@@ -6,8 +6,20 @@ function messagesReducer(state, action) {
       return [...state, action.message]
     case 'BULK_ADD':
       return [...state, ...action.messages]
-    case 'UPDATE_TOOL_RESULT':
-      return state.map(m => m.tool_call_id === action.tool_call_id ? { ...m, ...action.patch } : m)
+    case 'UPDATE_TOOL_RESULT': {
+      const patch = action.patch || {}
+      if (patch.invocation_id) {
+        const exact = state.some(m => m.invocation_id === patch.invocation_id)
+        return state.map(m => {
+          if (m.invocation_id === patch.invocation_id) return { ...m, ...patch }
+          if (!exact && !m.invocation_id && m.tool_call_id === action.tool_call_id) return { ...m, ...patch }
+          return m
+        })
+      }
+      return state.map(m => (
+        m.tool_call_id === action.tool_call_id && !m.invocation_id ? { ...m, ...patch } : m
+      ))
+    }
     case 'MAP':
       return action.mapper(state)
     case 'RESET':

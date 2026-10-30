@@ -181,7 +181,10 @@ async def get_conversation(
                     "data_classification_state": conv_class.binding_from_record(conversation)["state"],
                 },
             )
-    return conversation
+    from atlas.application.chat.runs.execution_state import attach_execution
+
+    attached = await attach_execution(conversation, current_user)
+    return attached if attached is not None else conversation
 
 
 def _classification_refusal(conversation, compliance_level: str, user_email: str):

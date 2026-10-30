@@ -14,6 +14,19 @@ import { FOCUS_RING } from '../utils/focusRing'
 // same tool a moment later. The component still mounts — it owns the effect
 // that sends the auto-approval — it just has no visible output. The
 // APPROVAL REQUIRED path is unchanged.
+function approvalIdentity(message) {
+  const extra = {}
+  if (message.run_id) extra.run_id = message.run_id
+  if (message.conversation_id) extra.conversation_id = message.conversation_id
+  if (message.invocation_id) extra.invocation_id = message.invocation_id
+  if (message.step != null) extra.step = message.step
+  return extra
+}
+
+function resultPatch(message, patch) {
+  return message.invocation_id ? { ...patch, invocation_id: message.invocation_id } : patch
+}
+
 const ToolApprovalMessage = ({ message, compact = true }) => {
   const { sendApprovalResponse, settings, updateToolResult } = useChat()
   const toast = useToast()
@@ -80,15 +93,23 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           tool_call_id: message.tool_call_id,
           approved: true,
           arguments: message.arguments,
+          ...(message.run_id ? { run_id: message.run_id } : {}),
+          ...(message.conversation_id ? { conversation_id: message.conversation_id } : {}),
+          ...(message.invocation_id ? { invocation_id: message.invocation_id } : {}),
+          ...(message.step != null ? { step: message.step } : {}),
         })
         if (sent) {
           autoApprovalSentRef.current = true
-          updateToolResult?.(message.tool_call_id, { auto_approved: true })
+          updateToolResult?.(message.tool_call_id, message.invocation_id
+            ? { auto_approved: true, invocation_id: message.invocation_id }
+            : { auto_approved: true })
         } else {
           // Force the review row visible so the user can approve manually.
           // `resolveAutoApproved` treats a boolean false as "not auto", which
           // also un-hides the Message wrapper that keys off the same helper.
-          updateToolResult?.(message.tool_call_id, { auto_approved: false })
+          updateToolResult?.(message.tool_call_id, message.invocation_id
+            ? { auto_approved: false, invocation_id: message.invocation_id }
+            : { auto_approved: false })
           toastRef.current.error(
             'Auto-approve failed (not connected). Approve manually, or reconnect and try again.'
           )
@@ -96,7 +117,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [settings?.autoApproveTools, message.admin_required, message.status, message.auto_approved, message.tool_call_id, message.arguments, sendApprovalResponse, updateToolResult])
+  }, [settings?.autoApproveTools, message.admin_required, message.status, message.auto_approved, message.tool_call_id, message.arguments, message.run_id, message.conversation_id, message.invocation_id, message.step, sendApprovalResponse, updateToolResult])
 
   const handleApprove = () => {
     if (resolvedStatus !== 'pending') return
@@ -107,13 +128,14 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       tool_call_id: message.tool_call_id,
       approved: true,
       arguments: isEditing ? editedArgs : message.arguments,
+      ...approvalIdentity(message),
     })
     if (!sent) {
       toastRef.current.error('Could not send approval (not connected). Try again when reconnected.')
       return
     }
     setDecision('approved')
-    updateToolResult?.(message.tool_call_id, { status: 'approved', auto_approved: false })
+    updateToolResult?.(message.tool_call_id, resultPatch(message, { status: 'approved', auto_approved: false }))
   }
 
   const handleReject = () => {
@@ -124,13 +146,14 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       tool_call_id: message.tool_call_id,
       approved: false,
       reason: rejectionReason,
+      ...approvalIdentity(message),
     })
     if (!sent) {
       toastRef.current.error('Could not send rejection (not connected). Try again when reconnected.')
       return
     }
     setDecision('rejected')
-    updateToolResult?.(message.tool_call_id, { status: 'rejected', rejection_reason: rejectionReason, auto_approved: false })
+    updateToolResult?.(message.tool_call_id, resultPatch(message, { status: 'rejected', rejection_reason: rejectionReason, auto_approved: false }))
   }
 
   const handleArgumentChange = (key, value) => {

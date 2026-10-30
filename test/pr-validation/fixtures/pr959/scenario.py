@@ -93,9 +93,13 @@ def row_key_client(msg):
     """
     mtype = row_type(msg)
     if mtype == "tool_call":
-        tc = (msg.get("metadata") or {}).get("tool_call_id") or msg.get("tool_call_id")
+        meta = msg.get("metadata") or {}
+        invocation = meta.get("invocation_id") or msg.get("invocation_id")
+        if invocation:
+            return (mtype, "invocation", invocation)
+        tc = meta.get("tool_call_id") or msg.get("tool_call_id")
         if tc:
-            return (mtype, tc, "")
+            return (mtype, "tool", tc)
     bucket = "prose" if mtype in PROSE_ROW_TYPES else mtype
     return (bucket, msg.get("role") or "", msg.get("content") or "")
 

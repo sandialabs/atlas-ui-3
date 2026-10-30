@@ -25,6 +25,14 @@ from atlas.modules.mcp_tools.sleep_tool import TURN_BUDGET_KEY
 from atlas.modules.mcp_tools.token_storage import AuthenticationRequiredException
 
 from ..approval_manager import get_approval_manager, resolve_approval_timeout
+from ..runs.execution_state import (
+    approval_storage_key,
+    execution_identity,
+    get_execution_store,
+    observe_tool_callback,
+    publish_execution_event,
+    wait_for_shared_approval,
+)
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 
 logger = logging.getLogger(__name__)
@@ -297,6 +305,49 @@ def tool_accepts_atlas_user(tool_name: str, tool_manager) -> bool:
         return False  # Default to not injecting if we can't determine
 
 
+async def _emit_approval_settlement(update_callback, identity: Dict[str, Any], tool_call, error: str, status: str) -> None:
+    """Tell the projection and the client that an approval will not run.
+
+    The frame is a settled tool event, so the run leaves ``waiting_for_input``
+    and the transcript keeps a failed row. A publish failure must not hide
+    the ToolResult the caller is about to return.
+    """
+    payload = {
+        "type": "tool_error",
+        "tool_call_id": tool_call.id,
+        "tool_name": tool_call.function.name,
+        "error": error,
+        "status": status,
+    }
+    if update_callback is not None:
+        try:
+            await update_callback(payload)
+            return
+        except Exception:
+            logger.warning("could not publish approval settlement", exc_info=True)
+    event = dict(identity)
+    event.update(payload)
+    await publish_execution_event(event)
+
+
+async def _claim_approval_timeout(identity: Dict[str, Any], tool_call_id: str) -> Dict[str, Any]:
+    """Record an expired approval unless a user response already won."""
+    outcome = {
+        "approved": False,
+        "status": "expired",
+        "reason": "Approval timeout",
+        "tool_call_id": tool_call_id,
+        "invocation_id": identity.get("invocation_id"),
+        "run_id": identity.get("run_id"),
+    }
+    key = approval_storage_key(identity.get("invocation_id"), tool_call_id)
+    try:
+        return await get_execution_store().put_resolution(key, outcome)
+    except Exception:
+        logger.warning("approval timeout claim failed", exc_info=True)
+        return {**outcome, "already_resolved": False}
+
+
 async def execute_single_tool(
     tool_call,
     session_context: Dict[str, Any],
@@ -412,6 +463,21 @@ async def execute_single_tool(
             # Track if arguments were edited (for LLM context)
             arguments_were_edited = False
             original_display_args = dict(display_args) if isinstance(display_args, dict) else display_args
+
+            # Publish the invocation before the first await that can block
+            # (hooks, approval). Parallel tools in one step are all visible
+            # before any of them finishes. The wrapper is a no-op when this
+            # call has no run, so untracked turns keep their payload shape.
+            identity = execution_identity(
+                session_context, tool_call.id, tool_call.function.name,
+            )
+            update_callback = observe_tool_callback(update_callback, identity)
+            await publish_execution_event({
+                **identity,
+                "type": "invocation",
+                "status": "calling",
+                "arguments": display_args,
+            })
 
             # --- Hook system (GH #713) -----------------------------------------
             # PermissionRequest fires at the approval gate: a hook may
@@ -541,6 +607,8 @@ async def execute_single_tool(
                     filtered_args,
                     allow_edit,
                     user_email=session_context.get("user_email", ""),
+                    invocation_id=identity.get("invocation_id"),
+                    run_id=identity.get("run_id"),
                 )
 
                 # Send the approval request and wait for the answer. Both exits unwind
@@ -551,6 +619,8 @@ async def execute_single_tool(
                 # process lifetime. With TOOL_APPROVAL_TIMEOUT_SECONDS=0 the
                 # wait is indefinite, so cancellation is the *only* exit from
                 # the wait and this is the only cleanup that runs.
+                response = None
+                expired = False
                 try:
                     if update_callback:
                         await update_callback({
@@ -563,27 +633,51 @@ async def execute_single_tool(
                         })
 
                     try:
-                        response = await request.wait_for_response(
-                            timeout=resolve_approval_timeout()
+                        response = await wait_for_shared_approval(
+                            request,
+                            resolve_approval_timeout(),
+                            approval_storage_key(identity.get("invocation_id"), tool_call.id),
                         )
                     except asyncio.TimeoutError:
                         # Only the wait can mean this: the send failing with
                         # a timeout is a transport problem, not an approval
                         # that timed out, and must not be reported as one.
+                        # A response that landed in the shared store during
+                        # the wait wins over the timeout.
                         logger.warning(f"Approval timeout for tool {tool_call.function.name}")
-                        return _finalize_span(ToolResult(
-                            tool_call_id=tool_call.id,
-                            content="Tool execution timed out waiting for user approval",
-                            success=False,
-                            error="Approval timeout"
-                        ))
+                        settled = await _claim_approval_timeout(identity, tool_call.id)
+                        if settled.get("already_resolved"):
+                            response = {
+                                "approved": bool(settled.get("approved")),
+                                "arguments": settled.get("arguments"),
+                                "reason": settled.get("reason"),
+                            }
+                        else:
+                            expired = True
                 finally:
                     approval_manager.cleanup_request(tool_call.id)
+                    if identity.get("invocation_id"):
+                        approval_manager.cleanup_request(identity["invocation_id"])
+
+                if expired or response is None:
+                    await _emit_approval_settlement(
+                        update_callback, identity, tool_call,
+                        "Approval timeout", "expired",
+                    )
+                    return _finalize_span(ToolResult(
+                        tool_call_id=tool_call.id,
+                        content="Tool execution timed out waiting for user approval",
+                        success=False,
+                        error="Approval timeout"
+                    ))
 
                 if not response["approved"]:
                     # Tool was rejected
                     reason = response.get("reason", "User rejected the tool call")
                     logger.info(f"Tool {tool_call.function.name} rejected by user: {reason}")
+                    await _emit_approval_settlement(
+                        update_callback, identity, tool_call, reason, "rejected",
+                    )
                     return _finalize_span(ToolResult(
                         tool_call_id=tool_call.id,
                         content=f"Tool execution rejected by user: {reason}",

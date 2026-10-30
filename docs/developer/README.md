@@ -1,6 +1,6 @@
 # Developer's Guide
 
-Last updated: 2026-10-16
+Last updated: 2026-10-29
 
 Technical reference for contributors to Atlas UI 3. These pages describe how
 the system works *today*. Point-in-time records of how individual features were
@@ -34,6 +34,7 @@ built live under [design-notes/](design-notes/README.md).
 ## Chat Behavior
 
 - [Interrupted Turns](interrupted-turns.md) - What is persisted when a turn is stopped, and how a later turn sees the tool work
+- [Execution State](execution-state.md) - The shared snapshot a reopened conversation uses for in-progress tools, approvals, and sleep
 
 ## Error Handling
 

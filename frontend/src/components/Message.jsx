@@ -236,14 +236,17 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     // Collapsed to a single summary line by default; expanding reveals the
     // input arguments and output together.
     if (message.type === 'tool_call') {
-      const isToolActive = message.status === 'calling' || message.status === 'in_progress'
+      const isToolActive = message.status === 'calling' || message.status === 'in_progress' || message.status === 'sleeping'
       const argCount = message.arguments ? Object.keys(message.arguments).length : 0
       const hasDetails = argCount > 0 || message.result != null
       // A call the user stopped is not a tool error, so it gets its own
-      // neutral treatment (#755). Only an explicit 'failed' reads as an error;
-      // any other unrecognized status falls through to the neutral style.
+      // neutral treatment (#755). An approval that expired or was rejected
+      // is a failed call with its own label. Any other unrecognized status
+      // falls through to the neutral style.
       const wasInterrupted = message.status === 'interrupted'
-      const failed = message.status === 'failed'
+      const expired = message.status === 'expired'
+      const rejected = message.status === 'rejected'
+      const failed = message.status === 'failed' || expired || rejected
       // Each terminal state is named explicitly. An unrecognized status (a
       // legacy row saved without one, or a state added later) must not claim
       // the user stopped the call, nor that it failed.
@@ -251,7 +254,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       const statusLabel =
         message.status === 'calling' ? 'CALLING' :
         message.status === 'in_progress' ? 'IN PROGRESS' :
+        message.status === 'sleeping' ? 'SLEEPING' :
         succeeded ? 'SUCCESS' :
+        expired ? 'EXPIRED' :
+        rejected ? 'REJECTED' :
         failed ? 'FAILED' :
         wasInterrupted ? 'STOPPED' : 'NO STATUS'
       const statusColor =

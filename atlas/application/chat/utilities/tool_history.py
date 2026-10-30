@@ -32,7 +32,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.application.chat.runs.context import get_current_run
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
-from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, normalize_tool_name
+from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, SLEEP_TOOL_NAME, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -128,20 +128,33 @@ class ToolCallRecorder:
         if normalize_tool_name(payload.get("tool_name")) == CANVAS_TOOL_NAME:
             return
 
-        entry = self._calls.setdefault(tool_call_id, {"tool_call_id": tool_call_id})
+        # invocation_id keeps a later step's reused tool_call_id from
+        # overwriting the row this step already recorded.
+        storage_key = payload.get("invocation_id") or tool_call_id
+        entry = self._calls.setdefault(storage_key, {"tool_call_id": tool_call_id})
         if payload.get("tool_name"):
             entry["tool_name"] = payload["tool_name"]
+        for field in ("invocation_id", "run_id", "step"):
+            if payload.get(field) is not None:
+                entry[field] = payload[field]
 
         if event_type == "tool_start":
             entry["server_name"] = payload.get("server_name")
             entry["arguments"] = payload.get("arguments")
-            entry.setdefault("status", "calling")
+            if normalize_tool_name(payload.get("tool_name")) == SLEEP_TOOL_NAME:
+                if entry.get("status") not in ("completed", "failed", "interrupted", "expired", "rejected"):
+                    entry["status"] = "sleeping"
+            else:
+                entry.setdefault("status", "calling")
         elif event_type == "tool_complete":
             entry["result"] = payload.get("result")
             entry["status"] = "completed" if payload.get("success") else "failed"
         elif event_type == "tool_error":
             entry["result"] = payload.get("error")
-            entry["status"] = "failed"
+            status = payload.get("status") or "failed"
+            if status not in ("failed", "expired", "rejected", "interrupted"):
+                status = "failed"
+            entry["status"] = status
         elif event_type == "auth_required":
             # The executor aborts the call after emitting this (no
             # tool_complete/tool_error follows), so treat it as terminal:
@@ -167,6 +180,9 @@ class ToolCallRecorder:
                 "result": _elide_for_storage(entry.get("result")),
                 "status": entry.get("status") or "completed",
             }
+            for field in ("invocation_id", "run_id", "step"):
+                if entry.get(field) is not None:
+                    metadata[field] = entry[field]
             out.append(Message(
                 role=MessageRole.TOOL,
                 content=f"Tool call: {tool_name}",

@@ -30,8 +30,15 @@ export function sameTranscriptRow(a, b) {
   const typeA = a.type || 'chat'
   const typeB = b.type || 'chat'
   if (typeA !== typeB && !(PROSE_ROW_TYPES.has(typeA) && PROSE_ROW_TYPES.has(typeB))) return false
-  if (typeA === 'tool_call' && a.tool_call_id && b.tool_call_id) {
-    return a.tool_call_id === b.tool_call_id
+  if (typeA === 'tool_call') {
+    // invocation_id is the stable identity. A row that has one does not match
+    // a row that does not: a later step reuses tool_call_id, and aligning them
+    // would treat two calls as one. Legacy rows, which have neither, still
+    // match on tool_call_id.
+    if (a.invocation_id || b.invocation_id) {
+      return !!a.invocation_id && a.invocation_id === b.invocation_id
+    }
+    if (a.tool_call_id && b.tool_call_id) return a.tool_call_id === b.tool_call_id
   }
   return a.role === b.role && (a.content || '') === (b.content || '')
 }

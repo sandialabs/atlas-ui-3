@@ -94,6 +94,14 @@ authoritative and readable from any replica that shares Redis.
 
 ## Verification
 
-Recorded after the implementation commits. Commands and results go below.
+Recorded 2026-10-29 from this worktree. `atlas.__file__` resolved to this tree, not the primary checkout. Redis compare-and-swap uses WATCH/MULTI/EXEC; the fakeredis in this environment does not implement EVAL.
 
-<!-- verification:pending -->
+- `ruff check` on the touched `atlas/` modules: all checks passed.
+- `pytest` `test_execution_state.py` `test_reopened_run_approval.py` `test_approval_manager.py` `test_tool_approval_cleanup.py` `test_tool_call_persistence.py`: passed.
+- `pytest` `test_run_in_flight_conversation.py` `test_multi_tool_calling.py` `test_tool_start_edited_args.py` `test_interrupted_turn_persistence.py` `test_run_stream_replay.py`: 97 passed, 1 failed. `test_stop_mid_tool_then_continue_sees_the_prior_work` raises during AppSettings setup because the local capability-token secret is a placeholder. The test body did not run.
+- `bash test/pr-validation/test_pr1122_reopened_run_state.sh`: Passed 2, Failed 0. The scenario's replica, timeout, and alignment checks passed, then pytest reported 46 passed.
+- Frontend vitest: `execution-state` (8), `transcript-alignment` (17), `tool-approval-websocket` (13), `agent-busy-indicator` (8), `use-messages-invocation` (3), `joined-run-refresh` (27), `sleep-tool-timer` (3), `tool-approval-message` (33). All passed.
+- `npx eslint` on the touched frontend files: clean.
+- `bash scripts/check-docs.sh`: OK (123 markdown files, 19 indexes, no orphans or broken links).
+
+A browser pass of a live sleep or approval turn was not run. No browser tool was available, and that turn needs a model. The labels and the reconcile rules are covered by the vitest files above.

@@ -15,14 +15,17 @@ export default function AgentBusyIndicator({
   isThinking,
   isStreaming,
   currentAgentStep,
+  activity,
   appName = 'Agent',
 }) {
   if (!isAgentRunning || isThinking || isStreaming) return null
 
   const step = Number(currentAgentStep)
-  const label = Number.isFinite(step) && step > 0
-    ? `Agent working on step ${step}...`
-    : 'Agent thinking...'
+  const label = activity === 'sleeping'
+    ? 'Sleeping until the scheduled wake-up...'
+    : Number.isFinite(step) && step > 0
+      ? `Agent working on step ${step}...`
+      : 'Agent thinking...'
 
   return (
     <div className="flex items-start gap-0 sm:gap-3 w-full" data-testid="agent-busy-indicator">

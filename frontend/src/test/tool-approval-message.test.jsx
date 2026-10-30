@@ -513,6 +513,35 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     expect(screen.queryByLabelText('STOPPED')).not.toBeInTheDocument()
   })
 
+  it('sends the invocation identity with an approval and patches only that row', () => {
+    const { sendApprovalResponse, updateToolResult } = setChat()
+    render(
+      <ToolApprovalMessage
+        message={{
+          ...baseMessage,
+          run_id: 'run-1',
+          conversation_id: 'conv-1',
+          invocation_id: 'run-1:0:call_1',
+          step: 0,
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    expect(sendApprovalResponse).toHaveBeenCalledWith(expect.objectContaining({
+      tool_call_id: 'call_1',
+      approved: true,
+      run_id: 'run-1',
+      conversation_id: 'conv-1',
+      invocation_id: 'run-1:0:call_1',
+      step: 0,
+    }))
+    expect(updateToolResult).toHaveBeenCalledWith('call_1', {
+      status: 'approved',
+      auto_approved: false,
+      invocation_id: 'run-1:0:call_1',
+    })
+  })
+
   it('labels the active spinner for screen readers in compact and classic modes', () => {
     // The active spinner replaces the outcome glyph while a tool is running.
     // Without an aria-label the spinning state is announced as nothing, so
@@ -530,6 +559,15 @@ describe('Message — tool-call collapse is shared across compact/classic (regre
     setChat({ settings: { compactMessages: true } })
     rerender(<Message message={inProgress} />)
     expect(screen.getByLabelText('IN PROGRESS')).toBeInTheDocument()
+
+    const sleeping = { ...toolCall, tool_name: 'atlas_sleep', status: 'sleeping', result: undefined }
+    rerender(<Message message={sleeping} />)
+    expect(screen.getByLabelText('SLEEPING')).toBeInTheDocument()
+
+    rerender(<Message message={{ ...toolCall, status: 'expired' }} />)
+    expect(screen.getByLabelText('EXPIRED')).toBeInTheDocument()
+    rerender(<Message message={{ ...toolCall, status: 'rejected' }} />)
+    expect(screen.getByLabelText('REJECTED')).toBeInTheDocument()
   })
 
   it('renders no transcript row for an auto-approved approval request (#762)', () => {

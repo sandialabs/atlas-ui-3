@@ -21,6 +21,7 @@ import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
+import { reconcileExecution } from '../utils/executionState'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
@@ -159,6 +160,9 @@ export const ChatProvider = ({ children }) => {
 	// The run streams into the view it started in, so this one is stale by
 	// construction; once the run ends the Sidebar reloads it from the store.
 	const joinedRunConversationRef = useRef(null)
+	// Last execution revision applied for each conversation. A snapshot with
+	// an older revision must not replace the view (issue #1122).
+	const executionRevisionRef = useRef({})
 	const joinedRunTimerRef = useRef(null)
 	const rearmCountRef = useRef({ id: null, n: 0 })
 	const [runEndedConversationId, setRunEndedConversationId] = useState(null)
@@ -1497,13 +1501,26 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setIsWelcomeVisible(false)
 
 		// Load messages into the chat view
-		const loadedMessages = conversationData.messages.map(msg => ({
+		let loadedMessages = conversationData.messages.map(msg => ({
 			...withoutInternalFlags(msg.metadata),
 			role: msg.role,
 			content: msg.content || '',
 			timestamp: msg.timestamp,
 			type: msg.message_type || 'chat',
 		}))
+		const loadedExecution = conversationData.execution
+		if (loadedExecution && typeof loadedExecution.revision === 'number') {
+			const reconciled = reconcileExecution(
+				loadedMessages, loadedExecution, executionRevisionRef.current[conversationData.id],
+			)
+			if (reconciled) {
+				loadedMessages = reconciled
+				executionRevisionRef.current[conversationData.id] = {
+					revision: loadedExecution.revision,
+					run_id: loadedExecution.run_id || null,
+				}
+			}
+		}
 		if (loadedMessages.length > 0) {
 			bulkAdd(loadedMessages)
 		}
@@ -1618,6 +1635,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// change. Otherwise compare the stored transcript to the on-screen one
 	// (live-only and streaming rows have no stored counterpart).
 	const reconnectSnapshotChanged = useCallback((data, id) => {
+		const execution = data?.execution
+		const previous = executionRevisionRef.current[id]
+		if (execution && typeof execution.revision === 'number' && previous && typeof previous.revision === 'number') {
+			const sameRun = !previous.run_id || !execution.run_id || previous.run_id === execution.run_id
+			if (sameRun && execution.revision < previous.revision) return false
+		}
+		const liveInvocations = latestMessagesRef.current.filter(m => m.type === 'tool_call' && m.invocation_id).length
+		const storedInvocations = Array.isArray(execution?.invocations) ? execution.invocations.length : 0
+		if (execution && liveInvocations > storedInvocations) return false
 		if (isRunActive(runsByConversationRef.current[id])) return true
 		if (data.in_flight === true) return true
 		const stored = Array.isArray(data.messages) ? data.messages : []
@@ -1718,7 +1744,23 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// this exists to remove. Every `_streaming` row is transient by
 		// construction: the stored rows supersede it, so it is settled with the
 		// append rather than matched.
-		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
+		let viewMessages = latestMessagesRef.current
+		const execution = conversationData.execution
+		if (execution && typeof execution.revision === 'number') {
+			const reconciled = reconcileExecution(
+				viewMessages, execution, executionRevisionRef.current[conversationData.id],
+			)
+			if (reconciled === null) return true
+			if (reconciled !== viewMessages) {
+				mapMessages(() => reconciled)
+				viewMessages = reconciled
+			}
+			executionRevisionRef.current[conversationData.id] = {
+				revision: execution.revision,
+				run_id: execution.run_id || null,
+			}
+		}
+		const current = viewMessages.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 
 		// Walk both lists together; everything must line up one-to-one or the
 		// refresh refuses. The rule itself lives in utils/transcriptAlignment so
@@ -1789,7 +1831,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		restoreContext()
 		if (stillInFlight && !live) rearmJoinedRun(conversationData.id)
 		return true
-	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken, activeComplianceFilter])
+	}, [sendMessage, refreshAppend, rearmJoinedRun, canRearmJoinedRun, streamToken, activeComplianceFilter, mapMessages])
 
 	// Mid-run refresh for a conversation this tab joined (issue: parallel-run
 	// tool-call visibility). A joined view holds the snapshot the run had when

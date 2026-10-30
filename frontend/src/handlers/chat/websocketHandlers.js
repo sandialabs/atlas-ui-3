@@ -1,6 +1,46 @@
 // Handlers extracted from original ChatContext to keep provider lean
 
 import { isCanvasTool } from '../../constants/atlasTools'
+import { isSleepTool, toolStatusFromEvent } from '../../utils/executionState'
+
+function withIdentity(message, data) {
+  const next = { ...message }
+  if (data.invocation_id) next.invocation_id = data.invocation_id
+  if (data.run_id) next.run_id = data.run_id
+  if (data.conversation_id) next.conversation_id = data.conversation_id
+  if (data.step != null) next.step = data.step
+  return next
+}
+
+function sameApproval(row, data) {
+  if (!row || row.type !== 'tool_approval_request') return false
+  if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
+  if (data.elicitation_id && row.elicitation_id) return row.elicitation_id === data.elicitation_id
+  if (data.invocation_id || row.invocation_id) return false
+  return !!data.tool_call_id && row.tool_call_id === data.tool_call_id
+}
+
+// Update the invocation this frame belongs to. A bare tool_call_id still
+// updates legacy rows that have no invocation id. When no row matches and
+// `insert` is set, the frame becomes a new row (a settlement that arrived
+// before tool_start, or after a reload that dropped it).
+function mapToolRows(prev, data, patch, insert) {
+  const exact = !!(data.invocation_id && prev.some(
+    msg => msg.type === 'tool_call' && msg.invocation_id === data.invocation_id
+  ))
+  let found = false
+  const next = prev.map(msg => {
+    if (msg.type !== 'tool_call') return msg
+    const hit = exact
+      ? msg.invocation_id === data.invocation_id
+      : !msg.invocation_id && !!data.tool_call_id && msg.tool_call_id === data.tool_call_id
+    if (!hit) return msg
+    found = true
+    return { ...msg, ...patch }
+  })
+  if (!found && insert) return next.concat(insert)
+  return next
+}
 
 // Default sandbox permissions for iframes (restrictive by default)
 const DEFAULT_IFRAME_SANDBOX = 'allow-scripts allow-same-origin';
@@ -475,7 +515,19 @@ export function createWebSocketHandler(deps) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
           if (isCanvasTool(data.tool_name)) break; // Suppress any chat message for canvas
-          addMessage({
+          let duplicate = false
+          if (typeof mapMessages === 'function') {
+            mapMessages(prev => {
+              duplicate = prev.some(msg => msg.type === 'tool_call' && (
+                data.invocation_id
+                  ? msg.invocation_id === data.invocation_id
+                  : !msg.invocation_id && msg.tool_call_id === data.tool_call_id
+              ))
+              return prev
+            })
+          }
+          if (duplicate) break
+          addMessage(withIdentity({
             role: 'system',
             content: `**Tool Call: ${data.tool_name}**`,
             type: 'tool_call',
@@ -483,22 +535,22 @@ export function createWebSocketHandler(deps) {
             tool_name: data.tool_name,
             server_name: data.server_name || 'tool',
             arguments: data.arguments || {},
-            status: 'calling',
+            status: isSleepTool(data.tool_name) ? 'sleeping' : 'calling',
             timestamp: new Date().toISOString(),
             agent_mode: false
-          })
+          }, data))
           break
         }
         case 'tool_progress': {
           // Update the in-flight tool message with progress
-          const { tool_call_id, progress, total, percentage, message } = data
-          mapMessages(prev => prev.map(msg => msg.tool_call_id === tool_call_id ? {
-            ...msg,
-            status: 'in_progress',
+          const { progress, total, percentage, message } = data
+          const sleeping = isSleepTool(data.tool_name)
+          mapMessages(prev => mapToolRows(prev, data, {
+            status: sleeping ? 'sleeping' : 'in_progress',
             progress: typeof percentage === 'number' ? percentage : undefined,
             progressRaw: { progress, total },
             progressMessage: message || ''
-          } : msg))
+          }))
           break
         }
         case 'tool_complete': {
@@ -506,24 +558,22 @@ export function createWebSocketHandler(deps) {
             // No update needed; canvas_content event handles display
             break
           }
-          mapMessages(prev => prev.map(msg => msg.tool_call_id === data.tool_call_id ? {
-              ...msg,
-              status: data.success ? 'completed' : 'failed',
-              result: data.result || null,
-              content: `**Tool: ${data.tool_name}** - ${data.success ? 'Success' : 'Failed'}`
-            } : msg))
+          mapMessages(prev => mapToolRows(prev, data, {
+            status: data.success ? 'completed' : 'failed',
+            result: data.result || null,
+            content: `**Tool: ${data.tool_name}** - ${data.success ? 'Success' : 'Failed'}`
+          }))
           break
         }
         case 'tool_interrupted': {
           // The turn was stopped while this call was still running (#755).
           // Without this the row spins as CALLING until a reload replaces it
           // with the persisted interrupted row.
-          mapMessages(prev => prev.map(msg => msg.tool_call_id && msg.tool_call_id === data.tool_call_id ? {
-              ...msg,
-              status: 'interrupted',
-              result: data.result || null,
-              content: `**Tool: ${data.tool_name}** - Stopped`
-            } : msg))
+          mapMessages(prev => mapToolRows(prev, data, {
+            status: 'interrupted',
+            result: data.result || null,
+            content: `**Tool: ${data.tool_name}** - Stopped`
+          }))
           break
         }
         case 'tool_error': {
@@ -536,12 +586,23 @@ export function createWebSocketHandler(deps) {
             })
             break
           }
-          mapMessages(prev => prev.map(msg => msg.tool_call_id === data.tool_call_id ? {
-              ...msg,
-              status: 'failed',
-              result: data.error || 'Unknown error',
-              content: `**Tool: ${data.tool_name}** - Failed`
-            } : msg))
+          const status = toolStatusFromEvent(data, 'failed')
+          mapMessages(prev => mapToolRows(prev, data, {
+            status,
+            result: data.error || 'Unknown error',
+            content: `**Tool: ${data.tool_name}** - Failed`
+          }, withIdentity({
+            role: 'system',
+            content: `**Tool: ${data.tool_name}** - Failed`,
+            type: 'tool_call',
+            tool_call_id: data.tool_call_id,
+            tool_name: data.tool_name,
+            server_name: data.server_name || 'tool',
+            arguments: data.arguments || {},
+            status,
+            result: data.error || 'Unknown error',
+            timestamp: new Date().toISOString(),
+          }, data)))
           break
         }
         case 'tool_synthesis_start': {
@@ -688,6 +749,19 @@ export function createWebSocketHandler(deps) {
             addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
             break
           }
+          // A stale approval card's "no matching request" used to take the
+          // generic error path and end the joined-view poll. Drop the card
+          // and leave the run alone (issue #1122).
+          if (data.error_type === 'unknown_tool_approval' || data.error_type === 'unknown_elicitation') {
+            mapMessages(prev => prev.filter(msg => {
+              if (data.error_type === 'unknown_elicitation') {
+                return !(msg.elicitation_id && msg.elicitation_id === data.elicitation_id)
+              }
+              if (!sameApproval(msg, data)) return true
+              return false
+            }))
+            break
+          }
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
@@ -765,20 +839,41 @@ export function createWebSocketHandler(deps) {
           }
           break
         case 'tool_approval_request':
-            // Handle tool approval request - stop thinking and add as a message in the chat
+            // Handle tool approval request - stop thinking and add as a message in the chat.
+            // Restore and a second copy of the same request must not stack cards.
             try { setIsThinking(false) } catch { /* no-op */ }
-          addMessage({
-            role: 'system',
-            content: `Tool Approval Required: ${data.tool_name}`,
-            type: 'tool_approval_request',
-            tool_call_id: data.tool_call_id,
-            tool_name: data.tool_name,
-            arguments: data.arguments || {},
-            allow_edit: data.allow_edit !== false,
-            admin_required: data.admin_required || false,
-            status: 'pending',
-            timestamp: new Date().toISOString()
-          })
+          {
+            let duplicate = false
+            if (typeof mapMessages === 'function') {
+              mapMessages(prev => {
+                duplicate = prev.some(msg => sameApproval(msg, data))
+                return prev
+              })
+            }
+            if (!duplicate) {
+              addMessage(withIdentity({
+                role: 'system',
+                content: `Tool Approval Required: ${data.tool_name}`,
+                type: 'tool_approval_request',
+                tool_call_id: data.tool_call_id,
+                tool_name: data.tool_name,
+                arguments: data.arguments || {},
+                allow_edit: data.allow_edit !== false,
+                admin_required: data.admin_required || false,
+                status: 'pending',
+                timestamp: new Date().toISOString()
+              }, data))
+            }
+          }
+          break
+        case 'tool_approval_settled':
+          // The request was already answered, on this tab or another. Mark the
+          // card and leave the turn running.
+          mapMessages(prev => prev.map(msg => sameApproval(msg, data) ? {
+            ...msg,
+            status: data.approved ? 'approved' : 'rejected',
+            already_resolved: true,
+          } : msg))
           break
         case 'elicitation_request':
           // Handle elicitation request - set pending elicitation state

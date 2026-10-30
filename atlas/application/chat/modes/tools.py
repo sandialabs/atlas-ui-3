@@ -350,6 +350,9 @@ class ToolsModeRunner:
                         })
                     break
 
+                # extra_round is incremented after this call, so the first
+                # round is step 0, matching the agent loop's step counter.
+                session_context["agent_step"] = extra_round
                 results = await tool_executor.execute_multiple_tools(
                     tool_calls=fresh,
                     session_context=session_context,

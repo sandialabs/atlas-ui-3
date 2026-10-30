@@ -975,6 +975,10 @@ const ChatArea = () => {
                   if (isSynthesizing) {
                     return 'Processing tool results...'
                   }
+                  const lastTool = [...messages].reverse().find(m => m.type === 'tool_call')
+                  if (lastTool && lastTool.status === 'sleeping') {
+                    return 'Sleeping until the scheduled wake-up...'
+                  }
                   const lastMsg = messages[messages.length - 1]
                   if (lastMsg && lastMsg.type === 'tool_call' && (lastMsg.status === 'calling' || lastMsg.status === 'in_progress')) {
                     return 'Running tool...'
@@ -993,6 +997,7 @@ const ChatArea = () => {
           isThinking={isThinking}
           isStreaming={isStreaming}
           currentAgentStep={currentAgentStep}
+          activity={messages.some(m => m.type === 'tool_call' && m.status === 'sleeping') ? 'sleeping' : undefined}
           appName={appName}
         />
         {/* Sentinel for auto-scroll */}

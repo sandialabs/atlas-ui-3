@@ -244,5 +244,78 @@ describe('Tool Approval WebSocket Tests', () => {
         tool_name: 'tool_2'
       }))
     })
+
+    it('marks atlas_sleep as sleeping and does not add the same invocation twice', () => {
+      let messages = []
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      deps.addMessage = vi.fn(message => {
+        messages = messages.concat(message)
+      })
+      handler = createWebSocketHandler(deps)
+      const frame = {
+        type: 'tool_start',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        run_id: 'run-1',
+        tool_name: 'atlas_sleep',
+        arguments: { seconds: 5 },
+      }
+      handler(frame)
+      handler(frame)
+      expect(messages).toHaveLength(1)
+      expect(messages[0].status).toBe('sleeping')
+      expect(messages[0].invocation_id).toBe('run-1:0:call_0')
+    })
+
+    it('does not end the turn when a stale approval card is rejected', () => {
+      let messages = [{
+        type: 'tool_approval_request',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        status: 'pending',
+      }]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      deps.clearAgentRunning = vi.fn()
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'error',
+        error_type: 'unknown_tool_approval',
+        message: 'No matching pending tool approval',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+      })
+      expect(messages).toEqual([])
+      expect(deps.addMessage).not.toHaveBeenCalled()
+      expect(deps.setIsThinking).not.toHaveBeenCalled()
+      expect(deps.clearAgentRunning).not.toHaveBeenCalled()
+    })
+
+    it('marks a duplicate approval settled without ending the turn', () => {
+      let messages = [{
+        type: 'tool_approval_request',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        status: 'pending',
+      }]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'tool_approval_settled',
+        approved: false,
+        already_resolved: true,
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+      })
+      expect(messages[0].status).toBe('rejected')
+      expect(messages[0].already_resolved).toBe(true)
+      expect(deps.setIsThinking).not.toHaveBeenCalled()
+      expect(deps.addMessage).not.toHaveBeenCalled()
+    })
   })
 })

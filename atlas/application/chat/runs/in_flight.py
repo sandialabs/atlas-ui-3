@@ -102,7 +102,7 @@ async def in_flight_conversation(
     stream_text = record.stream.text()
 
     metadata = _live_metadata(session)
-    return {
+    payload = {
         "id": conversation_id,
         "user_email": user_email,
         "title": title,
@@ -130,3 +130,9 @@ async def in_flight_conversation(
         # "in progress" marker does not already say.
         "streaming_text": stream_text or None,
     }
+    # Mid-step tool rows live in the shared projection, not in session
+    # history. Merging here is idempotent with the route's second attach.
+    from atlas.application.chat.runs.execution_state import attach_execution
+
+    attached = await attach_execution(payload, user_email)
+    return attached if attached is not None else payload
