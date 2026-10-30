@@ -154,3 +154,10 @@ Verified for that fix, worktree, `atlas.__file__` this tree:
 - Vitest `execution-state.test.js`: 13 passed.
 - `npx eslint` on `executionState.js` and `execution-state.test.js`: clean.
 - `bash scripts/check-docs.sh`: OK.
+
+A browser pass then showed every approved `atlas_sleep` reported as a user edit. The schema stores `seconds` as `3.0` and the browser sends `3`. Argument comparison now goes through JSON and compares values, so `3` and `3.0` are the same arguments and a real change still counts as an edit.
+
+Verified for that comparison, worktree, `atlas.__file__` this tree:
+
+- `ruff check` on `tool_executor.py` and `test_reopened_run_approval.py`: all checks passed.
+- `pytest` `test_an_unchanged_number_is_not_an_edit` and `test_a_repeated_call_id_in_one_step_is_refused`: 2 passed.
