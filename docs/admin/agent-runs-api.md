@@ -102,7 +102,8 @@ capabilities are the ones carried forward.
 `atlas_launch`), exactly like the stop button. `cancelled` says whether anything was still live.
 As with follow-ups, any of the conversation's run ids may be used: if the run named has already
 finished, the conversation's in-progress API run (a later follow-up) is stopped instead, and the
-response describes that run. A turn the user started themselves in ATLAS is never stopped.
+response describes that run. The named run's own sub-conversations are stopped either way. A turn
+the user started themselves in ATLAS is never stopped.
 
 ### Errors
 
@@ -150,7 +151,9 @@ Send an `idempotency_key` (any caller-chosen string up to 200 characters) to mak
 A repeat with the same key and the same body, for the same user, returns the original handle
 with HTTP 200 and `idempotent_replay: true` rather than launching again; the same key with a
 different body is a 409. Two simultaneous requests with one key launch once. A request that was
-refused does not consume its key. Keys are remembered for 24 hours, in the memory of the replica
+refused does not consume its key. Keys share one namespace per user across launches and
+follow-ups, so use a distinct key for each request (reusing a launch's key for its follow-up is a
+409 `idempotency_conflict`). Keys are remembered for 24 hours, in the memory of the replica
 that accepted them. A replay of a follow-up still works after the run it addressed has been
 cleaned up. When the replayed run itself is no longer tracked, the handle's `status` is
 `expired` (a value only replays carry); its conversation is still in the user's history.

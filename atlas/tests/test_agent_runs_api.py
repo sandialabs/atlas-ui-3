@@ -554,6 +554,31 @@ async def test_cancel_by_the_launch_id_stops_the_live_follow_up(factory):
     assert get_run_registry().get(first["run_id"]).status is RunStatus.COMPLETED
 
 
+async def test_cancel_by_a_finished_launch_id_also_stops_its_sub_conversations(factory):
+    """With a live follow-up too: the launch's own children are not skipped."""
+    async with _client(factory) as client:
+        first = await _completed_launch(client, factory)
+        child = get_run_registry().start(
+            conversation_id="child-conv",
+            user_email=USER,
+            parent_run_id=first["run_id"],
+            parent_conversation_id=first["conversation_id"],
+            depth=1,
+        )
+        follow_up = (
+            await client.post(
+                f"/api/agent-runs/{first['run_id']}/follow-up",
+                json={"message": "more"},
+                headers=AUTH,
+            )
+        ).json()
+        await factory.services[-1].started.wait()
+        response = await client.post(f"/api/agent-runs/{first['run_id']}/cancel", headers=AUTH)
+    assert response.json()["run_id"] == follow_up["run_id"]
+    assert get_run_registry().get(follow_up["run_id"]).status is RunStatus.CANCELLED
+    assert get_run_registry().get(child.run_id).status is RunStatus.CANCELLED
+
+
 # ---------------------------------------------------------------------------
 # Follow-up
 # ---------------------------------------------------------------------------
@@ -670,6 +695,10 @@ async def test_follow_up_after_the_workspace_is_revoked_is_refused(factory):
         )
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "workspace_not_found"
+    message = response.json()["detail"]["message"]
+    assert "/api/agent-runs/options" in message
+    assert "sub-conversation" not in message
+    assert "atlas_discover_launch_options" not in message
 
 
 async def test_follow_up_is_refused_while_waiting_for_the_user(factory):

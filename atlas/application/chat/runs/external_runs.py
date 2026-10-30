@@ -425,6 +425,34 @@ async def _resolve_api_model(config_manager: Any, model: str, user_email: str) -
         ) from exc
 
 
+def _revalidate_api_workspace(factory: Any, spec: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+    """``_revalidate_saved_workspace``, with refusals worded for a REST caller."""
+    try:
+        return _revalidate_saved_workspace(factory, spec, user_email)
+    except LaunchRefused as exc:
+        name = spec.get("workspace_name") or spec.get("workspace_id") or "unknown"
+        code = getattr(exc, "code", None)
+        messages = {
+            "workspace_not_found": (
+                f"The workspace '{name}' this conversation was launched under is no "
+                "longer available to the user (deleted, or access revoked), so it "
+                "cannot be continued. Launch a new run; GET /api/agent-runs/options "
+                "lists the user's workspaces."
+            ),
+            "not_continuable": (
+                "This conversation's workspace is no longer known, so it cannot be "
+                "continued. Launch a new run instead."
+            ),
+            "unavailable": (
+                f"The workspace '{name}' could not be checked just now, so the "
+                "conversation cannot be continued. Retry shortly."
+            ),
+        }
+        if code not in messages:
+            raise
+        raise LaunchRefused(messages[code], code=code) from exc
+
+
 def _api_record(run_id: str) -> Any:
     """The API-started run ``run_id``, or a not-found refusal.
 
@@ -571,7 +599,7 @@ async def follow_up_api_run(
                 "Launch a new run instead.",
                 code="not_continuable",
             )
-        workspace = _revalidate_saved_workspace(factory, spec, user_email)
+        workspace = _revalidate_api_workspace(factory, spec, user_email)
         await _resolve_api_model(config_manager, spec["model"], user_email)
         record, new_spec, admin_gated = await _start_child_run(
             factory=factory,
@@ -619,11 +647,14 @@ def cancel_api_run(run_id: str) -> Dict[str, Any]:
     """
     record = _api_record(run_id)
     registry = get_run_registry()
+    # The named run first, even when it has finished: that cascades to any
+    # sub-conversations it launched that are still working.
+    cancelled = registry.cancel(record.run_id, record.user_email)
     if record.is_terminal:
         live = [r for r in _api_runs_for_conversation(record) if not r.is_terminal]
         if live:
             record = max(live, key=lambda r: r.created_at)
-    cancelled = registry.cancel(record.run_id, record.user_email)
+            cancelled = registry.cancel(record.run_id, record.user_email) or cancelled
     _audit("cancel", record, record.launch_spec or {}, cancelled=cancelled)
     payload = _status(registry.get(record.run_id) or record)
     payload["cancelled"] = cancelled
