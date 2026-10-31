@@ -357,6 +357,12 @@ export function useChatConfig() {
   // unset), and a refresh that changes the signed-in user restores that
   // user's model too.
   const restoredForUserRef = useRef(null)
+  // The signed-in user the displayed selection belongs to. Set by the
+  // restore path and by every user-driven pick, so a refresh that switches
+  // users can tell a carried-over selection from this user's own (issue
+  // #1134; restoredForUserRef alone cannot, because a user who had nothing
+  // to restore and then picked manually never marks it).
+  const modelOwnerRef = useRef(null)
   useEffect(() => {
     // Runs once per user once the config names at least one model source:
     // static models, or in a gateway-only deployment the gateways, whose
@@ -374,18 +380,19 @@ export function useChatConfig() {
       // default to fall back on (a gateway-only deployment where they have
       // not picked a team model). Leave the restore un-done so a later
       // config refresh can still resolve one, but do not let a shared
-      // browser carry the previous user's selection over to them (the
-      // per-user rule of issue #1050, applied to the no-default case).
-      if (restoredForUserRef.current && restoredForUserRef.current !== user) {
+      // browser carry another account's selection over to them (the per-user
+      // rule of issue #1050, applied to the no-default case).
+      if (modelOwnerRef.current && modelOwnerRef.current !== user) {
         setCurrentModel('')
         currentModelRef.current = ''
-        // The cleared selection was this ref's user; forget it so a later
-        // refresh for them (or a switch back to them) restores afresh.
+        // The cleared selection was the restore's user; forget it so a
+        // later refresh for them (or a switch back) restores afresh.
         restoredForUserRef.current = null
       }
       return
     }
     restoredForUserRef.current = user
+    modelOwnerRef.current = user
     setCurrentModel(model)
     currentModelRef.current = model
     writeSavedModel(user, model)
@@ -409,6 +416,7 @@ export function useChatConfig() {
       const fallback = defaultModelOf({ models })
       setCurrentModel(fallback)
       currentModelRef.current = fallback
+      modelOwnerRef.current = user
       writeSavedModel(user, fallback)
     })()
   }, [user, currentModel, models, llmGateways])
@@ -438,6 +446,9 @@ export function useChatConfig() {
     setCurrentModel: (model) => {
       setCurrentModel(model)
       currentModelRef.current = model
+      // The selection now belongs to whoever picked it, so a refresh that
+      // switches users can drop it instead of carrying it over.
+      modelOwnerRef.current = userRef.current
       writeSavedModel(userRef.current, model)
     },
     agentModeAvailable,
