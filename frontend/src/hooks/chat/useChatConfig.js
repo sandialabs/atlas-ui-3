@@ -361,15 +361,19 @@ export function useChatConfig() {
     // Runs once per user once the config names at least one model source:
     // static models, or in a gateway-only deployment the gateways, whose
     // saved model keys are restored without any static model (issue #1134).
+    // The user stays unrestored until a model actually resolves, so a config
+    // refresh that arrives later (or adds static models) still gets to apply
+    // its default.
     if (!isKnownUser(user) || (!models.length && !llmGateways.length)) return
     if (restoredForUserRef.current === user) return
-    restoredForUserRef.current = user
 
     const saved = readSavedModel(user)
     const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
+    if (!model) return
+    restoredForUserRef.current = user
     setCurrentModel(model)
     currentModelRef.current = model
-    if (model) writeSavedModel(user, model)
+    writeSavedModel(user, model)
   }, [user, models, llmGateways])
 
   // A saved team-gateway model stays only while the user is still in that

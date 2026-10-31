@@ -252,34 +252,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def list_models(*, json_output: bool = False) -> int:
-    """Print all configured LLM models."""
+    """Print all configured LLM models and LiteLLM gateways.
+
+    Exits 0 when at least one model source (static model or gateway) is
+    configured, 1 when neither is.
+    """
     from atlas.modules.config import ConfigManager
 
     cm = ConfigManager()
     llm_config = cm.llm_config
     models = llm_config.models
-
-    if not models:
-        # A deployment may use Enterprise LiteLLM gateways as its sole model
-        # source; its models are picked per team, so report the gateways.
-        gateways = getattr(llm_config, "litellm_gateways", None) or {}
-        if json_output:
-            print(json.dumps({
-                "models": [],
-                "litellm_gateways": [
-                    {"name": name, "base_url": gw.base_url, "description": gw.description or ""}
-                    for name, gw in gateways.items()
-                ],
-            }, indent=2))
-            return 0 if gateways else 1
-        if gateways:
-            print(f"No static models; {len(gateways)} LiteLLM gateway(s) provide models:")
-            for name, gw in gateways.items():
-                desc = f"  ({gw.description})" if gw.description else ""
-                print(f"  {name}: {gw.base_url}{desc}")
-            return 0
-        print("No models configured.", file=sys.stderr)
-        return 1
+    gateways = getattr(llm_config, "litellm_gateways", None) or {}
 
     if json_output:
         out = []
@@ -290,12 +273,31 @@ async def list_models(*, json_output: bool = False) -> int:
                 "description": cfg.description or "",
                 "compliance_level": cfg.compliance_level or "",
             })
-        print(json.dumps({"models": out}, indent=2))
-        return 0
+        print(json.dumps({
+            "models": out,
+            "litellm_gateways": [
+                {"name": name, "base_url": gw.base_url, "description": gw.description or ""}
+                for name, gw in gateways.items()
+            ],
+        }, indent=2))
+        return 0 if (models or gateways) else 1
+
+    if not models and not gateways:
+        print("No models configured.", file=sys.stderr)
+        return 1
 
     for name, cfg in models.items():
         desc = f"  ({cfg.description})" if cfg.description else ""
         print(f"  {name}: {cfg.model_name}{desc}")
+    if gateways:
+        if models:
+            print()
+        # A deployment may use Enterprise LiteLLM gateways as its sole model
+        # source; their models are picked per team, so list the gateways.
+        print(f"LiteLLM gateways ({len(gateways)}):")
+        for name, gw in gateways.items():
+            desc = f"  ({gw.description})" if gw.description else ""
+            print(f"  {name}: {gw.base_url}{desc}")
     return 0
 
 

@@ -25,6 +25,12 @@ entry nor a gateway still fails validation. A gateway that is configured but
 unreachable (or rejects the credentials) is a discovery-time failure reported
 by the model picker and chat errors -- not a configuration-validation error.
 
+One limitation: sub-conversation launches (`atlas_launch` and the agent-runs
+REST API) enumerate statically configured models, so a gateway-only deployment
+refuses launch discovery with a message asking for a static model. A gateway
+model names a LiteLLM team, which only the signed-in user's proxy session can
+enumerate, so child runs cannot yet be pointed at one.
+
 ## Configuration
 
 Add a `litellm_gateways` section next to `models` in `config/llmconfig.yml`.

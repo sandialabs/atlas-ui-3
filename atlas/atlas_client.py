@@ -39,7 +39,7 @@ def _default_model_name(llm_config) -> str:
     team, so there is nothing to guess -- and neither has an empty config, so
     both raise instead of silently trying a hardcoded model name (issue #1134).
     """
-    models = llm_config.models
+    models = getattr(llm_config, "models", None) or {}
     if models:
         return next(iter(models))
     raise ValueError(

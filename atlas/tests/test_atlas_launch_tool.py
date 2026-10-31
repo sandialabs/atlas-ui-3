@@ -238,6 +238,28 @@ async def test_launch_is_blocked_when_discovery_has_no_choices():
 
 
 @pytest.mark.asyncio
+async def test_gateway_only_deployment_gets_a_clear_launch_refusal():
+    """A deployment whose only model source is a LiteLLM gateway cannot list
+    launchable models (they are picked per team in the model picker), so
+    discovery refuses with the reason instead of a generic "no models"
+    (issue #1134)."""
+    factory = _Factory(lambda c: _ChatService(c), models={})
+    factory.get_config_manager = lambda: SimpleNamespace(
+        app_settings=factory._settings,
+        llm_config=SimpleNamespace(
+            models={}, litellm_gateways={"enterprise": SimpleNamespace()}
+        ),
+    )
+    context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
+
+    with pytest.raises(LaunchRefused, match="no statically configured LLM models") as excinfo:
+        await discover_launch_options(context, factory=factory)
+    assert excinfo.value.code == "no_static_model_source"
+    assert "enterprise" in str(excinfo.value)
+    assert context["launch_discovery"] == {"_failed": True}
+
+
+@pytest.mark.asyncio
 async def test_discovery_execution_primes_the_same_context_for_launch():
     factory = _Factory(lambda c: _ChatService(c))
     context = {"user_email": "user@example.com", "factory": factory, "launch_discovery": {}}

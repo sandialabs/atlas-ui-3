@@ -217,6 +217,22 @@ async def list_launch_options(factory: Any, user_email: str) -> Dict[str, Any]:
         raise LaunchRefused(
             "Launch discovery failed while loading models. Try again.", code="unavailable"
         ) from exc
+    if not models:
+        gateways = getattr(getattr(config_manager, "llm_config", None), "litellm_gateways", None) or {}
+        if gateways:
+            # Gateway models are picked per team in the model picker, so
+            # discovery cannot enumerate what this user may call without a
+            # round trip to the proxy; child runs need a statically configured
+            # model (issue #1134). A clear refusal rather than a generic "no
+            # models" that reads as a broken deployment.
+            raise LaunchRefused(
+                "Launch discovery found no statically configured LLM models: this "
+                "deployment serves its models through the LiteLLM gateway(s) "
+                f"{', '.join(sorted(gateways))}, whose team-scoped models are not "
+                "launchable as child-run models. Ask the operator to configure at "
+                "least one static model under 'models' in llmconfig.yml.",
+                code="no_static_model_source",
+            )
     return {
         "workspaces": [
             {"id": str(item.get("id")), "name": str(item.get("name"))}

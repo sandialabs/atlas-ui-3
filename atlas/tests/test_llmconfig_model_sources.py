@@ -8,6 +8,7 @@ failures such as an unreachable or rejecting proxy (which must not).
 """
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -265,3 +266,130 @@ class TestDefaultModelSelection:
     def test_empty_config_has_no_default(self):
         with pytest.raises(ValueError):
             _default_model_name(LLMConfig(models={}))
+
+    def test_headless_chat_reports_the_gateway_key_form(self, monkeypatch):
+        """The error reaches a chat() caller, not just the helper's unit test."""
+        from atlas.atlas_client import AtlasClient
+
+        client = AtlasClient()
+        llm_config = LLMConfig(models={}, litellm_gateways={"enterprise": {
+            "base_url": "https://litellm.example.gov", "api_key": "k",
+        }})
+
+        async def _initialize():
+            client._initialized = True
+            client._factory = SimpleNamespace(
+                get_config_manager=lambda: SimpleNamespace(llm_config=llm_config)
+            )
+
+        monkeypatch.setattr(client, "initialize", _initialize)
+        with pytest.raises(ValueError, match="gateway model"):
+            asyncio.run(client.chat("hello"))
+
+
+class TestCliListModelsGatewayBranch:
+    """Both ``list-models`` CLIs report gateways in every config shape, and
+    the JSON shape no longer depends on which sources exist."""
+
+    @staticmethod
+    def _config_manager_factory(config_path):
+        def _factory():
+            manager = ConfigManager()
+            manager._search_paths = lambda _: [config_path]
+            return manager
+
+        return _factory
+
+    def test_atlas_chat_cli_gateway_only_lists_the_gateway(self, monkeypatch, tmp_path, capsys):
+        import atlas.modules.config as config_package
+        from atlas.atlas_chat_cli import list_models as chat_cli_list_models
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(GATEWAY_ONLY_YAML, encoding="utf-8")
+        monkeypatch.setattr(config_package, "ConfigManager", self._config_manager_factory(config_path))
+
+        code = asyncio.run(chat_cli_list_models(json_output=False))
+
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "LiteLLM gateways (1)" in out
+        assert "enterprise" in out
+        assert "https://litellm.example.gov" in out
+
+    def test_atlas_chat_cli_mixed_lists_both_sections(self, monkeypatch, tmp_path, capsys):
+        import atlas.modules.config as config_package
+        from atlas.atlas_chat_cli import list_models as chat_cli_list_models
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(MIXED_YAML, encoding="utf-8")
+        monkeypatch.setattr(config_package, "ConfigManager", self._config_manager_factory(config_path))
+
+        code = asyncio.run(chat_cli_list_models(json_output=False))
+
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "static-model" in out
+        assert "LiteLLM gateways (1)" in out
+
+    @pytest.mark.parametrize("yaml_text", [GATEWAY_ONLY_YAML, STATIC_ONLY_YAML])
+    def test_atlas_chat_cli_json_always_has_both_keys(self, monkeypatch, tmp_path, capsys, yaml_text):
+        import atlas.modules.config as config_package
+        from atlas.atlas_chat_cli import list_models as chat_cli_list_models
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(yaml_text, encoding="utf-8")
+        monkeypatch.setattr(config_package, "ConfigManager", self._config_manager_factory(config_path))
+
+        assert asyncio.run(chat_cli_list_models(json_output=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert set(payload) == {"models", "litellm_gateways"}
+        assert isinstance(payload["models"], list) and isinstance(payload["litellm_gateways"], list)
+
+    def test_atlas_chat_cli_neither_source_exits_1(self, monkeypatch, tmp_path, capsys):
+        import atlas.modules.config as config_package
+        from atlas.atlas_chat_cli import list_models as chat_cli_list_models
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text("models: {}\n", encoding="utf-8")
+        monkeypatch.setattr(config_package, "ConfigManager", self._config_manager_factory(config_path))
+
+        assert asyncio.run(chat_cli_list_models(json_output=False)) == 1
+        assert "No models configured" in capsys.readouterr().err
+
+    def test_config_cli_gateway_only_lists_the_gateway(self, monkeypatch, tmp_path, capsys):
+        from atlas.modules.config import cli as config_cli
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(GATEWAY_ONLY_YAML, encoding="utf-8")
+        monkeypatch.setattr(config_cli, "ConfigManager", self._config_manager_factory(config_path))
+
+        config_cli.list_models(None)
+
+        out = capsys.readouterr().out
+        assert "LiteLLM gateways (1)" in out
+        assert "enterprise" in out
+        assert "No models configured" not in out
+
+    def test_config_cli_mixed_lists_both_sections(self, monkeypatch, tmp_path, capsys):
+        from atlas.modules.config import cli as config_cli
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text(MIXED_YAML, encoding="utf-8")
+        monkeypatch.setattr(config_cli, "ConfigManager", self._config_manager_factory(config_path))
+
+        config_cli.list_models(None)
+
+        out = capsys.readouterr().out
+        assert "static-model" in out
+        assert "LiteLLM gateways (1)" in out
+
+    def test_config_cli_neither_source_still_reports_empty(self, monkeypatch, tmp_path, capsys):
+        from atlas.modules.config import cli as config_cli
+
+        config_path = tmp_path / "llmconfig.yml"
+        config_path.write_text("models: {}\n", encoding="utf-8")
+        monkeypatch.setattr(config_cli, "ConfigManager", self._config_manager_factory(config_path))
+
+        config_cli.list_models(None)
+
+        assert "No models configured" in capsys.readouterr().out

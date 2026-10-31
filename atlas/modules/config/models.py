@@ -694,6 +694,18 @@ def lookup_model_config(llm_config: Any, model_name: str) -> Optional[ModelConfi
     return llm_config.models.get(model_name)
 
 
+def has_model_source(llm_config: Any) -> bool:
+    """Whether the configuration names at least one model source.
+
+    A static model or an Enterprise LiteLLM gateway each count; either alone
+    is a usable deployment (issue #1134). Tolerates the bare ``models``
+    holders test doubles pass around, like :func:`lookup_model_config` does.
+    """
+    models = getattr(llm_config, "models", None) or {}
+    gateways = getattr(llm_config, "litellm_gateways", None) or {}
+    return bool(models or gateways)
+
+
 class OAuthConfig(BaseModel):
     """OAuth 2.1 configuration for an ``auth_type: "oauth"`` MCP server.
 
