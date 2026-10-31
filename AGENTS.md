@@ -331,6 +331,15 @@ bash test/run_pr_validation.sh --list     # List available
 
 See `test/pr-validation/README.md` for the full template.
 
+## Shepherding a PR
+
+When asked to take a PR to completion ("own it end to end", "shepherd it"):
+
+- Before pushing, the PR must have its `changes/<id>.<type>.md` fragment and, for backend changes, a `test/pr-validation/` script. Reviewers flag both when they are missing.
+- Shepherd until CI is green and every review thread has a reply (a fix or a reasoned answer), or until 3 review rounds have passed, or until you are blocked on a maintainer decision. Then stop and report. Do not wait out a fixed time window; if the PR needs another look later, the operator will send a follow-up.
+- Work in your own git worktree (`git worktree add ../atlas-ui-3-wt-<issue> origin/main`). Never share a checkout with another running agent.
+- Security findings go in your report to the operator, never in a gist, issue, or other public place.
+
 ## Critical Restrictions
 
 - **NEVER use `uvicorn --reload`** - causes development issues
