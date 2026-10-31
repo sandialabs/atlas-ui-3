@@ -69,6 +69,14 @@ def _llm_config(**gateway_overrides) -> LLMConfig:
     )
 
 
+def _gateway_only_config(**gateway_overrides) -> LLMConfig:
+    """An Enterprise LiteLLM deployment with no static models at all (issue #1134)."""
+    return LLMConfig(
+        models={},
+        litellm_gateways={"enterprise": _gateway(**gateway_overrides)},
+    )
+
+
 def _mock_transport() -> httpx.ASGITransport:
     return httpx.ASGITransport(app=litellm_mock.app)
 
@@ -471,6 +479,50 @@ class TestGatewayChatAgainstMock:
             ):
                 pass
         assert [r["model"] for r in litellm_mock._request_log] == ["gpt-4o-mini"]
+
+
+class TestGatewayOnlyConfigChat:
+    """A chat request works when a gateway is the sole model source: the
+    caller's llmconfig has zero static models (issue #1134)."""
+
+    @pytest.mark.asyncio
+    async def test_plain_call_with_no_static_models(self, live_mock_url):
+        caller = LiteLLMCaller(llm_config=_gateway_only_config(base_url=live_mock_url))
+        content = await caller.call_plain(
+            f"enterprise::{BETA}::llama-3.3-70b",
+            [{"role": "user", "content": "gateway-only hello"}],
+            user_email="test@test.com",
+        )
+        assert content.startswith("[Project Beta / llama-3.3-70b]")
+        assert litellm_mock._request_log[-1]["team_header"] == BETA
+
+    @pytest.mark.asyncio
+    async def test_streaming_call_with_no_static_models(self, live_mock_url):
+        caller = LiteLLMCaller(llm_config=_gateway_only_config(base_url=live_mock_url))
+        chunks = [
+            chunk
+            async for chunk in caller.stream_plain(
+                f"enterprise::{ALPHA}::claude-sonnet",
+                [{"role": "user", "content": "gateway-only stream"}],
+                user_email="alice@example.com",
+            )
+        ]
+        text = "".join(c for c in chunks if isinstance(c, str))
+        assert text.startswith("[Project Alpha / claude-sonnet]")
+        assert litellm_mock._request_log[-1]["team_header"] == ALPHA
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_still_reports_a_model_error(self, live_mock_url):
+        """A name that is no static model and no gateway key is a caller
+        error, reported the same as before -- not masked by the empty
+        static-model set."""
+        caller = LiteLLMCaller(llm_config=_gateway_only_config(base_url=live_mock_url))
+        with pytest.raises(ValueError, match="not found in configuration"):
+            await caller.call_plain(
+                "no-such-model",
+                [{"role": "user", "content": "hi"}],
+                user_email="test@test.com",
+            )
 
 
 # -- routes -----------------------------------------------------------------------

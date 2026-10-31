@@ -31,6 +31,24 @@ class ChatResult:
         }
 
 
+def _default_model_name(llm_config) -> str:
+    """The model chat() runs on when the caller names none.
+
+    The first statically configured model. An Enterprise LiteLLM gateway
+    deployment has no static model to default to -- a gateway model names a
+    team, so there is nothing to guess -- and neither has an empty config, so
+    both raise instead of silently trying a hardcoded model name (issue #1134).
+    """
+    models = llm_config.models
+    if models:
+        return next(iter(models))
+    raise ValueError(
+        "No static models are configured, so chat() needs an explicit "
+        "model argument (a configured model name, or a gateway model "
+        "key of the form <gateway>::<team_id>::<model_id>)"
+    )
+
+
 class AtlasClient:
     """
     Headless Python client for Atlas chat.
@@ -121,13 +139,7 @@ class AtlasClient:
             session_id = uuid4()
 
         if model is None:
-            models = self._factory.get_config_manager().llm_config.models
-            if models:
-                # models is a dict of {display_name: ModelConfig}
-                first_key = next(iter(models))
-                model = first_key
-            else:
-                model = "gpt-4o"
+            model = _default_model_name(self._factory.get_config_manager().llm_config)
 
         if user_email is None:
             cfg = self._factory.get_config_manager()

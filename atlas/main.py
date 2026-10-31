@@ -1349,7 +1349,11 @@ async def lifespan(app: FastAPI):
         await app_factory.stop_shared_infrastructure()
         raise
 
-    logger.info(f"Backend initialized with {len(config.llm_config.models)} LLM models")
+    logger.info(
+        "Backend initialized with %d static LLM models and %d LiteLLM gateway(s)",
+        len(config.llm_config.models),
+        len(config.llm_config.litellm_gateways),
+    )
     logger.info(f"MCP servers configured: {len(config.mcp_config.servers)}")
 
     # Report how the Help page gets its content (issue #1107). A

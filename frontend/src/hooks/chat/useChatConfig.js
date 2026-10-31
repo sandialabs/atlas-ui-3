@@ -358,7 +358,10 @@ export function useChatConfig() {
   // user's model too.
   const restoredForUserRef = useRef(null)
   useEffect(() => {
-    if (!isKnownUser(user) || !models.length) return
+    // Runs once per user once the config names at least one model source:
+    // static models, or in a gateway-only deployment the gateways, whose
+    // saved model keys are restored without any static model (issue #1134).
+    if (!isKnownUser(user) || (!models.length && !llmGateways.length)) return
     if (restoredForUserRef.current === user) return
     restoredForUserRef.current = user
 

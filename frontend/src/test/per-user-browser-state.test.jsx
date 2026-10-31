@@ -335,6 +335,16 @@ describe('selected model per user', () => {
     expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
   })
 
+  it('restores a saved gateway model when the deployment has no static models (#1134)', async () => {
+    localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-a::gpt-x')
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    mockFetch({ app_name: 'Atlas', user: BOB, models: [], llm_gateways: GATEWAYS, features: {} })
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/llm/gateways/corp/teams'))
+    await new Promise(r => setTimeout(r, 0))
+    expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
+  })
+
   it('keeps a saved gateway model when membership cannot be checked', async () => {
     localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-a::gpt-x')
     teamsResponse = () => ({ ok: false, status: 502, json: async () => ({}) })

@@ -54,6 +54,20 @@ def list_models(args) -> None:
         sys.exit(1)
 
     if not llm_config.models:
+        gateways = getattr(llm_config, "litellm_gateways", None) or {}
+        if gateways:
+            # A deployment may use Enterprise LiteLLM as its sole model source;
+            # its models are picked per team, so list the gateways instead.
+            print(f"No static models; {len(gateways)} LiteLLM gateway(s) provide models:\n")
+            for name, gateway in gateways.items():
+                print(f"[gateway] {name}")
+                print(f"   Base URL: {gateway.base_url}")
+                if gateway.display_name:
+                    print(f"   Display Name: {gateway.display_name}")
+                if gateway.description:
+                    print(f"   Description: {gateway.description}")
+                print()
+            return
         print("❌ No models configured")
         return
 

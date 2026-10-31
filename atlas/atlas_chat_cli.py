@@ -260,8 +260,23 @@ async def list_models(*, json_output: bool = False) -> int:
     models = llm_config.models
 
     if not models:
+        # A deployment may use Enterprise LiteLLM gateways as its sole model
+        # source; its models are picked per team, so report the gateways.
+        gateways = getattr(llm_config, "litellm_gateways", None) or {}
         if json_output:
-            print(json.dumps({"models": []}, indent=2))
+            print(json.dumps({
+                "models": [],
+                "litellm_gateways": [
+                    {"name": name, "base_url": gw.base_url, "description": gw.description or ""}
+                    for name, gw in gateways.items()
+                ],
+            }, indent=2))
+            return 0 if gateways else 1
+        if gateways:
+            print(f"No static models; {len(gateways)} LiteLLM gateway(s) provide models:")
+            for name, gw in gateways.items():
+                desc = f"  ({gw.description})" if gw.description else ""
+                print(f"  {name}: {gw.base_url}{desc}")
             return 0
         print("No models configured.", file=sys.stderr)
         return 1
