@@ -1,0 +1,9 @@
+# Enterprise LiteLLM as the sole model source (issue #1134): no static
+# models at all -- no `models` section -- just one team-scoped gateway.
+# __MOCK_LITELLM_PORT__ is substituted by the validation script.
+litellm_gateways:
+  enterprise:
+    base_url: "http://127.0.0.1:__MOCK_LITELLM_PORT__"
+    api_key: "sk-mock-litellm-master"
+    display_name: "Enterprise LiteLLM"
+    description: "Team-scoped models on the mock proxy"

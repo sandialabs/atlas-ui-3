@@ -358,15 +358,34 @@ export function useChatConfig() {
   // user's model too.
   const restoredForUserRef = useRef(null)
   useEffect(() => {
-    if (!isKnownUser(user) || !models.length) return
+    // Runs once per user once the config names at least one model source:
+    // static models, or in a gateway-only deployment the gateways, whose
+    // saved model keys are restored without any static model (issue #1134).
+    // The user stays unrestored until a model actually resolves, so a config
+    // refresh that arrives later (or adds static models) still gets to apply
+    // its default.
+    if (!isKnownUser(user) || (!models.length && !llmGateways.length)) return
     if (restoredForUserRef.current === user) return
-    restoredForUserRef.current = user
 
     const saved = readSavedModel(user)
     const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
+    if (!model) {
+      // Nothing resolves for this user yet: no saved model and no static
+      // default to fall back on (a gateway-only deployment where they have
+      // not picked a team model). Leave the restore un-done so a later
+      // config refresh can still resolve one, but do not let a shared
+      // browser carry the previous user's selection over to them (the
+      // per-user rule of issue #1050, applied to the no-default case).
+      if (restoredForUserRef.current && restoredForUserRef.current !== user) {
+        setCurrentModel('')
+        currentModelRef.current = ''
+      }
+      return
+    }
+    restoredForUserRef.current = user
     setCurrentModel(model)
     currentModelRef.current = model
-    if (model) writeSavedModel(user, model)
+    writeSavedModel(user, model)
   }, [user, models, llmGateways])
 
   // A saved team-gateway model stays only while the user is still in that

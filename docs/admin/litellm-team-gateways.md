@@ -1,6 +1,6 @@
 # Enterprise LiteLLM Team Gateways
 
-Last updated: 2026-10-10
+Last updated: 2026-10-31
 
 Some deployments reach their models through an enterprise
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) where access and
@@ -17,6 +17,19 @@ and every LLM request for that model carries the team in the
 LiteLLM only acts on that header in its JWT/OIDC auth mode, which is an
 Enterprise feature. Against OSS LiteLLM, see
 [Enterprise vs. OSS LiteLLM](#enterprise-vs-oss-litellm) before deploying.
+
+A gateway may be the deployment's **sole model source**: `llmconfig.yml`
+validates, Atlas starts, and the model picker offers the gateway even when
+there is no `models` section at all. A configuration with neither a `models`
+entry nor a gateway still fails validation. A gateway that is configured but
+unreachable (or rejects the credentials) is a discovery-time failure reported
+by the model picker and chat errors -- not a configuration-validation error.
+
+One limitation: sub-conversation launches (`atlas_launch` and the agent-runs
+REST API) enumerate statically configured models, so a gateway-only deployment
+refuses launch discovery with a message asking for a static model. A gateway
+model names a LiteLLM team, which only the signed-in user's proxy session can
+enumerate, so child runs cannot yet be pointed at one.
 
 ## Configuration
 

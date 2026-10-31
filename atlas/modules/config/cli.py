@@ -53,11 +53,16 @@ def list_models(args) -> None:
         print(f"\n❌ {e}")
         sys.exit(1)
 
-    if not llm_config.models:
-        print("❌ No models configured")
+    gateways = getattr(llm_config, "litellm_gateways", None) or {}
+    if not llm_config.models and not gateways:
+        print(
+            "❌ No models configured. Add a model under 'models' or an Enterprise "
+            "LiteLLM gateway under 'litellm_gateways' in llmconfig.yml."
+        )
         return
 
-    print(f"📚 Found {len(llm_config.models)} configured models:\n")
+    if llm_config.models:
+        print(f"📚 Found {len(llm_config.models)} configured models:\n")
 
     for name, model in llm_config.models.items():
         print(f"🤖 {name}")
@@ -70,6 +75,19 @@ def list_models(args) -> None:
         if model.extra_headers:
             print(f"   Extra Headers: {list(model.extra_headers.keys())}")
         print()
+
+    if gateways:
+        # A deployment may use Enterprise LiteLLM as its sole model source;
+        # its models are picked per team, so list the gateways.
+        print(f"LiteLLM gateways ({len(gateways)}):\n")
+        for name, gateway in gateways.items():
+            print(f"[gateway] {name}")
+            print(f"   Base URL: {gateway.base_url}")
+            if gateway.display_name:
+                print(f"   Display Name: {gateway.display_name}")
+            if gateway.description:
+                print(f"   Description: {gateway.description}")
+            print()
 
 
 def list_servers(args) -> None:
