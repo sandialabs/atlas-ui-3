@@ -379,6 +379,9 @@ export function useChatConfig() {
       if (restoredForUserRef.current && restoredForUserRef.current !== user) {
         setCurrentModel('')
         currentModelRef.current = ''
+        // The cleared selection was this ref's user; forget it so a later
+        // refresh for them (or a switch back to them) restores afresh.
+        restoredForUserRef.current = null
       }
       return
     }

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
 import { useChat } from '../contexts/ChatContext'
@@ -56,25 +56,36 @@ describe('ChatArea - gateway-only deployments explain the empty model selection 
       </BrowserRouter>
     )
 
+  const typeMessage = (text) => {
+    const textarea = screen.getByPlaceholderText(/Type a message/i)
+    fireEvent.change(textarea, { target: { value: text } })
+    return textarea
+  }
+
   it('shows the choose-a-team-model hint and disables send before a pick', () => {
     useChat.mockReturnValue(gatewayOnlyContext)
     const { container } = renderChat()
 
     expect(screen.getByTestId('choose-team-model-hint')).toBeInTheDocument()
+    // With text typed, only the missing model keeps Send unavailable --
+    // an empty input alone would disable it for any deployment.
+    typeMessage('hello')
     const sendButton = container.querySelector('button[type="submit"]')
     expect(sendButton).toBeTruthy()
     expect(sendButton).toBeDisabled()
   })
 
-  it('stays quiet once a team model is selected', () => {
+  it('enables send once a team model is selected', () => {
     useChat.mockReturnValue({
       ...gatewayOnlyContext,
       currentModel: 'enterprise::team-a::gpt-x',
       models: [{ name: 'enterprise::team-a::gpt-x' }],
     })
-    renderChat()
+    const { container } = renderChat()
 
     expect(screen.queryByTestId('choose-team-model-hint')).toBeNull()
+    typeMessage('hello')
+    expect(container.querySelector('button[type="submit"]')).toBeEnabled()
   })
 
   it('stays quiet in a mixed deployment without a selection', () => {

@@ -154,6 +154,22 @@ class TestOtherConfigShapes:
         assert list(config.litellm_gateways) == ["enterprise"]
         assert cm.validate_config()["llm_config"] is True
 
+    def test_null_litellm_gateways_key_is_an_empty_set(self):
+        """``litellm_gateways:`` with nothing under it is an empty set, the
+        same treatment the ``models`` key gets."""
+        config = LLMConfig(
+            models={"a": {"model_name": "openai/gpt-4o", "model_url": "https://x", "api_key": "k"}},
+            litellm_gateways=None,
+        )
+        assert config.litellm_gateways == {}
+
+    def test_static_only_with_a_null_gateways_key_is_valid(self, tmp_path):
+        cm = _cm_with_llmconfig(tmp_path, STATIC_ONLY_YAML + "litellm_gateways:\n")
+        config = cm.llm_config
+        assert list(config.models) == ["static-model"]
+        assert config.litellm_gateways == {}
+        assert cm.validate_config()["llm_config"] is True
+
     def test_no_model_source_fails_validation(self, tmp_path, caplog):
         cm = _cm_with_llmconfig(tmp_path, "models: {}\n")
         with caplog.at_level("ERROR", logger="atlas.modules.config.config_loader"):

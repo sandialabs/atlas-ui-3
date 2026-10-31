@@ -376,6 +376,19 @@ describe('selected model per user', () => {
     teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-b', label: 'B' }] }) })
     await act(async () => { await result.current.refreshConfig() })
     expect(result.current.currentModel).toBe('corp::team-b::m2')
+
+    // Switching back restores the first user's saved model again: the
+    // clear forgot which user the dropped selection belonged to. The team
+    // stub must cover that model again, or the membership check (rightly)
+    // drops it.
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(ALICE) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
   })
 
   it('keeps a saved gateway model when membership cannot be checked', async () => {

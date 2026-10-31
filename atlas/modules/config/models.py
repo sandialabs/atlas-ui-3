@@ -621,6 +621,15 @@ class LLMConfig(BaseModel):
                    for name, config in v.items()}
         return v
 
+    @field_validator('litellm_gateways', mode='before')
+    @classmethod
+    def validate_gateways(cls, v):
+        """A null ``litellm_gateways`` key is an empty set, matching the null
+        ``models`` handling: either section may be left empty in YAML."""
+        if v is None:
+            return {}
+        return v
+
     @model_validator(mode="after")
     def validate_gateway_names(self):
         for gateway_name in self.litellm_gateways:
