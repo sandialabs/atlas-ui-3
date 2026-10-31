@@ -27,6 +27,12 @@ from atlas.core.telemetry import (
     set_attrs,
     start_span,
 )
+from atlas.modules.file_storage.listing import (
+    filename_from_key,
+    select_file_page,
+    tags_with_source,
+    user_prefix,
+)
 from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
@@ -44,6 +50,9 @@ def _category_from_key(key: str) -> str:
 
 
 _STORAGE_BACKEND = "s3"
+# One list call returns at most 1000 keys. Stop after this many pages so a
+# huge prefix cannot pin a worker; the page total then reflects what was seen.
+_MAX_LIST_PAGES = 200
 
 
 class S3StorageClient:
@@ -404,22 +413,80 @@ class S3StorageClient:
                 logger.error("Error getting file from S3: %s", sanitize_for_logging(str(e)))
                 raise
 
+    def _iter_listed_objects(self, prefix: str):
+        """Yield every object under ``prefix``, following continuation tokens.
+
+        ``MaxKeys`` on a single call is a page of keys, not the newest files.
+        Tags and metadata are read later, and only for the page that is returned.
+        """
+        token = None
+        for _page in range(_MAX_LIST_PAGES):
+            kwargs = {
+                "Bucket": self.bucket_name,
+                "Prefix": prefix,
+                "MaxKeys": 1000,
+            }
+            if token:
+                kwargs["ContinuationToken"] = token
+            response = self.s3_client.list_objects_v2(**kwargs)
+            for obj in response.get("Contents", []) or []:
+                yield obj
+            if not response.get("IsTruncated"):
+                return
+            token = response.get("NextContinuationToken")
+            if not token:
+                return
+        logger.warning(
+            "Stopped listing files after %s pages under one prefix",
+            _MAX_LIST_PAGES,
+        )
+
     async def list_files(
         self,
         user_email: str,
         file_type: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """List one page of files for a user. See ``list_file_page``."""
+        page = await self.list_file_page(
+            user_email=user_email,
+            file_type=file_type,
+            limit=limit,
+            offset=offset,
+            query=query,
+            category=category,
+        )
+        return page["files"]
+
+    async def list_file_page(
+        self,
+        user_email: str,
+        file_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        List files for a user.
+        List one page of files for a user.
+
+        Keys under the user's prefix are filtered and ordered first. Object
+        tags and metadata are read only for the page that is returned.
 
         Args:
             user_email: Email of the user
             file_type: Optional filter by file type ("user" or "tool")
             limit: Maximum number of files to return
+            offset: How many matches to skip
+            query: Optional case-insensitive substring of the stored file name
+            category: Optional explorer folder (image, code, data, document, other)
 
         Returns:
-            List of file metadata dictionaries
+            ``{"files", "total", "offset", "limit"}`` where ``total`` counts
+            matches before paging.
         """
         start_ns = time.monotonic_ns()
         span_attrs = {
@@ -430,76 +497,81 @@ class S3StorageClient:
         }
         with start_span("storage.list", span_attrs) as span:
             try:
-                # List objects with user's prefix
-                prefix = f"users/{user_email}/"
-                if file_type == "tool":
-                    prefix = f"users/{user_email}/generated/"
-                elif file_type == "user":
-                    prefix = f"users/{user_email}/uploads/"
+                prefix = user_prefix(user_email, file_type)
+                listed = []
+                for obj in self._iter_listed_objects(prefix):
+                    etag = obj.get("ETag") or ""
+                    listed.append({
+                        "key": obj["Key"],
+                        "size": obj.get("Size", 0),
+                        "etag": etag.strip('"') if isinstance(etag, str) else etag,
+                        "last_modified": obj.get("LastModified"),
+                    })
 
-                response = self.s3_client.list_objects_v2(
-                    Bucket=self.bucket_name,
-                    Prefix=prefix,
-                    MaxKeys=limit
+                page, total = select_file_page(
+                    listed,
+                    limit=limit,
+                    offset=offset,
+                    query=query,
+                    category=category,
                 )
 
-                entries = []
-                for obj in response.get('Contents', []):
-                    # Get tags for each object
+                files = []
+                for entry in page:
+                    key = entry["key"]
                     try:
                         tags_response = self.s3_client.get_object_tagging(
                             Bucket=self.bucket_name,
-                            Key=obj['Key']
+                            Key=key,
                         )
-                        tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
+                        tags = {tag["Key"]: tag["Value"] for tag in tags_response.get("TagSet", [])}
                     except Exception:
                         tags = {}
 
-                    # Get metadata
                     try:
                         head_response = self.s3_client.head_object(
                             Bucket=self.bucket_name,
-                            Key=obj['Key']
+                            Key=key,
                         )
-                        metadata = head_response.get('Metadata', {})
-                        content_type = head_response.get('ContentType', 'application/octet-stream')
-                        filename = metadata.get('original_filename', obj['Key'].split('/')[-1])
+                        metadata = head_response.get("Metadata", {})
+                        content_type = head_response.get("ContentType", "application/octet-stream")
+                        filename = metadata.get("original_filename") or filename_from_key(key)
                     except Exception:
-                        content_type = 'application/octet-stream'
-                        filename = obj['Key'].split('/')[-1]
+                        content_type = "application/octet-stream"
+                        filename = filename_from_key(key)
 
                     # boto3 returns LastModified as a datetime; the metadata
                     # contract (and the API that serves it) is a string.
-                    last_modified = iso_timestamp(obj['LastModified'])
-                    entries.append((
-                        obj['LastModified'],
-                        {
-                            "key": obj['Key'],
-                            "filename": filename,
-                            "size": obj['Size'],
-                            "content_type": content_type,
-                            "last_modified": last_modified,
-                            "etag": obj['ETag'].strip('"'),
-                            "tags": tags,
-                            "user_email": user_email
-                        }
-                    ))
+                    files.append({
+                        "key": key,
+                        "filename": filename,
+                        "size": entry.get("size", 0),
+                        "content_type": content_type,
+                        "last_modified": iso_timestamp(entry.get("last_modified")),
+                        "etag": entry.get("etag") or "",
+                        "tags": tags_with_source(tags, key),
+                        "user_email": user_email,
+                    })
 
-                # Sort by last modified, newest first. The raw timestamp is
-                # the sort key: the ISO strings would only sort chronologically
-                # as text while every value carries the same UTC offset.
-                entries.sort(key=lambda entry: entry[0], reverse=True)
-                files = [file_data for _, file_data in entries]
-
-                logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
+                logger.info(
+                    "Listed %s of %s files for user %s",
+                    len(files),
+                    total,
+                    sanitize_for_logging(user_email),
+                )
 
                 set_attrs(span, {
                     "num_results": len(files),
-                    "total_bytes": sum(int(f.get('size', 0) or 0) for f in files),
+                    "total_bytes": sum(int(f.get("size", 0) or 0) for f in files),
                     "success": True,
                     "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                 })
-                return files
+                return {
+                    "files": files,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
 
             except ClientError as e:
                 safe_error = preview(
