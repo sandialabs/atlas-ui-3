@@ -345,6 +345,39 @@ describe('selected model per user', () => {
     expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
   })
 
+  it('drops the previous user\'s gateway model when a refresh switches to a user with no saved model (#1134)', async () => {
+    // A fresh config object per response, like the real endpoint produces:
+    // the restore effect must re-run on every refresh, not just when the
+    // previous response's arrays differ by identity.
+    const freshConfig = (user) => ({ app_name: 'Atlas', user, models: [], llm_gateways: GATEWAYS, features: {} })
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    localStorage.setItem(`chatui-current-model:${ALICE}`, 'corp::team-a::gpt-x')
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(ALICE) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(result.current.currentModel).toBe('corp::team-a::gpt-x'))
+
+    // The signed-in identity changes without a remount (a refresh that
+    // carries the new user); the new user has saved nothing, and a
+    // gateway-only config has no default to fall back to.
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(BOB) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('')
+
+    // A later refresh that resolves something for the same user still applies.
+    localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-b::m2')
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-b', label: 'B' }] }) })
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('corp::team-b::m2')
+  })
+
   it('keeps a saved gateway model when membership cannot be checked', async () => {
     localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-a::gpt-x')
     teamsResponse = () => ({ ok: false, status: 502, json: async () => ({}) })

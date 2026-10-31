@@ -55,7 +55,10 @@ def list_models(args) -> None:
 
     gateways = getattr(llm_config, "litellm_gateways", None) or {}
     if not llm_config.models and not gateways:
-        print("❌ No models configured")
+        print(
+            "❌ No models configured. Add a model under 'models' or an Enterprise "
+            "LiteLLM gateway under 'litellm_gateways' in llmconfig.yml."
+        )
         return
 
     if llm_config.models:

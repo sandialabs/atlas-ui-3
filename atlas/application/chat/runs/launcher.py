@@ -218,19 +218,25 @@ async def list_launch_options(factory: Any, user_email: str) -> Dict[str, Any]:
             "Launch discovery failed while loading models. Try again.", code="unavailable"
         ) from exc
     if not models:
-        gateways = getattr(getattr(config_manager, "llm_config", None), "litellm_gateways", None) or {}
-        if gateways:
+        llm_config = getattr(config_manager, "llm_config", None)
+        configured_models = getattr(llm_config, "models", None) or {}
+        gateways = getattr(llm_config, "litellm_gateways", None) or {}
+        if not configured_models and gateways:
             # Gateway models are picked per team in the model picker, so
             # discovery cannot enumerate what this user may call without a
             # round trip to the proxy; child runs need a statically configured
             # model (issue #1134). A clear refusal rather than a generic "no
-            # models" that reads as a broken deployment.
+            # models" that reads as a broken deployment. The decision reads
+            # the *configured* models -- a user merely unauthorized for every
+            # static model of a mixed deployment gets the generic refusal
+            # below instead -- and names no gateway, whose groups this user
+            # may not pass.
             raise LaunchRefused(
                 "Launch discovery found no statically configured LLM models: this "
-                "deployment serves its models through the LiteLLM gateway(s) "
-                f"{', '.join(sorted(gateways))}, whose team-scoped models are not "
-                "launchable as child-run models. Ask the operator to configure at "
-                "least one static model under 'models' in llmconfig.yml.",
+                "deployment serves its models through LiteLLM gateway(s), whose "
+                "team-scoped models are not launchable as child-run models. Ask "
+                "the operator to configure at least one static model under "
+                "'models' in llmconfig.yml.",
                 code="no_static_model_source",
             )
     return {

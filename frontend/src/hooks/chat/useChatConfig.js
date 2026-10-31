@@ -369,7 +369,19 @@ export function useChatConfig() {
 
     const saved = readSavedModel(user)
     const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
-    if (!model) return
+    if (!model) {
+      // Nothing resolves for this user yet: no saved model and no static
+      // default to fall back on (a gateway-only deployment where they have
+      // not picked a team model). Leave the restore un-done so a later
+      // config refresh can still resolve one, but do not let a shared
+      // browser carry the previous user's selection over to them (the
+      // per-user rule of issue #1050, applied to the no-default case).
+      if (restoredForUserRef.current && restoredForUserRef.current !== user) {
+        setCurrentModel('')
+        currentModelRef.current = ''
+      }
+      return
+    }
     restoredForUserRef.current = user
     setCurrentModel(model)
     currentModelRef.current = model

@@ -283,7 +283,11 @@ async def list_models(*, json_output: bool = False) -> int:
         return 0 if (models or gateways) else 1
 
     if not models and not gateways:
-        print("No models configured.", file=sys.stderr)
+        print(
+            "No models configured. Add a model under 'models' or an Enterprise "
+            "LiteLLM gateway under 'litellm_gateways' in llmconfig.yml.",
+            file=sys.stderr,
+        )
         return 1
 
     for name, cfg in models.items():
