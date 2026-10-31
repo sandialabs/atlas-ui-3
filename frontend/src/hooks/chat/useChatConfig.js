@@ -370,7 +370,18 @@ export function useChatConfig() {
     // The user stays unrestored until a model actually resolves, so a config
     // refresh that arrives later (or adds static models) still gets to apply
     // its default.
-    if (!isKnownUser(user) || (!models.length && !llmGateways.length)) return
+    if (!isKnownUser(user)) return
+    // A refresh that switches users must never display the previous
+    // account's selection -- even when this response carries no model
+    // source at all, which must not read as "keep what is shown".
+    if (modelOwnerRef.current && modelOwnerRef.current !== user) {
+      setCurrentModel('')
+      currentModelRef.current = ''
+      // The cleared selection was the restore's user; forget it so a later
+      // refresh for them (or a switch back) restores afresh.
+      restoredForUserRef.current = null
+    }
+    if (!models.length && !llmGateways.length) return
     if (restoredForUserRef.current === user) return
 
     const saved = readSavedModel(user)
@@ -379,16 +390,7 @@ export function useChatConfig() {
       // Nothing resolves for this user yet: no saved model and no static
       // default to fall back on (a gateway-only deployment where they have
       // not picked a team model). Leave the restore un-done so a later
-      // config refresh can still resolve one, but do not let a shared
-      // browser carry another account's selection over to them (the per-user
-      // rule of issue #1050, applied to the no-default case).
-      if (modelOwnerRef.current && modelOwnerRef.current !== user) {
-        setCurrentModel('')
-        currentModelRef.current = ''
-        // The cleared selection was the restore's user; forget it so a
-        // later refresh for them (or a switch back) restores afresh.
-        restoredForUserRef.current = null
-      }
+      // config refresh can still resolve one.
       return
     }
     restoredForUserRef.current = user
@@ -412,7 +414,9 @@ export function useChatConfig() {
     ;(async () => {
       const member = await gatewayTeamStillMember(parsed)
       if (token !== membershipCheckRef.current || member) return
-      if (restoredForUserRef.current !== user || currentModelRef.current !== currentModel) return
+      // Ownership decides whose selection this is, so a manually picked
+      // team model is re-checked exactly like a restored one.
+      if (modelOwnerRef.current !== user || currentModelRef.current !== currentModel) return
       const fallback = defaultModelOf({ models })
       setCurrentModel(fallback)
       currentModelRef.current = fallback
