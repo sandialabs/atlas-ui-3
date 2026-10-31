@@ -72,6 +72,23 @@ def test_select_file_page_filters_query_category_and_offset():
     assert filename_from_key(entries[1]["key"]) == "photo.png"
 
 
+def test_select_file_page_query_folds_spaces_and_ignores_the_path():
+    entries = [
+        _entry(
+            "users/me@example.com/uploads/1700000200_aaaaaaaa_my_report.pdf",
+            datetime(2026, 2, 1, tzinfo=timezone.utc),
+        ),
+    ]
+
+    matched, total = select_file_page(entries, query=" my report ")
+    assert total == 1
+    assert matched[0]["key"].endswith("my_report.pdf")
+
+    for query in ("uploads", "me@example.com", "generated"):
+        _page, empty = select_file_page(entries, query=query)
+        assert empty == 0
+
+
 def test_list_route_rejects_an_unknown_category(test_user_headers):
     from main import app
 

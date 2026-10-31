@@ -53,6 +53,7 @@ const AllFilesView = () => {
   const loadedOnce = useRef(false)
   const filterTimer = useRef(null)
   const filesRef = useRef([])
+  const requestSeq = useRef(0)
 
   folderIdRef.current = folderId
   searchRef.current = searchQuery
@@ -66,9 +67,11 @@ const AllFilesView = () => {
   }
 
   const fetchAllFiles = async ({ offset = 0, folderId: nextFolder = 'all', q = '' } = {}) => {
+    const requestId = ++requestSeq.current
     const requested = folderById(nextFolder)
     const unfiltered = offset === 0 && requested.id === 'all' && !(q || '').trim()
     const firstLoad = filesRef.current.length === 0 && offset === 0
+    const stillCurrent = () => requestId === requestSeq.current
     try {
       if (firstLoad) setLoading(true)
       else setPaging(true)
@@ -84,11 +87,13 @@ const AllFilesView = () => {
         }
       })
 
+      if (!stillCurrent()) return
       if (!response.ok) {
         throw new Error(`Failed to fetch files: ${response.statusText}`)
       }
 
       const payload = await response.json()
+      if (!stillCurrent()) return
       const files = Array.isArray(payload) ? payload : []
       const totalHeader = response.headers?.get?.('X-Total-Count')
       const headerTotal = totalHeader == null || totalHeader === '' ? null : Number(totalHeader)
@@ -104,6 +109,7 @@ const AllFilesView = () => {
       setPageOffset(offset)
       setAllFiles(files)
     } catch (err) {
+      if (!stillCurrent()) return
       if (filesRef.current.length === 0) {
         setError(err.message)
       } else {
@@ -111,8 +117,10 @@ const AllFilesView = () => {
       }
       console.error('Error fetching all files:', err)
     } finally {
-      setLoading(false)
-      setPaging(false)
+      if (stillCurrent()) {
+        setLoading(false)
+        setPaging(false)
+      }
     }
   }
 
@@ -146,6 +154,10 @@ const AllFilesView = () => {
   }
 
   const selectFolder = (id) => {
+    if (filterTimer.current) {
+      clearTimeout(filterTimer.current)
+      filterTimer.current = null
+    }
     setFolderId(id)
     setPageOffset(0)
     if (!completeRef.current) {

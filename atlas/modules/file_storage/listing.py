@@ -27,6 +27,10 @@ _CATEGORY_EXTENSIONS = {
 
 # Upload keys look like ``{unix_seconds}_{8 hex}_{safe_filename}``.
 _KEY_FILENAME = re.compile(r"^\d{9,}_[0-9a-fA-F]{8}_(.+)$")
+# Stored names replace spaces and other separators with "_". Folding both
+# sides lets a search for "my report" match ``my_report.pdf`` without
+# reading every object's metadata.
+_SEARCH_FOLD = re.compile(r"[^a-z0-9]+")
 
 
 def user_prefix(user_email: str, file_type: Optional[str] = None) -> str:
@@ -101,12 +105,24 @@ def _epoch(value: Any) -> Optional[float]:
     return None
 
 
+def _fold_search(value: str) -> str:
+    """Lowercase and drop separators so a spaced query matches a stored name."""
+    return _SEARCH_FOLD.sub("", (value or "").lower())
+
+
 def _matches(entry: Dict[str, Any], needle: str, category: Optional[str]) -> bool:
     key = entry.get("key") or ""
     leaf = key.rsplit("/", 1)[-1]
     stored_name = filename_from_key(key)
-    if needle and needle not in leaf.lower() and needle not in stored_name.lower():
-        return False
+    if needle:
+        names = (leaf.lower(), stored_name.lower())
+        folded = _fold_search(needle)
+        folded_names = (_fold_search(leaf), _fold_search(stored_name))
+        direct = needle in names[0] or needle in names[1]
+        loose = bool(folded) and (folded in folded_names[0] or folded in folded_names[1])
+        # The directory prefix (the user email, ``uploads/``) is not a name.
+        if not direct and not loose:
+            return False
     if category and category != "all":
         if category_for_filename(stored_name) != category and category_for_filename(leaf) != category:
             return False

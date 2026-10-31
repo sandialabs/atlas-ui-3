@@ -5,9 +5,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import AllFilesView from '../components/AllFilesView'
-import { categoryForFilename, filesQuery } from '../utils/fileLibraryModel'
+import { categoryForFilename, filesQuery, filterAndSortFiles } from '../utils/fileLibraryModel'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 
@@ -45,6 +45,18 @@ describe('file library model', () => {
     expect(categoryForFilename('sheet.csv')).toBe('data')
     expect(categoryForFilename('main.py')).toBe('code')
     expect(categoryForFilename('archive.bin')).toBe('other')
+  })
+
+  it('matches a spaced name and ignores the storage path', () => {
+    const files = [{
+      key: 'users/me@example.com/uploads/1700000200_aaaaaaaa_my_report.pdf',
+      filename: 'my_report.pdf',
+      tags: { source: 'user' },
+      last_modified: '2026-06-01T00:00:00Z',
+    }]
+    expect(filterAndSortFiles(files, { searchQuery: ' my report ' })).toHaveLength(1)
+    expect(filterAndSortFiles(files, { searchQuery: 'uploads' })).toHaveLength(0)
+    expect(filterAndSortFiles(files, { searchQuery: 'me@example.com' })).toHaveLength(0)
   })
 
   it('builds a paged query', () => {
@@ -121,5 +133,65 @@ describe('AllFilesView explorer', () => {
       expect(screen.getByText('later.txt')).toBeInTheDocument()
     })
     expect(fetchMock.mock.calls[1][0]).toContain('offset=50')
+  })
+
+  it('deletes only the rows on the current page', async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(jsonResponse([notes, plot], 80))
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [] })
+    global.fetch = fetchMock
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllFilesView />)
+    const button = await screen.findByRole('button', { name: /Delete Page \(2\)/ })
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('on this page')
+    )
+    const deletes = fetchMock.mock.calls.filter(([, opts]) => opts?.method === 'DELETE')
+    expect(deletes).toHaveLength(2)
+    expect(deletes.map(([url]) => url).join(' ')).toContain('notes.txt')
+    expect(deletes.map(([url]) => url).join(' ')).toContain('plot.png')
+    expect(deletes.map(([url]) => url).join(' ')).not.toContain('later.txt')
+  })
+
+  it('drops a list response that finishes after a newer one', async () => {
+    let resolveUploads
+    const uploads = new Promise((resolve) => {
+      resolveUploads = resolve
+    })
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('file_type=user')) return uploads
+      return Promise.resolve(jsonResponse([notes, plot], 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('notes.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Uploads' }))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('button', { name: 'File Library' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3)
+    })
+
+    resolveUploads(jsonResponse([{
+      key: 'users/a/uploads/9_zzzzzzzz_stale.txt',
+      filename: 'stale.txt',
+      size: 1,
+      last_modified: '2026-06-03T00:00:00Z',
+      tags: { source: 'user' },
+    }], 1))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByText('stale.txt')).not.toBeInTheDocument()
+    expect(screen.getByText('notes.txt')).toBeInTheDocument()
+    expect(screen.getByText('plot.png')).toBeInTheDocument()
   })
 })

@@ -5,6 +5,7 @@ This client provides the same interface as S3StorageClient but uses the
 S3 mock server via TestClient, eliminating the need for Docker/MinIO in development.
 """
 
+import asyncio
 import base64
 import hashlib
 import logging
@@ -411,6 +412,7 @@ class MockS3StorageClient:
 
         The mock listing is filtered and ordered before each object is read,
         matching the S3 client. ``total`` counts matches before paging.
+        The mock HTTP calls run off the event loop.
 
         Args:
             user_email: Email of the user
@@ -423,6 +425,26 @@ class MockS3StorageClient:
         Returns:
             ``{"files", "total", "offset", "limit"}``.
         """
+        return await asyncio.to_thread(
+            self._list_file_page_sync,
+            user_email,
+            file_type,
+            limit,
+            offset,
+            query,
+            category,
+        )
+
+    def _list_file_page_sync(
+        self,
+        user_email: str,
+        file_type: Optional[str],
+        limit: int,
+        offset: int,
+        query: Optional[str],
+        category: Optional[str],
+    ) -> Dict[str, Any]:
+        """Blocking listing used by ``list_file_page``."""
         start_ns = time.monotonic_ns()
         span_attrs = {
             "user_hash": hash_short(user_email),

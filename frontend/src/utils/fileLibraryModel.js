@@ -77,6 +77,16 @@ export function compareFiles(a, b, sortBy, sortOrder) {
   return 0
 }
 
+function storedName(key) {
+  const leaf = (key || '').split('/').pop() || ''
+  const match = leaf.match(/^\d{9,}_[0-9a-fA-F]{8}_(.+)$/)
+  return match ? match[1] : leaf
+}
+
+function foldSearch(value) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
 export function filterAndSortFiles(files, {
   searchQuery = '',
   source = 'all',
@@ -84,11 +94,16 @@ export function filterAndSortFiles(files, {
   sortBy = 'last_modified',
   sortOrder = 'desc',
 } = {}) {
-  const query = (searchQuery || '').toLowerCase()
+  const query = (searchQuery || '').trim().toLowerCase()
+  const foldedQuery = foldSearch(query)
   const filtered = (files || []).filter((file) => {
     if (query) {
-      const haystack = `${file.filename || ''} ${file.key || ''}`.toLowerCase()
-      if (!haystack.includes(query)) return false
+      // Match the name the user sees and the stored leaf, not the object
+      // path. The path contains the account email and uploads/ or generated/.
+      const names = [file.filename || '', storedName(file.key)]
+      const direct = names.some((name) => name.toLowerCase().includes(query))
+      const loose = foldedQuery && names.some((name) => foldSearch(name).includes(foldedQuery))
+      if (!direct && !loose) return false
     }
     if (source !== 'all' && file.tags?.source !== source) return false
     if (category !== 'all') {

@@ -81,7 +81,7 @@ as the epoch.
 | `offset` | How many matches to skip. Default 0. |
 | `file_type` | `user` for uploads, or `tool` for generated files. |
 | `category` | `image`, `code`, `data`, `document`, or `other`. Anything else is HTTP 400. |
-| `q` | Case-insensitive substring of the stored file name. At most 200 characters. |
+| `q` | Case-insensitive substring of the stored file name. Spaces match the underscores stored in the key. The account prefix is not searched. At most 200 characters. |
 
 The response header `X-Total-Count` is the number of matches before `offset`
 and `limit`. The File Library asks for 50 rows at a time and reads that

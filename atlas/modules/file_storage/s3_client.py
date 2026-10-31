@@ -5,6 +5,7 @@ This module provides a client interface to interact with S3-compatible storage
 (MinIO or AWS S3) using boto3.
 """
 
+import asyncio
 import base64
 import logging
 import re
@@ -475,6 +476,7 @@ class S3StorageClient:
 
         Keys under the user's prefix are filtered and ordered first. Object
         tags and metadata are read only for the page that is returned.
+        The boto3 calls run off the event loop.
 
         Args:
             user_email: Email of the user
@@ -488,6 +490,26 @@ class S3StorageClient:
             ``{"files", "total", "offset", "limit"}`` where ``total`` counts
             matches before paging.
         """
+        return await asyncio.to_thread(
+            self._list_file_page_sync,
+            user_email,
+            file_type,
+            limit,
+            offset,
+            query,
+            category,
+        )
+
+    def _list_file_page_sync(
+        self,
+        user_email: str,
+        file_type: Optional[str],
+        limit: int,
+        offset: int,
+        query: Optional[str],
+        category: Optional[str],
+    ) -> Dict[str, Any]:
+        """Blocking listing used by ``list_file_page``."""
         start_ns = time.monotonic_ns()
         span_attrs = {
             "user_hash": hash_short(user_email),

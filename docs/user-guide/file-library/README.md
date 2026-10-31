@@ -25,7 +25,7 @@ The folders down the side are views of the same library:
 The breadcrumb above the list shows where you are. Choose **File Library** in
 the breadcrumb to return to every file.
 
-Search still matches the file name. Sort still orders the rows you are looking
+Search still matches the file name. A space matches an underscore in the stored name. Sort still orders the rows you are looking
 at by date, name, or size. Download, delete, and **Add to session** work the
 same way they did on the flat list.
 
