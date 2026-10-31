@@ -51,6 +51,14 @@ describe('AgentRunStatus', () => {
     expect(screen.getByTestId('agent-run-status')).toHaveTextContent(/step 3/i)
   })
 
+  it('keeps the explanation for screen readers when the row is one line', () => {
+    render(<AgentRunStatus isAgentRunning currentAgentStep={3} onStop={vi.fn()} compact />)
+    const detail = screen.getByText(/using tools as needed/i)
+    expect(detail).toHaveClass('sr-only')
+    expect(screen.getByTestId('agent-run-status')).toHaveTextContent(/step 3/i)
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument()
+  })
+
   it('explains why an agent is paused for an answer', () => {
     render(
       <AgentRunStatus isAgentRunning currentAgentStep={0} onStop={vi.fn()} waitingForAnswer />

@@ -7,6 +7,8 @@ import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import { autoResizeComposer, resetComposerHeight, COMPOSER_MAX_HEIGHT } from '../utils/composerAutoResize'
 import { useComposerHeightVar } from '../hooks/useComposerHeightVar'
+import { useShortViewport } from '../hooks/useShortViewport'
+import { FOCUS_RING } from '../utils/focusRing'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
 import PromptSelector from './PromptSelector'
 import EnabledDataSourcesIndicator from './EnabledDataSourcesIndicator'
@@ -55,6 +57,9 @@ const ChatArea = () => {
   const [filteredFiles, setFilteredFiles] = useState([])
   const [selectedFileIndex, setSelectedFileIndex] = useState(0)
   const [isDragOver, setIsDragOver] = useState(false)
+  // Short windows collapse the attached-file list until the user asks for it.
+  const [attachedFilesOpen, setAttachedFilesOpen] = useState(false)
+  const [composerFocused, setComposerFocused] = useState(false)
   const textareaRef = useRef(null)
   const messagesRef = useRef(null)
   const endRef = useRef(null)
@@ -209,6 +214,16 @@ const ChatArea = () => {
   // Keep --atlas-composer-height in sync so floating controls (the feedback
   // button) can sit above the composer instead of on top of Send.
   useComposerHeightVar(composerRef)
+
+  // Short windows (issue #1135) cap the composer in CSS and collapse the
+  // pieces that were stacking into a second screen of controls.
+  const shortViewport = useShortViewport()
+  const attachedFileCount = Object.keys(uploadedFiles).length
+  const showAttachedFiles = attachedFileCount > 0 && (!shortViewport || attachedFilesOpen)
+
+  useEffect(() => {
+    if (attachedFileCount === 0 && attachedFilesOpen) setAttachedFilesOpen(false)
+  }, [attachedFileCount, attachedFilesOpen])
 
   // Check for mobile screen size
   useEffect(() => {
@@ -1031,20 +1046,25 @@ const ChatArea = () => {
         data-testid="composer-footer"
         className="p-4 border-t border-gray-700 flex-shrink-0"
       >
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-4xl mx-auto w-full composer-stack">
+          <div className="composer-aux">
           {/* A running agent is easy to lose once the transcript is scrolled
               away from its newest row. This sits in the footer, which is
               always visible, and reuses the same run state and Stop handler as
-              the composer controls. */}
+              the composer controls. On a short window the status and the
+              active-tools strip share one row (see index.css). */}
+          <div className={shortViewport && (agentRunActive || (selectedTools?.size > 0)) ? 'composer-status-row' : undefined}>
           <AgentRunStatus
             isAgentRunning={agentRunActive}
             currentAgentStep={currentAgentStep}
             onStop={stopAgent}
             waitingForAnswer={showAgentQuestion}
+            compact={shortViewport}
           />
 
           {/* Enabled Tools Indicator */}
           <EnabledToolsIndicator />
+          </div>
 
           {/* Enabled data sources, as pills (issue #839 review) */}
           <EnabledDataSourcesIndicator />
@@ -1191,9 +1211,25 @@ const ChatArea = () => {
             </div>
           )}
 
-          {/* Uploaded Files Display */}
-          {Object.keys(uploadedFiles).length > 0 && (
-            <div className="mb-3 p-3 bg-gray-800 rounded-lg border border-gray-600">
+          {/* Uploaded Files Display. The count used to be repeated again under
+              the controls; the list (or its collapse button) is the one place
+              it appears. Short windows collapse the list so it does not eat
+              the transcript (issue #1135). */}
+          {attachedFileCount > 0 && shortViewport && (
+            <button
+              type="button"
+              onClick={() => setAttachedFilesOpen((open) => !open)}
+              aria-expanded={attachedFilesOpen}
+              aria-controls="uploaded-files-panel"
+              data-testid="uploaded-files-toggle"
+              className={`mb-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-600 bg-gray-800 text-sm text-gray-200 hover:bg-gray-700 ${FOCUS_RING}`}
+            >
+              <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
+              {attachedFileCount === 1 ? '1 file attached' : `${attachedFileCount} files attached`}
+            </button>
+          )}
+          {showAttachedFiles && (
+            <div id="uploaded-files-panel" className="mb-3 p-3 bg-gray-800 rounded-lg border border-gray-600">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm text-gray-300">Uploaded Files:</div>
                 {/* Global extraction mode toggle - only show if feature is enabled */}
@@ -1308,7 +1344,9 @@ const ChatArea = () => {
               </div>
             </div>
           )}
-          
+          </div>
+
+          <div className="composer-pinned">
           <form onSubmit={handleSubmit} className="flex flex-col gap-2">
             <div className="flex gap-3">
               <button
@@ -1344,6 +1382,8 @@ const ChatArea = () => {
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
                 placeholder={isMobile ? "Type a message..." : "Type a message... (/ or @ for help)"}
                 rows={1}
                 className={`w-full px-4 py-3 bg-gray-800 rounded-lg text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:border-transparent ${
@@ -1469,7 +1509,10 @@ const ChatArea = () => {
             <div role="group" aria-label="Chat controls" className="flex items-center gap-3 flex-wrap min-w-0">
               <ModelSelector />
               <ToolSelector />
-              {features?.workspaces && <WorkspaceSelector placement="up" />}
+              {/* The header already has a workspace switcher. On a short window
+                  the second one is the duplicate that crowded the transcript
+                  (issue #1135); tall windows keep it here (issue #839). */}
+              {features?.workspaces && !shortViewport && <WorkspaceSelector placement="up" />}
               <PromptSelector />
               {/* Context meter (issue #877) sits on this row with the model
                   and prompt. */}
@@ -1477,11 +1520,11 @@ const ChatArea = () => {
                 contextCompaction={contextCompaction}
                 disabled={!isConnected || isThinking || isStreaming || isAgentRunning}
               />
-              <span className="hidden sm:inline">Press Shift + Enter for new line</span>
+              {(!shortViewport || composerFocused) && (
+                <span className="hidden sm:inline">Press Shift + Enter for new line</span>
+              )}
             </div>
-            {Object.keys(uploadedFiles).length > 0 && (
-              <span>{Object.keys(uploadedFiles).length} file(s) uploaded</span>
-            )}
+          </div>
           </div>
         </div>
       </footer>

@@ -110,7 +110,9 @@ const FeedbackButton = () => {
           the user into the feedback modal instead of sending the message.
           ChatArea publishes the live composer height as --atlas-composer-height
           (see useComposerHeightVar); the fallback keeps the button clear of the
-          composer before the first measurement lands. */}
+          composer before the first measurement lands. On a short window,
+          index.css docks the button inside the composer band instead
+          (html.atlas-short-viewport), so it does not cover the transcript. */}
       <button
         onClick={() => setIsOpen(true)}
         style={{ bottom: 'calc(var(--atlas-composer-height, 8rem) + 1rem)' }}

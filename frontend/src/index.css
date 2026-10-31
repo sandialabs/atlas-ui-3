@@ -805,6 +805,71 @@
   }
 }
 
+/* Short windows (issue #1135).
+   `useShortViewport` adds `atlas-short-viewport` on <html> at max-height
+   950px. The transcript is the flex sibling of this footer, so capping what
+   sits above the message box is what keeps the history at about half the
+   screen: 7rem is the header plus the compliance banner, 11rem is the
+   message box, its control row, and this footer's padding. The aux stack
+   (agent status, tools, warnings, files) scrolls inside the remainder. The
+   message box stays outside that scroller. Tall windows do not get the
+   class, so this block does not apply. */
+html.atlas-short-viewport [data-testid="composer-footer"] {
+  container-type: inline-size;
+  padding: 0.5rem 1rem;
+}
+
+html.atlas-short-viewport .composer-aux {
+  max-height: max(4.5rem, calc(50vh - 18rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+html.atlas-short-viewport .composer-status-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+html.atlas-short-viewport .composer-status-row > * {
+  margin-bottom: 0;
+}
+
+@media (min-width: 1100px) {
+  html.atlas-short-viewport .composer-status-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  html.atlas-short-viewport .composer-status-row > :first-child {
+    flex: 0 1 auto;
+  }
+
+  html.atlas-short-viewport .composer-status-row > :not(:first-child) {
+    flex: 1 1 0%;
+    min-width: 0;
+  }
+}
+
+/* The feedback button is fixed to the viewport, to the right of the centered
+   composer column. When that column runs into the button (a sidebar or canvas
+   has narrowed the chat), keep the controls clear of it. Wide short windows
+   already have the margin. */
+@container (max-width: 68rem) {
+  html.atlas-short-viewport .composer-stack {
+    padding-right: 3.25rem;
+  }
+}
+
+html.atlas-short-viewport [data-testid="feedback-button"] {
+  /* Beat the inline composer-height offset. 2.75rem is a 44px touch target,
+     and it sits inside the composer band instead of over the transcript. */
+  bottom: 0.5rem !important;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
 /* Print styles for chat export (#150) */
 @media print {
   /* Hide non-content UI elements */

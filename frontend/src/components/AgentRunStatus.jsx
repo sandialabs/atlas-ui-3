@@ -19,6 +19,9 @@ export default function AgentRunStatus({
   currentAgentStep,
   onStop,
   waitingForAnswer = false,
+  // Short windows draw one line. The explanation stays in the live region
+  // so a screen reader still hears why the run is paused or still going.
+  compact = false,
 }) {
   if (!isAgentRunning) return null
 
@@ -50,7 +53,7 @@ export default function AgentRunStatus({
             <span className="font-normal text-blue-200"> · step {step}</span>
           )}
         </div>
-        <div className="text-xs text-blue-200">{subtitle}</div>
+        <div className={compact ? 'sr-only' : 'text-xs text-blue-200'}>{subtitle}</div>
       </div>
       {typeof onStop === 'function' && (
         <button
