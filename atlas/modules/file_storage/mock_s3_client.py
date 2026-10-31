@@ -514,11 +514,14 @@ class MockS3StorageClient:
                         "user_email": user_email,
                     })
 
+                # Inline CR/LF removal: CodeQL py/log-injection traces this
+                # barrier and does not treat sanitize_for_logging as one.
+                safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
                 logger.info(
                     "Listed %s of %s files for user %s",
                     len(files),
                     total,
-                    sanitize_for_logging(user_email),
+                    safe_user_email,
                 )
 
                 set_attrs(span, {
