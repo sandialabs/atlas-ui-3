@@ -244,12 +244,16 @@ async def test_gateway_only_deployment_gets_a_clear_launch_refusal():
     discovery refuses with the reason instead of a generic "no models"
     (issue #1134)."""
     factory = _Factory(lambda c: _ChatService(c), models={})
-    factory.get_config_manager = lambda: SimpleNamespace(
-        app_settings=factory._settings,
-        llm_config=SimpleNamespace(
-            models={}, litellm_gateways={"enterprise": SimpleNamespace()}
-        ),
-    )
+
+    def _gateway_only_config_manager():
+        return SimpleNamespace(
+            app_settings=factory._settings,
+            llm_config=SimpleNamespace(
+                models={}, litellm_gateways={"enterprise": SimpleNamespace()}
+            ),
+        )
+
+    factory.get_config_manager = _gateway_only_config_manager
     context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
 
     with pytest.raises(LaunchRefused, match="no statically configured LLM models") as excinfo:
