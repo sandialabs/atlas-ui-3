@@ -112,7 +112,8 @@ const FeedbackButton = () => {
           (see useComposerHeightVar); the fallback keeps the button clear of the
           composer before the first measurement lands. On a short window,
           index.css docks the button inside the composer band instead
-          (html.atlas-short-viewport), so it does not cover the transcript. */}
+          (@media (max-height: 950px)), so it does not cover the transcript;
+          --atlas-canvas-width keeps the dock left of an open canvas. */}
       <button
         onClick={() => setIsOpen(true)}
         style={{ bottom: 'calc(var(--atlas-composer-height, 8rem) + 1rem)' }}

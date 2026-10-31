@@ -1048,28 +1048,10 @@ const ChatArea = () => {
       >
         <div className="max-w-4xl mx-auto w-full composer-stack">
           <div className="composer-aux">
-          {/* A running agent is easy to lose once the transcript is scrolled
-              away from its newest row. This sits in the footer, which is
-              always visible, and reuses the same run state and Stop handler as
-              the composer controls. On a short window the status and the
-              active-tools strip share one row (see index.css). */}
-          <div className={shortViewport && (agentRunActive || (selectedTools?.size > 0)) ? 'composer-status-row' : undefined}>
-          <AgentRunStatus
-            isAgentRunning={agentRunActive}
-            currentAgentStep={currentAgentStep}
-            onStop={stopAgent}
-            waitingForAnswer={showAgentQuestion}
-            compact={shortViewport}
-          />
-
-          {/* Enabled Tools Indicator */}
-          <EnabledToolsIndicator />
-          </div>
-
-          {/* Enabled data sources, as pills (issue #839 review) */}
-          <EnabledDataSourcesIndicator />
-
-          {/* Warning: WebSocket disconnected - sending is blocked until reconnected */}
+          {/* Blocking warnings render above the agent status. On a short
+              window the aux stack is capped and scrolls; putting the
+              disconnected and model-capability warnings first keeps them in
+              view instead of scrolled out of sight under the status row. */}
           {!isConnected && (
             <div
               className="mb-2 px-3 py-2 bg-red-900/40 border border-red-600/50 rounded-lg flex items-center gap-2 text-red-300 text-sm"
@@ -1106,6 +1088,37 @@ const ChatArea = () => {
               </span>
             </div>
           )}
+
+          {/* Warning: images uploaded but model doesn't support vision */}
+          {Object.keys(uploadedFiles).some(f => isImageFile(f)) && !currentModelSupportsVision && (
+            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
+              <Image className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>{currentModelLabel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
+              </span>
+            </div>
+          )}
+
+          {/* A running agent is easy to lose once the transcript is scrolled
+              away from its newest row. This sits in the footer, which is
+              always visible, and reuses the same run state and Stop handler as
+              the composer controls. On a short window the status and the
+              active-tools strip share one row (see index.css). */}
+          <div className={shortViewport && (agentRunActive || (selectedTools?.size > 0)) ? 'composer-status-row' : undefined}>
+          <AgentRunStatus
+            isAgentRunning={agentRunActive}
+            currentAgentStep={currentAgentStep}
+            onStop={stopAgent}
+            waitingForAnswer={showAgentQuestion}
+            compact={shortViewport}
+          />
+
+          {/* Enabled Tools Indicator */}
+          <EnabledToolsIndicator />
+          </div>
+
+          {/* Enabled data sources, as pills (issue #839 review) */}
+          <EnabledDataSourcesIndicator />
 
           {/* Agent Mode on with nothing for the loop to act on. Sending is
               still allowed -- the backend downgrades the turn to a normal
@@ -1198,16 +1211,6 @@ const ChatArea = () => {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Warning: images uploaded but model doesn't support vision */}
-          {Object.keys(uploadedFiles).some(f => isImageFile(f)) && !currentModelSupportsVision && (
-            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
-              <Image className="w-4 h-4 flex-shrink-0" />
-              <span>
-                <strong>{currentModelLabel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
-              </span>
             </div>
           )}
 

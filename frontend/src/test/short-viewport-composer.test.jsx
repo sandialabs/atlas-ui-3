@@ -2,9 +2,9 @@
  * Short windows were giving the transcript a thin strip (issue #1135).
  *
  * jsdom has no layout engine, so these tests pin the behavior the CSS then
- * sizes: the short-viewport class, the collapsed file list, the single file
- * count, the one-line agent status, and the composer height budget in
- * index.css. They do not measure pixels.
+ * sizes: the short-viewport breakpoint shared by the hook and the stylesheet,
+ * the collapsed file list, the single file count, the one-line agent status,
+ * and the composer height budget in index.css. They do not measure pixels.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -81,7 +81,6 @@ describe('short-viewport composer (issue #1135)', () => {
   afterEach(() => {
     cleanup()
     window.matchMedia = originalMatchMedia
-    document.documentElement.classList.remove('atlas-short-viewport')
   })
 
   const renderChat = () => render(
@@ -119,17 +118,22 @@ describe('short-viewport composer (issue #1135)', () => {
     // The budget is the contract the layout depends on. 7rem is the header
     // and compliance banner; 11rem is the message box, the control row, and
     // the footer padding; the aux panels scroll in what is left of 50vh.
-    expect(css).toContain('html.atlas-short-viewport [data-testid="composer-footer"]')
+    // The rules live in a media query keyed to the same breakpoint the
+    // useShortViewport hook reports, so styling cannot desynchronize from
+    // the JS-side collapse.
+    expect(css).toContain(`@media ${SHORT_VIEWPORT_QUERY}`)
+    expect(css).toContain('[data-testid="composer-footer"]')
     expect(css).toContain('max-height: max(4.5rem, calc(50vh - 18rem))')
-    expect(css).toContain('html.atlas-short-viewport [data-testid="feedback-button"]')
+    expect(css).toContain('[data-testid="feedback-button"]')
     expect(css).toContain('bottom: 0.5rem !important')
+    expect(css).toContain('--atlas-canvas-width')
   })
 
   it('collapses attached files, drops the duplicate count, and keeps controls reachable', () => {
     short = true
     renderChat()
 
-    expect(document.documentElement.classList.contains('atlas-short-viewport')).toBe(true)
+    expect(document.querySelector('.composer-status-row')).not.toBeNull()
     const footer = screen.getByTestId('composer-footer')
     const status = within(footer).getByTestId('agent-run-status')
     expect(status).toHaveTextContent(/agent is running/i)
@@ -179,7 +183,6 @@ describe('short-viewport composer (issue #1135)', () => {
     short = false
     renderChat()
 
-    expect(document.documentElement.classList.contains('atlas-short-viewport')).toBe(false)
     expect(screen.getByRole('button', { name: 'Workspaces' })).toBeInTheDocument()
     expect(screen.getByText(/Press Shift \+ Enter/)).toBeInTheDocument()
     expect(within(screen.getByTestId('agent-run-status')).getByText(/using tools as needed/i))

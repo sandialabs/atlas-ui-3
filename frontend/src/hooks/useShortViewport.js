@@ -1,14 +1,14 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
  * Window height at or under which the composer yields room to the transcript
- * (issue #1135). Kept in sync with the `html.atlas-short-viewport` rules in
- * `index.css` -- the class is the bridge, because the feedback button lives
- * outside the chat column and cannot see this hook.
+ * (issue #1135). Kept in sync with the `@media (max-height: 950px)` rules in
+ * `index.css`: the hook drives the JS-side conditionals (the attached-files
+ * collapse, the compact status row, the hidden workspace switcher) and the
+ * media query drives the styling, so a wrong class on <html> could never
+ * desynchronize the two.
  */
 export const SHORT_VIEWPORT_QUERY = '(max-height: 950px)'
-
-const SHORT_VIEWPORT_CLASS = 'atlas-short-viewport'
 
 function viewportIsShort() {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
@@ -23,19 +23,13 @@ function viewportIsShort() {
 /**
  * True on short windows (a laptop, or a browser that is not maximized).
  *
- * Sets `atlas-short-viewport` on `<html>` so the composer height cap and the
- * feedback-button dock in `index.css` apply together. Call this from one
- * always-mounted component (the chat column): a second caller would remove
- * the class when it unmounts.
+ * Drive only component state with this. The matching CSS lives in a media
+ * query in `index.css`, not behind a class this hook would have to toggle --
+ * a single unmounting caller would otherwise switch the short layout off
+ * for the whole page.
  */
 export function useShortViewport() {
   const [matches, setMatches] = useState(viewportIsShort)
-
-  useLayoutEffect(() => {
-    const root = document.documentElement
-    root.classList.toggle(SHORT_VIEWPORT_CLASS, matches)
-    return () => root.classList.remove(SHORT_VIEWPORT_CLASS)
-  }, [matches])
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return undefined
