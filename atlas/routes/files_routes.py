@@ -18,6 +18,7 @@ from atlas.core.capabilities import verify_file_token
 from atlas.core.log_sanitizer import get_current_user
 from atlas.core.metrics_logger import log_metric
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.file_storage.listing import FILE_CATEGORIES
 from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
@@ -207,19 +208,49 @@ async def upload_file(
 
 @router.get("/files", response_model=List[FileResponse])
 async def list_files(
+    response: Response,
     current_user: str = Depends(get_current_user),
     file_type: Optional[str] = None,
-    limit: int = 100
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200),
+    category: Optional[str] = Query(default=None),
 ) -> List[FileResponse]:
-    """List files for the current user."""
+    """List one page of files for the current user.
+
+    The body stays a list. ``X-Total-Count`` is the number of matches before
+    ``offset`` and ``limit`` are applied, so a library can be browsed one page
+    at a time. ``file_type`` is ``user`` (uploads) or ``tool`` (generated).
+    ``category`` is an explorer folder: image, code, data, document, or other.
+    ``q`` is a case-insensitive substring of the stored file name.
+    """
+    if category is not None and category not in FILE_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Unknown file category")
+
     try:
         s3_client = app_factory.get_file_storage()
-        result = await s3_client.list_files(
-            user_email=current_user,
-            file_type=file_type,
-            limit=limit
-        )
+        list_page = getattr(s3_client, "list_file_page", None)
+        if list_page is not None:
+            page = await list_page(
+                user_email=current_user,
+                file_type=file_type,
+                limit=limit,
+                offset=offset,
+                query=q,
+                category=category,
+            )
+            result = page["files"]
+            total = int(page["total"])
+        else:
+            # Storage doubles that predate paging still answer the first page.
+            result = await s3_client.list_files(
+                user_email=current_user,
+                file_type=file_type,
+                limit=limit,
+            )
+            total = len(result)
 
+        response.headers["X-Total-Count"] = str(total)
         # _file_metadata normalizes last_modified to an ISO format string
         return [FileResponse(**_file_metadata(file_data)) for file_data in result]
 

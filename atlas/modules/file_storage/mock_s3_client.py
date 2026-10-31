@@ -26,6 +26,12 @@ from atlas.core.telemetry import (
     set_attrs,
     start_span,
 )
+from atlas.modules.file_storage.listing import (
+    filename_from_key,
+    select_file_page,
+    tags_with_source,
+    user_prefix,
+)
 from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
@@ -43,6 +49,9 @@ def _category_from_key(key: str) -> str:
 
 
 _STORAGE_BACKEND = "mock"
+# The in-process mock returns one page and does not issue continuation tokens.
+# Ask for a wide page so the explorer can order the library before slicing.
+_MOCK_LIST_MAX_KEYS = 10000
 
 
 def _http_date_to_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -372,18 +381,47 @@ class MockS3StorageClient:
         self,
         user_email: str,
         file_type: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """List one page of files for a user. See ``list_file_page``."""
+        page = await self.list_file_page(
+            user_email=user_email,
+            file_type=file_type,
+            limit=limit,
+            offset=offset,
+            query=query,
+            category=category,
+        )
+        return page["files"]
+
+    async def list_file_page(
+        self,
+        user_email: str,
+        file_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        List files for a user.
+        List one page of files for a user.
+
+        The mock listing is filtered and ordered before each object is read,
+        matching the S3 client. ``total`` counts matches before paging.
 
         Args:
             user_email: Email of the user
             file_type: Optional filter by file type ("user" or "tool")
             limit: Maximum number of files to return
+            offset: How many matches to skip
+            query: Optional case-insensitive substring of the stored file name
+            category: Optional explorer folder (image, code, data, document, other)
 
         Returns:
-            List of file metadata dictionaries
+            ``{"files", "total", "offset", "limit"}``.
         """
         start_ns = time.monotonic_ns()
         span_attrs = {
@@ -394,29 +432,26 @@ class MockS3StorageClient:
         }
         with start_span("storage.list", span_attrs) as span:
             try:
-                # Determine prefix
-                prefix = f"users/{user_email}/"
-                if file_type == "tool":
-                    prefix = f"users/{user_email}/generated/"
-                elif file_type == "user":
-                    prefix = f"users/{user_email}/uploads/"
+                prefix = user_prefix(user_email, file_type)
 
-                # List via TestClient
                 response = self.client.get(
                     f"/{self.bucket_name}",
-                    params={"list-type": "2", "prefix": prefix, "max-keys": str(limit)}
+                    params={
+                        "list-type": "2",
+                        "prefix": prefix,
+                        "max-keys": str(_MOCK_LIST_MAX_KEYS),
+                    },
                 )
 
                 if response.status_code != 200:
                     raise Exception(f"List failed: {response.text}")
 
-                # Parse XML response
                 import xml.etree.ElementTree as ET
                 root = ET.fromstring(response.text)
                 ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
                 contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
 
-                files = []
+                listed = []
                 for content in contents:
                     key_elem = content.find("s3:Key", ns)
                     if key_elem is None:
@@ -431,22 +466,37 @@ class MockS3StorageClient:
                     if modified_elem is None:
                         modified_elem = content.find("LastModified")
 
-                    if key_elem is None:
+                    if key_elem is None or not key_elem.text:
                         continue
 
-                    key = key_elem.text
-                    size = int(size_elem.text) if size_elem is not None else 0
-                    etag = etag_elem.text.strip('"') if etag_elem is not None else ""
+                    listed.append({
+                        "key": key_elem.text,
+                        "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                        "etag": etag_elem.text.strip('"') if etag_elem is not None and etag_elem.text else "",
+                        "last_modified": modified_elem.text if modified_elem is not None else None,
+                    })
+
+                page, total = select_file_page(
+                    listed,
+                    limit=limit,
+                    offset=offset,
+                    query=query,
+                    category=category,
+                )
+
+                files = []
+                for entry in page:
+                    key = entry["key"]
                     # The listing reports the modification time as an
                     # ISO-8601 string; it is parsed and re-formatted so every
                     # path of this client speaks the same format.
-                    last_modified = iso_timestamp(
-                        _iso_to_datetime(modified_elem.text if modified_elem is not None else None)
-                    )
+                    last_modified = iso_timestamp(_iso_to_datetime(entry.get("last_modified")))
 
-                    # Get metadata via HEAD
                     head_response = self.client.head(f"/{self.bucket_name}/{key}")
-                    filename = head_response.headers.get("x-amz-meta-original_filename", key.split('/')[-1])
+                    filename = head_response.headers.get(
+                        "x-amz-meta-original_filename",
+                        filename_from_key(key),
+                    )
                     content_type = head_response.headers.get("Content-Type", "application/octet-stream")
                     if not last_modified:
                         last_modified = iso_timestamp(
@@ -456,15 +506,23 @@ class MockS3StorageClient:
                     files.append({
                         "key": key,
                         "filename": filename,
-                        "size": size,
+                        "size": entry["size"],
                         "content_type": content_type,
                         "last_modified": last_modified,
-                        "etag": etag,
-                        "tags": {},
-                        "user_email": user_email
+                        "etag": entry["etag"],
+                        "tags": tags_with_source({}, key),
+                        "user_email": user_email,
                     })
 
-                logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
+                # Inline CR/LF removal: CodeQL py/log-injection traces this
+                # barrier and does not treat sanitize_for_logging as one.
+                safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
+                logger.info(
+                    "Listed %s of %s files for user %s",
+                    len(files),
+                    total,
+                    safe_user_email,
+                )
 
                 set_attrs(span, {
                     "num_results": len(files),
@@ -472,7 +530,12 @@ class MockS3StorageClient:
                     "success": True,
                     "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                 })
-                return files
+                return {
+                    "files": files,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
 
             except Exception as e:
                 set_attrs(span, {

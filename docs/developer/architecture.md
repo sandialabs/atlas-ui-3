@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-10-04
+Last updated: 2026-10-31
 
 The application is composed of a React frontend and a FastAPI backend, communicating via WebSockets.
 
@@ -47,7 +47,9 @@ The frontend is a modern React 19 application built with Vite.
 Admin configuration actions live in `useAdminConfigActions` and the active
 `components/admin/` cards. `AdminDashboard` hosts those cards rather than
 maintaining duplicate fetch handlers. The file-manager entry point is
-`FileManagerPanel`, which uses `SessionFilesView`.
+`FileManagerPanel`, which uses `SessionFilesView` for the current chat and
+`AllFilesView` for the File Library explorer (folders plus a paged
+`GET /api/files`).
 
 Install E2E dependencies from `test_e2e/package-lock.json` with `npm ci` in that
 directory. Dependency directories and generated Playwright reports are ignored,

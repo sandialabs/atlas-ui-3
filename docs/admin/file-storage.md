@@ -1,6 +1,6 @@
 # File Storage and Tool Integration
 
-Last updated: 2026-10-21
+Last updated: 2026-10-31
 
 The application uses S3-compatible object storage for handling all user-uploaded files. This system is designed to be secure and flexible, allowing tools to access files without ever needing direct S3 credentials.
 
@@ -70,6 +70,24 @@ as a `datetime`, and the API layer converts it; clients can parse it with any
 ISO-8601 parser. The field is `null` when the storage backend cannot report
 a timestamp, so clients must treat a missing value as "unknown" rather than
 as the epoch.
+
+#### Listing a page
+
+`GET /api/files` still returns a JSON list. These query parameters narrow it:
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | Page size, from 1 to 1000. Default 100. |
+| `offset` | How many matches to skip. Default 0. |
+| `file_type` | `user` for uploads, or `tool` for generated files. |
+| `category` | `image`, `code`, `data`, `document`, or `other`. Anything else is HTTP 400. |
+| `q` | Case-insensitive substring of the stored file name. At most 200 characters. |
+
+The response header `X-Total-Count` is the number of matches before `offset`
+and `limit`. The File Library asks for 50 rows at a time and reads that
+header for the pager. Keys are listed first and ordered newest-first; object
+tags and metadata are read only for the page that is returned. A file with no
+usable timestamp sorts after every dated file.
 
 ## How MCP Tools Access Files
 
