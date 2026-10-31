@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.capabilities import verify_file_token
 from atlas.infrastructure.app_factory import app_factory
@@ -116,6 +117,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.url.path.startswith('/auth/globus/') or
             request.url.path.startswith('/auth/oidc/') or
             request.url.path == self.auth_redirect_url):
+            return await call_next(request)
+
+        # Agent-runs service API (#1105): authenticated exclusively by its own
+        # bearer key, checked by the router's dependency on every route. It is
+        # called by a trusted service, not a browser, so neither the identity
+        # header nor the proxy secret nor an OIDC session applies -- and none
+        # of them may stand in for the key.
+        if is_agent_runs_path(request.url.path):
             return await call_next(request)
 
         # MCP file download path: authenticate exclusively via HMAC capability tokens.

@@ -347,6 +347,11 @@ class RunRegistry:
         records.sort(key=lambda r: r.created_at, reverse=True)
         return records
 
+    def all_records(self) -> List[RunRecord]:
+        """Every retained record, any owner. For callers already authorized
+        across users (the agent-runs service API); never a per-user view."""
+        return list(self._runs.values())
+
     def snapshot_for_user(self, user_email: str) -> List[Dict[str, Any]]:
         """Every run this user can still meaningfully see, newest first.
 

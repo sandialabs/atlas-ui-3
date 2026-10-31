@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-10-21
+Last updated: 2026-10-29
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -153,6 +153,19 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
 - **Cost**: every launched run is a full agent run on the model it names. Raising the caps
   raises the worst-case spend of a single user message multiplicatively, and every follow-up
   is another full agent run.
+
+### External Agent Runs API
+
+A trusted service can launch, poll, follow up and cancel agent runs on behalf of any user over
+REST, authenticated by one master key (issue #1105). See
+[Agent Runs REST API](agent-runs-api.md) for the endpoints, approval rules and limits.
+
+```bash
+# Off by default; also requires chat history and agent mode.
+FEATURE_AGENT_RUNS_API_ENABLED=false
+# Master bearer key, at least 32 characters. Grants launching runs as any user.
+AGENT_RUNS_API_KEY=
+```
 
 ### Agent Mode Availability and Step Budget
 

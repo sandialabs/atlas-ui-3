@@ -123,6 +123,34 @@ async def test_refused_turn_leaves_the_session_untouched():
 
 
 @pytest.mark.asyncio
+async def test_admission_check_refuses_without_a_level_when_required():
+    """The gates the agent-runs API admits with are the turn's own, unmocked."""
+    service = _make_service()
+    with pytest.raises(ValidationError, match="compliance level is required"):
+        await service.check_turn_admission(
+            model="test-model",
+            selected_tools=None,
+            selected_data_sources=None,
+            compliance_level=None,
+            user_email="user@test.com",
+        )
+    service.session_repository.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admission_check_passes_with_no_level_when_optional():
+    service = _make_service(required=False)
+    active = await service.check_turn_admission(
+        model="test-model",
+        selected_tools=None,
+        selected_data_sources=None,
+        compliance_level=None,
+        user_email="user@test.com",
+    )
+    assert active is None
+
+
+@pytest.mark.asyncio
 async def test_undefined_level_is_refused_when_required():
     """A level the deployment does not define validates to None: refused."""
     service = _make_service()

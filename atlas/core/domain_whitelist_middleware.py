@@ -11,6 +11,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.core.domain_whitelist import DomainWhitelistManager
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,11 @@ class DomainWhitelistMiddleware(BaseHTTPMiddleware):
         """
         # Skip check for health endpoint and auth redirect endpoint
         if request.url.path == '/api/health' or request.url.path == self.auth_redirect_url:
+            return await call_next(request)
+
+        # The agent-runs service API (#1105) has no browser user on the
+        # request; it applies the whitelist to the user it acts as instead.
+        if is_agent_runs_path(request.url.path):
             return await call_next(request)
 
         # Get email from request state (set by AuthMiddleware)

@@ -91,6 +91,7 @@ from atlas.modules.config.settings import agent_mode_available, warn_removed_age
 from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.help.help_config import report_help_config_problem, resolve_help_config
 from atlas.routes.admin_routes import admin_router
+from atlas.routes.agent_run_routes import router as agent_run_router
 
 # Import essential routes
 from atlas.routes.capture_routes import capture_router
@@ -1560,6 +1561,7 @@ app.include_router(llm_auth_router)
 app.include_router(litellm_gateway_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
+app.include_router(agent_run_router)
 app.include_router(user_prompt_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)

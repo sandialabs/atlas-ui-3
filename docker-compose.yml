@@ -119,6 +119,8 @@ services:
       - AGENT_SLEEP_MAX_TURN_SECONDS=7200
       - AGENT_DEFAULT_ENABLED=true
       - FEATURE_AGENT_MODE_AVAILABLE=true
+      # External agent-runs REST API (#1105); also set AGENT_RUNS_API_KEY to enable
+      - FEATURE_AGENT_RUNS_API_ENABLED=false
       - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
       - FEATURE_FINETUNE_CAPTURE_ENABLED=false
       

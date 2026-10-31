@@ -1,6 +1,6 @@
 # Administrator's Guide
 
-Last updated: 2026-10-21
+Last updated: 2026-10-29
 
 For administrators responsible for deploying, configuring, and managing Atlas UI 3.
 
@@ -41,6 +41,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 - [Chat History Persistence](chat-history.md) - Conversation storage and retention
 - [Context Tracking and Compaction](context-compaction.md) - Context meter, manual/automatic compaction, model context windows and settings
 - [Parallel Conversation Runs](parallel-conversation-runs.md) - Concurrent agent runs, per-user caps, and background execution
+- [Agent Runs REST API](agent-runs-api.md) - Master-key service API to launch, poll, follow up and cancel agent runs on behalf of users
 - [PyPI Release Guide](pypi-releases.md) - Publishing the `atlas-chat` package
 
 ## UI Customization
