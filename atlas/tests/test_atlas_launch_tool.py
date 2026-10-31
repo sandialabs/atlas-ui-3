@@ -269,10 +269,7 @@ async def test_unauthorized_static_models_do_not_read_as_gateway_only():
     """In a mixed deployment, a user authorized for none of the static
     models gets the generic refusal -- the "gateway-only" message is for
     deployments that truly have no static model configured."""
-    factory = _Factory(
-        lambda c: _ChatService(c),
-        models={"restricted-model": SimpleNamespace(groups=["engineering"])},
-    )
+    factory = _Factory(_ChatService, models={"restricted-model": SimpleNamespace(groups=["engineering"])})
 
     def _mixed_config_manager():
         return SimpleNamespace(
