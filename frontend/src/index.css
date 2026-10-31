@@ -805,6 +805,83 @@
   }
 }
 
+/* Short windows (issue #1135).
+   `useShortViewport` flips the JS-driven pieces (the attached-files collapse,
+   the compact status row, the hidden workspace switcher) at the same
+   max-height 950px breakpoint. Styling with a media query instead of a class
+   on <html> keeps the cap and the dock working even if component state is
+   wrong or the hook is missing: the transcript cap, the aux scroller, and the
+   feedback-button dock follow the viewport, not component state.
+   The transcript is the flex sibling of this footer, so capping what sits
+   above the message box is what keeps the history at about half the screen:
+   7rem is the header plus the compliance banner, 11rem is the message box,
+   its control row, and this footer's padding. The aux stack (agent status,
+   tools, warnings, files) scrolls inside the remainder. The message box stays
+   outside that scroller. Tall windows are over 950px, so this block does not
+   apply. */
+@media (max-height: 950px) {
+  [data-testid="composer-footer"] {
+    container-type: inline-size;
+    padding: 0.5rem 1rem;
+  }
+
+  .composer-aux {
+    max-height: max(4.5rem, calc(50vh - 18rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .composer-status-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .composer-status-row > * {
+    margin-bottom: 0;
+  }
+
+  @media (min-width: 1100px) {
+    .composer-status-row {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    .composer-status-row > :first-child {
+      flex: 0 1 auto;
+    }
+
+    .composer-status-row > :not(:first-child) {
+      flex: 1 1 0%;
+      min-width: 0;
+    }
+  }
+
+  [data-testid="feedback-button"] {
+    /* Beat the inline composer-height offset. 2.75rem is a 44px touch target,
+       and it sits inside the composer band instead of over the transcript. */
+    bottom: 0.5rem !important;
+    /* An open side-by-side canvas takes the right edge of the viewport.
+       CanvasPanel publishes its live width as --atlas-canvas-width, so the
+       dock moves left of the panel instead of covering its corner. A closed
+       or stacked canvas publishes 0 and the dock stays at the edge. */
+    right: calc(var(--atlas-canvas-width, 0px) + 0.5rem) !important;
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /* The feedback button is fixed to the viewport, to the right of the centered
+     composer column. When that column runs into the button (a sidebar or canvas
+     has narrowed the chat), keep the controls clear of it. Wide short windows
+     already have the margin. */
+  @container (max-width: 68rem) {
+    .composer-stack {
+      padding-right: 3.25rem;
+    }
+  }
+}
+
 /* Print styles for chat export (#150) */
 @media print {
   /* Hide non-content UI elements */

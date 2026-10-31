@@ -98,6 +98,19 @@ const CanvasPanel = ({
     }
   }, [width, isOpen, onWidthChange]);
 
+  // Publish the live canvas width as --atlas-canvas-width on <html>. The
+  // feedback button is fixed to the viewport's right edge; on a short window
+  // it docks into the composer band, and an open side-by-side canvas would put
+  // that dock on top of the panel's corner. The dock reads this variable and
+  // stays left of the panel instead. A stacked (top) or full-screen canvas
+  // does not sit beside the chat, so it publishes 0.
+  useEffect(() => {
+    const root = document.documentElement;
+    const sideBySide = isOpen && orientation !== 'top' && size !== 'full';
+    root.style.setProperty('--atlas-canvas-width', `${sideBySide ? Math.round(width) : 0}px`);
+    return () => root.style.removeProperty('--atlas-canvas-width');
+  }, [isOpen, orientation, size, width]);
+
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isResizing) return;

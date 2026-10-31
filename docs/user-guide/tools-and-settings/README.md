@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-19
+Last updated: 2026-10-30
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -61,6 +61,18 @@ While a run is active, a high-visibility status stays above the message box --
 visible even if you have scrolled up to read earlier output -- with the current
 step and a **Stop** action. It reads the same run state as the composer, so the
 two can never disagree.
+
+On a short window (about 950px tall or less -- a laptop, or a browser that is
+not maximized), the transcript keeps about half the screen. The panels above
+the message box scroll inside the composer instead of pushing the history
+into a thin strip. Attached files collapse to a **files attached** button;
+activate it to get the same file list and extraction controls back. When the
+window is also wide, the agent status and the active-tools row share one
+line. The longer status explanation is still there for a screen reader. The
+workspace switcher stays in the header on these windows, so it is not repeated
+under the message box. The Shift+Enter hint appears while the message box is
+focused. The feedback button sits in the composer band, beside the controls,
+instead of over the transcript. Taller windows keep the previous layout.
 
 **General → Max Agent Iterations** bounds how many tool steps one agent turn
 may take. The slider's upper end is the ceiling your ATLAS administrator
