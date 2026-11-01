@@ -550,7 +550,7 @@ async def test_listing_walk_and_hydration_run_on_the_dedicated_executors(monkeyp
 
     threads = {}
 
-    def walk(prefix):
+    def walk(user_email, prefix, generation):
         threads["walk"] = threading.current_thread().name
         return iter([
             {
@@ -573,3 +573,37 @@ async def test_listing_walk_and_hydration_run_on_the_dedicated_executors(monkeyp
 
     assert threads["walk"].startswith("s3-io")
     assert threads["hydrate"].startswith("s3-hydrate")
+
+
+def test_a_walk_stops_when_a_newer_listing_for_the_user_starts(monkeypatch):
+    """The abandoned walk frees its worker at the next page boundary."""
+    import pytest
+
+    from atlas.modules.file_storage.listing import ListingSupersededError
+
+    client, boto = _fake_s3_client(monkeypatch)
+
+    calls = []
+
+    def list_objects(**kwargs):
+        calls.append(kwargs.get("ContinuationToken"))
+        token = kwargs.get("ContinuationToken")
+        return {
+            "IsTruncated": True,
+            "NextContinuationToken": f"after-{token}",
+            "Contents": [],
+        }
+
+    boto.list_objects_v2.side_effect = list_objects
+
+    first = client._begin_walk("a@example.com")
+    assert client._walk_superseded("a@example.com", first) is False
+
+    second = client._begin_walk("a@example.com")
+    assert client._walk_superseded("a@example.com", first) is True
+    assert client._walk_superseded("a@example.com", second) is False
+
+    with pytest.raises(ListingSupersededError):
+        list(client._iter_listed_objects("a@example.com", "users/a@example.com/", first))
+    # The walk stops before its next S3 page: no call was ever made.
+    assert len(calls) == 0

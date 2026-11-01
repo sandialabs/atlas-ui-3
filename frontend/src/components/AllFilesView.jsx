@@ -36,6 +36,7 @@ const AllFilesView = () => {
   const [filteredFiles, setFilteredFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [paging, setPaging] = useState(false)
+  const [searching, setSearching] = useState(false)
   const [error, setError] = useState(null)
   const [notification, setNotification] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -196,6 +197,7 @@ const AllFilesView = () => {
       if (stillCurrent()) {
         setLoading(false)
         setPaging(false)
+        setSearching(false)
       }
     }
   }
@@ -242,15 +244,23 @@ const AllFilesView = () => {
 
   const onSearchChange = (value) => {
     setSearchQuery(value)
-    scheduleServerLoad({ offset: 0, folderId: folderIdRef.current, q: value })
+    if (!completeRef.current) {
+      // The server is about to re-filter the whole library. Say so now,
+      // instead of flashing the empty state while the debounce runs.
+      setSearching(true)
+      scheduleServerLoad({ offset: 0, folderId: folderIdRef.current, q: value })
+    }
   }
 
   const goToPage = (offset) => {
-    // An explicit page turn wins over a pending search reset, the same
-    // way an explicit folder switch does.
     if (filterTimer.current) {
+      // A typed search has not loaded yet. The only coherent page for any
+      // click right now is the search's first page; pairing the loaded
+      // offset with the new query would skip its first matches.
       clearTimeout(filterTimer.current)
       filterTimer.current = null
+      fetchAllFiles({ offset: 0, folderId, q: searchRef.current })
+      return
     }
     fetchAllFiles({ offset, folderId, q: searchQuery })
   }
@@ -664,7 +674,7 @@ const AllFilesView = () => {
 
           {filteredFiles.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
-              {paging ? (
+              {paging || searching ? (
                 <>
                   <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-400" />
                   <div className="text-lg mb-4">Loading files...</div>

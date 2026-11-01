@@ -30,6 +30,15 @@ class ListingTooLargeError(Exception):
     can include the newest uploads, and paging cannot reach them.
     """
 
+
+class ListingSupersededError(Exception):
+    """Raised when a walk stops because a newer listing for the same user started.
+
+    The abandoned request's response is never read by its caller, so
+    stopping between pages only frees the shared worker for the listing
+    that will actually be read.
+    """
+
 _CATEGORY_EXTENSIONS = {
     "image": frozenset({"jpg", "jpeg", "png", "gif", "svg", "webp"}),
     "code": frozenset({"js", "jsx", "ts", "tsx", "py", "java", "cpp", "c", "go", "rs"}),

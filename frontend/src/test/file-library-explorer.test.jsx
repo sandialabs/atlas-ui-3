@@ -564,7 +564,7 @@ describe('AllFilesView explorer', () => {
     expect(screen.getByPlaceholderText('Search files...').value).toBe('')
   })
 
-  it('pages without a pending search reload overriding the page', async () => {
+  it('applies a typed search when a page turn is clicked during the debounce', async () => {
     const pageTwo = Array.from({ length: 30 }, (_, i) => ({
       key: `users/a/uploads/${2000 + i}_aaaaaaaa_p2_${i}.txt`,
       filename: `p2_${i}.txt`,
@@ -573,6 +573,7 @@ describe('AllFilesView explorer', () => {
       tags: { source: 'user' },
     }))
     const fetchMock = vi.fn((url) => {
+      if (String(url).includes('q=notes')) return Promise.resolve(jsonResponse([notes], 3))
       if (String(url).includes('offset=50')) return Promise.resolve(jsonResponse(pageTwo, 80))
       return Promise.resolve(jsonResponse(bigPage, 80))
     })
@@ -581,19 +582,44 @@ describe('AllFilesView explorer', () => {
     render(<AllFilesView />)
     await screen.findByText('batch_0.txt')
 
-    // The search's debounced reload is still pending when the user turns
-    // the page; the explicit page turn wins.
-    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'p2' } })
+    // Load page 2 first.
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-
     await screen.findByText('p2_0.txt')
     expect(screen.getByText('Sorting applies to this page')).toBeInTheDocument()
 
+    // Type a search and turn the page inside the debounce window: the
+    // click applies the typed search from its first page instead of
+    // pairing the loaded offset with the new query.
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'notes' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await screen.findByText('notes.txt')
     await new Promise((resolve) => setTimeout(resolve, 350))
     const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/files'))
-    expect(listCalls).toHaveLength(2)
-    expect(String(listCalls[1][0])).toContain('offset=50')
-    expect(screen.getByText('Showing 51–80 of 80')).toBeInTheDocument()
+    expect(listCalls).toHaveLength(3)
+    expect(String(listCalls[2][0])).toContain('offset=0')
+    expect(String(listCalls[2][0])).toContain('q=notes')
+    expect(screen.getByText('Showing 1–1 of 3')).toBeInTheDocument()
+  })
+
+  it('shows the loading state as soon as a search starts', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('q=zzz')) return Promise.resolve(jsonResponse([], 0))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'zzz' } })
+
+    // The debounce has not fired yet, but the empty state does not flash.
+    expect(screen.getByText('Loading files...')).toBeInTheDocument()
+    expect(screen.queryByText('No files match your filters')).not.toBeInTheDocument()
+
+    await screen.findByText('All files (0)')
+    expect(screen.queryByText('Loading files...')).not.toBeInTheDocument()
   })
 
   it('reloads the view on screen when a refresh makes the library paged', async () => {

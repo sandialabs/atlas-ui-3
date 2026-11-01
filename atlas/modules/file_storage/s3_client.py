@@ -9,6 +9,7 @@ import asyncio
 import base64
 import logging
 import re
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,7 @@ from atlas.core.telemetry import (
     start_span,
 )
 from atlas.modules.file_storage.listing import (
+    ListingSupersededError,
     ListingTooLargeError,
     filename_from_key,
     select_file_page,
@@ -149,6 +151,21 @@ class S3StorageClient:
             max_workers=_IO_WORKERS,
             thread_name_prefix="s3-io",
         )
+        # A new listing for a user supersedes their in-flight walks: the
+        # abandoned walk checks this between S3 pages and stops early.
+        self._walk_lock = threading.Lock()
+        self._walk_generation = {}
+
+    def _begin_walk(self, user_email: str) -> int:
+        """Register a new walk for ``user_email`` and invalidate their older ones."""
+        with self._walk_lock:
+            self._walk_generation[user_email] = gen = self._walk_generation.get(user_email, 0) + 1
+            return gen
+
+    def _walk_superseded(self, user_email: str, generation: int) -> bool:
+        """True when a newer walk for the same user has started."""
+        with self._walk_lock:
+            return self._walk_generation.get(user_email, generation) != generation
 
         logger.info(f"S3Client initialized with endpoint: {self.endpoint_url}, bucket: {self.bucket_name}")
         self._ensure_bucket()
@@ -444,14 +461,20 @@ class S3StorageClient:
                 logger.error("Error getting file from S3: %s", sanitize_for_logging(str(e)))
                 raise
 
-    def _iter_listed_objects(self, prefix: str):
+    def _iter_listed_objects(self, user_email: str, prefix: str, generation: int):
         """Yield every object under ``prefix``, following continuation tokens.
 
         ``MaxKeys`` on a single call is a page of keys, not the newest files.
         Tags and metadata are read later, and only for the page that is returned.
+        Between pages the walk checks whether a newer listing for the same
+        user has started, and stops when it has.
         """
         token = None
         for _page in range(_MAX_LIST_PAGES):
+            if self._walk_superseded(user_email, generation):
+                raise ListingSupersededError(
+                    "A newer file listing for this user superseded this walk"
+                )
             kwargs = {
                 "Bucket": self.bucket_name,
                 "Prefix": prefix,
@@ -591,8 +614,9 @@ class S3StorageClient:
         with start_span("storage.list", span_attrs) as span:
             try:
                 prefix = user_prefix(user_email, file_type)
+                generation = self._begin_walk(user_email)
                 listed = []
-                for obj in self._iter_listed_objects(prefix):
+                for obj in self._iter_listed_objects(user_email, prefix, generation):
                     etag = obj.get("ETag") or ""
                     listed.append({
                         "key": obj["Key"],
@@ -644,6 +668,19 @@ class S3StorageClient:
                     "limit": limit,
                 }
 
+            except ListingSupersededError:
+                # The request that abandoned this walk is gone; nothing
+                # reads the response. Stop quietly.
+                set_attrs(span, {
+                    "superseded": True,
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                })
+                logger.debug(
+                    "Listing walk superseded for user %s",
+                    str(user_email).replace("\r", "").replace("\n", ""),
+                )
+                raise
             except ClientError as e:
                 safe_error = preview(
                     e.response.get('Error', {}).get('Message', str(e)),
@@ -773,7 +810,8 @@ class S3StorageClient:
             upload_count = 0
             generated_count = 0
 
-            for obj in self._iter_listed_objects(user_prefix(user_email)):
+            generation = self._begin_walk(user_email)
+            for obj in self._iter_listed_objects(user_email, user_prefix(user_email), generation):
                 total_files += 1
                 total_size += int(obj.get("Size", 0) or 0)
 
@@ -792,6 +830,12 @@ class S3StorageClient:
             logger.info(f"Got file stats for user {sanitize_for_logging(user_email)}: {result}")
             return result
 
+        except ListingSupersededError:
+            logger.debug(
+                "Stats walk superseded for user %s",
+                str(user_email).replace("\r", "").replace("\n", ""),
+            )
+            raise
         except Exception as e:
             logger.error(f"Error getting user stats from S3: {str(e)}")
             raise
