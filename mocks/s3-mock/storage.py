@@ -106,8 +106,15 @@ def delete_object(bucket_root: Path, key: str) -> bool:
     return deleted
 
 
-def list_objects(bucket_root: Path, prefix: str = "", max_keys: int = 100) -> List[Dict[str, str]]:
-    items: List[Dict[str, str]] = []
+def list_objects(bucket_root: Path, prefix: str = "", max_keys: int = 100, start_after: Optional[str] = None) -> Tuple[List[Dict[str, str]], bool, Optional[str]]:
+    """List objects the way ListObjectsV2 does: lexicographic key order.
+
+    ``start_after`` excludes keys at or before it, which is how a
+    continuation token (the last key of the previous page) pages through
+    the bucket. Returns the page, whether more keys remain, and the token
+    for the next page.
+    """
+    keys: List[str] = []
     base = bucket_root
     for root, _, files in os.walk(base):
         for name in files:
@@ -117,24 +124,29 @@ def list_objects(bucket_root: Path, prefix: str = "", max_keys: int = 100) -> Li
             key = str(rel_path).replace(os.sep, "/")
             if not key.startswith(prefix):
                 continue
-            obj_path = base / rel_path
-            size = obj_path.stat().st_size
-            meta = load_meta(bucket_root, key) or {}
-            etag = meta.get("etag")
-            if not etag:
-                with open(obj_path, "rb") as f:
-                    etag = calc_etag(f.read())
-            items.append({
-                "Key": key,
-                "Size": size,
-                "ETag": etag,
-                "LastModified": iso8601(obj_path.stat().st_mtime),
-            })
-            if len(items) >= max_keys:
-                return items
-    # Sort by last modified desc to mimic S3 behavior often seen by clients
-    items.sort(key=lambda x: x["LastModified"], reverse=True)
-    return items
+            if start_after and key <= start_after:
+                continue
+            keys.append(key)
+    keys.sort()
+    page_keys = keys[:max_keys] if max_keys > 0 else []
+    items = []
+    for key in page_keys:
+        obj_path = base / key
+        size = obj_path.stat().st_size
+        meta = load_meta(bucket_root, key) or {}
+        etag = meta.get("etag")
+        if not etag:
+            with open(obj_path, "rb") as f:
+                etag = calc_etag(f.read())
+        items.append({
+            "Key": key,
+            "Size": size,
+            "ETag": etag,
+            "LastModified": iso8601(obj_path.stat().st_mtime),
+        })
+    truncated = max_keys > 0 and len(keys) > len(page_keys)
+    next_token = page_keys[-1] if truncated else None
+    return items, truncated, next_token
 
 
 def set_tags(bucket_root: Path, key: str, tags: Dict[str, str]) -> None:

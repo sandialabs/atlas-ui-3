@@ -54,6 +54,7 @@ const AllFilesView = () => {
   const filterTimer = useRef(null)
   const fetchAbort = useRef(null)
   const requestSeq = useRef(0)
+  const lastRequestRef = useRef({ offset: 0, folderId: 'all', q: '' })
 
   folderIdRef.current = folderId
   searchRef.current = searchQuery
@@ -67,6 +68,7 @@ const AllFilesView = () => {
 
   const fetchAllFiles = async ({ offset = 0, folderId: nextFolder = 'all', q = '' } = {}) => {
     const requestId = ++requestSeq.current
+    lastRequestRef.current = { offset, folderId: nextFolder, q }
     const requested = folderById(nextFolder)
     const unfiltered = offset === 0 && requested.id === 'all' && !(q || '').trim()
     // Only the very first successful load shows the full-screen spinner.
@@ -105,6 +107,17 @@ const AllFilesView = () => {
       const totalHeader = response.headers?.get?.('X-Total-Count')
       const headerTotal = totalHeader == null || totalHeader === '' ? null : Number(totalHeader)
       const total = Number.isFinite(headerTotal) ? headerTotal : null
+
+      if (total != null && total > 0 && offset > 0 && offset >= total) {
+        // The result shrank below this offset (a delete here or in another
+        // window). Reload the last page that still exists instead of
+        // showing an empty page that hides the remaining files.
+        return fetchAllFiles({
+          offset: Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE,
+          folderId: nextFolder,
+          q,
+        })
+      }
 
       let complete = false
       if (unfiltered) {
@@ -272,7 +285,9 @@ const AllFilesView = () => {
         throw new Error('Delete failed')
       }
 
-      fetchAllFiles({ offset: pageOffset, folderId, q: searchQuery })
+      // Refresh whatever view the user is on now, not the view the delete
+      // started from; navigation while the delete was pending must win.
+      fetchAllFiles(lastRequestRef.current)
       showNotification('File deleted successfully', 'success')
     } catch (err) {
       console.error('Error deleting file:', err)
@@ -323,7 +338,8 @@ const AllFilesView = () => {
         }
       }
 
-      await fetchAllFiles({ offset: 0, folderId, q: searchQuery })
+      // Same as the single delete: refresh the view the user is on now.
+      await fetchAllFiles(lastRequestRef.current)
 
       if (failures === 0) {
         showNotification(`Deleted ${filesToDelete.length} file(s) successfully`, 'success')

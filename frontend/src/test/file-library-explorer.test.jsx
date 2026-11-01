@@ -307,4 +307,71 @@ describe('AllFilesView explorer', () => {
     expect(screen.queryByText('Error loading files')).not.toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Folders' })).toBeInTheDocument()
   })
+
+  it('reloads the last valid page when the result shrinks below the offset', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('offset=50')) return Promise.resolve(jsonResponse([], 50))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    // Page two came back empty with a total of 50, so page one reloads
+    // instead of showing an empty library.
+    await waitFor(() => {
+      expect(screen.getByText('batch_0.txt')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('No files found')).not.toBeInTheDocument()
+
+    const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/files'))
+    expect(listCalls).toHaveLength(3)
+    expect(String(listCalls[1][0])).toContain('offset=50')
+    expect(String(listCalls[2][0])).toContain('offset=0')
+  })
+
+  it('refreshes the current view after a delete that finished after navigation', async () => {
+    let resolveDelete
+    const fetchMock = vi.fn((url, opts) => {
+      if (opts?.method === 'DELETE') {
+        return new Promise((resolve) => {
+          resolveDelete = resolve
+        })
+      }
+      if (String(url).includes('file_type=tool')) {
+        return Promise.resolve(jsonResponse([plot], 80))
+      }
+      return Promise.resolve(jsonResponse([notes], 80))
+    })
+    global.fetch = fetchMock
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllFilesView />)
+    await screen.findByText('notes.txt')
+
+    fireEvent.click(screen.getByTitle('Delete file'))
+    // The delete is still pending when the user opens another folder.
+    fireEvent.click(screen.getByRole('button', { name: 'Generated' }))
+    await screen.findByText('plot.png')
+
+    resolveDelete({ ok: true, json: async () => ({}) })
+
+    await waitFor(() => {
+      const listCalls = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== 'DELETE')
+      expect(listCalls.length).toBeGreaterThanOrEqual(3)
+    })
+    const listCalls = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== 'DELETE')
+    const lastListUrl = String(listCalls[listCalls.length - 1][0])
+    expect(lastListUrl).toContain('file_type=tool')
+    expect(lastListUrl).not.toContain('file_type=user')
+
+    // The generated folder stays on screen; the stale view never returns.
+    await waitFor(() => {
+      expect(screen.getByText('plot.png')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument()
+  })
 })

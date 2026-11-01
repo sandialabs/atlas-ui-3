@@ -28,6 +28,7 @@ from atlas.core.telemetry import (
     start_span,
 )
 from atlas.modules.file_storage.listing import (
+    ListingTooLargeError,
     filename_from_key,
     select_file_page,
     source_for_key,
@@ -51,9 +52,12 @@ def _category_from_key(key: str) -> str:
 
 
 _STORAGE_BACKEND = "mock"
-# The in-process mock returns one page and does not issue continuation tokens.
-# Ask for a wide page so the explorer can order the library before slicing.
-_MOCK_LIST_MAX_KEYS = 10000
+# One mock list call returns at most this many keys, with a continuation
+# token for the rest, like the real service. The client follows the tokens
+# until the prefix is exhausted.
+_MOCK_LIST_MAX_KEYS = 1000
+# Same traversal safety cap as the S3 client.
+_MAX_LIST_PAGES = 200
 
 
 def _http_date_to_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -437,51 +441,71 @@ class MockS3StorageClient:
         )
 
     def _list_raw_sync(self, user_email: str, file_type: Optional[str]) -> List[Dict[str, Any]]:
-        """List cheap key entries under one prefix. Blocking; no hydration."""
+        """List cheap key entries under one prefix. Blocking; no hydration.
+
+        The mock issues continuation tokens like the real service, so the
+        traversal follows them until the prefix is exhausted instead of
+        silently stopping at one request's page size.
+        """
         prefix = user_prefix(user_email, file_type)
 
-        response = self.client.get(
-            f"/{self.bucket_name}",
-            params={
+        listed = []
+        token = None
+        for _page in range(_MAX_LIST_PAGES):
+            params = {
                 "list-type": "2",
                 "prefix": prefix,
                 "max-keys": str(_MOCK_LIST_MAX_KEYS),
-            },
+            }
+            if token:
+                params["continuation-token"] = token
+
+            response = self.client.get(f"/{self.bucket_name}", params=params)
+
+            if response.status_code != 200:
+                raise Exception(f"List failed: {response.text}")
+
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(response.text)
+            ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
+            contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
+
+            for content in contents:
+                key_elem = content.find("s3:Key", ns)
+                if key_elem is None:
+                    key_elem = content.find("Key")
+                size_elem = content.find("s3:Size", ns)
+                if size_elem is None:
+                    size_elem = content.find("Size")
+                etag_elem = content.find("s3:ETag", ns)
+                if etag_elem is None:
+                    etag_elem = content.find("ETag")
+                modified_elem = content.find("s3:LastModified", ns)
+                if modified_elem is None:
+                    modified_elem = content.find("LastModified")
+
+                if key_elem is None or not key_elem.text:
+                    continue
+
+                listed.append({
+                    "key": key_elem.text,
+                    "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                    "etag": etag_elem.text.strip('"') if etag_elem is not None and etag_elem.text else "",
+                    "last_modified": modified_elem.text if modified_elem is not None else None,
+                })
+
+            next_elem = root.find("s3:NextContinuationToken", ns)
+            if next_elem is None:
+                next_elem = root.find("NextContinuationToken")
+            next_token = next_elem.text if next_elem is not None and next_elem.text else None
+            if not next_token:
+                return listed
+            token = next_token
+
+        raise ListingTooLargeError(
+            f"User file listing stopped after {_MAX_LIST_PAGES} mock pages; "
+            "refusing to report a partial result"
         )
-
-        if response.status_code != 200:
-            raise Exception(f"List failed: {response.text}")
-
-        import xml.etree.ElementTree as ET
-        root = ET.fromstring(response.text)
-        ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
-        contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
-
-        listed = []
-        for content in contents:
-            key_elem = content.find("s3:Key", ns)
-            if key_elem is None:
-                key_elem = content.find("Key")
-            size_elem = content.find("s3:Size", ns)
-            if size_elem is None:
-                size_elem = content.find("Size")
-            etag_elem = content.find("s3:ETag", ns)
-            if etag_elem is None:
-                etag_elem = content.find("ETag")
-            modified_elem = content.find("s3:LastModified", ns)
-            if modified_elem is None:
-                modified_elem = content.find("LastModified")
-
-            if key_elem is None or not key_elem.text:
-                continue
-
-            listed.append({
-                "key": key_elem.text,
-                "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
-                "etag": etag_elem.text.strip('"') if etag_elem is not None and etag_elem.text else "",
-                "last_modified": modified_elem.text if modified_elem is not None else None,
-            })
-        return listed
 
     def _list_file_page_sync(
         self,

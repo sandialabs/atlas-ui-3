@@ -89,6 +89,12 @@ def test_select_file_page_query_folds_spaces_and_ignores_the_path():
         _page, empty = select_file_page(entries, query=query)
         assert empty == 0
 
+    # The timestamp and UUID inside the key are not part of the name the
+    # user sees, and the browser filter never matches them either.
+    for query in ("1700000200", "aaaaaaaa", "1700000200_aaaaaaaa"):
+        _page, empty = select_file_page(entries, query=query)
+        assert empty == 0
+
 
 def test_list_route_rejects_an_unknown_category(test_user_headers):
     from main import app
@@ -368,3 +374,56 @@ async def test_s3_user_stats_count_the_raw_listing_without_hydrating(monkeypatch
     assert stats["total_size"] == sum(range(1000)) + sum(range(200))
     assert boto.head_object.call_count == 0
     assert boto.get_object_tagging.call_count == 0
+
+
+async def test_s3_listing_cap_fails_instead_of_reporting_a_partial_result(monkeypatch):
+    """Past the traversal cap the client raises instead of truncating silently."""
+    import pytest
+
+    from atlas.modules.file_storage import s3_client as s3_mod
+    from atlas.modules.file_storage.listing import ListingTooLargeError
+
+    client, boto = _fake_s3_client(monkeypatch)
+    monkeypatch.setattr(s3_mod, "_MAX_LIST_PAGES", 2)
+
+    def list_objects(**kwargs):
+        return {
+            "IsTruncated": True,
+            "NextContinuationToken": f"token-{kwargs.get('ContinuationToken')}",
+            "Contents": [_listed("users/a@example.com/uploads/1_aaaaaaaa_x.txt", 1, datetime(2026, 6, 1, tzinfo=timezone.utc))],
+        }
+
+    boto.list_objects_v2.side_effect = list_objects
+
+    with pytest.raises(ListingTooLargeError):
+        await client.list_file_page(user_email="a@example.com", limit=10, offset=0)
+
+    with pytest.raises(ListingTooLargeError):
+        await client.get_user_stats("a@example.com")
+
+
+async def test_mock_listing_follows_continuation_tokens(monkeypatch, tmp_path):
+    """The mock pages through its whole prefix, one small request at a time."""
+    from atlas.modules.file_storage import mock_s3_client as mock_mod
+    from atlas.modules.file_storage.mock_s3_client import MockS3StorageClient
+
+    monkeypatch.setenv("MOCK_S3_ROOT", str(tmp_path))
+    monkeypatch.setattr(mock_mod, "_MOCK_LIST_MAX_KEYS", 2)
+    client = MockS3StorageClient(s3_bucket_name="atlas-explorer")
+    user = "ada@example.com"
+
+    for i in range(5):
+        await client.upload_file(
+            user_email=user,
+            filename=f"doc_{i}.txt",
+            content_base64=base64.b64encode(b"x").decode(),
+            content_type="application/octet-stream",
+        )
+
+    page = await client.list_file_page(user_email=user, limit=10, offset=0)
+    assert page["total"] == 5
+    assert sorted(f["filename"] for f in page["files"]) == [f"doc_{i}.txt" for i in range(5)]
+
+    stats = await client.get_user_stats(user)
+    assert stats["total_files"] == 5
+    assert stats["upload_count"] == 5

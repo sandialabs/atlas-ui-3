@@ -203,9 +203,21 @@ async def list_objects_v2(bucket: str, request: Request):
 
     prefix = request.query_params.get("prefix", "")
     max_keys = int(request.query_params.get("max-keys", "1000"))
+    continuation_token = request.query_params.get("continuation-token", "")
 
-    objects = list_objects(bucket_root, prefix, max_keys)
-    xml_response = create_list_objects_xml(bucket, prefix, objects)
+    objects, truncated, next_token = list_objects(
+        bucket_root,
+        prefix,
+        max_keys,
+        start_after=continuation_token or None,
+    )
+    xml_response = create_list_objects_xml(
+        bucket,
+        prefix,
+        objects,
+        is_truncated=truncated,
+        continuation_token=next_token or "",
+    )
 
     return Response(content=xml_response, media_type="application/xml")
 

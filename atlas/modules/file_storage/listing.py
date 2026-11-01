@@ -18,6 +18,15 @@ FILE_CATEGORIES = ("image", "code", "data", "document", "other")
 
 _MAX_PAGE_SIZE = 1000
 
+
+class ListingTooLargeError(Exception):
+    """Raised when a prefix listing exceeds the traversal safety cap.
+
+    Failing is safer than answering with a partial listing presented as a
+    complete page total or a complete set of statistics: the omitted keys
+    can include the newest uploads, and paging cannot reach them.
+    """
+
 _CATEGORY_EXTENSIONS = {
     "image": frozenset({"jpg", "jpeg", "png", "gif", "svg", "webp"}),
     "code": frozenset({"js", "jsx", "ts", "tsx", "py", "java", "cpp", "c", "go", "rs"}),
@@ -115,13 +124,13 @@ def _matches(entry: Dict[str, Any], needle: str, category: Optional[str]) -> boo
     leaf = key.rsplit("/", 1)[-1]
     stored_name = filename_from_key(key)
     if needle:
-        names = (leaf.lower(), stored_name.lower())
+        # Search the stored file name only. The raw leaf would also match
+        # the timestamp and UUID inside the key, which the browser filter
+        # never sees, so those rows would fill a page and inflate the
+        # total while the browser hides them.
         folded = _fold_search(needle)
-        folded_names = (_fold_search(leaf), _fold_search(stored_name))
-        direct = needle in names[0] or needle in names[1]
-        loose = bool(folded) and (folded in folded_names[0] or folded in folded_names[1])
-        # The directory prefix (the user email, ``uploads/``) is not a name.
-        if not direct and not loose:
+        name = stored_name.lower()
+        if needle not in name and not (folded and folded in _fold_search(stored_name)):
             return False
     if category and category != "all":
         if category_for_filename(stored_name) != category and category_for_filename(leaf) != category:

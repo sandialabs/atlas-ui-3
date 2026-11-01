@@ -30,6 +30,7 @@ from atlas.core.telemetry import (
     start_span,
 )
 from atlas.modules.file_storage.listing import (
+    ListingTooLargeError,
     filename_from_key,
     select_file_page,
     source_for_key,
@@ -443,9 +444,11 @@ class S3StorageClient:
             token = response.get("NextContinuationToken")
             if not token:
                 return
-        logger.warning(
-            "Stopped listing files after %s pages under one prefix",
-            _MAX_LIST_PAGES,
+        # A silent stop would present a partial scan as an exact total, and
+        # the omitted keys can include the newest uploads.
+        raise ListingTooLargeError(
+            f"User file listing stopped after {_MAX_LIST_PAGES} S3 pages "
+            "(200000 objects); refusing to report a partial result"
         )
 
     async def list_files(
