@@ -34,7 +34,7 @@ const FileManagerPanel = ({ isOpen, onClose }) => {
       onClick={onClose}
     >
       <div 
-        className="bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] mx-4 flex flex-col"
+        className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full max-h-[85vh] mx-4 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -126,16 +126,16 @@ const FileManagerPanel = ({ isOpen, onClose }) => {
               <h3 className="text-sm font-medium text-gray-200 mb-2">About File Library</h3>
               <div className="text-xs text-gray-400 space-y-2">
                 <p>
-                  This shows all files across all your sessions, including:
+                  This shows files from every session, arranged like a folder explorer:
                 </p>
                 <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li>Files from previous sessions</li>
-                  <li>Historical uploads and generated files</li>
-                  <li>Search and filter capabilities</li>
-                  <li>Load files into current session</li>
+                  <li>Uploads and generated files in their own folders</li>
+                  <li>Documents, images, data, and code grouped by type</li>
+                  <li>Search, sort, and page through long lists</li>
+                  <li>Load a file into the current session</li>
                 </ul>
                 <p className="pt-2 border-t border-gray-600">
-                  Use the search and filters above to find specific files.
+                  Open a folder or search to narrow the list. Delete All covers every file in view; on a long list it deletes the current page.
                 </p>
               </div>
             </div>

@@ -5,6 +5,7 @@ This client provides the same interface as S3StorageClient but uses the
 S3 mock server via TestClient, eliminating the need for Docker/MinIO in development.
 """
 
+import asyncio
 import base64
 import hashlib
 import logging
@@ -26,6 +27,14 @@ from atlas.core.telemetry import (
     set_attrs,
     start_span,
 )
+from atlas.modules.file_storage.listing import (
+    ListingTooLargeError,
+    filename_from_key,
+    select_file_page,
+    source_for_key,
+    tags_with_source,
+    user_prefix,
+)
 from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
@@ -43,6 +52,12 @@ def _category_from_key(key: str) -> str:
 
 
 _STORAGE_BACKEND = "mock"
+# One mock list call returns at most this many keys, with a continuation
+# token for the rest, like the real service. The client follows the tokens
+# until the prefix is exhausted.
+_MOCK_LIST_MAX_KEYS = 1000
+# Same traversal safety cap as the S3 client.
+_MAX_LIST_PAGES = 200
 
 
 def _http_date_to_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -372,19 +387,136 @@ class MockS3StorageClient:
         self,
         user_email: str,
         file_type: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """List one page of files for a user. See ``list_file_page``."""
+        page = await self.list_file_page(
+            user_email=user_email,
+            file_type=file_type,
+            limit=limit,
+            offset=offset,
+            query=query,
+            category=category,
+        )
+        return page["files"]
+
+    async def list_file_page(
+        self,
+        user_email: str,
+        file_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        List files for a user.
+        List one page of files for a user.
+
+        The mock listing is filtered and ordered before each object is read,
+        matching the S3 client. ``total`` counts matches before paging.
+        The mock HTTP calls run off the event loop.
 
         Args:
             user_email: Email of the user
             file_type: Optional filter by file type ("user" or "tool")
             limit: Maximum number of files to return
+            offset: How many matches to skip
+            query: Optional case-insensitive substring of the stored file name
+            category: Optional explorer folder (image, code, data, document, other)
 
         Returns:
-            List of file metadata dictionaries
+            ``{"files", "total", "offset", "limit"}``.
         """
+        return await asyncio.to_thread(
+            self._list_file_page_sync,
+            user_email,
+            file_type,
+            limit,
+            offset,
+            query,
+            category,
+        )
+
+    def _list_raw_sync(self, user_email: str, file_type: Optional[str]) -> List[Dict[str, Any]]:
+        """List cheap key entries under one prefix. Blocking; no hydration.
+
+        The mock issues continuation tokens like the real service, so the
+        traversal follows them until the prefix is exhausted instead of
+        silently stopping at one request's page size.
+        """
+        prefix = user_prefix(user_email, file_type)
+
+        listed = []
+        token = None
+        for _page in range(_MAX_LIST_PAGES):
+            params = {
+                "list-type": "2",
+                "prefix": prefix,
+                "max-keys": str(_MOCK_LIST_MAX_KEYS),
+            }
+            if token:
+                params["continuation-token"] = token
+
+            response = self.client.get(f"/{self.bucket_name}", params=params)
+
+            if response.status_code != 200:
+                raise Exception(f"List failed: {response.text}")
+
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(response.text)
+            ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
+            contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
+
+            for content in contents:
+                key_elem = content.find("s3:Key", ns)
+                if key_elem is None:
+                    key_elem = content.find("Key")
+                size_elem = content.find("s3:Size", ns)
+                if size_elem is None:
+                    size_elem = content.find("Size")
+                etag_elem = content.find("s3:ETag", ns)
+                if etag_elem is None:
+                    etag_elem = content.find("ETag")
+                modified_elem = content.find("s3:LastModified", ns)
+                if modified_elem is None:
+                    modified_elem = content.find("LastModified")
+
+                if key_elem is None or not key_elem.text:
+                    continue
+
+                listed.append({
+                    "key": key_elem.text,
+                    "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                    "etag": etag_elem.text.strip('"') if etag_elem is not None and etag_elem.text else "",
+                    "last_modified": modified_elem.text if modified_elem is not None else None,
+                })
+
+            next_elem = root.find("s3:NextContinuationToken", ns)
+            if next_elem is None:
+                next_elem = root.find("NextContinuationToken")
+            next_token = next_elem.text if next_elem is not None and next_elem.text else None
+            if not next_token:
+                return listed
+            token = next_token
+
+        raise ListingTooLargeError(
+            f"User file listing stopped after {_MAX_LIST_PAGES} mock pages; "
+            "refusing to report a partial result"
+        )
+
+    def _list_file_page_sync(
+        self,
+        user_email: str,
+        file_type: Optional[str],
+        limit: int,
+        offset: int,
+        query: Optional[str],
+        category: Optional[str],
+    ) -> Dict[str, Any]:
+        """Blocking listing used by ``list_file_page``."""
         start_ns = time.monotonic_ns()
         span_attrs = {
             "user_hash": hash_short(user_email),
@@ -394,59 +526,29 @@ class MockS3StorageClient:
         }
         with start_span("storage.list", span_attrs) as span:
             try:
-                # Determine prefix
-                prefix = f"users/{user_email}/"
-                if file_type == "tool":
-                    prefix = f"users/{user_email}/generated/"
-                elif file_type == "user":
-                    prefix = f"users/{user_email}/uploads/"
+                listed = self._list_raw_sync(user_email, file_type)
 
-                # List via TestClient
-                response = self.client.get(
-                    f"/{self.bucket_name}",
-                    params={"list-type": "2", "prefix": prefix, "max-keys": str(limit)}
+                page, total = select_file_page(
+                    listed,
+                    limit=limit,
+                    offset=offset,
+                    query=query,
+                    category=category,
                 )
 
-                if response.status_code != 200:
-                    raise Exception(f"List failed: {response.text}")
-
-                # Parse XML response
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(response.text)
-                ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
-                contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
-
                 files = []
-                for content in contents:
-                    key_elem = content.find("s3:Key", ns)
-                    if key_elem is None:
-                        key_elem = content.find("Key")
-                    size_elem = content.find("s3:Size", ns)
-                    if size_elem is None:
-                        size_elem = content.find("Size")
-                    etag_elem = content.find("s3:ETag", ns)
-                    if etag_elem is None:
-                        etag_elem = content.find("ETag")
-                    modified_elem = content.find("s3:LastModified", ns)
-                    if modified_elem is None:
-                        modified_elem = content.find("LastModified")
-
-                    if key_elem is None:
-                        continue
-
-                    key = key_elem.text
-                    size = int(size_elem.text) if size_elem is not None else 0
-                    etag = etag_elem.text.strip('"') if etag_elem is not None else ""
+                for entry in page:
+                    key = entry["key"]
                     # The listing reports the modification time as an
                     # ISO-8601 string; it is parsed and re-formatted so every
                     # path of this client speaks the same format.
-                    last_modified = iso_timestamp(
-                        _iso_to_datetime(modified_elem.text if modified_elem is not None else None)
-                    )
+                    last_modified = iso_timestamp(_iso_to_datetime(entry.get("last_modified")))
 
-                    # Get metadata via HEAD
                     head_response = self.client.head(f"/{self.bucket_name}/{key}")
-                    filename = head_response.headers.get("x-amz-meta-original_filename", key.split('/')[-1])
+                    filename = head_response.headers.get(
+                        "x-amz-meta-original_filename",
+                        filename_from_key(key),
+                    )
                     content_type = head_response.headers.get("Content-Type", "application/octet-stream")
                     if not last_modified:
                         last_modified = iso_timestamp(
@@ -456,15 +558,23 @@ class MockS3StorageClient:
                     files.append({
                         "key": key,
                         "filename": filename,
-                        "size": size,
+                        "size": entry["size"],
                         "content_type": content_type,
                         "last_modified": last_modified,
-                        "etag": etag,
-                        "tags": {},
-                        "user_email": user_email
+                        "etag": entry["etag"],
+                        "tags": tags_with_source({}, key),
+                        "user_email": user_email,
                     })
 
-                logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
+                # Inline CR/LF removal: CodeQL py/log-injection traces this
+                # barrier and does not treat sanitize_for_logging as one.
+                safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
+                logger.info(
+                    "Listed %s of %s files for user %s",
+                    len(files),
+                    total,
+                    safe_user_email,
+                )
 
                 set_attrs(span, {
                     "num_results": len(files),
@@ -472,7 +582,12 @@ class MockS3StorageClient:
                     "success": True,
                     "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                 })
-                return files
+                return {
+                    "files": files,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
 
             except Exception as e:
                 set_attrs(span, {
@@ -557,25 +672,32 @@ class MockS3StorageClient:
         Returns:
             Dictionary containing file statistics
         """
-        try:
-            # List all user files
-            files = await self.list_files(user_email, limit=1000)
+        return await asyncio.to_thread(self._get_user_stats_sync, user_email)
 
+    def _get_user_stats_sync(self, user_email: str) -> Dict[str, Any]:
+        """Blocking stats used by ``get_user_stats``.
+
+        The key listing already carries the size and the uploads/generated
+        split, so no object is hydrated for these counts.
+        """
+        try:
+            total_files = 0
             total_size = 0
             upload_count = 0
             generated_count = 0
 
-            for file_data in files:
-                total_size += file_data['size']
+            for entry in self._list_raw_sync(user_email, None):
+                total_files += 1
+                total_size += int(entry.get('size', 0) or 0)
 
                 # Determine type from key path
-                if "/generated/" in file_data['key']:
+                if source_for_key(entry['key']) == 'tool':
                     generated_count += 1
                 else:
                     upload_count += 1
 
             result = {
-                "total_files": len(files),
+                "total_files": total_files,
                 "total_size": total_size,
                 "upload_count": upload_count,
                 "generated_count": generated_count

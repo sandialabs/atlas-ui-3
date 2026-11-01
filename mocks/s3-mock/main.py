@@ -1,4 +1,5 @@
 import os
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Dict
@@ -8,7 +9,7 @@ from fastapi.responses import StreamingResponse
 import uvicorn
 
 from storage import (
-    ensure_bucket, load_object, save_object, delete_object,
+    load_object, save_object, delete_object,
     list_objects, get_tags, set_tags, load_meta
 )
 from s3_xml import (
@@ -33,10 +34,44 @@ def get_app():
 # Configuration
 MOCK_S3_ROOT = Path(os.getenv("MOCK_S3_ROOT", "minio-data/chatui"))
 
+# Bucket names become directory names under MOCK_S3_ROOT. Restricting the
+# requested bucket to identifier-ish characters keeps it from ever forming a
+# traversal path (every route below resolves its paths under this root).
+_BUCKET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+
 
 def get_bucket_root(bucket: str) -> Path:
     """Get the root path for a bucket."""
-    return ensure_bucket(MOCK_S3_ROOT, bucket)
+    # The bucket is one directory directly under the storage root. basename
+    # strips any path structure a caller may have smuggled into the name (an
+    # encoded slash survives Starlette's decoding); anything that changed
+    # under basename, or that the character check rejects, is an error.
+    flat = os.path.basename(bucket)
+    if flat != bucket or not _BUCKET_NAME_PATTERN.fullmatch(flat):
+        raise HTTPException(
+            status_code=400,
+            detail=create_error_xml(
+                "InvalidBucketName",
+                "The bucket name contains characters that are not allowed.",
+                f"/{bucket}",
+            ),
+        )
+
+    # Absolute path under the constant storage root, then a prefix check
+    # against that same root, so the directory is provably inside it.
+    root = os.path.abspath(MOCK_S3_ROOT)
+    bucket_path = os.path.abspath(os.path.join(root, flat))
+    if not bucket_path.startswith(root + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail=create_error_xml(
+                "InvalidBucketName",
+                "The bucket resolves outside the storage root.",
+                f"/{flat}",
+            ),
+        )
+    os.makedirs(bucket_path, exist_ok=True)
+    return Path(bucket_path)
 
 
 def extract_metadata(headers: Dict[str, str]) -> Dict[str, str]:
@@ -203,9 +238,21 @@ async def list_objects_v2(bucket: str, request: Request):
 
     prefix = request.query_params.get("prefix", "")
     max_keys = int(request.query_params.get("max-keys", "1000"))
+    continuation_token = request.query_params.get("continuation-token", "")
 
-    objects = list_objects(bucket_root, prefix, max_keys)
-    xml_response = create_list_objects_xml(bucket, prefix, objects)
+    objects, truncated, next_token = list_objects(
+        bucket_root,
+        prefix,
+        max_keys,
+        start_after=continuation_token or None,
+    )
+    xml_response = create_list_objects_xml(
+        bucket,
+        prefix,
+        objects,
+        is_truncated=truncated,
+        continuation_token=next_token or "",
+    )
 
     return Response(content=xml_response, media_type="application/xml")
 

@@ -13,7 +13,7 @@ def create_list_objects_xml(bucket: str, prefix: str, objects: List[Dict[str, st
     ET.SubElement(root, "MaxKeys").text = "1000"
     ET.SubElement(root, "IsTruncated").text = "true" if is_truncated else "false"
     if continuation_token:
-        ET.SubElement(root, "ContinuationToken").text = continuation_token
+        ET.SubElement(root, "NextContinuationToken").text = continuation_token
 
     for obj in objects:
         contents = ET.SubElement(root, "Contents")

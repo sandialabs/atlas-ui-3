@@ -5,11 +5,14 @@ This module provides a client interface to interact with S3-compatible storage
 (MinIO or AWS S3) using boto3.
 """
 
+import asyncio
 import base64
 import logging
 import re
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -26,6 +29,15 @@ from atlas.core.telemetry import (
     safe_label,
     set_attrs,
     start_span,
+)
+from atlas.modules.file_storage.listing import (
+    ListingSupersededError,
+    ListingTooLargeError,
+    filename_from_key,
+    select_file_page,
+    source_for_key,
+    tags_with_source,
+    user_prefix,
 )
 from atlas.modules.file_storage.timestamps import iso_timestamp
 
@@ -44,6 +56,17 @@ def _category_from_key(key: str) -> str:
 
 
 _STORAGE_BACKEND = "s3"
+# One list call returns at most 1000 keys. Stop after this many pages so a
+# huge prefix cannot pin a worker; the page total then reflects what was seen.
+_MAX_LIST_PAGES = 200
+# Page hydration reads tags and metadata for every row on the page. These
+# reads are independent, so they run on a small thread pool instead of one
+# after another. A boto3 client is safe to share across threads.
+_HYDRATE_WORKERS = 8
+# The prefix walk behind a listing can run for many S3 calls. It blocks on
+# this client's own executor instead of the loop's default one, which also
+# runs unrelated blocking work such as token verification.
+_IO_WORKERS = 8
 
 
 class S3StorageClient:
@@ -106,9 +129,43 @@ class S3StorageClient:
                 signature_version='s3v4',
                 connect_timeout=s3_timeout,
                 read_timeout=s3_timeout,
-                retries={'max_attempts': 3}
+                retries={'max_attempts': 3},
+                # Page hydration shares one bounded executor whose workers
+                # each hold a connection while they read; leave headroom
+                # above the pool size so the listing call never queues
+                # behind hydration.
+                max_pool_connections=max(10, _HYDRATE_WORKERS + 4),
             )
         )
+
+        # Page hydration runs the per-row tag and metadata reads here. One
+        # shared bounded executor per client keeps the concurrent S3 calls
+        # independent of how many listings run at once.
+        self._hydrate_pool = ThreadPoolExecutor(
+            max_workers=_HYDRATE_WORKERS,
+            thread_name_prefix="s3-hydrate",
+        )
+        # Long blocking walks (the listing itself, stats) run here too, so
+        # they cannot occupy the loop's default executor.
+        self._io_pool = ThreadPoolExecutor(
+            max_workers=_IO_WORKERS,
+            thread_name_prefix="s3-io",
+        )
+        # A new listing for a user supersedes their in-flight walks: the
+        # abandoned walk checks this between S3 pages and stops early.
+        self._walk_lock = threading.Lock()
+        self._walk_generation = {}
+
+    def _begin_walk(self, user_email: str) -> int:
+        """Register a new walk for ``user_email`` and invalidate their older ones."""
+        with self._walk_lock:
+            self._walk_generation[user_email] = gen = self._walk_generation.get(user_email, 0) + 1
+            return gen
+
+    def _walk_superseded(self, user_email: str, generation: int) -> bool:
+        """True when a newer walk for the same user has started."""
+        with self._walk_lock:
+            return self._walk_generation.get(user_email, generation) != generation
 
         logger.info(f"S3Client initialized with endpoint: {self.endpoint_url}, bucket: {self.bucket_name}")
         self._ensure_bucket()
@@ -404,23 +461,149 @@ class S3StorageClient:
                 logger.error("Error getting file from S3: %s", sanitize_for_logging(str(e)))
                 raise
 
+    def _iter_listed_objects(self, user_email: str, prefix: str, generation: int):
+        """Yield every object under ``prefix``, following continuation tokens.
+
+        ``MaxKeys`` on a single call is a page of keys, not the newest files.
+        Tags and metadata are read later, and only for the page that is returned.
+        Between pages the walk checks whether a newer listing for the same
+        user has started, and stops when it has.
+        """
+        token = None
+        for _page in range(_MAX_LIST_PAGES):
+            if self._walk_superseded(user_email, generation):
+                raise ListingSupersededError(
+                    "A newer file listing for this user superseded this walk"
+                )
+            kwargs = {
+                "Bucket": self.bucket_name,
+                "Prefix": prefix,
+                "MaxKeys": 1000,
+            }
+            if token:
+                kwargs["ContinuationToken"] = token
+            response = self.s3_client.list_objects_v2(**kwargs)
+            for obj in response.get("Contents", []) or []:
+                yield obj
+            if not response.get("IsTruncated"):
+                return
+            token = response.get("NextContinuationToken")
+            if not token:
+                return
+        # A silent stop would present a partial scan as an exact total, and
+        # the omitted keys can include the newest uploads.
+        raise ListingTooLargeError(
+            f"User file listing stopped after {_MAX_LIST_PAGES} S3 pages "
+            "(200000 objects); refusing to report a partial result"
+        )
+
     async def list_files(
         self,
         user_email: str,
         file_type: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        """List one page of files for a user. See ``list_file_page``."""
+        page = await self.list_file_page(
+            user_email=user_email,
+            file_type=file_type,
+            limit=limit,
+            offset=offset,
+            query=query,
+            category=category,
+        )
+        return page["files"]
+
+    async def list_file_page(
+        self,
+        user_email: str,
+        file_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        List files for a user.
+        List one page of files for a user.
+
+        Keys under the user's prefix are filtered and ordered first. Object
+        tags and metadata are read only for the page that is returned.
+        The boto3 calls run off the event loop.
 
         Args:
             user_email: Email of the user
             file_type: Optional filter by file type ("user" or "tool")
             limit: Maximum number of files to return
+            offset: How many matches to skip
+            query: Optional case-insensitive substring of the stored file name
+            category: Optional explorer folder (image, code, data, document, other)
 
         Returns:
-            List of file metadata dictionaries
+            ``{"files", "total", "offset", "limit"}`` where ``total`` counts
+            matches before paging.
         """
+        return await asyncio.get_running_loop().run_in_executor(
+            self._io_pool,
+            lambda: self._list_file_page_sync(
+                user_email,
+                file_type,
+                limit,
+                offset,
+                query,
+                category,
+            ),
+        )
+
+    def _hydrate_entry(self, user_email: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Read one object's tags and metadata. Blocking; call off the event loop."""
+        key = entry["key"]
+        try:
+            tags_response = self.s3_client.get_object_tagging(
+                Bucket=self.bucket_name,
+                Key=key,
+            )
+            tags = {tag["Key"]: tag["Value"] for tag in tags_response.get("TagSet", [])}
+        except Exception:
+            tags = {}
+
+        try:
+            head_response = self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=key,
+            )
+            metadata = head_response.get("Metadata", {})
+            content_type = head_response.get("ContentType", "application/octet-stream")
+            filename = metadata.get("original_filename") or filename_from_key(key)
+        except Exception:
+            content_type = "application/octet-stream"
+            filename = filename_from_key(key)
+
+        # boto3 returns LastModified as a datetime; the metadata
+        # contract (and the API that serves it) is a string.
+        return {
+            "key": key,
+            "filename": filename,
+            "size": entry.get("size", 0),
+            "content_type": content_type,
+            "last_modified": iso_timestamp(entry.get("last_modified")),
+            "etag": entry.get("etag") or "",
+            "tags": tags_with_source(tags, key),
+            "user_email": user_email,
+        }
+
+    def _list_file_page_sync(
+        self,
+        user_email: str,
+        file_type: Optional[str],
+        limit: int,
+        offset: int,
+        query: Optional[str],
+        category: Optional[str],
+    ) -> Dict[str, Any]:
+        """Blocking listing used by ``list_file_page``."""
         start_ns = time.monotonic_ns()
         span_attrs = {
             "user_hash": hash_short(user_email),
@@ -430,77 +613,74 @@ class S3StorageClient:
         }
         with start_span("storage.list", span_attrs) as span:
             try:
-                # List objects with user's prefix
-                prefix = f"users/{user_email}/"
-                if file_type == "tool":
-                    prefix = f"users/{user_email}/generated/"
-                elif file_type == "user":
-                    prefix = f"users/{user_email}/uploads/"
+                prefix = user_prefix(user_email, file_type)
+                generation = self._begin_walk(user_email)
+                listed = []
+                for obj in self._iter_listed_objects(user_email, prefix, generation):
+                    etag = obj.get("ETag") or ""
+                    listed.append({
+                        "key": obj["Key"],
+                        "size": obj.get("Size", 0),
+                        "etag": etag.strip('"') if isinstance(etag, str) else etag,
+                        "last_modified": obj.get("LastModified"),
+                    })
 
-                response = self.s3_client.list_objects_v2(
-                    Bucket=self.bucket_name,
-                    Prefix=prefix,
-                    MaxKeys=limit
+                page, total = select_file_page(
+                    listed,
+                    limit=limit,
+                    offset=offset,
+                    query=query,
+                    category=category,
                 )
 
-                entries = []
-                for obj in response.get('Contents', []):
-                    # Get tags for each object
-                    try:
-                        tags_response = self.s3_client.get_object_tagging(
-                            Bucket=self.bucket_name,
-                            Key=obj['Key']
-                        )
-                        tags = {tag['Key']: tag['Value'] for tag in tags_response.get('TagSet', [])}
-                    except Exception:
-                        tags = {}
-
-                    # Get metadata
-                    try:
-                        head_response = self.s3_client.head_object(
-                            Bucket=self.bucket_name,
-                            Key=obj['Key']
-                        )
-                        metadata = head_response.get('Metadata', {})
-                        content_type = head_response.get('ContentType', 'application/octet-stream')
-                        filename = metadata.get('original_filename', obj['Key'].split('/')[-1])
-                    except Exception:
-                        content_type = 'application/octet-stream'
-                        filename = obj['Key'].split('/')[-1]
-
-                    # boto3 returns LastModified as a datetime; the metadata
-                    # contract (and the API that serves it) is a string.
-                    last_modified = iso_timestamp(obj['LastModified'])
-                    entries.append((
-                        obj['LastModified'],
-                        {
-                            "key": obj['Key'],
-                            "filename": filename,
-                            "size": obj['Size'],
-                            "content_type": content_type,
-                            "last_modified": last_modified,
-                            "etag": obj['ETag'].strip('"'),
-                            "tags": tags,
-                            "user_email": user_email
-                        }
+                if page:
+                    # The page's two reads per row run concurrently, so a page
+                    # does not wait for one slow object after another. The
+                    # executor is shared across listings to bound the total
+                    # number of concurrent S3 calls.
+                    files = list(self._hydrate_pool.map(
+                        lambda entry: self._hydrate_entry(user_email, entry),
+                        page,
                     ))
+                else:
+                    files = []
 
-                # Sort by last modified, newest first. The raw timestamp is
-                # the sort key: the ISO strings would only sort chronologically
-                # as text while every value carries the same UTC offset.
-                entries.sort(key=lambda entry: entry[0], reverse=True)
-                files = [file_data for _, file_data in entries]
-
-                logger.info(f"Listed {len(files)} files for user {sanitize_for_logging(user_email)}")
+                # Inline CR/LF removal: CodeQL py/log-injection traces this
+                # barrier and does not treat sanitize_for_logging as one.
+                safe_user_email = str(user_email).replace("\r", "").replace("\n", "")
+                logger.info(
+                    "Listed %s of %s files for user %s",
+                    len(files),
+                    total,
+                    safe_user_email,
+                )
 
                 set_attrs(span, {
                     "num_results": len(files),
-                    "total_bytes": sum(int(f.get('size', 0) or 0) for f in files),
+                    "total_bytes": sum(int(f.get("size", 0) or 0) for f in files),
                     "success": True,
                     "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
                 })
-                return files
+                return {
+                    "files": files,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
 
+            except ListingSupersededError:
+                # The request that abandoned this walk is gone; nothing
+                # reads the response. Stop quietly.
+                set_attrs(span, {
+                    "superseded": True,
+                    "success": False,
+                    "duration_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
+                })
+                logger.debug(
+                    "Listing walk superseded for user %s",
+                    str(user_email).replace("\r", "").replace("\n", ""),
+                )
+                raise
             except ClientError as e:
                 safe_error = preview(
                     e.response.get('Error', {}).get('Message', str(e)),
@@ -612,24 +792,36 @@ class S3StorageClient:
         Returns:
             Dictionary containing file statistics
         """
-        try:
-            # List all user files
-            files = await self.list_files(user_email, limit=1000)
+        return await asyncio.get_running_loop().run_in_executor(
+            self._io_pool,
+            lambda: self._get_user_stats_sync(user_email),
+        )
 
+    def _get_user_stats_sync(self, user_email: str) -> Dict[str, Any]:
+        """Blocking stats used by ``get_user_stats``.
+
+        The key listing already carries the size and the uploads/generated
+        split, so no object is hydrated for these counts and the per-object
+        tag and metadata reads never run.
+        """
+        try:
+            total_files = 0
             total_size = 0
             upload_count = 0
             generated_count = 0
 
-            for file_data in files:
-                total_size += file_data['size']
+            generation = self._begin_walk(user_email)
+            for obj in self._iter_listed_objects(user_email, user_prefix(user_email), generation):
+                total_files += 1
+                total_size += int(obj.get("Size", 0) or 0)
 
-                if file_data.get('tags', {}).get('source') == 'tool':
+                if source_for_key(obj["Key"]) == "tool":
                     generated_count += 1
                 else:
                     upload_count += 1
 
             result = {
-                "total_files": len(files),
+                "total_files": total_files,
                 "total_size": total_size,
                 "upload_count": upload_count,
                 "generated_count": generated_count
@@ -638,6 +830,12 @@ class S3StorageClient:
             logger.info(f"Got file stats for user {sanitize_for_logging(user_email)}: {result}")
             return result
 
+        except ListingSupersededError:
+            logger.debug(
+                "Stats walk superseded for user %s",
+                str(user_email).replace("\r", "").replace("\n", ""),
+            )
+            raise
         except Exception as e:
             logger.error(f"Error getting user stats from S3: {str(e)}")
             raise
