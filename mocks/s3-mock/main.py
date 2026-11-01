@@ -42,7 +42,12 @@ _BUCKET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
 def get_bucket_root(bucket: str) -> Path:
     """Get the root path for a bucket."""
-    if not _BUCKET_NAME_PATTERN.fullmatch(bucket):
+    # The bucket is one directory directly under the storage root. basename
+    # strips any path structure a caller may have smuggled into the name (an
+    # encoded slash survives Starlette's decoding); anything that changed
+    # under basename, or that the character check rejects, is an error.
+    flat = os.path.basename(bucket)
+    if flat != bucket or not _BUCKET_NAME_PATTERN.fullmatch(flat):
         raise HTTPException(
             status_code=400,
             detail=create_error_xml(
@@ -51,7 +56,7 @@ def get_bucket_root(bucket: str) -> Path:
                 f"/{bucket}",
             ),
         )
-    return ensure_bucket(MOCK_S3_ROOT, bucket)
+    return ensure_bucket(MOCK_S3_ROOT, flat)
 
 
 def extract_metadata(headers: Dict[str, str]) -> Dict[str, str]:

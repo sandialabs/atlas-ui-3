@@ -288,6 +288,25 @@ def test_delete_object():
 
     print("  DELETE successful, object no longer exists")
 
+def test_bucket_name_validation():
+    """Bucket names must never traverse out of the storage root."""
+    print("Testing bucket name validation...")
+
+    client = create_test_client()
+
+    # Encoded traversal must be rejected by the server, never normalized
+    # away by the client before it gets there.
+    for bucket in ("..%2F..%2Fetc", "%2e%2e"):
+        response = client.get(
+            f"/{bucket}",
+            params={"list-type": "2"},
+        )
+        assert response.status_code == 400, (
+            f"Bucket {bucket!r} should be rejected, got {response.status_code}"
+        )
+
+    print("  Traversal and unusual bucket names are rejected with 400")
+
 def cleanup():
     """Clean up test objects."""
     print("Cleaning up test objects...")
@@ -324,6 +343,7 @@ def main():
         test_tagging()
         test_html_file_tagging()
         test_delete_object()
+        test_bucket_name_validation()
 
         print("\n" + "=" * 40)
         print("All tests passed!")
