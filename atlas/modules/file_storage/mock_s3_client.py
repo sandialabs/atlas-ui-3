@@ -30,6 +30,7 @@ from atlas.core.telemetry import (
 from atlas.modules.file_storage.listing import (
     filename_from_key,
     select_file_page,
+    source_for_key,
     tags_with_source,
     user_prefix,
 )
@@ -435,6 +436,53 @@ class MockS3StorageClient:
             category,
         )
 
+    def _list_raw_sync(self, user_email: str, file_type: Optional[str]) -> List[Dict[str, Any]]:
+        """List cheap key entries under one prefix. Blocking; no hydration."""
+        prefix = user_prefix(user_email, file_type)
+
+        response = self.client.get(
+            f"/{self.bucket_name}",
+            params={
+                "list-type": "2",
+                "prefix": prefix,
+                "max-keys": str(_MOCK_LIST_MAX_KEYS),
+            },
+        )
+
+        if response.status_code != 200:
+            raise Exception(f"List failed: {response.text}")
+
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(response.text)
+        ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
+        contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
+
+        listed = []
+        for content in contents:
+            key_elem = content.find("s3:Key", ns)
+            if key_elem is None:
+                key_elem = content.find("Key")
+            size_elem = content.find("s3:Size", ns)
+            if size_elem is None:
+                size_elem = content.find("Size")
+            etag_elem = content.find("s3:ETag", ns)
+            if etag_elem is None:
+                etag_elem = content.find("ETag")
+            modified_elem = content.find("s3:LastModified", ns)
+            if modified_elem is None:
+                modified_elem = content.find("LastModified")
+
+            if key_elem is None or not key_elem.text:
+                continue
+
+            listed.append({
+                "key": key_elem.text,
+                "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                "etag": etag_elem.text.strip('"') if etag_elem is not None and etag_elem.text else "",
+                "last_modified": modified_elem.text if modified_elem is not None else None,
+            })
+        return listed
+
     def _list_file_page_sync(
         self,
         user_email: str,
@@ -454,49 +502,7 @@ class MockS3StorageClient:
         }
         with start_span("storage.list", span_attrs) as span:
             try:
-                prefix = user_prefix(user_email, file_type)
-
-                response = self.client.get(
-                    f"/{self.bucket_name}",
-                    params={
-                        "list-type": "2",
-                        "prefix": prefix,
-                        "max-keys": str(_MOCK_LIST_MAX_KEYS),
-                    },
-                )
-
-                if response.status_code != 200:
-                    raise Exception(f"List failed: {response.text}")
-
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(response.text)
-                ns = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
-                contents = root.findall(".//s3:Contents", ns) or root.findall(".//Contents")
-
-                listed = []
-                for content in contents:
-                    key_elem = content.find("s3:Key", ns)
-                    if key_elem is None:
-                        key_elem = content.find("Key")
-                    size_elem = content.find("s3:Size", ns)
-                    if size_elem is None:
-                        size_elem = content.find("Size")
-                    etag_elem = content.find("s3:ETag", ns)
-                    if etag_elem is None:
-                        etag_elem = content.find("ETag")
-                    modified_elem = content.find("s3:LastModified", ns)
-                    if modified_elem is None:
-                        modified_elem = content.find("LastModified")
-
-                    if key_elem is None or not key_elem.text:
-                        continue
-
-                    listed.append({
-                        "key": key_elem.text,
-                        "size": int(size_elem.text) if size_elem is not None and size_elem.text else 0,
-                        "etag": etag_elem.text.strip('"') if etag_elem is not None and etag_elem.text else "",
-                        "last_modified": modified_elem.text if modified_elem is not None else None,
-                    })
+                listed = self._list_raw_sync(user_email, file_type)
 
                 page, total = select_file_page(
                     listed,
@@ -642,25 +648,32 @@ class MockS3StorageClient:
         Returns:
             Dictionary containing file statistics
         """
-        try:
-            # List all user files
-            files = await self.list_files(user_email, limit=1000)
+        return await asyncio.to_thread(self._get_user_stats_sync, user_email)
 
+    def _get_user_stats_sync(self, user_email: str) -> Dict[str, Any]:
+        """Blocking stats used by ``get_user_stats``.
+
+        The key listing already carries the size and the uploads/generated
+        split, so no object is hydrated for these counts.
+        """
+        try:
+            total_files = 0
             total_size = 0
             upload_count = 0
             generated_count = 0
 
-            for file_data in files:
-                total_size += file_data['size']
+            for entry in self._list_raw_sync(user_email, None):
+                total_files += 1
+                total_size += int(entry.get('size', 0) or 0)
 
                 # Determine type from key path
-                if "/generated/" in file_data['key']:
+                if source_for_key(entry['key']) == 'tool':
                     generated_count += 1
                 else:
                     upload_count += 1
 
             result = {
-                "total_files": len(files),
+                "total_files": total_files,
                 "total_size": total_size,
                 "upload_count": upload_count,
                 "generated_count": generated_count

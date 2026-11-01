@@ -11,6 +11,7 @@ import logging
 import re
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -31,6 +32,7 @@ from atlas.core.telemetry import (
 from atlas.modules.file_storage.listing import (
     filename_from_key,
     select_file_page,
+    source_for_key,
     tags_with_source,
     user_prefix,
 )
@@ -54,6 +56,10 @@ _STORAGE_BACKEND = "s3"
 # One list call returns at most 1000 keys. Stop after this many pages so a
 # huge prefix cannot pin a worker; the page total then reflects what was seen.
 _MAX_LIST_PAGES = 200
+# Page hydration reads tags and metadata for every row on the page. These
+# reads are independent, so they run on a small thread pool instead of one
+# after another. A boto3 client is safe to share across threads.
+_HYDRATE_WORKERS = 8
 
 
 class S3StorageClient:
@@ -500,6 +506,43 @@ class S3StorageClient:
             category,
         )
 
+    def _hydrate_entry(self, user_email: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Read one object's tags and metadata. Blocking; call off the event loop."""
+        key = entry["key"]
+        try:
+            tags_response = self.s3_client.get_object_tagging(
+                Bucket=self.bucket_name,
+                Key=key,
+            )
+            tags = {tag["Key"]: tag["Value"] for tag in tags_response.get("TagSet", [])}
+        except Exception:
+            tags = {}
+
+        try:
+            head_response = self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=key,
+            )
+            metadata = head_response.get("Metadata", {})
+            content_type = head_response.get("ContentType", "application/octet-stream")
+            filename = metadata.get("original_filename") or filename_from_key(key)
+        except Exception:
+            content_type = "application/octet-stream"
+            filename = filename_from_key(key)
+
+        # boto3 returns LastModified as a datetime; the metadata
+        # contract (and the API that serves it) is a string.
+        return {
+            "key": key,
+            "filename": filename,
+            "size": entry.get("size", 0),
+            "content_type": content_type,
+            "last_modified": iso_timestamp(entry.get("last_modified")),
+            "etag": entry.get("etag") or "",
+            "tags": tags_with_source(tags, key),
+            "user_email": user_email,
+        }
+
     def _list_file_page_sync(
         self,
         user_email: str,
@@ -538,42 +581,18 @@ class S3StorageClient:
                     category=category,
                 )
 
-                files = []
-                for entry in page:
-                    key = entry["key"]
-                    try:
-                        tags_response = self.s3_client.get_object_tagging(
-                            Bucket=self.bucket_name,
-                            Key=key,
-                        )
-                        tags = {tag["Key"]: tag["Value"] for tag in tags_response.get("TagSet", [])}
-                    except Exception:
-                        tags = {}
-
-                    try:
-                        head_response = self.s3_client.head_object(
-                            Bucket=self.bucket_name,
-                            Key=key,
-                        )
-                        metadata = head_response.get("Metadata", {})
-                        content_type = head_response.get("ContentType", "application/octet-stream")
-                        filename = metadata.get("original_filename") or filename_from_key(key)
-                    except Exception:
-                        content_type = "application/octet-stream"
-                        filename = filename_from_key(key)
-
-                    # boto3 returns LastModified as a datetime; the metadata
-                    # contract (and the API that serves it) is a string.
-                    files.append({
-                        "key": key,
-                        "filename": filename,
-                        "size": entry.get("size", 0),
-                        "content_type": content_type,
-                        "last_modified": iso_timestamp(entry.get("last_modified")),
-                        "etag": entry.get("etag") or "",
-                        "tags": tags_with_source(tags, key),
-                        "user_email": user_email,
-                    })
+                if page:
+                    # The page's two reads per row run concurrently, so a page
+                    # does not wait for one slow object after another.
+                    with ThreadPoolExecutor(
+                        max_workers=min(_HYDRATE_WORKERS, len(page))
+                    ) as pool:
+                        files = list(pool.map(
+                            lambda entry: self._hydrate_entry(user_email, entry),
+                            page,
+                        ))
+                else:
+                    files = []
 
                 # Inline CR/LF removal: CodeQL py/log-injection traces this
                 # barrier and does not treat sanitize_for_logging as one.
@@ -709,24 +728,32 @@ class S3StorageClient:
         Returns:
             Dictionary containing file statistics
         """
-        try:
-            # List all user files
-            files = await self.list_files(user_email, limit=1000)
+        return await asyncio.to_thread(self._get_user_stats_sync, user_email)
 
+    def _get_user_stats_sync(self, user_email: str) -> Dict[str, Any]:
+        """Blocking stats used by ``get_user_stats``.
+
+        The key listing already carries the size and the uploads/generated
+        split, so no object is hydrated for these counts and the per-object
+        tag and metadata reads never run.
+        """
+        try:
+            total_files = 0
             total_size = 0
             upload_count = 0
             generated_count = 0
 
-            for file_data in files:
-                total_size += file_data['size']
+            for obj in self._iter_listed_objects(user_prefix(user_email)):
+                total_files += 1
+                total_size += int(obj.get("Size", 0) or 0)
 
-                if file_data.get('tags', {}).get('source') == 'tool':
+                if source_for_key(obj["Key"]) == "tool":
                     generated_count += 1
                 else:
                     upload_count += 1
 
             result = {
-                "total_files": len(files),
+                "total_files": total_files,
                 "total_size": total_size,
                 "upload_count": upload_count,
                 "generated_count": generated_count

@@ -50,14 +50,13 @@ const AllFilesView = () => {
   const folderIdRef = useRef('all')
   const searchRef = useRef('')
   const completeRef = useRef(false)
-  const loadedOnce = useRef(false)
+  const hasLoaded = useRef(false)
   const filterTimer = useRef(null)
-  const filesRef = useRef([])
+  const fetchAbort = useRef(null)
   const requestSeq = useRef(0)
 
   folderIdRef.current = folderId
   searchRef.current = searchQuery
-  filesRef.current = allFiles
 
   const folder = folderById(folderId)
 
@@ -70,18 +69,26 @@ const AllFilesView = () => {
     const requestId = ++requestSeq.current
     const requested = folderById(nextFolder)
     const unfiltered = offset === 0 && requested.id === 'all' && !(q || '').trim()
-    const firstLoad = filesRef.current.length === 0 && offset === 0
+    // Only the very first successful load shows the full-screen spinner.
+    // A later reload of an empty folder or search keeps the explorer up.
+    const firstLoad = !hasLoaded.current
     const stillCurrent = () => requestId === requestSeq.current
     try {
       if (firstLoad) setLoading(true)
       else setPaging(true)
       setError(null)
+      // A newer request supersedes this one, so cancel the older download
+      // instead of letting it finish and discarding the response.
+      if (fetchAbort.current) fetchAbort.current.abort()
+      const controller = new AbortController()
+      fetchAbort.current = controller
       const response = await fetch(filesQuery({
         offset,
         source: requested.source,
         category: requested.category,
         q,
       }), {
+        signal: controller.signal,
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -108,9 +115,10 @@ const AllFilesView = () => {
       setReportedTotal(total)
       setPageOffset(offset)
       setAllFiles(files)
+      hasLoaded.current = true
     } catch (err) {
-      if (!stillCurrent()) return
-      if (filesRef.current.length === 0) {
+      if (!stillCurrent() || err?.name === 'AbortError') return
+      if (!hasLoaded.current) {
         setError(err.message)
       } else {
         showNotification('Failed to load files', 'error')
@@ -125,11 +133,10 @@ const AllFilesView = () => {
   }
 
   useEffect(() => {
-    if (loadedOnce.current) return undefined
-    loadedOnce.current = true
     fetchAllFiles({ offset: 0, folderId: 'all', q: '' })
     return () => {
       if (filterTimer.current) clearTimeout(filterTimer.current)
+      if (fetchAbort.current) fetchAbort.current.abort()
     }
   // The library is loaded once per time the panel opens this view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -278,13 +285,15 @@ const AllFilesView = () => {
       return
     }
 
+    // A page that is a slice of a larger result deletes only its own rows,
+    // so that wording wins over the filter wording.
     const filtersActive = searchQuery !== '' || folderId !== 'all'
     const partialPage = !libraryComplete && reportedTotal != null && reportedTotal > filteredFiles.length
     const confirmed = window.confirm(
-      filtersActive
-        ? `Are you sure you want to delete the ${filteredFiles.length} file(s) matching your current filters? This action cannot be undone.`
-        : partialPage
-          ? `Are you sure you want to delete the ${filteredFiles.length} file(s) on this page? This action cannot be undone.`
+      partialPage
+        ? `Are you sure you want to delete the ${filteredFiles.length} file(s) on this page? This action cannot be undone.`
+        : filtersActive
+          ? `Are you sure you want to delete the ${filteredFiles.length} file(s) matching your current filters? This action cannot be undone.`
           : `Are you sure you want to delete all ${filteredFiles.length} file(s)? This action cannot be undone.`
     )
     if (!confirmed) {
@@ -385,13 +394,20 @@ const AllFilesView = () => {
       <div className="text-center py-12">
         <div className="text-red-400 mb-4">Error loading files</div>
         <p className="text-gray-500">{error}</p>
+        <button
+          type="button"
+          onClick={() => fetchAllFiles({ offset: 0, folderId: folderIdRef.current, q: searchRef.current })}
+          className="mt-4 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors"
+        >
+          Try again
+        </button>
       </div>
     )
   }
 
   const filtersActive = searchQuery !== '' || folderId !== 'all'
   const partialPage = !libraryComplete && reportedTotal != null && reportedTotal > filteredFiles.length
-  const deleteLabel = filtersActive ? 'Delete Filtered' : partialPage ? 'Delete Page' : 'Delete All'
+  const deleteLabel = partialPage ? 'Delete Page' : filtersActive ? 'Delete Filtered' : 'Delete All'
   const displayCount = libraryComplete ? filteredFiles.length : (reportedTotal ?? filteredFiles.length)
   const showPager = reportedTotal != null
     ? pageOffset > 0 || reportedTotal > allFiles.length
@@ -488,10 +504,10 @@ const AllFilesView = () => {
                 disabled={deletingAll}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                 title={
-                  filtersActive
-                    ? 'Delete the files matching the current filters'
-                    : partialPage
-                      ? 'Delete the files on this page'
+                  partialPage
+                    ? 'Delete the files on this page'
+                    : filtersActive
+                      ? 'Delete the files matching the current filters'
                       : 'Delete all files'
                 }
               >
@@ -561,16 +577,25 @@ const AllFilesView = () => {
 
           {filteredFiles.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
-              <File className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <div className="text-lg mb-4">
-                {filtersActive ? 'No files match your filters' : 'No files found'}
-              </div>
-              <p className="text-gray-500">
-                {filtersActive
-                  ? 'Try another folder, or adjust your search'
-                  : 'Files from all sessions will appear here'
-                }
-              </p>
+              {paging ? (
+                <>
+                  <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-400" />
+                  <div className="text-lg mb-4">Loading files...</div>
+                </>
+              ) : (
+                <>
+                  <File className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <div className="text-lg mb-4">
+                    {filtersActive ? 'No files match your filters' : 'No files found'}
+                  </div>
+                  <p className="text-gray-500">
+                    {filtersActive
+                      ? 'Try another folder, or adjust your search'
+                      : 'Files from all sessions will appear here'
+                    }
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-2">

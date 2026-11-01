@@ -38,6 +38,14 @@ const jsonResponse = (files, total) => ({
   },
 })
 
+const bigPage = Array.from({ length: 50 }, (_, i) => ({
+  key: `users/a/uploads/${1000 + i}_aaaaaaaa_batch_${i}.txt`,
+  filename: `batch_${i}.txt`,
+  size: 1,
+  last_modified: '2026-06-01T00:00:00Z',
+  tags: { source: 'user' },
+}))
+
 describe('file library model', () => {
   it('classifies the same folders the API does', () => {
     expect(categoryForFilename('plot.png')).toBe('image')
@@ -193,5 +201,110 @@ describe('AllFilesView explorer', () => {
     expect(screen.queryByText('stale.txt')).not.toBeInTheDocument()
     expect(screen.getByText('notes.txt')).toBeInTheDocument()
     expect(screen.getByText('plot.png')).toBeInTheDocument()
+  })
+
+  it('says Delete Page whenever the result spans more than one page', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('q=notes')) return Promise.resolve(jsonResponse([notes], 80))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'notes' } })
+
+    const button = await screen.findByRole('button', { name: /Delete Page \(1\)/ }, { timeout: 3000 })
+    expect(button.title).toContain('on this page')
+
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('on this page')
+    )
+    const deletes = fetchMock.mock.calls.filter(([, opts]) => opts?.method === 'DELETE')
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0][0]).toContain('notes.txt')
+  })
+
+  it('keeps the explorer up while an empty view reloads', async () => {
+    let resolveNext
+    const fetchMock = vi.fn((url) => {
+      const query = String(url)
+      if (query.includes('q=zzz')) return Promise.resolve(jsonResponse([], 0))
+      if (query.includes('q=yyy')) {
+        return new Promise((resolve) => {
+          resolveNext = resolve
+        })
+      }
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'zzz' } })
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('q=zzz'))).toBe(true)
+    })
+    // The server answer for the empty search has been applied.
+    await screen.findByText('All files (0)')
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'yyy' } })
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('q=yyy'))).toBe(true)
+    })
+
+    // The reload of an empty view is an inline indicator, not a takeover.
+    await waitFor(() => {
+      expect(screen.getByText('Loading files...')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('navigation', { name: 'Folders' })).toBeInTheDocument()
+
+    const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/files'))
+    expect(listCalls).toHaveLength(3)
+    expect(listCalls.every(([, opts]) => opts?.signal != null)).toBe(true)
+
+    resolveNext(jsonResponse([], 0))
+    await waitFor(() => {
+      expect(screen.queryByText('Loading files...')).not.toBeInTheDocument()
+    })
+  })
+
+  it('offers a retry when the first load fails', async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockRejectedValueOnce(new Error('storage down'))
+    fetchMock.mockResolvedValueOnce(jsonResponse([notes], 80))
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('Error loading files')
+    expect(screen.getByText('storage down')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await screen.findByText('notes.txt')
+    const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/files'))
+    expect(listCalls).toHaveLength(2)
+  })
+
+  it('notifies instead of replacing the explorer when a later load fails', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('q=zzz')) return Promise.reject(new Error('timeout'))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'zzz' } })
+
+    await screen.findByText('Failed to load files')
+    expect(screen.queryByText('Error loading files')).not.toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Folders' })).toBeInTheDocument()
   })
 })

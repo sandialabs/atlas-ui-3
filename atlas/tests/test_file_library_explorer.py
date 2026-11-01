@@ -7,6 +7,7 @@ only for the page that is returned.
 
 import base64
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -256,3 +257,114 @@ async def test_mock_list_file_page_orders_and_filters(monkeypatch, tmp_path):
     found = await client.list_file_page(user_email=user, limit=10, query="notes")
     assert found["total"] == 1
     assert found["files"][0]["filename"] == "notes.txt"
+
+
+def _fake_s3_client(monkeypatch):
+    """Build an S3StorageClient whose boto3 client is a MagicMock."""
+    from atlas.modules.file_storage import s3_client as s3_mod
+
+    monkeypatch.setattr(s3_mod.S3StorageClient, "_ensure_bucket", lambda self: None)
+    boto = MagicMock()
+    monkeypatch.setattr(s3_mod.boto3, "client", lambda *args, **kwargs: boto)
+    client = s3_mod.S3StorageClient(
+        s3_endpoint="http://fake",
+        s3_bucket_name="b",
+        s3_access_key="a",
+        s3_secret_key="s",
+        s3_region="us-east-1",
+        s3_timeout=1,
+        s3_use_ssl=False,
+    )
+    return client, boto
+
+
+def _listed(key, size, when):
+    return {
+        "Key": key,
+        "Size": size,
+        "ETag": '"e"',
+        "LastModified": when,
+    }
+
+
+async def test_s3_page_hydration_runs_concurrently_and_keeps_page_order(monkeypatch):
+    """The page's per-row reads overlap, and the hydrated rows keep page order."""
+    client, boto = _fake_s3_client(monkeypatch)
+
+    stamps = [
+        datetime(2026, 3, 1, tzinfo=timezone.utc),
+        datetime(2026, 2, 1, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, tzinfo=timezone.utc),
+    ]
+    names = ["one.txt", "two.txt", "three.txt"]
+    keys = [
+        f"users/a@example.com/uploads/{1700000300 - 1000 * i}_aaaaaaaa_{names[i]}"
+        for i in range(3)
+    ]
+    filename_by_key = dict(zip(keys, names))
+    boto.list_objects_v2.return_value = {
+        "IsTruncated": False,
+        "Contents": [
+            _listed(key, 1, stamps[i])
+            for i, key in enumerate(keys)
+        ],
+    }
+
+    in_flight = 0
+    max_in_flight = 0
+
+    def head_object(**kwargs):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        time.sleep(0.05)
+        in_flight -= 1
+        return {
+            "Metadata": {"original_filename": filename_by_key[kwargs["Key"]]},
+            "ContentType": "text/plain",
+        }
+
+    boto.head_object.side_effect = head_object
+    boto.get_object_tagging.return_value = {"TagSet": []}
+
+    page = await client.list_file_page(user_email="a@example.com", limit=3, offset=0)
+
+    assert [f["filename"] for f in page["files"]] == names
+    assert boto.head_object.call_count == 3
+    assert boto.get_object_tagging.call_count == 3
+    assert max_in_flight >= 2
+
+
+async def test_s3_user_stats_count_the_raw_listing_without_hydrating(monkeypatch):
+    """Stats come from the key listing: no per-object reads, no 1000-file cap."""
+    client, boto = _fake_s3_client(monkeypatch)
+
+    when = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    uploads = [
+        _listed(f"users/a@example.com/uploads/{1700000000 + i}_aaaaaaaa_f{i}.txt", i, when)
+        for i in range(1000)
+    ]
+    generated = [
+        _listed(f"users/a@example.com/generated/{1700000000 + i}_aaaaaaaa_g{i}.txt", i, when)
+        for i in range(200)
+    ]
+
+    def list_objects(**kwargs):
+        if kwargs.get("ContinuationToken") == "next":
+            return {"IsTruncated": False, "Contents": generated}
+        return {
+            "IsTruncated": True,
+            "NextContinuationToken": "next",
+            "Contents": uploads,
+        }
+
+    boto.list_objects_v2.side_effect = list_objects
+
+    stats = await client.get_user_stats("a@example.com")
+
+    assert stats["total_files"] == 1200
+    assert stats["upload_count"] == 1000
+    assert stats["generated_count"] == 200
+    assert stats["total_size"] == sum(range(1000)) + sum(range(200))
+    assert boto.head_object.call_count == 0
+    assert boto.get_object_tagging.call_count == 0
