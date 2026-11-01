@@ -77,7 +77,7 @@ as the epoch.
 
 | Parameter | Meaning |
 | --- | --- |
-| `limit` | Page size, from 1 to 1000. Default 100. |
+| `limit` | Page size, from 1 to 200. Default 100. |
 | `offset` | How many matches to skip. Default 0. |
 | `file_type` | `user` for uploads, or `tool` for generated files. |
 | `category` | `image`, `code`, `data`, `document`, or `other`. Anything else is HTTP 400. |

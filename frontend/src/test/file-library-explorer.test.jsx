@@ -436,4 +436,90 @@ describe('AllFilesView explorer', () => {
 
     await screen.findByText('The file library is too large to list')
   })
+
+  it('hides the pager when a later page comes back empty', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('offset=50')) return Promise.resolve(jsonResponse([], 0))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await screen.findByText('No files found')
+    expect(screen.getByText('All files (0)')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Previous' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
+  })
+
+  it('keeps newer typing when an older search load fails', async () => {
+    let rejectFirst
+    const fetchMock = vi.fn((url) => {
+      const query = String(url)
+      if (query.includes('q=aaa')) {
+        return new Promise((resolve, reject) => {
+          rejectFirst = reject
+        })
+      }
+      if (query.includes('q=bbb')) return Promise.resolve(jsonResponse([], 0))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'aaa' } })
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('q=aaa'))).toBe(true)
+    })
+
+    // The user keeps typing while the first search is still in flight; the
+    // newer text's own reload has not started yet.
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'bbb' } })
+
+    await act(async () => {
+      rejectFirst(new Error('late failure'))
+    })
+    await screen.findByText('Failed to load files')
+
+    // The newer text survives the older load's failure, and its pending
+    // reload still runs.
+    expect(screen.getByPlaceholderText('Search files...').value).toBe('bbb')
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('q=bbb'))).toBe(true)
+    })
+  })
+
+  it('keeps the chosen folder when a redundant refresh fails', async () => {
+    let listCalls = 0
+    const fetchMock = vi.fn((url, opts) => {
+      if (opts?.method === 'DELETE') return Promise.resolve({ ok: true, json: async () => ({}) })
+      listCalls += 1
+      if (listCalls === 1) return Promise.resolve(jsonResponse([notes, plot], 2))
+      return Promise.reject(new Error('refresh failed'))
+    })
+    global.fetch = fetchMock
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllFilesView />)
+    await screen.findByText('notes.txt')
+
+    // Two files with a total of two: the library is complete, so folder
+    // switches filter in the browser without a reload.
+    fireEvent.click(screen.getByRole('button', { name: 'Uploads' }))
+    expect(screen.getByText('Uploads (1)')).toBeInTheDocument()
+    expect(screen.queryByText('plot.png')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByTitle('Delete file')[0])
+    await screen.findByText('Failed to load files')
+
+    // The failed refresh changed nothing about the view.
+    await screen.findByText('notes.txt')
+    expect(screen.getByText('Uploads (1)')).toBeInTheDocument()
+    expect(screen.queryByText('plot.png')).not.toBeInTheDocument()
+  })
 })

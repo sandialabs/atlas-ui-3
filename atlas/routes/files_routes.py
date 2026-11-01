@@ -211,7 +211,7 @@ async def list_files(
     response: Response,
     current_user: str = Depends(get_current_user),
     file_type: Optional[str] = None,
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     q: Optional[str] = Query(default=None, max_length=200),
     category: Optional[str] = Query(default=None),

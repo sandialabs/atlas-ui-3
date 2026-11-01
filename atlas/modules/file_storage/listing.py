@@ -16,7 +16,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 FILE_CATEGORIES = ("image", "code", "data", "document", "other")
 
-_MAX_PAGE_SIZE = 1000
+# Pages hydrate their rows on a shared worker pool, and the page size is
+# what bounds how much work one request queues there. Keep the cap close
+# to what the explorer asks for (50) so no single request starves others.
+_MAX_PAGE_SIZE = 200
 
 
 class ListingTooLargeError(Exception):

@@ -96,6 +96,24 @@ def test_select_file_page_query_folds_spaces_and_ignores_the_path():
         assert empty == 0
 
 
+def test_select_file_page_caps_the_page_size():
+    entries = [
+        _entry(f"users/a/uploads/{1700000000 + i}_aaaaaaaa_f{i}.txt", datetime(2026, 6, 1, tzinfo=timezone.utc))
+        for i in range(250)
+    ]
+    page, total = select_file_page(entries, limit=500)
+    assert total == 250
+    assert len(page) == 200
+
+
+def test_list_route_rejects_a_page_above_the_cap(test_user_headers):
+    from main import app
+
+    client = TestClient(app)
+    response = client.get("/api/files", params={"limit": 201}, headers=test_user_headers)
+    assert response.status_code == 422
+
+
 def test_list_route_rejects_an_unknown_category(test_user_headers):
     from main import app
 

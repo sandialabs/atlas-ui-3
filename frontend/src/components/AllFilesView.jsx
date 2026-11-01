@@ -56,9 +56,11 @@ const AllFilesView = () => {
   const requestSeq = useRef(0)
   const lastRequestRef = useRef({ offset: 0, folderId: 'all', q: '' })
   const lastLoadedRef = useRef({ offset: 0, folderId: 'all', q: '' })
+  const pageOffsetRef = useRef(0)
 
   folderIdRef.current = folderId
   searchRef.current = searchQuery
+  pageOffsetRef.current = pageOffset
 
   const folder = folderById(folderId)
 
@@ -75,6 +77,10 @@ const AllFilesView = () => {
     // Only the very first successful load shows the full-screen spinner.
     // A later reload of an empty folder or search keeps the explorer up.
     const firstLoad = !hasLoaded.current
+    // The loaded-library state before this request: a browser-filtered
+    // library owes nothing to a failed refresh, since its rows are still
+    // valid for whatever folder or search the user has chosen.
+    const wasComplete = completeRef.current
     const stillCurrent = () => requestId === requestSeq.current
     try {
       if (firstLoad) setLoading(true)
@@ -133,6 +139,9 @@ const AllFilesView = () => {
         })
       }
 
+      // An empty result for a later page means the library emptied; show
+      // it from the first page so the pager does not linger over it.
+      const shownOffset = total === 0 ? 0 : offset
       let complete = false
       if (unfiltered) {
         complete = total == null ? files.length < PAGE_SIZE : files.length === total
@@ -140,29 +149,34 @@ const AllFilesView = () => {
       completeRef.current = complete
       setLibraryComplete(complete)
       setReportedTotal(total)
-      setPageOffset(offset)
+      setPageOffset(shownOffset)
       setAllFiles(files)
       hasLoaded.current = true
-      lastLoadedRef.current = { offset, folderId: nextFolder, q }
+      lastLoadedRef.current = { offset: shownOffset, folderId: nextFolder, q }
     } catch (err) {
       if (!stillCurrent() || err?.name === 'AbortError') return
       if (!hasLoaded.current) {
         setError(err.message)
       } else {
-        // The failed request had already optimistically switched the
-        // heading, folder, or page to something that never loaded.
-        // Restore the view that actually holds the rows on screen, and
-        // point later refreshes at that restored view instead of the
-        // request that just failed.
-        const loaded = lastLoadedRef.current
-        if (filterTimer.current) {
-          clearTimeout(filterTimer.current)
-          filterTimer.current = null
+        // The failed request may have optimistically switched the heading,
+        // folder, or page. Roll that back only when the on-screen view is
+        // still the one this request was for; anything the user did since
+        // (typing, another folder, a browser-filtered refresh) stands.
+        const viewMatches =
+          folderIdRef.current === nextFolder &&
+          searchRef.current === q &&
+          pageOffsetRef.current === offset
+        if (!wasComplete && viewMatches) {
+          const loaded = lastLoadedRef.current
+          if (filterTimer.current) {
+            clearTimeout(filterTimer.current)
+            filterTimer.current = null
+          }
+          lastRequestRef.current = { ...loaded }
+          setFolderId(loaded.folderId)
+          setSearchQuery(loaded.q)
+          setPageOffset(loaded.offset)
         }
-        lastRequestRef.current = { ...loaded }
-        setFolderId(loaded.folderId)
-        setSearchQuery(loaded.q)
-        setPageOffset(loaded.offset)
         showNotification('Failed to load files', 'error')
       }
       console.error('Error fetching all files:', err)
