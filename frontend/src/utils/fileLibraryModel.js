@@ -84,7 +84,10 @@ function storedName(key) {
 }
 
 function foldSearch(value) {
-  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  // Keep letters and digits from any script, drop separators and
+  // punctuation, so a spaced query matches the stored name in any
+  // language. Must agree with listing.py's fold.
+  return (value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 }
 
 export function filterAndSortFiles(files, {

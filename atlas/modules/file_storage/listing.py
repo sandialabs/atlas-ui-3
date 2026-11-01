@@ -41,8 +41,9 @@ _CATEGORY_EXTENSIONS = {
 _KEY_FILENAME = re.compile(r"^\d{9,}_[0-9a-fA-F]{8}_(.+)$")
 # Stored names replace spaces and other separators with "_". Folding both
 # sides lets a search for "my report" match ``my_report.pdf`` without
-# reading every object's metadata.
-_SEARCH_FOLD = re.compile(r"[^a-z0-9]+")
+# reading every object's metadata. ``\W`` is Unicode-aware, so letters
+# outside ASCII survive the fold; the underscore is removed by hand.
+_SEARCH_FOLD = re.compile(r"[\W_]+", re.UNICODE)
 
 
 def user_prefix(user_email: str, file_type: Optional[str] = None) -> str:

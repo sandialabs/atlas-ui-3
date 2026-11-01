@@ -65,6 +65,15 @@ describe('file library model', () => {
     expect(filterAndSortFiles(files, { searchQuery: ' my report ' })).toHaveLength(1)
     expect(filterAndSortFiles(files, { searchQuery: 'uploads' })).toHaveLength(0)
     expect(filterAndSortFiles(files, { searchQuery: 'me@example.com' })).toHaveLength(0)
+
+    const japanese = [{
+      key: 'users/me@example.com/uploads/1700000200_bbbbbbbb_日本_報告.txt',
+      filename: '日本 報告.txt',
+      tags: { source: 'user' },
+      last_modified: '2026-06-01T00:00:00Z',
+    }]
+    expect(filterAndSortFiles(japanese, { searchQuery: '日本 報告' })).toHaveLength(1)
+    expect(filterAndSortFiles(japanese, { searchQuery: '報告' })).toHaveLength(1)
   })
 
   it('builds a paged query', () => {
@@ -553,5 +562,37 @@ describe('AllFilesView explorer', () => {
     expect(screen.getByText('All files (80)')).toBeInTheDocument()
     expect(screen.getByText('Showing 51–80 of 80')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Search files...').value).toBe('')
+  })
+
+  it('pages without a pending search reload overriding the page', async () => {
+    const pageTwo = Array.from({ length: 30 }, (_, i) => ({
+      key: `users/a/uploads/${2000 + i}_aaaaaaaa_p2_${i}.txt`,
+      filename: `p2_${i}.txt`,
+      size: 1,
+      last_modified: '2026-06-02T00:00:00Z',
+      tags: { source: 'user' },
+    }))
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('offset=50')) return Promise.resolve(jsonResponse(pageTwo, 80))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    // The search's debounced reload is still pending when the user turns
+    // the page; the explicit page turn wins.
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'p2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await screen.findByText('p2_0.txt')
+    expect(screen.getByText('Sorting applies to this page')).toBeInTheDocument()
+
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    const listCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/files'))
+    expect(listCalls).toHaveLength(2)
+    expect(String(listCalls[1][0])).toContain('offset=50')
+    expect(screen.getByText('Showing 51–80 of 80')).toBeInTheDocument()
   })
 })

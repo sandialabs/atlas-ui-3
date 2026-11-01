@@ -96,6 +96,19 @@ def test_select_file_page_query_folds_spaces_and_ignores_the_path():
         assert empty == 0
 
 
+def test_select_file_page_query_folds_unicode_separators():
+    entries = [
+        _entry(
+            "users/me@example.com/uploads/1700000200_aaaaaaaa_日本_報告.txt",
+            datetime(2026, 2, 1, tzinfo=timezone.utc),
+        ),
+    ]
+
+    matched, total = select_file_page(entries, query="日本 報告")
+    assert total == 1
+    assert matched[0]["key"].endswith("日本_報告.txt")
+
+
 def test_select_file_page_caps_the_page_size():
     entries = [
         _entry(f"users/a/uploads/{1700000000 + i}_aaaaaaaa_f{i}.txt", datetime(2026, 6, 1, tzinfo=timezone.utc))

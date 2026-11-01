@@ -237,6 +237,16 @@ const AllFilesView = () => {
     scheduleServerLoad({ offset: 0, folderId: folderIdRef.current, q: value })
   }
 
+  const goToPage = (offset) => {
+    // An explicit page turn wins over a pending search reset, the same
+    // way an explicit folder switch does.
+    if (filterTimer.current) {
+      clearTimeout(filterTimer.current)
+      filterTimer.current = null
+    }
+    fetchAllFiles({ offset, folderId, q: searchQuery })
+  }
+
   const getFileIcon = (file) => {
     const extension = (file.filename || '').split('.').pop()?.toLowerCase()
     switch (extension) {
@@ -636,6 +646,12 @@ const AllFilesView = () => {
                 </button>
               ))}
             </div>
+
+            {showPager && (
+              <p className="text-xs text-gray-500">
+                Sorting applies to this page
+              </p>
+            )}
           </div>
 
           {filteredFiles.length === 0 ? (
@@ -732,11 +748,7 @@ const AllFilesView = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => fetchAllFiles({
-                    offset: Math.max(0, pageOffset - PAGE_SIZE),
-                    folderId,
-                    q: searchQuery,
-                  })}
+                  onClick={() => goToPage(Math.max(0, pageOffset - PAGE_SIZE))}
                   disabled={paging || pageOffset === 0}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-600 text-gray-200 disabled:opacity-40"
                 >
@@ -745,11 +757,7 @@ const AllFilesView = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => fetchAllFiles({
-                    offset: pageOffset + PAGE_SIZE,
-                    folderId,
-                    q: searchQuery,
-                  })}
+                  onClick={() => goToPage(pageOffset + PAGE_SIZE)}
                   disabled={paging || atEnd}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-600 text-gray-200 disabled:opacity-40"
                 >
