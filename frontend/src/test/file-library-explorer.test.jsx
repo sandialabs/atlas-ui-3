@@ -374,4 +374,25 @@ describe('AllFilesView explorer', () => {
     })
     expect(screen.queryByText('notes.txt')).not.toBeInTheDocument()
   })
+
+  it('rolls back to the loaded folder when a folder switch fails', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('file_type=tool')) return Promise.reject(new Error('boom'))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generated' }))
+
+    await screen.findByText('Failed to load files')
+
+    // The failed switch never loaded, so the heading and rows return to
+    // the folder that is actually loaded and the delete stays truthful.
+    expect(screen.getByText('All files (80)')).toBeInTheDocument()
+    expect(screen.getByText('batch_0.txt')).toBeInTheDocument()
+    expect(screen.queryByText(/Generated \(/)).not.toBeInTheDocument()
+  })
 })

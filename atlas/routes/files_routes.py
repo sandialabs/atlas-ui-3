@@ -18,7 +18,7 @@ from atlas.core.capabilities import verify_file_token
 from atlas.core.log_sanitizer import get_current_user
 from atlas.core.metrics_logger import log_metric
 from atlas.infrastructure.app_factory import app_factory
-from atlas.modules.file_storage.listing import FILE_CATEGORIES
+from atlas.modules.file_storage.listing import FILE_CATEGORIES, ListingTooLargeError
 from atlas.modules.file_storage.timestamps import iso_timestamp
 
 logger = logging.getLogger(__name__)
@@ -254,9 +254,14 @@ async def list_files(
         # _file_metadata normalizes last_modified to an ISO format string
         return [FileResponse(**_file_metadata(file_data)) for file_data in result]
 
+    except ListingTooLargeError:
+        # The cap is an internal safety limit; the response carries a fixed
+        # message instead of internal details.
+        logger.error("File listing exceeded the traversal cap")
+        raise HTTPException(status_code=503, detail="The file library is too large to list")
     except Exception as e:
         logger.error(f"Error listing files: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list files")
 
 
 @router.get("/users/{user_email}/files/stats")
@@ -274,9 +279,12 @@ async def get_user_file_stats(
         result = await s3_client.get_user_stats(current_user)
         return result
 
+    except ListingTooLargeError:
+        logger.error("File stats exceeded the traversal cap")
+        raise HTTPException(status_code=503, detail="The file library is too large to list")
     except Exception as e:
         logger.error(f"Error getting user stats: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get stats")
 
 
 async def _handle_file_download(file_key: str, token: str | None, current_user: str) -> Response:

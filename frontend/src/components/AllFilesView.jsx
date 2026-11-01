@@ -55,6 +55,7 @@ const AllFilesView = () => {
   const fetchAbort = useRef(null)
   const requestSeq = useRef(0)
   const lastRequestRef = useRef({ offset: 0, folderId: 'all', q: '' })
+  const lastLoadedRef = useRef({ offset: 0, folderId: 'all', q: '' })
 
   folderIdRef.current = folderId
   searchRef.current = searchQuery
@@ -129,11 +130,19 @@ const AllFilesView = () => {
       setPageOffset(offset)
       setAllFiles(files)
       hasLoaded.current = true
+      lastLoadedRef.current = { offset, folderId: nextFolder, q }
     } catch (err) {
       if (!stillCurrent() || err?.name === 'AbortError') return
       if (!hasLoaded.current) {
         setError(err.message)
       } else {
+        // The failed request had already optimistically switched the
+        // heading, folder, or page to something that never loaded.
+        // Restore the view that actually holds the rows on screen.
+        const loaded = lastLoadedRef.current
+        setFolderId(loaded.folderId)
+        setSearchQuery(loaded.q)
+        setPageOffset(loaded.offset)
         showNotification('Failed to load files', 'error')
       }
       console.error('Error fetching all files:', err)

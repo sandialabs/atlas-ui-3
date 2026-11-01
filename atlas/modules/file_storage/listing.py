@@ -78,15 +78,16 @@ def category_for_filename(filename: str) -> str:
 
 
 def tags_with_source(tags: Optional[Dict[str, str]], key: str) -> Dict[str, str]:
-    """Ensure ``source`` is set, deriving it from the key when tagging is empty.
+    """Derive ``source`` from the key so the API agrees with folder selection.
 
-    ``s3:GetObjectTagging`` is optional. Without it the tag set comes back
-    empty and the library cannot tell uploads from generated files, even
-    though the key prefix already records that.
+    Folder membership is decided by the key prefix (``uploads/`` versus
+    ``generated/``), because that is what the paged listing filters on. The
+    stored ``source`` tag is informational and can carry any value, so the
+    listing always overwrites it with the key-derived value rather than
+    letting a stale tag contradict the folder the file was counted in.
     """
     merged = dict(tags or {})
-    if not merged.get("source"):
-        merged["source"] = source_for_key(key)
+    merged["source"] = source_for_key(key)
     return merged
 
 

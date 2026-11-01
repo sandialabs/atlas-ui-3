@@ -427,3 +427,85 @@ async def test_mock_listing_follows_continuation_tokens(monkeypatch, tmp_path):
     stats = await client.get_user_stats(user)
     assert stats["total_files"] == 5
     assert stats["upload_count"] == 5
+
+
+async def test_s3_listing_source_tag_follows_the_key(monkeypatch):
+    """A stale or non-standard source tag never contradicts the folder the file is counted in."""
+    client, boto = _fake_s3_client(monkeypatch)
+
+    boto.list_objects_v2.return_value = {
+        "IsTruncated": False,
+        "Contents": [
+            _listed("users/a@example.com/uploads/1700000100_aaaaaaaa_x.txt", 1, datetime(2026, 6, 1, tzinfo=timezone.utc)),
+            _listed("users/a@example.com/generated/1700000200_bbbbbbbb_y.txt", 1, datetime(2026, 6, 2, tzinfo=timezone.utc)),
+        ],
+    }
+    # An old writer stored a source value that does not match the key path.
+    boto.get_object_tagging.return_value = {"TagSet": [{"Key": "source", "Value": "chat"}]}
+    boto.head_object.return_value = {
+        "Metadata": {"original_filename": "x.txt"},
+        "ContentType": "text/plain",
+    }
+
+    page = await client.list_file_page(user_email="a@example.com", limit=10, offset=0)
+
+    sources = {f["key"].rsplit("/", 2)[-2]: f["tags"]["source"] for f in page["files"]}
+    assert sources == {"uploads": "user", "generated": "tool"}
+
+
+def test_list_route_maps_the_cap_to_a_fixed_message(monkeypatch, test_user_headers):
+    from main import app
+
+    from atlas.infrastructure.app_factory import app_factory
+    from atlas.modules.file_storage.listing import ListingTooLargeError
+
+    storage = app_factory.get_file_storage()
+
+    async def too_large(**kwargs):
+        raise ListingTooLargeError("User file listing stopped after 200 S3 pages (200000 objects)")
+
+    monkeypatch.setattr(storage, "list_file_page", too_large)
+    client = TestClient(app)
+    response = client.get("/api/files", headers=test_user_headers)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "The file library is too large to list"
+    assert "200000" not in response.text
+
+
+def test_list_route_returns_a_generic_message_for_other_failures(monkeypatch, test_user_headers):
+    from main import app
+
+    from atlas.infrastructure.app_factory import app_factory
+
+    storage = app_factory.get_file_storage()
+
+    async def broken(**kwargs):
+        raise RuntimeError("internal storage endpoint http://10.0.0.1:9000 refused")
+
+    monkeypatch.setattr(storage, "list_file_page", broken)
+    client = TestClient(app)
+    response = client.get("/api/files", headers=test_user_headers)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list files"
+    assert "10.0.0.1" not in response.text
+
+
+def test_stats_route_maps_the_cap_to_a_fixed_message(monkeypatch, test_user_headers, test_user):
+    from main import app
+
+    from atlas.infrastructure.app_factory import app_factory
+    from atlas.modules.file_storage.listing import ListingTooLargeError
+
+    storage = app_factory.get_file_storage()
+
+    async def too_large(user_email):
+        raise ListingTooLargeError("User file listing stopped after 200 S3 pages (200000 objects)")
+
+    monkeypatch.setattr(storage, "get_user_stats", too_large)
+    client = TestClient(app)
+    response = client.get(f"/api/users/{test_user}/files/stats", headers=test_user_headers)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "The file library is too large to list"
