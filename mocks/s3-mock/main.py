@@ -1,4 +1,5 @@
 import os
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Dict
@@ -33,9 +34,23 @@ def get_app():
 # Configuration
 MOCK_S3_ROOT = Path(os.getenv("MOCK_S3_ROOT", "minio-data/chatui"))
 
+# Bucket names become directory names under MOCK_S3_ROOT. Restricting the
+# requested bucket to identifier-ish characters keeps it from ever forming a
+# traversal path (every route below resolves its paths under this root).
+_BUCKET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+
 
 def get_bucket_root(bucket: str) -> Path:
     """Get the root path for a bucket."""
+    if not _BUCKET_NAME_PATTERN.fullmatch(bucket):
+        raise HTTPException(
+            status_code=400,
+            detail=create_error_xml(
+                "InvalidBucketName",
+                "The bucket name contains characters that are not allowed.",
+                f"/{bucket}",
+            ),
+        )
     return ensure_bucket(MOCK_S3_ROOT, bucket)
 
 
