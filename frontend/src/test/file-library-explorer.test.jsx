@@ -392,7 +392,48 @@ describe('AllFilesView explorer', () => {
     // The failed switch never loaded, so the heading and rows return to
     // the folder that is actually loaded and the delete stays truthful.
     expect(screen.getByText('All files (80)')).toBeInTheDocument()
-    expect(screen.getByText('batch_0.txt')).toBeInTheDocument()
+    await screen.findByText('batch_0.txt')
     expect(screen.queryByText(/Generated \(/)).not.toBeInTheDocument()
+  })
+
+  it('refreshes the restored view after a delete that follows a failed switch', async () => {
+    const fetchMock = vi.fn((url, opts) => {
+      if (opts?.method === 'DELETE') return Promise.resolve({ ok: true, json: async () => ({}) })
+      if (String(url).includes('file_type=tool')) return Promise.reject(new Error('boom'))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generated' }))
+    await screen.findByText('Failed to load files')
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.click(screen.getAllByTitle('Delete file')[0])
+
+    await waitFor(() => {
+      const listCalls = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== 'DELETE')
+      expect(listCalls.length).toBeGreaterThanOrEqual(3)
+    })
+    const listCalls = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== 'DELETE')
+    const lastListUrl = String(listCalls[listCalls.length - 1][0])
+    // The refresh follows the restored folder, not the one that failed.
+    expect(lastListUrl).not.toContain('file_type=')
+  })
+
+  it('shows the API detail when the list fails with a JSON error', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: '',
+      json: async () => ({ detail: 'The file library is too large to list' }),
+    })
+
+    render(<AllFilesView />)
+
+    await screen.findByText('The file library is too large to list')
   })
 })

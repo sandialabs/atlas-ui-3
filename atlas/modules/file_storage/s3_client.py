@@ -123,8 +123,21 @@ class S3StorageClient:
                 signature_version='s3v4',
                 connect_timeout=s3_timeout,
                 read_timeout=s3_timeout,
-                retries={'max_attempts': 3}
+                retries={'max_attempts': 3},
+                # Page hydration shares one bounded executor whose workers
+                # each hold a connection while they read; leave headroom
+                # above the pool size so the listing call never queues
+                # behind hydration.
+                max_pool_connections=max(10, _HYDRATE_WORKERS + 4),
             )
+        )
+
+        # Page hydration runs the per-row tag and metadata reads here. One
+        # shared bounded executor per client keeps the concurrent S3 calls
+        # independent of how many listings run at once.
+        self._hydrate_pool = ThreadPoolExecutor(
+            max_workers=_HYDRATE_WORKERS,
+            thread_name_prefix="s3-hydrate",
         )
 
         logger.info(f"S3Client initialized with endpoint: {self.endpoint_url}, bucket: {self.bucket_name}")
@@ -586,14 +599,13 @@ class S3StorageClient:
 
                 if page:
                     # The page's two reads per row run concurrently, so a page
-                    # does not wait for one slow object after another.
-                    with ThreadPoolExecutor(
-                        max_workers=min(_HYDRATE_WORKERS, len(page))
-                    ) as pool:
-                        files = list(pool.map(
-                            lambda entry: self._hydrate_entry(user_email, entry),
-                            page,
-                        ))
+                    # does not wait for one slow object after another. The
+                    # executor is shared across listings to bound the total
+                    # number of concurrent S3 calls.
+                    files = list(self._hydrate_pool.map(
+                        lambda entry: self._hydrate_entry(user_email, entry),
+                        page,
+                    ))
                 else:
                     files = []
 

@@ -99,7 +99,20 @@ const AllFilesView = () => {
 
       if (!stillCurrent()) return
       if (!response.ok) {
-        throw new Error(`Failed to fetch files: ${response.statusText}`)
+        // statusText is empty under HTTP/2, so prefer the JSON detail the
+        // API sends with its error responses.
+        let message = `Failed to fetch files: ${response.statusText}`.trim()
+        try {
+          const body = await response.json()
+          if (body && typeof body.detail === 'string' && body.detail) {
+            message = body.detail
+          }
+        } catch {
+          // A body that is not JSON (a proxy page, an empty body) keeps
+          // the status-text fallback.
+        }
+        if (!stillCurrent()) return
+        throw new Error(message)
       }
 
       const payload = await response.json()
@@ -138,8 +151,15 @@ const AllFilesView = () => {
       } else {
         // The failed request had already optimistically switched the
         // heading, folder, or page to something that never loaded.
-        // Restore the view that actually holds the rows on screen.
+        // Restore the view that actually holds the rows on screen, and
+        // point later refreshes at that restored view instead of the
+        // request that just failed.
         const loaded = lastLoadedRef.current
+        if (filterTimer.current) {
+          clearTimeout(filterTimer.current)
+          filterTimer.current = null
+        }
+        lastRequestRef.current = { ...loaded }
         setFolderId(loaded.folderId)
         setSearchQuery(loaded.q)
         setPageOffset(loaded.offset)
