@@ -527,3 +527,36 @@ def test_stats_route_maps_the_cap_to_a_fixed_message(monkeypatch, test_user_head
 
     assert response.status_code == 503
     assert response.json()["detail"] == "The file library is too large to list"
+
+
+async def test_listing_walk_and_hydration_run_on_the_dedicated_executors(monkeypatch):
+    """The blocking walk leaves the loop's default executor to other callers."""
+    import threading
+
+    client, boto = _fake_s3_client(monkeypatch)
+
+    threads = {}
+
+    def walk(prefix):
+        threads["walk"] = threading.current_thread().name
+        return iter([
+            {
+                "Key": "users/a@example.com/uploads/1700000100_aaaaaaaa_x.txt",
+                "Size": 1,
+                "ETag": '"e"',
+                "LastModified": datetime(2026, 6, 1, tzinfo=timezone.utc),
+            }
+        ])
+
+    def head(**kwargs):
+        threads["hydrate"] = threading.current_thread().name
+        return {"Metadata": {}, "ContentType": "text/plain"}
+
+    monkeypatch.setattr(client, "_iter_listed_objects", walk)
+    boto.head_object.side_effect = head
+    boto.get_object_tagging.return_value = {"TagSet": []}
+
+    await client.list_file_page(user_email="a@example.com", limit=1, offset=0)
+
+    assert threads["walk"].startswith("s3-io")
+    assert threads["hydrate"].startswith("s3-hydrate")

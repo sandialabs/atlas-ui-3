@@ -166,17 +166,19 @@ const AllFilesView = () => {
           folderIdRef.current === nextFolder &&
           searchRef.current === q &&
           pageOffsetRef.current === offset
+        const loaded = lastLoadedRef.current
         if (!wasComplete && viewMatches) {
-          const loaded = lastLoadedRef.current
           if (filterTimer.current) {
             clearTimeout(filterTimer.current)
             filterTimer.current = null
           }
-          lastRequestRef.current = { ...loaded }
           setFolderId(loaded.folderId)
           setSearchQuery(loaded.q)
           setPageOffset(loaded.offset)
         }
+        // Later refreshes target the view that actually loaded, never the
+        // request that failed.
+        lastRequestRef.current = { ...loaded }
         showNotification('Failed to load files', 'error')
       }
       console.error('Error fetching all files:', err)
@@ -230,6 +232,8 @@ const AllFilesView = () => {
 
   const onSearchChange = (value) => {
     setSearchQuery(value)
+    // A search is a new view from the first page, like a folder switch.
+    setPageOffset(0)
     scheduleServerLoad({ offset: 0, folderId: folderIdRef.current, q: value })
   }
 

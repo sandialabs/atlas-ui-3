@@ -522,4 +522,36 @@ describe('AllFilesView explorer', () => {
     expect(screen.getByText('Uploads (1)')).toBeInTheDocument()
     expect(screen.queryByText('plot.png')).not.toBeInTheDocument()
   })
+
+  it('rolls a failed search on page two back to the page that loaded', async () => {
+    const pageTwo = Array.from({ length: 30 }, (_, i) => ({
+      key: `users/a/uploads/${2000 + i}_aaaaaaaa_p2_${i}.txt`,
+      filename: `p2_${i}.txt`,
+      size: 1,
+      last_modified: '2026-06-02T00:00:00Z',
+      tags: { source: 'user' },
+    }))
+    const fetchMock = vi.fn((url) => {
+      if (String(url).includes('q=')) return Promise.reject(new Error('search failed'))
+      if (String(url).includes('offset=50')) return Promise.resolve(jsonResponse(pageTwo, 80))
+      return Promise.resolve(jsonResponse(bigPage, 80))
+    })
+    global.fetch = fetchMock
+
+    render(<AllFilesView />)
+    await screen.findByText('batch_0.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('p2_0.txt')
+    expect(screen.getByText('Showing 51–80 of 80')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'notes' } })
+    await screen.findByText('Failed to load files')
+
+    // The failed search returns the explorer to the loaded page 2 view.
+    await screen.findByText('p2_0.txt')
+    expect(screen.getByText('All files (80)')).toBeInTheDocument()
+    expect(screen.getByText('Showing 51–80 of 80')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Search files...').value).toBe('')
+  })
 })

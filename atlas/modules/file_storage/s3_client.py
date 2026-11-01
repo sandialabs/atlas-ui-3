@@ -61,6 +61,10 @@ _MAX_LIST_PAGES = 200
 # reads are independent, so they run on a small thread pool instead of one
 # after another. A boto3 client is safe to share across threads.
 _HYDRATE_WORKERS = 8
+# The prefix walk behind a listing can run for many S3 calls. It blocks on
+# this client's own executor instead of the loop's default one, which also
+# runs unrelated blocking work such as token verification.
+_IO_WORKERS = 8
 
 
 class S3StorageClient:
@@ -138,6 +142,12 @@ class S3StorageClient:
         self._hydrate_pool = ThreadPoolExecutor(
             max_workers=_HYDRATE_WORKERS,
             thread_name_prefix="s3-hydrate",
+        )
+        # Long blocking walks (the listing itself, stats) run here too, so
+        # they cannot occupy the loop's default executor.
+        self._io_pool = ThreadPoolExecutor(
+            max_workers=_IO_WORKERS,
+            thread_name_prefix="s3-io",
         )
 
         logger.info(f"S3Client initialized with endpoint: {self.endpoint_url}, bucket: {self.bucket_name}")
@@ -512,14 +522,16 @@ class S3StorageClient:
             ``{"files", "total", "offset", "limit"}`` where ``total`` counts
             matches before paging.
         """
-        return await asyncio.to_thread(
-            self._list_file_page_sync,
-            user_email,
-            file_type,
-            limit,
-            offset,
-            query,
-            category,
+        return await asyncio.get_running_loop().run_in_executor(
+            self._io_pool,
+            lambda: self._list_file_page_sync(
+                user_email,
+                file_type,
+                limit,
+                offset,
+                query,
+                category,
+            ),
         )
 
     def _hydrate_entry(self, user_email: str, entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -743,7 +755,10 @@ class S3StorageClient:
         Returns:
             Dictionary containing file statistics
         """
-        return await asyncio.to_thread(self._get_user_stats_sync, user_email)
+        return await asyncio.get_running_loop().run_in_executor(
+            self._io_pool,
+            lambda: self._get_user_stats_sync(user_email),
+        )
 
     def _get_user_stats_sync(self, user_email: str) -> Dict[str, Any]:
         """Blocking stats used by ``get_user_stats``.
