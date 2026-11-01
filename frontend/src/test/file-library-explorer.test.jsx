@@ -595,4 +595,48 @@ describe('AllFilesView explorer', () => {
     expect(String(listCalls[1][0])).toContain('offset=50')
     expect(screen.getByText('Showing 51–80 of 80')).toBeInTheDocument()
   })
+
+  it('reloads the view on screen when a refresh makes the library paged', async () => {
+    const grown = Array.from({ length: 50 }, (_, i) => ({
+      key: `users/a/uploads/${3000 + i}_aaaaaaaa_grown_${i}.txt`,
+      filename: `grown_${i}.txt`,
+      size: 1,
+      last_modified: '2026-06-03T00:00:00Z',
+      tags: { source: 'user' },
+    }))
+    let listCalls = 0
+    const fetchMock = vi.fn((url, opts) => {
+      if (opts?.method === 'DELETE') return Promise.resolve({ ok: true, json: async () => ({}) })
+      listCalls += 1
+      if (listCalls === 1) return Promise.resolve(jsonResponse([notes, plot], 2))
+      if (String(url).includes('file_type=user')) {
+        return Promise.resolve(jsonResponse([notes], 80))
+      }
+      return Promise.resolve(jsonResponse(grown, 80))
+    })
+    global.fetch = fetchMock
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<AllFilesView />)
+    await screen.findByText('notes.txt')
+
+    // The library is complete, so the folder switch filters in the browser.
+    fireEvent.click(screen.getByRole('button', { name: 'Uploads' }))
+    expect(screen.getByText('Uploads (1)')).toBeInTheDocument()
+
+    // The delete refresh discovers the library outgrew one page; the
+    // explorer then reloads the folder that is on screen.
+    fireEvent.click(screen.getAllByTitle('Delete file')[0])
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== 'DELETE')
+      expect(calls.length).toBeGreaterThanOrEqual(3)
+    })
+    const calls = fetchMock.mock.calls.filter(([, opts]) => opts?.method !== 'DELETE')
+    expect(String(calls[2][0])).toContain('file_type=user')
+
+    await screen.findByText('notes.txt')
+    expect(screen.getByText('Uploads (80)')).toBeInTheDocument()
+    expect(screen.queryByText('plot.png')).not.toBeInTheDocument()
+  })
 })

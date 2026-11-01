@@ -153,6 +153,13 @@ const AllFilesView = () => {
       setAllFiles(files)
       hasLoaded.current = true
       lastLoadedRef.current = { offset: shownOffset, folderId: nextFolder, q }
+
+      if (!complete && (folderIdRef.current !== nextFolder || searchRef.current !== q)) {
+        // A refresh of a previously complete library just outgrew one
+        // page, and the page that landed is not the folder or search the
+        // user is looking at. Load the view on screen.
+        return fetchAllFiles({ offset: 0, folderId: folderIdRef.current, q: searchRef.current })
+      }
     } catch (err) {
       if (!stillCurrent() || err?.name === 'AbortError') return
       if (!hasLoaded.current) {
@@ -162,10 +169,13 @@ const AllFilesView = () => {
         // folder, or page. Roll that back only when the on-screen view is
         // still the one this request was for; anything the user did since
         // (typing, another folder, a browser-filtered refresh) stands.
+        // A first-page request (a search or folder switch) is matched on
+        // folder and query alone: typing never moves the page, and the
+        // switch already did.
         const viewMatches =
           folderIdRef.current === nextFolder &&
           searchRef.current === q &&
-          pageOffsetRef.current === offset
+          (offset === 0 || pageOffsetRef.current === offset)
         const loaded = lastLoadedRef.current
         if (!wasComplete && viewMatches) {
           if (filterTimer.current) {
@@ -232,8 +242,6 @@ const AllFilesView = () => {
 
   const onSearchChange = (value) => {
     setSearchQuery(value)
-    // A search is a new view from the first page, like a folder switch.
-    setPageOffset(0)
     scheduleServerLoad({ offset: 0, folderId: folderIdRef.current, q: value })
   }
 
