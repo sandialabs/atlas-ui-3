@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 import uvicorn
 
 from storage import (
-    ensure_bucket, load_object, save_object, delete_object,
+    load_object, save_object, delete_object,
     list_objects, get_tags, set_tags, load_meta
 )
 from s3_xml import (
@@ -56,7 +56,22 @@ def get_bucket_root(bucket: str) -> Path:
                 f"/{bucket}",
             ),
         )
-    return ensure_bucket(MOCK_S3_ROOT, flat)
+
+    # Absolute path under the constant storage root, then a prefix check
+    # against that same root, so the directory is provably inside it.
+    root = os.path.abspath(MOCK_S3_ROOT)
+    bucket_path = os.path.abspath(os.path.join(root, flat))
+    if not bucket_path.startswith(root + os.sep):
+        raise HTTPException(
+            status_code=400,
+            detail=create_error_xml(
+                "InvalidBucketName",
+                "The bucket resolves outside the storage root.",
+                f"/{flat}",
+            ),
+        )
+    os.makedirs(bucket_path, exist_ok=True)
+    return Path(bucket_path)
 
 
 def extract_metadata(headers: Dict[str, str]) -> Dict[str, str]:
