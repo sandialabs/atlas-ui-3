@@ -72,8 +72,8 @@ def save_object(bucket_root: Path, key: str, data: bytes, content_type: str, met
     return meta
 
 
-def load_meta(bucket_root: Path, key: str) -> Optional[Dict[str, str]]:
-    _, meta_path = object_paths(bucket_root, key)
+def load_meta_file(meta_path: Path) -> Optional[Dict[str, str]]:
+    """Read one ``.meta.json`` sidecar that has already been resolved."""
     if not meta_path.exists():
         return None
     try:
@@ -81,6 +81,11 @@ def load_meta(bucket_root: Path, key: str) -> Optional[Dict[str, str]]:
             return json.load(f)
     except Exception:
         return None
+
+
+def load_meta(bucket_root: Path, key: str) -> Optional[Dict[str, str]]:
+    _, meta_path = object_paths(bucket_root, key)
+    return load_meta_file(meta_path)
 
 
 def load_object(bucket_root: Path, key: str) -> Optional[Tuple[bytes, Dict[str, str]]]:
@@ -131,9 +136,15 @@ def list_objects(bucket_root: Path, prefix: str = "", max_keys: int = 100, start
     page_keys = keys[:max_keys] if max_keys > 0 else []
     items = []
     for key in page_keys:
-        obj_path = base / key
+        # Every path used here comes from object_paths, which rejects
+        # traversal components and keeps the resolved path inside the
+        # bucket root -- the same guarantee the write and delete paths use.
+        try:
+            obj_path, meta_path = object_paths(bucket_root, key)
+        except ValueError:
+            continue
         size = obj_path.stat().st_size
-        meta = load_meta(bucket_root, key) or {}
+        meta = load_meta_file(meta_path) or {}
         etag = meta.get("etag")
         if not etag:
             with open(obj_path, "rb") as f:
