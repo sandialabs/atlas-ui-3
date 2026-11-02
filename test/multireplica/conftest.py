@@ -54,6 +54,7 @@ def shared_infra():
         if _infra_absent() and not os.environ.get("ATLAS_MULTIREPLICA_REQUIRED"):
             pytest.skip(message)
         pytest.fail(message, pytrace=False)
+        raise  # unreachable (skip/fail raise); tells static analysis `infra` is always bound below
     try:
         yield infra
     finally:
