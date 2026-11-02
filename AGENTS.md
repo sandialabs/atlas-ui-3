@@ -423,3 +423,15 @@ Concretely, a PR fails the gate if it introduces any of the following single-ins
 - **Cross-replica cache warmth**: a cache written by one replica must live in Redis or be safe to miss everywhere else; never assume a replica can read another's local cache.
 
 If a change cannot meet these requirements, call the limitation out explicitly in the PR description with a scaling justification. Do not merge single-instance assumptions silently.
+
+### Multi-replica harness (required for run-coordination PRs)
+
+`bash test/multireplica_tests.sh` starts two real Atlas API processes sharing one Redis and one PostgreSQL (throwaway **podman** containers, or `ATLAS_TEST_REDIS_URL` / `ATLAS_TEST_POSTGRES_URL`) and drives them with pytest; see `test/multireplica/README.md`. It takes about two minutes and is **not** part of `test/atlas_tests.sh` or CI.
+
+A PR that touches any of the following must run it and paste the pytest summary into the PR description (its `test/pr-validation/` script should call it):
+
+- `atlas/application/chat/runs/` (run registry, launcher, execution state, external/API runs)
+- `atlas/infrastructure/redis/`, `atlas/infrastructure/sessions/`
+- run admission, cancel, steering or tool-approval paths (`atlas/application/chat/service.py`, `approval_manager.py`, `elicitation_manager.py`, `atlas/routes/agent_run_routes.py`, the run handling in `atlas/main.py`)
+
+The run must end with no failures. Tests marked `xfail(strict=True)` describe #1128 acceptance criteria not met yet; a PR that meets one gets an XPASS, which fails the run, and removes that marker in the same PR (and lowers `EXPECTED_GAPS` in `test/pr-validation/test_pr1146_multireplica_harness.sh`). Infrastructure that fails to come up fails the run; it is never a skip.
