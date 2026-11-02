@@ -335,6 +335,118 @@ describe('selected model per user', () => {
     expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
   })
 
+  it('restores a saved gateway model when the deployment has no static models (#1134)', async () => {
+    localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-a::gpt-x')
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    mockFetch({ app_name: 'Atlas', user: BOB, models: [], llm_gateways: GATEWAYS, features: {} })
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/llm/gateways/corp/teams'))
+    await new Promise(r => setTimeout(r, 0))
+    expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
+  })
+
+  it('drops the previous user\'s gateway model when a refresh switches to a user with no saved model (#1134)', async () => {
+    // A fresh config object per response, like the real endpoint produces:
+    // the restore effect must re-run on every refresh, not just when the
+    // previous response's arrays differ by identity.
+    const freshConfig = (user) => ({ app_name: 'Atlas', user, models: [], llm_gateways: GATEWAYS, features: {} })
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    localStorage.setItem(`chatui-current-model:${ALICE}`, 'corp::team-a::gpt-x')
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(ALICE) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(result.current.currentModel).toBe('corp::team-a::gpt-x'))
+
+    // The signed-in identity changes without a remount (a refresh that
+    // carries the new user); the new user has saved nothing, and a
+    // gateway-only config has no default to fall back to.
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(BOB) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('')
+
+    // A later refresh that resolves something for the same user still applies.
+    localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-b::m2')
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-b', label: 'B' }] }) })
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('corp::team-b::m2')
+
+    // Switching back restores the first user's saved model again: the
+    // clear forgot which user the dropped selection belonged to. The team
+    // stub must cover that model again, or the membership check (rightly)
+    // drops it.
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(ALICE) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
+  })
+
+  it('drops a manually picked gateway model when a refresh switches users (#1134)', async () => {
+    // A user with no saved model on a gateway-only deployment picks a team
+    // model by hand: the restore ref stays unset for them, so the ownership
+    // tracking (not the restore) is what must not carry the pick over.
+    const freshConfig = (user) => ({ app_name: 'Atlas', user, models: [], llm_gateways: GATEWAYS, features: {} })
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(BOB) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(result.current.user).toBe(BOB))
+    expect(result.current.currentModel).toBe('')
+    act(() => result.current.setCurrentModel('corp::team-a::gpt-x'))
+    expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
+    expect(localStorage.getItem(`chatui-current-model:${BOB}`)).toBe('corp::team-a::gpt-x')
+
+    // A refresh that switches to a user with no saved model drops the pick.
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(ALICE) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('')
+    // BOB's pick stays saved for BOB.
+    expect(localStorage.getItem(`chatui-current-model:${BOB}`)).toBe('corp::team-a::gpt-x')
+    expect(localStorage.getItem(`chatui-current-model:${ALICE}`)).toBeNull()
+  })
+
+  it('re-checks a manually picked gateway model against team membership (#1134)', async () => {
+    // A picked model is owned by the picker, so when the next config
+    // refresh re-runs the membership check it is dropped like a restored
+    // one -- ownership, not the restore marker, decides.
+    const freshConfig = (user) => ({ app_name: 'Atlas', user, models: [], llm_gateways: GATEWAYS, features: {} })
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-a', label: 'A' }] }) })
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/config')) return { ok: true, json: async () => freshConfig(BOB) }
+      if (url.startsWith('/api/llm/gateways/corp/teams')) return teamsResponse()
+      return { ok: false, json: async () => ({}) }
+    }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(result.current.user).toBe(BOB))
+    act(() => result.current.setCurrentModel('corp::team-a::gpt-x'))
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/llm/gateways/corp/teams'))
+    expect(result.current.currentModel).toBe('corp::team-a::gpt-x')
+
+    // The user's team list no longer includes the picked model's team; the
+    // next refresh re-runs the check (fresh config arrays) and drops it.
+    teamsResponse = () => ({ ok: true, json: async () => ({ teams: [{ team_id: 'team-b', label: 'B' }] }) })
+    await act(async () => { await result.current.refreshConfig() })
+    expect(result.current.currentModel).toBe('')
+  })
+
   it('keeps a saved gateway model when membership cannot be checked', async () => {
     localStorage.setItem(`chatui-current-model:${BOB}`, 'corp::team-a::gpt-x')
     teamsResponse = () => ({ ok: false, status: 502, json: async () => ({}) })

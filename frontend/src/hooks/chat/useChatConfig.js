@@ -357,16 +357,47 @@ export function useChatConfig() {
   // unset), and a refresh that changes the signed-in user restores that
   // user's model too.
   const restoredForUserRef = useRef(null)
+  // The signed-in user the displayed selection belongs to. Set by the
+  // restore path and by every user-driven pick, so a refresh that switches
+  // users can tell a carried-over selection from this user's own (issue
+  // #1134; restoredForUserRef alone cannot, because a user who had nothing
+  // to restore and then picked manually never marks it).
+  const modelOwnerRef = useRef(null)
   useEffect(() => {
-    if (!isKnownUser(user) || !models.length) return
+    // Runs once per user once the config names at least one model source:
+    // static models, or in a gateway-only deployment the gateways, whose
+    // saved model keys are restored without any static model (issue #1134).
+    // The user stays unrestored until a model actually resolves, so a config
+    // refresh that arrives later (or adds static models) still gets to apply
+    // its default.
+    if (!isKnownUser(user)) return
+    // A refresh that switches users must never display the previous
+    // account's selection -- even when this response carries no model
+    // source at all, which must not read as "keep what is shown".
+    if (modelOwnerRef.current && modelOwnerRef.current !== user) {
+      setCurrentModel('')
+      currentModelRef.current = ''
+      // The cleared selection was the restore's user; forget it so a later
+      // refresh for them (or a switch back) restores afresh.
+      restoredForUserRef.current = null
+    }
+    if (!models.length && !llmGateways.length) return
     if (restoredForUserRef.current === user) return
-    restoredForUserRef.current = user
 
     const saved = readSavedModel(user)
     const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
+    if (!model) {
+      // Nothing resolves for this user yet: no saved model and no static
+      // default to fall back on (a gateway-only deployment where they have
+      // not picked a team model). Leave the restore un-done so a later
+      // config refresh can still resolve one.
+      return
+    }
+    restoredForUserRef.current = user
+    modelOwnerRef.current = user
     setCurrentModel(model)
     currentModelRef.current = model
-    if (model) writeSavedModel(user, model)
+    writeSavedModel(user, model)
   }, [user, models, llmGateways])
 
   // A saved team-gateway model stays only while the user is still in that
@@ -383,10 +414,13 @@ export function useChatConfig() {
     ;(async () => {
       const member = await gatewayTeamStillMember(parsed)
       if (token !== membershipCheckRef.current || member) return
-      if (restoredForUserRef.current !== user || currentModelRef.current !== currentModel) return
+      // Ownership decides whose selection this is, so a manually picked
+      // team model is re-checked exactly like a restored one.
+      if (modelOwnerRef.current !== user || currentModelRef.current !== currentModel) return
       const fallback = defaultModelOf({ models })
       setCurrentModel(fallback)
       currentModelRef.current = fallback
+      modelOwnerRef.current = user
       writeSavedModel(user, fallback)
     })()
   }, [user, currentModel, models, llmGateways])
@@ -416,6 +450,9 @@ export function useChatConfig() {
     setCurrentModel: (model) => {
       setCurrentModel(model)
       currentModelRef.current = model
+      // The selection now belongs to whoever picked it, so a refresh that
+      // switches users can drop it instead of carrying it over.
+      modelOwnerRef.current = userRef.current
       writeSavedModel(userRef.current, model)
     },
     agentModeAvailable,

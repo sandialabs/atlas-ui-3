@@ -5,6 +5,7 @@ Last updated: 2026-10-14
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
 *   **Location**: The package default is at `atlas/config/llmconfig.yml`. Place your instance-specific configuration in `config/llmconfig.yml`.
+*   **Model sources**: The `models` section and the `litellm_gateways` section (see [Enterprise LiteLLM Team Gateways](litellm-team-gateways.md)) are the two supported model sources, and either alone is a valid configuration. A deployment may run with an empty `models` section -- or none at all -- when every model is reached through a gateway; a configuration with neither fails validation at startup.
 
 ## Comprehensive Example
 

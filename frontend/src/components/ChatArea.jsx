@@ -80,6 +80,7 @@ const ChatArea = () => {
     sendCaptureCorrection,
     currentModel,
     models,
+    llmGateways,
     tools,
     selectedTools,
     toggleTool,
@@ -1052,6 +1053,23 @@ const ChatArea = () => {
               window the aux stack is capped and scrolls; putting the
               disconnected and model-capability warnings first keeps them in
               view instead of scrolled out of sight under the status row. */}
+          {/* A gateway-only deployment has no static model to default to, so
+              Send stays disabled until a team model is picked -- say why
+              instead of a silently dead composer (issue #1134). Shown only
+              when no static model exists at all; a mixed deployment always
+              has a default selected. */}
+          {isConnected && !currentModel && models.length === 0 && llmGateways?.length > 0 && (
+            <div
+              className="mb-2 px-3 py-2 bg-blue-900/30 border border-blue-600/50 rounded-lg flex items-center gap-2 text-blue-200 text-sm"
+              role="status"
+              data-testid="choose-team-model-hint"
+            >
+              <span>
+                Choose a model to start chatting: open the model selector and pick one of
+                your LiteLLM teams, then a model that team may call.
+              </span>
+            </div>
+          )}
           {!isConnected && (
             <div
               className="mb-2 px-3 py-2 bg-red-900/40 border border-red-600/50 rounded-lg flex items-center gap-2 text-red-300 text-sm"

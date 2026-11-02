@@ -27,6 +27,7 @@ from .models import (
     RAGSourcesConfig,
     ToolApprovalConfig,
     ToolApprovalsConfig,
+    has_model_source,
     qualified_tool_name,
     resolve_env_var,
 )
@@ -248,7 +249,11 @@ class ConfigManager:
                     self._llm_config = LLMConfig(**data)
                     # Validate compliance levels
                     self._validate_llm_compliance_levels()
-                    logger.info(f"Loaded {len(self._llm_config.models)} models from LLM config")
+                    logger.info(
+                        "Loaded %d models and %d LiteLLM gateway(s) from LLM config",
+                        len(self._llm_config.models),
+                        len(self._llm_config.litellm_gateways),
+                    )
                 else:
                     self._llm_config = LLMConfig(models={})
                     logger.info("Created empty LLM config (no configuration file found)")
@@ -714,9 +719,21 @@ class ConfigManager:
 
         try:
             llm_config = self.llm_config
-            status["llm_config"] = len(llm_config.models) > 0
+            # A model source is a static model or an Enterprise LiteLLM
+            # gateway; either alone is a usable configuration (issue #1134).
+            status["llm_config"] = has_model_source(llm_config)
             if not status["llm_config"]:
-                logger.warning("LLM config is valid but contains no models")
+                logger.error(
+                    "LLM config is valid but defines no model source: add a static "
+                    "model under 'models' or an Enterprise LiteLLM gateway under "
+                    "'litellm_gateways'"
+                )
+            elif not llm_config.models:
+                logger.info(
+                    "LLM config has no static models; models are served by %d "
+                    "LiteLLM gateway(s)",
+                    len(llm_config.litellm_gateways),
+                )
         except Exception as e:
             logger.error(f"LLM config validation failed: {e}", exc_info=True)
             status["llm_config"] = False

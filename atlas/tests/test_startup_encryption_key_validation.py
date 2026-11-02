@@ -120,7 +120,9 @@ class TestLifespanRefusesToStart:
 
         config = types.SimpleNamespace(
             app_settings=settings_factory(key),
-            llm_config=types.SimpleNamespace(models={}),
+            # Mirrors LLMConfig's shape: the startup log reports both model
+            # sources (issue #1134).
+            llm_config=types.SimpleNamespace(models={}, litellm_gateways={}),
             mcp_config=types.SimpleNamespace(servers={}),
         )
         monkeypatch.setattr(

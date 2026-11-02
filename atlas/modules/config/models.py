@@ -597,7 +597,10 @@ class LiteLLMGatewayConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     """Configuration for all LLM models."""
-    models: Dict[str, ModelConfig]
+    # Optional: an Enterprise deployment may use LiteLLM gateways as its sole
+    # model source, so zero static models is a valid configuration (issue
+    # #1134). validate_config() still requires at least one model source.
+    models: Dict[str, ModelConfig] = Field(default_factory=dict)
     # Enterprise LiteLLM proxies with team-scoped model selection, keyed by a
     # short gateway name that prefixes the gateway's model keys.
     litellm_gateways: Dict[str, LiteLLMGatewayConfig] = Field(default_factory=dict)
@@ -605,10 +608,26 @@ class LLMConfig(BaseModel):
     @field_validator('models', mode='before')
     @classmethod
     def validate_models(cls, v):
-        """Convert dict values to ModelConfig objects."""
+        """Convert dict values to ModelConfig objects.
+
+        A null ``models`` key (``models:`` with nothing under it) is an empty
+        set, not a schema error: the file may leave the section out entirely
+        when every model is reached through a gateway.
+        """
+        if v is None:
+            return {}
         if isinstance(v, dict):
             return {name: ModelConfig(**config) if isinstance(config, dict) else config
                    for name, config in v.items()}
+        return v
+
+    @field_validator('litellm_gateways', mode='before')
+    @classmethod
+    def validate_gateways(cls, v):
+        """A null ``litellm_gateways`` key is an empty set, matching the null
+        ``models`` handling: either section may be left empty in YAML."""
+        if v is None:
+            return {}
         return v
 
     @model_validator(mode="after")
@@ -682,6 +701,18 @@ def lookup_model_config(llm_config: Any, model_name: str) -> Optional[ModelConfi
     # Deliberately not defaulted: a missing or broken registry must raise here
     # so callers that fail open on a lookup error can still log it.
     return llm_config.models.get(model_name)
+
+
+def has_model_source(llm_config: Any) -> bool:
+    """Whether the configuration names at least one model source.
+
+    A static model or an Enterprise LiteLLM gateway each count; either alone
+    is a usable deployment (issue #1134). Tolerates the bare ``models``
+    holders test doubles pass around, like :func:`lookup_model_config` does.
+    """
+    models = getattr(llm_config, "models", None) or {}
+    gateways = getattr(llm_config, "litellm_gateways", None) or {}
+    return bool(models or gateways)
 
 
 class OAuthConfig(BaseModel):
