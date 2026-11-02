@@ -11,9 +11,15 @@ from pathlib import Path as _Path
 
 from dotenv import dotenv_values as _dotenv_values
 
-# Load .env values without setting them in os.environ yet (just to read feature flag)
+from atlas.core.dotenv_policy import dotenv_loading_disabled as _dotenv_loading_disabled
+
+# Load .env values without setting them in os.environ yet (just to read feature flag).
+# PYTHON_DOTENV_DISABLED (python-dotenv's own opt-out, set by the test harness)
+# skips the read, exactly as it makes the load_dotenv() call below a no-op.
 _env_path = _Path(__file__).parent.parent / ".env"
-_env_values = _dotenv_values(_env_path) if _env_path.exists() else {}
+_env_values = (
+    _dotenv_values(_env_path) if _env_path.exists() and not _dotenv_loading_disabled() else {}
+)
 
 # Check feature flag: FEATURE_SUPPRESS_LITELLM_LOGGING (default: true)
 _suppress_litellm = _env_values.get("FEATURE_SUPPRESS_LITELLM_LOGGING", "true").lower() in ("true", "1", "yes")
@@ -22,7 +28,7 @@ if _suppress_litellm and "LITELLM_LOG" not in os.environ:
     os.environ["LITELLM_LOG"] = "ERROR"
 
 # Clean up temporary imports
-del _Path, _dotenv_values, _env_path, _env_values, _suppress_litellm
+del _Path, _dotenv_values, _dotenv_loading_disabled, _env_path, _env_values, _suppress_litellm
 
 # Standard imports follow - must come after LiteLLM logging suppression above
 # ruff: noqa: E402
@@ -122,7 +128,8 @@ from atlas.routes.user_prompt_routes import router as user_prompt_router
 from atlas.routes.workspace_routes import router as workspace_router
 from atlas.version import VERSION
 
-# Load environment variables from the parent directory
+# Load environment variables from the parent directory. A no-op when
+# PYTHON_DOTENV_DISABLED is set (see atlas/core/dotenv_policy.py).
 load_dotenv(dotenv_path="../.env")
 
 # Surface (and ignore) any removed Agent Portal settings left in .env / the env

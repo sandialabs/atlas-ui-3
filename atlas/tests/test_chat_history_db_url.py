@@ -152,7 +152,7 @@ class TestChatHistoryDbUrlPrecedenceFromAllSources:
     the explicit URL must still win.
     """
 
-    def test_url_from_env_file_wins_over_parts(self, tmp_path, monkeypatch):
+    def test_url_from_env_file_wins_over_parts(self, tmp_path, monkeypatch, dotenv_loading_enabled):
         env_file = tmp_path / ".env"
         env_file.write_text(
             "CHAT_HISTORY_DB_URL=postgresql://envfile:pw@db.example.com:5432/from_envfile\n"

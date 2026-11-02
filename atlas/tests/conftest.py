@@ -17,6 +17,32 @@ if str(atlas_root) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# --- .env isolation: one switch, set before anything is imported ----------
+# Every ``.env`` read in this process -- and in every subprocess a test spawns,
+# which inherits this environment -- is turned off here, before the first app
+# or third-party import (issue #1149). The readers it covers:
+#
+#   * ``atlas/main.py`` calls ``load_dotenv("../.env")`` at import, which
+#     refills any variable the scrub below removed;
+#   * ``litellm`` calls a bare ``load_dotenv()`` at import, whose
+#     ``find_dotenv`` walk starts at litellm's own file -- so a venv shared
+#     with another checkout loads *that* checkout's ``.env``;
+#   * ``AppSettings``' dotenv source (``env_file="../.env"``), which subprocess
+#     tests that import the real app would otherwise read.
+#
+# ``PYTHON_DOTENV_DISABLED`` is python-dotenv's own opt-out (``load_dotenv``
+# returns False without touching ``os.environ``); Atlas's own non-``load_dotenv``
+# reads honor it through ``atlas.core.dotenv_policy``. Forced, not
+# ``setdefault``: an exported falsy value must not reopen the channel. Nothing
+# sets it at runtime, so production behavior is unchanged.
+#
+# Test configuration comes from the process environment only: the harness
+# variables below, the session pins further down, and per-test
+# ``monkeypatch``. Tests that exercise dotenv loading itself opt back in with
+# the ``dotenv_loading_enabled`` fixture (in-process) or by removing the
+# variable from a subprocess's ``env``.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+
 # --- Shell-environment isolation -----------------------------------------
 # The guards below pin specific variables, but ``AppSettings`` reads the whole
 # process environment, so *any* settings-derived variable exported in the
@@ -129,93 +155,13 @@ def _scrub_session_environment() -> None:
 
 _scrub_session_environment()
 
-# --- dotenv import-window guard ------------------------------------------
-# Imports executed by this conftest itself must not be able to load a FOREIGN
-# .env into ``os.environ``: ``litellm`` calls bare ``load_dotenv()`` at import
-# (``litellm/__init__.py``), and python-dotenv's ``find_dotenv`` then walks up
-# parent directories -- so a checkout (or worktree) without its own ``.env``
-# picks up whatever ``.env`` an ancestor directory happens to contain. Values
-# loaded that way re-enter ``os.environ`` *after* the scrub above (a foreign
-# ``CAPABILITY_TOKEN_SECRET`` failed conftest import outright this way), so
-# the scrub alone cannot hold.
-#
-# The guard is deliberately selective rather than a blanket block: the
-# checkout's own ``.env`` stays load-bearing exactly as before (CI bakes
-# ``/app/.env``, and the app-import chain inside conftest reads its values --
-# e.g. ``DEBUG_MODE`` -- during these imports, because ``AppSettings`` itself
-# has env-file loading disabled). Only a resolved path OUTSIDE the checkout
-# under test is refused. The real function is restored at the bottom of this
-# module, before any test module is imported, so tests that exercise dotenv
-# behavior (CLI env-file handling) keep the real implementation. This is a
-# test-isolation guard, not a product behavior change.
-import dotenv  # noqa: E402
-
-_real_load_dotenv = dotenv.main.load_dotenv
-_real_find_dotenv = dotenv.main.find_dotenv
-
-
-def _dotenv_path_is_inside_checkout(path) -> bool:
-    resolved = Path(path).resolve()
-    root = project_root.resolve()
-    return resolved == root or root in resolved.parents
-
-
-def _guarded_load_dotenv(*args, **kwargs):
-    """Refuse ``load_dotenv`` calls that would load a .env from outside the
-    checkout; pass everything else through to the real implementation.
-
-    A call with no path (the bare ``load_dotenv()`` litellm makes) resolves
-    the file with python-dotenv's upward walk, then applies the same
-    inside-the-checkout rule. Note the walk's origin: ``find_dotenv`` starts
-    from the first stack frame outside python-dotenv, which with this guard in
-    between is *this file*, so the walk starts at ``atlas/tests/`` rather than
-    at the real caller (e.g. ``site-packages/litellm/``). That is deliberate:
-    a venv outside the checkout (or a worktree's symlinked ``.venv``) means a
-    caller-origin walk never reaches the checkout's ``.env``, and the suite's
-    mock-admin tests depend on the ``DEBUG_MODE`` it supplies during these
-    imports -- starting from the caller was tried and failed them. The
-    conftest origin therefore resolves the checkout's own ``.env`` when there
-    is one, and an ancestor's (refused) when there is not.
-
-    Once the window closes the guard is a pure pass-through: a module that
-    bound the name with ``from dotenv import load_dotenv`` during the window
-    (``litellm.proxy.proxy_cli`` does) keeps this function object for the
-    whole session, and must see the real behavior from then on.
-    """
-    if not _dotenv_guard_active or kwargs.get("stream") is not None:
-        return _real_load_dotenv(*args, **kwargs)
-    dotenv_path = kwargs.get("dotenv_path")
-    if dotenv_path is None and args:
-        dotenv_path = args[0]
-    if dotenv_path is None:
-        dotenv_path = _real_find_dotenv(usecwd=False)
-        if not dotenv_path:
-            return False
-        if not args:
-            kwargs["dotenv_path"] = dotenv_path
-    if not _dotenv_path_is_inside_checkout(dotenv_path):
-        return False
-    return _real_load_dotenv(*args, **kwargs)
-
-
-_dotenv_guard_active = False
-
-
-def _block_foreign_dotenv_loads() -> None:
-    global _dotenv_guard_active
-    _dotenv_guard_active = True
-    dotenv.main.load_dotenv = _guarded_load_dotenv
-    dotenv.load_dotenv = _guarded_load_dotenv
-
-
-def _restore_dotenv_loads() -> None:
-    global _dotenv_guard_active
-    _dotenv_guard_active = False
-    dotenv.main.load_dotenv = _real_load_dotenv
-    dotenv.load_dotenv = _real_load_dotenv
-
-
-_block_foreign_dotenv_loads()
+# ``DEBUG_MODE`` is harness-provided: CI passes it explicitly on every leg
+# (``docker run -e DEBUG_MODE=true|false``) and an exported value is honored.
+# When nothing provides it, pin the suite's documented default -- the same
+# ``true`` that ``Dockerfile-test`` bakes and that the debug-only test gates
+# (``os.environ.get("DEBUG_MODE", "true")``) assume -- instead of letting a
+# checkout-local ``.env`` decide (issue #1149).
+os.environ.setdefault("DEBUG_MODE", "true")
 
 # --- Telemetry isolation -------------------------------------------------
 # OpenTelemetry's ``trace.set_tracer_provider`` is first-writer-wins: once
@@ -294,11 +240,11 @@ AppSettings.model_config["env_file"] = None
 # scenario.
 #
 # Pin all three to explicit values for the session -- including the default
-# level, *pinned empty* rather than popped. ``atlas.main`` calls
-# ``load_dotenv("../.env")`` (override=False) at import, which refills any
-# environment key that is missing, so a popped ``COMPLIANCE_DEFAULT_LEVEL`` would
-# be restored by a developer's .env and the guard would depend on import order.
-# An explicit value is left alone by ``load_dotenv`` with ``override=False``.
+# level, *pinned empty* rather than popped. ``.env`` loading is disabled for
+# the session (``PYTHON_DOTENV_DISABLED`` above), so nothing refills a popped
+# key any more; the explicit values stay as defense in depth, because an
+# explicit value is also left alone by any ``load_dotenv(override=False)`` a
+# test re-enables.
 # Compliance-specific tests still opt in with ``monkeypatch.setenv`` / direct
 # settings overrides, which take precedence over this session-level pin (see
 # ``test_compliance_level_required.py``). This is a test-isolation guard, not a
@@ -343,9 +289,9 @@ os.environ["FEATURE_PROXY_SECRET_ENABLED"] = "false"
 # contributor has it exported in their shell, admin-route tests that expect a
 # non-admin identity to be rejected silently become meaningless and fail with
 # 200s/400s instead of 403s. Pin it off for the test session rather than removing
-# it: ``atlas.main`` loads the repository .env during collection, and dotenv
-# would otherwise restore a developer-local true value. Tests can still opt into
-# the bypass via ``skip_auth_checks_env``.
+# it, so even a test that re-enables dotenv loading (``override=False``) cannot
+# restore a developer-local true value. Tests can still opt into the bypass via
+# ``skip_auth_checks_env``.
 os.environ["SKIP_AUTHORIZATION_CHECKS"] = "false"
 
 # MCP token storage now refuses to start without an explicit encryption key
@@ -388,11 +334,19 @@ import pytest  # noqa: E402
 
 from atlas.modules.config.config_manager import config_manager as _config_manager  # noqa: E402
 
-# Conftest's own imports are done: hand dotenv back to the suite. Everything
-# imported below this line -- and every test module after collection starts --
-# sees the real ``load_dotenv``, so dotenv behavior tests and the CLI env-file
-# tests exercise the real implementation.
-_restore_dotenv_loads()
+
+@pytest.fixture
+def dotenv_loading_enabled(monkeypatch):
+    """Re-enable ``.env`` loading for one test.
+
+    The session disables every ``.env`` read via ``PYTHON_DOTENV_DISABLED``
+    (see the top of this module, issue #1149). Tests that exercise dotenv
+    behavior itself request this fixture; ``monkeypatch`` restores the switch
+    afterwards. Pair it with ``mock.patch.dict(os.environ)`` (or
+    ``monkeypatch``) around the load so loaded values cannot outlive the test.
+    """
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+
 
 # ConfigManager caches each lazily-built config on a private (underscore-prefixed)
 # instance attribute. Rather than hand-maintain a list that silently drifts when a

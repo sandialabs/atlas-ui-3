@@ -5,9 +5,10 @@ import os
 from typing import Dict, FrozenSet, Optional
 
 from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from sqlalchemy.engine import make_url
 
+from atlas.core.dotenv_policy import dotenv_loading_disabled
 from atlas.core.security_config import validate_capability_secret
 
 logger = logging.getLogger(__name__)
@@ -1559,3 +1560,25 @@ class AppSettings(BaseSettings):
         "extra": "ignore",
         "env_prefix": "",
     }
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ):
+        """Keep the default source order; drop the ``.env`` source when
+        ``PYTHON_DOTENV_DISABLED`` is set.
+
+        The switch is python-dotenv's own opt-out (it already turns
+        ``load_dotenv`` into a no-op); honoring it here as well means one
+        variable disables every ``.env`` read, including in subprocesses that
+        inherit it. The test harness sets it (issue #1149); with it unset the
+        sources are exactly pydantic-settings' defaults.
+        """
+        if dotenv_loading_disabled():
+            return init_settings, env_settings, file_secret_settings
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
