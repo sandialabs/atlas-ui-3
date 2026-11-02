@@ -1,6 +1,6 @@
 # Multi-replica harness
 
-Last updated: 2026-11-01
+Last updated: 2026-11-02
 
 Pytest suite that runs **two independent Atlas API processes** (replicas A and
 B) against one shared Redis and one shared PostgreSQL, the way a horizontally
@@ -25,6 +25,18 @@ Requirements:
   `ATLAS_TEST_POSTGRES_URL` (an admin URL; the suite creates and drops its own
   database and uses a random Redis key prefix).
 
+If neither podman nor the URLs are available the suite is skipped when you
+run pytest directly; through `test/multireplica_tests.sh` it refuses to start.
+Any other infrastructure problem (a broken podman, an image pull failure, an
+unreachable URL, a readiness timeout) **fails** the run rather than skipping
+it, so the gate can never pass with zero coverage.
+
+`bash test/run_pr_validation.sh 1146` runs the suite and checks its outcome
+from the parsed pytest counts (no failures, errors, skips or XPASSes, and
+exactly `EXPECTED_GAPS` expected failures), that every process group and
+container the run recorded in its manifest (`ATLAS_MULTIREPLICA_MANIFEST`) is
+gone, and that `atlas/tests` does not collect the harness.
+
 It is **not** part of `test/atlas_tests.sh` or CI. AGENTS.md ("Horizontal
 Scaling") lists the code paths whose PRs must run it.
 
@@ -34,8 +46,8 @@ Scaling") lists the code paths whose PRs must run it.
 |-------|-------|-------|
 | Redis + Postgres | `harness/infra.py` | podman, one pair per session |
 | Scripted model | `harness/mock_llm.py` | OpenAI-compatible; directives in the message drive tool calls |
-| Side-effect tool | `harness/side_effect_mcp.py` | stdio MCP server; every execution is appended to a shared file so tests can count them across replicas |
-| Replicas | `harness/replica.py` | `uvicorn atlas.main:app` per replica, own port, process group, log and `.env`; environment built from scratch |
+| Side-effect tool | `harness/side_effect_mcp.py`, `harness/side_effect_keys.py` | stdio MCP server; every execution is appended to a shared file so tests can count them across replicas. Writer and reader share one key-to-filename function; the reader skips torn or undecodable lines |
+| Replicas | `harness/replica.py` | `uvicorn atlas.main:app` per replica, own port, process group, log and `.env`; environment built from scratch, `ENVIRONMENT=development` (required by `DEBUG_MODE`) and `PYTHON_DOTENV_DISABLED=1` so litellm's import-time `load_dotenv()` cannot pull in a `.env` found above the venv |
 | Client helpers | `harness/cluster.py` | agent-runs REST API (`launch`, `run_status`, `cancel`, `wait_terminal`), conversations, side-effect counts |
 
 Replicas start once per session. The `cluster` fixture restarts or resumes any
@@ -52,8 +64,10 @@ answer. A message without directives is answered `ECHO: <message>`.
 
 ## The tests
 
-- `test_harness_baseline.py`: must pass on main. Shared durable state, the
-  side-effect counter, crash without replay, pause/resume.
+- `test_harness_baseline.py`: must pass on main. Durable state shared through
+  Postgres, live sessions shared through Redis (fails if the replicas fall
+  back to the in-memory session store), the side-effect counter, crash without
+  replay, pause/resume.
 - `test_run_coordination_gaps.py`: the #1128 acceptance criteria, each marked
   `xfail(strict=True, raises=GapNotClosed)`. Only the final criterion raises
   `GapNotClosed` (via `expect(...)`); preconditions use plain `assert`, so a

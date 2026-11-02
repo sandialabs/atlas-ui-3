@@ -434,4 +434,4 @@ A PR that touches any of the following must run it and paste the pytest summary 
 - `atlas/infrastructure/redis/`, `atlas/infrastructure/sessions/`
 - run admission, cancel, steering or tool-approval paths (`atlas/application/chat/service.py`, `approval_manager.py`, `elicitation_manager.py`, `atlas/routes/agent_run_routes.py`, the run handling in `atlas/main.py`)
 
-The run must end with no failures. Tests marked `xfail(strict=True)` describe #1128 acceptance criteria not met yet; a PR that meets one gets an XPASS, which fails the run, and removes that marker in the same PR.
+The run must end with no failures. Tests marked `xfail(strict=True)` describe #1128 acceptance criteria not met yet; a PR that meets one gets an XPASS, which fails the run, and removes that marker in the same PR (and lowers `EXPECTED_GAPS` in `test/pr-validation/test_pr1146_multireplica_harness.sh`). Infrastructure that fails to come up fails the run; it is never a skip.

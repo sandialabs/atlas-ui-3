@@ -9,6 +9,8 @@
 # Needs podman (Redis and Postgres are started as throwaway containers), or
 # ATLAS_TEST_REDIS_URL / ATLAS_TEST_POSTGRES_URL pointing at servers you run.
 # ATLAS_MULTIREPLICA_KEEP=1 keeps the work dir (replica logs) afterwards.
+# ATLAS_MULTIREPLICA_MANIFEST=<file> records every process group and container
+# the run starts (one JSON line each), so a caller can check they are all gone.
 #
 # Usage: bash test/multireplica_tests.sh [extra pytest args]
 set -euo pipefail
@@ -39,4 +41,6 @@ if not os.path.realpath(atlas.__file__).startswith(os.path.realpath(root) + os.s
     sys.exit(f"atlas resolves to {atlas.__file__}, not this checkout ({root})")
 PY
 
+# Infrastructure that fails to come up is a failure here, never a skip.
+export ATLAS_MULTIREPLICA_REQUIRED=1
 exec python -m pytest test/multireplica -v -p no:cacheprovider -rxX "$@"

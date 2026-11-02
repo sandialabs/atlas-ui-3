@@ -3,7 +3,8 @@
 Set ``ATLAS_TEST_REDIS_URL`` and/or ``ATLAS_TEST_POSTGRES_URL`` to use servers
 you already run; anything not given is started as a disposable podman
 container on a random local port and removed afterwards. With neither the URLs
-nor podman available the suite is skipped.
+nor podman available the suite is skipped; any other infrastructure failure
+fails it (see ``conftest.shared_infra``).
 
 A provided Redis is isolated with a random key prefix and a provided Postgres
 with a fresh database that is dropped afterwards, so the suite never touches
@@ -21,12 +22,14 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from .manifest import record_container
+
 REDIS_IMAGE = os.environ.get("ATLAS_TEST_REDIS_IMAGE", "docker.io/library/redis:7-alpine")
 POSTGRES_IMAGE = os.environ.get("ATLAS_TEST_POSTGRES_IMAGE", "docker.io/library/postgres:16-alpine")
 
 
 class InfraUnavailable(RuntimeError):
-    """Neither a provided URL nor podman can supply a server."""
+    """A provided URL or podman could not supply a working server."""
 
 
 @dataclass
@@ -63,11 +66,19 @@ def _run_container(name: str, image: str, container_port: int, env: dict,
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         raise InfraUnavailable(f"podman run {image} failed: {result.stderr.strip()}")
-    port = subprocess.run(
-        [podman, "port", name, f"{container_port}/tcp"], capture_output=True, text=True, timeout=30
-    ).stdout.strip()
-    # "127.0.0.1:41234" (one line per binding)
-    return int(port.splitlines()[0].rsplit(":", 1)[1])
+    record_container(name)
+    output = ""
+    try:
+        output = subprocess.run(
+            [podman, "port", name, f"{container_port}/tcp"], capture_output=True, text=True, timeout=30
+        ).stdout.strip()
+        # "127.0.0.1:41234" (one line per binding)
+        return int(output.splitlines()[0].rsplit(":", 1)[1])
+    except (subprocess.SubprocessError, IndexError, ValueError) as exc:
+        # The caller only registers cleanup once it has a port; remove the
+        # container here so a failed lookup cannot leave it running.
+        _remove_container(name)()
+        raise InfraUnavailable(f"podman port {name} failed: {exc}; output: {output!r}") from exc
 
 
 def _remove_container(name: str) -> Callable[[], None]:

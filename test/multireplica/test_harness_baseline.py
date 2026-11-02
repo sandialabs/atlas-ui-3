@@ -1,6 +1,7 @@
 """What already works across replicas, and the harness checking itself.
 
-These must pass on main. If one fails, either the harness is broken or a change
+These must pass on main. Between them they prove the replicas really share
+state: durable data through PostgreSQL, live sessions through Redis. If one fails, either the harness is broken or a change
 regressed something multi-replica deployments rely on today.
 """
 
@@ -31,6 +32,38 @@ def test_durable_state_is_shared_through_postgres(cluster):
     assert final["status"] == "completed", final
     assert final["result"] == "ECHO: hello from replica A", final
     assert handle["conversation_id"] in cluster.conversation_ids(cluster.b, user)
+
+
+def test_live_sessions_are_shared_through_redis(cluster):
+    """A run's session is written to the shared Redis, not a replica's memory.
+
+    Guards against a silent fallback to the process-local session store, which
+    would leave every other test measuring single-replica behaviour.
+    """
+    import json
+
+    import redis
+
+    user = cluster.new_user()
+    message = f"session probe {user}"
+    handle = cluster.launch_ok(cluster.a, user, message)
+    final = cluster.wait_terminal(cluster.a, handle["run_id"])
+    assert final["status"] == "completed", final
+
+    client = redis.Redis.from_url(cluster.infra.redis_url)
+    try:
+        pattern = f"{cluster.infra.redis_key_prefix}:session:*"
+        sessions = []
+        for key in client.scan_iter(match=pattern, count=500):
+            raw = client.hget(key, "data")
+            if raw:
+                sessions.append(json.loads(raw))
+    finally:
+        client.close()
+    mine = [s for s in sessions if s.get("user_email") == user]
+    assert mine, f"no session for {user} under {pattern}; found {len(sessions)} other session(s)"
+    contents = json.dumps([s.get("history") for s in mine])
+    assert message in contents and f"ECHO: {message}" in contents, contents[:2000]
 
 
 def test_side_effect_tool_counts_every_execution(cluster):

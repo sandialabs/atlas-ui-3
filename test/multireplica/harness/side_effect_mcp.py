@@ -9,14 +9,12 @@ run interrupted by a replica crash is never replayed.
 
 import json
 import os
-import re
 import time
 
 from fastmcp import FastMCP
+from side_effect_keys import log_name  # sibling module; this file runs as a script
 
 mcp = FastMCP("harness")
-
-_SAFE_KEY = re.compile(r"[^A-Za-z0-9_.-]")
 
 
 @mcp.tool
@@ -28,13 +26,16 @@ def side_effect(key: str, seconds: float = 0.0) -> str:
         seconds: How long to wait after recording, to keep the run busy.
     """
     directory = os.environ["HARNESS_SIDE_EFFECT_DIR"]
-    path = os.path.join(directory, _SAFE_KEY.sub("_", key) + ".log")
+    path = os.path.join(directory, log_name(key))
     line = json.dumps({"replica": os.environ.get("HARNESS_REPLICA", "?"), "pid": os.getpid(), "t": time.time()})
-    # A single O_APPEND write of a short line is atomic, so replicas writing
-    # concurrently never interleave a record.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    # O_APPEND keeps concurrent replicas from overwriting each other. A short
+    # write is retried until the whole record is out; the reader ignores a
+    # line that has no newline yet, so a torn record is never miscounted.
+    data = (line + "\n").encode()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        os.write(fd, (line + "\n").encode())
+        while data:
+            data = data[os.write(fd, data):]
     finally:
         os.close(fd)
     time.sleep(max(0.0, min(float(seconds), 60.0)))

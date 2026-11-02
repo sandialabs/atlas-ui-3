@@ -24,6 +24,8 @@ from typing import Dict, Optional
 
 import httpx
 
+from .manifest import record_process
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Variables a child process needs to run at all; everything else is explicit.
@@ -37,7 +39,13 @@ def free_port() -> int:
 
 
 def port_is_free(port: int) -> bool:
+    """True when a new server could listen on ``port`` now.
+
+    ``SO_REUSEADDR`` matches what uvicorn sets, so a port whose old connections
+    sit in ``TIME_WAIT`` after a replica stopped still counts as free.
+    """
     with socket.socket() as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
         except OSError:
@@ -49,6 +57,11 @@ def base_env(extra: Dict[str, str]) -> Dict[str, str]:
     env = {k: os.environ[k] for k in _PASSTHROUGH if k in os.environ}
     env["PYTHONPATH"] = str(REPO_ROOT)
     env["PYTHONUNBUFFERED"] = "1"
+    # litellm calls ``load_dotenv()`` at import time, which walks up from the
+    # installed package and loads the first ``.env`` it finds -- with a venv
+    # inside a checkout, the developer's own ``.env``. Disable python-dotenv so
+    # no file outside the harness can configure a replica.
+    env["PYTHON_DOTENV_DISABLED"] = "1"
     env.update(extra)
     return env
 
@@ -94,6 +107,7 @@ class Replica:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        record_process(f"replica-{self.name}", self.proc.pid)
         self.paused = False
         self.wait_healthy(timeout)
 
@@ -106,7 +120,7 @@ class Replica:
                 if httpx.get(self.url + "/api/health", timeout=2).status_code == 200:
                     return
             except httpx.HTTPError:
-                pass
+                pass  # not listening yet; keep polling until the deadline
             time.sleep(0.5)
         raise RuntimeError(f"{self.name} not healthy after {timeout:.0f}s:\n{self.log_tail()}")
 
@@ -115,7 +129,7 @@ class Replica:
             try:
                 os.killpg(self.proc.pid, sig)
             except ProcessLookupError:
-                pass
+                pass  # the group already exited between poll() and killpg()
 
     def kill(self) -> None:
         """Crash the replica: SIGKILL its whole process group, no teardown."""
@@ -154,6 +168,8 @@ class Replica:
             try:
                 self.proc.wait(10)
             except subprocess.TimeoutExpired:
+                # Unkillable (e.g. stuck in D state); drop the handle anyway
+                # and let the port wait below report what is left.
                 pass
         self.proc = None
         self.paused = False
@@ -194,18 +210,26 @@ class MockLLM:
             start_new_session=True,
         )
         log.close()
+        record_process("mock-llm", self.proc.pid)
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
+            if self.proc.poll() is not None:
+                break
             try:
                 if httpx.get(self.url + "/health", timeout=2).status_code == 200:
                     return
             except httpx.HTTPError:
                 time.sleep(0.3)
-        raise RuntimeError("mock LLM did not start")
+        log_text = (self.workdir / "mock_llm.log").read_text(errors="replace")[-2000:]
+        self.stop()
+        raise RuntimeError(f"mock LLM did not start:\n{log_text}")
 
     def stop(self) -> None:
         if self.proc is not None and self.proc.poll() is None:
-            os.killpg(self.proc.pid, signal.SIGKILL)
+            try:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # exited between poll() and killpg()
             self.proc.wait(10)
 
 
@@ -255,7 +279,11 @@ def replica_env(
 ) -> Dict[str, str]:
     env = {
         "PORT": str(port),
+        # DEBUG_MODE (X-User-Email trusted without a proxy) is refused when
+        # ENVIRONMENT is production, the default; replicas bind to loopback.
         "DEBUG_MODE": "true",
+        "ENVIRONMENT": "development",
+        "ATLAS_HOST": "127.0.0.1",
         "APP_CONFIG_DIR": str(config_dir),
         "APP_LOG_DIR": str(workdir / "logs"),
         # Shared state: what makes these processes replicas of one deployment.

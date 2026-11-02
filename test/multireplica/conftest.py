@@ -28,22 +28,46 @@ def harness_dir():
         shutil.rmtree(path, ignore_errors=True)
 
 
+def _infra_absent() -> bool:
+    """Nothing was offered at all: no podman and no ATLAS_TEST_*_URL."""
+    return (
+        shutil.which("podman") is None
+        and not os.environ.get("ATLAS_TEST_REDIS_URL")
+        and not os.environ.get("ATLAS_TEST_POSTGRES_URL")
+    )
+
+
 @pytest.fixture(scope="session")
 def shared_infra():
+    """Redis + Postgres for the session.
+
+    The only skip is a machine that offers no infrastructure at all, and only
+    when the run is not required (``test/multireplica_tests.sh`` sets
+    ``ATLAS_MULTIREPLICA_REQUIRED=1``). A broken podman, a failed image pull, a
+    readiness timeout or an unreachable supplied URL fails the run: a gate that
+    "passes" with zero coverage is worse than one that fails loudly.
+    """
     try:
         infra = start_shared_infra()
-    except InfraUnavailable as exc:
-        pytest.skip(f"multi-replica harness needs Redis and Postgres: {exc}")
-    yield infra
-    infra.close()
+    except (InfraUnavailable, ImportError) as exc:
+        message = f"multi-replica harness needs Redis and Postgres: {exc}"
+        if _infra_absent() and not os.environ.get("ATLAS_MULTIREPLICA_REQUIRED"):
+            pytest.skip(message)
+        pytest.fail(message, pytrace=False)
+    try:
+        yield infra
+    finally:
+        infra.close()
 
 
 @pytest.fixture(scope="session")
 def mock_llm(harness_dir):
     mock = MockLLM(harness_dir)
-    mock.start()
-    yield mock
-    mock.stop()
+    try:
+        mock.start()
+        yield mock
+    finally:
+        mock.stop()
 
 
 @pytest.fixture(scope="session")
@@ -54,8 +78,10 @@ def _session_cluster(harness_dir, shared_infra, mock_llm):
     except BaseException:
         cluster.close()
         raise
-    yield cluster
-    cluster.close()
+    try:
+        yield cluster
+    finally:
+        cluster.close()
 
 
 @pytest.fixture

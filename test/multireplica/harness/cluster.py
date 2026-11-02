@@ -13,6 +13,7 @@ import httpx
 
 from .infra import SharedInfra
 from .replica import MockLLM, Replica, free_port, replica_env, write_config
+from .side_effect_keys import log_name, read_records
 
 TERMINAL = ("completed", "failed", "cancelled")
 WORKSPACE = "Multireplica harness"
@@ -142,8 +143,16 @@ class Cluster:
         assert status in (200, 202), (status, body)
         return body
 
-    def run_status(self, replica: Replica, run_id: str) -> Tuple[int, Any]:
-        return self.call(replica, "GET", f"/api/agent-runs/{run_id}", service=True)
+    def run_status(self, replica: Replica, run_id: str) -> Tuple[int, Dict[str, Any]]:
+        """GET the run on ``replica``. The body is always a JSON object.
+
+        A non-JSON body (a proxy error page, a plain-text 500) breaks the
+        transport contract: it fails the test with a plain ``AssertionError``
+        instead of an ``AttributeError`` later, and never counts as a gap.
+        """
+        status, body = self.call(replica, "GET", f"/api/agent-runs/{run_id}", service=True)
+        assert isinstance(body, dict), f"{replica.name} answered {status} with a non-JSON body: {body!r:.300}"
+        return status, body
 
     def cancel(self, replica: Replica, run_id: str) -> Tuple[int, Any]:
         return self.call(replica, "POST", f"/api/agent-runs/{run_id}/cancel", service=True)
@@ -177,10 +186,8 @@ class Cluster:
     # -- side-effect accounting -------------------------------------------------
 
     def side_effects(self, key: str) -> List[Dict[str, Any]]:
-        path = self.side_effect_dir / f"{key}.log"
-        if not path.exists():
-            return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        """Complete records the side-effect tool wrote under ``key``."""
+        return read_records(self.side_effect_dir / log_name(key))
 
     def wait_side_effects(self, key: str, count: int, timeout: float = 30.0) -> List[Dict[str, Any]]:
         deadline = time.monotonic() + timeout
@@ -198,7 +205,7 @@ class Cluster:
                 try:
                     self.cancel(replica, run_id)
                 except httpx.HTTPError:
-                    pass
+                    pass  # best effort: the replica may be going down; heal() follows
 
 
 def directive(label: str, *, sleep: float = 0, steps: int = 1, tool: str = "sleep", words: int = 3,
