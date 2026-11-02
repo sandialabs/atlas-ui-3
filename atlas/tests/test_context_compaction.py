@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import pytest
 
 from atlas.application.chat.context import compaction_engine as engine
+from atlas.application.chat.context import compaction_summarizer as summarizer
 from atlas.application.chat.context.compaction_controller import ContextCompactor
 from atlas.application.chat.context.compaction_policy import (
     CHECKPOINT_FAILURE_EMPTY_CONTENT,
@@ -714,10 +715,10 @@ class TestEmptyCheckpoint:
         assert await _summarize(llm) == "## Goal\nrecovered checkpoint"
         assert len(llm.calls) == 2
         # The retry asks for more room than the first attempt.
-        assert llm.calls[0]["max_tokens"] == engine.SUMMARY_MAX_TOKENS
-        assert llm.calls[1]["max_tokens"] == engine.SUMMARY_RETRY_MAX_TOKENS
+        assert llm.calls[0]["max_tokens"] == summarizer.SUMMARY_MAX_TOKENS
+        assert llm.calls[1]["max_tokens"] == summarizer.SUMMARY_RETRY_MAX_TOKENS
         # Recovery is deterministic, and stays on the conversation's model.
-        assert llm.calls[1]["temperature"] == engine.SUMMARY_RETRY_TEMPERATURE
+        assert llm.calls[1]["temperature"] == summarizer.SUMMARY_RETRY_TEMPERATURE
         assert [c["model"] for c in llm.calls] == ["m", "m"]
         assert [c["user_email"] for c in llm.calls] == ["u@x", "u@x"]
 
@@ -728,7 +729,7 @@ class TestEmptyCheckpoint:
             await _summarize(llm)
         assert caught.value.reason == CHECKPOINT_FAILURE_EMPTY_CONTENT
         # One retry and no more, and the classified cause reaches the user copy.
-        assert len(llm.calls) == engine.MAX_SUMMARY_ATTEMPTS
+        assert len(llm.calls) == summarizer.MAX_SUMMARY_ATTEMPTS
         assert "no checkpoint text" in failure_text(caught.value)
 
     @pytest.mark.asyncio
@@ -806,8 +807,8 @@ class TestEmptyCheckpoint:
             )}),
         )
         assert await _summarize(llm) == "## Goal\nok"
-        assert llm.calls[0]["max_tokens"] == engine.SUMMARY_REASONING_MAX_TOKENS
-        assert engine.SUMMARY_REASONING_MAX_TOKENS > engine.SUMMARY_MAX_TOKENS
+        assert llm.calls[0]["max_tokens"] == summarizer.SUMMARY_REASONING_MAX_TOKENS
+        assert summarizer.SUMMARY_REASONING_MAX_TOKENS > summarizer.SUMMARY_MAX_TOKENS
 
     @pytest.mark.asyncio
     async def test_unconfigured_llm_keeps_the_default_budget(self):
@@ -815,7 +816,7 @@ class TestEmptyCheckpoint:
         # gets the plain budget instead of failing the compaction.
         llm = ScriptedSummarizer(["## Goal\nok"])
         await _summarize(llm)
-        assert llm.calls[0]["max_tokens"] == engine.SUMMARY_MAX_TOKENS
+        assert llm.calls[0]["max_tokens"] == summarizer.SUMMARY_MAX_TOKENS
 
     @pytest.mark.asyncio
     async def test_retry_falls_back_to_plain_call_plain(self):
@@ -832,29 +833,29 @@ class TestEmptyCheckpoint:
         llm = PlainLLM()
         assert await _summarize(llm) == "## Goal\nrecovered"
         assert [c["max_tokens"] for c in llm.calls] == [
-            engine.SUMMARY_MAX_TOKENS, engine.SUMMARY_RETRY_MAX_TOKENS,
+            summarizer.SUMMARY_MAX_TOKENS, summarizer.SUMMARY_RETRY_MAX_TOKENS,
         ]
 
     def test_classification_covers_the_three_causes(self):
-        assert engine.classify_empty_response({"finish_reason": "length"}) == CHECKPOINT_FAILURE_TOKEN_EXHAUSTION
-        assert engine.classify_empty_response({"has_reasoning_content": True}) == CHECKPOINT_FAILURE_REASONING_ONLY
-        assert engine.classify_empty_response({}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
-        assert engine.classify_empty_response(None) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        assert summarizer.classify_empty_response({"finish_reason": "length"}) == CHECKPOINT_FAILURE_TOKEN_EXHAUSTION
+        assert summarizer.classify_empty_response({"has_reasoning_content": True}) == CHECKPOINT_FAILURE_REASONING_ONLY
+        assert summarizer.classify_empty_response({}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        assert summarizer.classify_empty_response(None) == CHECKPOINT_FAILURE_EMPTY_CONTENT
         # An unrecognized finish reason is provider text: it only counts as a
         # blank reply, never as a distinct category.
-        assert engine.classify_empty_response({"finish_reason": "other"}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        assert summarizer.classify_empty_response({"finish_reason": "other"}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
 
     def test_output_budget_is_capped_by_the_window(self):
         # A tiny window shrinks both attempts to what can still fit beside the
         # summarizer's own prompt, and the retry is never the smaller one.
-        assert engine.checkpoint_output_budget(attempt=0, input_budget_tokens=1000) == 350
-        assert engine.checkpoint_output_budget(attempt=1, input_budget_tokens=1000) == 500
+        assert summarizer.checkpoint_output_budget(attempt=0, input_budget_tokens=1000) == 350
+        assert summarizer.checkpoint_output_budget(attempt=1, input_budget_tokens=1000) == 500
         # A comfortably large window leaves the nominal budgets alone.
-        assert engine.checkpoint_output_budget(attempt=0, input_budget_tokens=1_000_000) == engine.SUMMARY_MAX_TOKENS
-        assert engine.checkpoint_output_budget(attempt=1, input_budget_tokens=1_000_000) == engine.SUMMARY_RETRY_MAX_TOKENS
+        assert summarizer.checkpoint_output_budget(attempt=0, input_budget_tokens=1_000_000) == summarizer.SUMMARY_MAX_TOKENS
+        assert summarizer.checkpoint_output_budget(attempt=1, input_budget_tokens=1_000_000) == summarizer.SUMMARY_RETRY_MAX_TOKENS
         # Unknown budget: fall back to the nominal budget, floored.
-        assert engine.checkpoint_output_budget(attempt=1) == engine.SUMMARY_RETRY_MAX_TOKENS
-        assert engine.checkpoint_output_budget(attempt=0) == engine.SUMMARY_MAX_TOKENS
+        assert summarizer.checkpoint_output_budget(attempt=1) == summarizer.SUMMARY_RETRY_MAX_TOKENS
+        assert summarizer.checkpoint_output_budget(attempt=0) == summarizer.SUMMARY_MAX_TOKENS
 
 
 class TestEmptyCheckpointRunGuard:
