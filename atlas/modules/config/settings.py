@@ -5,7 +5,7 @@ import os
 from typing import Dict, FrozenSet, Optional
 
 from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_validator
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
 from atlas.core.dotenv_policy import dotenv_loading_disabled
@@ -1581,28 +1581,21 @@ class AppSettings(BaseSettings):
         "env_prefix": "",
     }
 
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls,
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ):
-        """Keep the default source order; drop the ``.env`` source when
-        ``PYTHON_DOTENV_DISABLED`` is set.
+    def __init__(self, **values) -> None:
+        """Skip the ``.env`` file entirely when ``PYTHON_DOTENV_DISABLED`` is set.
 
         The switch is python-dotenv's own opt-out (it already turns
         ``load_dotenv`` into a no-op); honoring it here as well means one
         variable disables every ``.env`` read, including in subprocesses that
-        inherit it. The test harness sets it (issue #1149); with it unset the
-        sources are exactly pydantic-settings' defaults. A process that sets
-        it while an env file exists gets a one-time warning, so the skipped
-        file is never silent.
+        inherit it. The test harness sets it (issue #1149). ``_env_file`` is
+        resolved to ``None`` *before* pydantic-settings builds its sources, so
+        the file is never opened or parsed -- an unreadable file cannot fail
+        construction -- and an explicit ``_env_file=`` is skipped too. A
+        one-time warning names any existing file that was skipped. With the
+        switch unset, construction is exactly pydantic-settings' default.
         """
-        sources = (init_settings, env_settings, dotenv_settings, file_secret_settings)
         if dotenv_loading_disabled():
-            sources = tuple(source for source in sources if source is not dotenv_settings)
-            _warn_env_file_skipped(getattr(dotenv_settings, "env_file", None))
-        return sources
+            requested = values.get("_env_file") if "_env_file" in values else self.model_config.get("env_file")
+            _warn_env_file_skipped(requested)
+            values["_env_file"] = None
+        super().__init__(**values)

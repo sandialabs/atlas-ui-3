@@ -112,6 +112,15 @@ def test_settings_ignore_an_env_file_while_disabled(tmp_path, monkeypatch, caplo
     assert str(env_file) in skipped[0].getMessage()
 
 
+def test_settings_never_open_the_env_file_while_disabled(tmp_path, monkeypatch):
+    """The file is skipped before it is read, so an undecodable one cannot fail construction."""
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(b"ADMIN_GROUP=\xff\xfe\xfa not utf-8\n")
+    monkeypatch.delenv("ADMIN_GROUP", raising=False)
+
+    assert AppSettings(_env_file=str(env_file)).admin_group == "admin"
+
+
 def test_settings_read_an_env_file_when_dotenv_is_enabled(
     tmp_path, monkeypatch, dotenv_loading_enabled
 ):
@@ -242,7 +251,8 @@ def _run_child_session(tmp_path: Path, name: str, *, with_dotenv: bool, order: l
     can be varied (a module that imports ``main`` at collection, before the
     probe, or the probe alone). Files rather than ``file::test`` node ids,
     because pytest does not keep a node id in argument order; ``-k`` then
-    deselects everything in this module except the probe.
+    deselects every test except the probe (the other files are still
+    imported at collection, which is all the ordering needs).
     """
     root = tmp_path / name
     work = root / "work"
@@ -274,7 +284,7 @@ def _run_child_session(tmp_path: Path, name: str, *, with_dotenv: bool, order: l
             "-p",
             "no:cacheprovider",
             "-k",
-            "not test_dotenv_isolation or test_probe_effective_configuration",
+            "test_probe_effective_configuration",
             *order,
         ],
         cwd=work,
@@ -332,13 +342,25 @@ def test_child_sessions_ignore_a_conflicting_dotenv(tmp_path):
         assert observed == baseline, f"{label}: {observed} != {baseline}"
 
 
-def test_planted_dotenv_is_where_the_app_reads_it(tmp_path):
-    """Positive control for the child-session test: the planted file is live.
+@pytest.mark.parametrize(
+    ("switch", "expected"),
+    [
+        (None, ["loaded-from-dotenv", "dotenv_admins"]),
+        ("1", [None, "admin"]),
+    ],
+    ids=["switch-unset-reads-dotenv", "switch-set-reads-nothing"],
+)
+def test_plain_app_import_honors_the_switch(tmp_path, switch, expected):
+    """Conftest-free control for the child sessions above.
 
-    Without the switch, a plain interpreter importing ``main`` from the same
-    ``<root>/work`` layout loads ``<root>/.env`` into ``os.environ`` and into
-    ``AppSettings``. This proves the isolation test above passes because the
-    switch blocks a real read, not because the file sits somewhere unread.
+    A plain interpreter (no pytest, so no conftest and no
+    ``model_config["env_file"] = None``) imports ``main`` from the same
+    ``<root>/work`` layout. Without the switch it loads the planted
+    ``<root>/.env`` into ``os.environ`` and ``AppSettings`` -- proving the file
+    sits where the app reads it, so the isolation test above passes because a
+    real read is blocked. With the switch, ``main``'s ``load_dotenv`` and the
+    ``AppSettings`` hook alone must keep both out; this is the only check that
+    fails if the ``AppSettings`` hook regresses.
     """
     root = tmp_path / "control"
     work = root / "work"
@@ -346,6 +368,8 @@ def test_planted_dotenv_is_where_the_app_reads_it(tmp_path):
     (root / ".env").write_text(f"{_SENTINEL_VAR}=loaded-from-dotenv\nADMIN_GROUP=dotenv_admins\n")
 
     env = {k: v for k, v in os.environ.items() if k not in (DOTENV_DISABLED_ENV_VAR, "ADMIN_GROUP")}
+    if switch is not None:
+        env[DOTENV_DISABLED_ENV_VAR] = switch
     env["PYTHONPATH"] = os.pathsep.join([str(_ATLAS_DIR.parent), str(_ATLAS_DIR)])
     code = (
         "import json, os, main\n"
@@ -356,4 +380,4 @@ def test_planted_dotenv_is_where_the_app_reads_it(tmp_path):
         [sys.executable, "-c", code], cwd=work, env=env, capture_output=True, text=True, timeout=300
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout.strip().splitlines()[-1]) == ["loaded-from-dotenv", "dotenv_admins"]
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == expected
