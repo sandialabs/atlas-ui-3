@@ -1,5 +1,6 @@
 """Shared compaction engine, run guard and conversation checkpoints (#877)."""
 
+import logging
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
@@ -8,9 +9,15 @@ import pytest
 from atlas.application.chat.context import compaction_engine as engine
 from atlas.application.chat.context.compaction_controller import ContextCompactor
 from atlas.application.chat.context.compaction_policy import (
+    CHECKPOINT_FAILURE_EMPTY_CONTENT,
+    CHECKPOINT_FAILURE_PROVIDER_ERROR,
+    CHECKPOINT_FAILURE_REASONING_ONLY,
+    CHECKPOINT_FAILURE_TOKEN_EXHAUSTION,
     TRIGGER_AUTO,
     TRIGGER_MANUAL,
     CompactionPolicy,
+    EmptyCheckpointError,
+    failure_frame,
     failure_text,
 )
 from atlas.domain.messages.models import (
@@ -22,6 +29,8 @@ from atlas.domain.messages.models import (
     MessageRole,
 )
 from atlas.modules.config.models import LLMConfig, ModelConfig
+from atlas.modules.llm.litellm_caller import describe_plain_response
+from atlas.modules.llm.models import PlainCompletion
 
 BIG = "result line with data\n" * 400  # ~8.8K chars per tool output
 
@@ -161,9 +170,12 @@ class TestEngine:
 
     @pytest.mark.asyncio
     async def test_empty_summary_is_failure(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(EmptyCheckpointError) as caught:
             await engine.summarize_messages(SummaryLLM(reply="  "), "m", [{"role": "user", "content": "x"}],
                                             user_email=None, input_budget_tokens=4000)
+        # The reply is empty without hitting the output-token limit, so it is
+        # reported as a blank reply rather than an exhausted budget (#1138).
+        assert caught.value.reason == CHECKPOINT_FAILURE_EMPTY_CONTENT
 
 
 class TestRunGuard:
@@ -626,3 +638,295 @@ async def test_history_frames_name_their_conversation():
         trigger=TRIGGER_MANUAL, keep_tokens=0, conversation_id="conv-8",
     )
     assert pub.frames and all(f["conversation_id"] == "conv-8" for f in pub.frames if f["type"] == "context_compaction")
+
+
+# -- issue #1138: empty checkpoint responses ---------------------------------
+
+
+def _fake_response(*, content, finish_reason, reasoning_tokens=None, reasoning_content=None, model="openai/test-model"):
+    """Build a minimal stand-in for a litellm ModelResponse."""
+    message = SimpleNamespace(content=content, reasoning_content=reasoning_content)
+    usage = SimpleNamespace(
+        prompt_tokens=100, completion_tokens=20, total_tokens=120,
+        completion_tokens_details=(
+            SimpleNamespace(reasoning_tokens=reasoning_tokens) if reasoning_tokens is not None else None
+        ),
+    )
+    return SimpleNamespace(
+        model=model,
+        choices=[SimpleNamespace(index=0, message=message, finish_reason=finish_reason)],
+        usage=usage,
+    )
+
+
+class ScriptedSummarizer:
+    """LLM double that replays scripted summarizer responses (issue #1138).
+
+    Each entry is either a checkpoint string or a fake response; empty ones
+    carry the same metadata the LiteLLM caller reports, so the engine's retry
+    and classification run exactly as they do in production.
+    """
+
+    def __init__(self, replies, llm_config=None):
+        self.replies = list(replies)
+        self.calls: List[Dict[str, Any]] = []
+        # A provider that fails one way usually keeps failing the same way, so
+        # the last scripted reply repeats once the script runs out.
+        self.last: Any = None
+        # What the real LiteLLMCaller carries; the engine reads it only to size
+        # the output budget for a reasoning model.
+        self.llm_config = llm_config
+
+    async def call_plain_detailed(self, model, messages, temperature=None, max_tokens=None, user_email=None):
+        self.calls.append({
+            "model": model, "messages": messages, "temperature": temperature,
+            "max_tokens": max_tokens, "user_email": user_email,
+        })
+        reply = self.replies.pop(0) if self.replies else self.last
+        self.last = reply
+        if isinstance(reply, str):
+            return PlainCompletion(text=reply, diagnostics={"model": model})
+        response = reply if reply is not None else _fake_response(content=None, finish_reason="stop")
+        content = getattr(getattr(response.choices[0], "message", None), "content", None) or ""
+        return PlainCompletion(
+            text=content,
+            diagnostics={**describe_plain_response(response, model), "requested_max_tokens": max_tokens},
+        )
+
+
+def _summarize(llm, **extra):
+    return engine.summarize_messages(
+        llm, "m", [{"role": "user", "content": "audit the repository"}],
+        user_email="u@x", input_budget_tokens=4000, **extra,
+    )
+
+
+class TestEmptyCheckpoint:
+    """A summarizer reply with no checkpoint text (#1138)."""
+
+    @pytest.mark.asyncio
+    async def test_null_content_retries_once_and_recovers(self):
+        llm = ScriptedSummarizer([
+            _fake_response(content=None, finish_reason="stop"),
+            "## Goal\nrecovered checkpoint",
+        ])
+        assert await _summarize(llm) == "## Goal\nrecovered checkpoint"
+        assert len(llm.calls) == 2
+        # The retry asks for more room than the first attempt.
+        assert llm.calls[0]["max_tokens"] == engine.SUMMARY_MAX_TOKENS
+        assert llm.calls[1]["max_tokens"] == engine.SUMMARY_RETRY_MAX_TOKENS
+        # Recovery is deterministic, and stays on the conversation's model.
+        assert llm.calls[1]["temperature"] == engine.SUMMARY_RETRY_TEMPERATURE
+        assert [c["model"] for c in llm.calls] == ["m", "m"]
+        assert [c["user_email"] for c in llm.calls] == ["u@x", "u@x"]
+
+    @pytest.mark.asyncio
+    async def test_blank_content_is_reported_as_empty_content(self):
+        llm = ScriptedSummarizer([_fake_response(content="   ", finish_reason="stop")])
+        with pytest.raises(EmptyCheckpointError) as caught:
+            await _summarize(llm)
+        assert caught.value.reason == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        # One retry and no more, and the classified cause reaches the user copy.
+        assert len(llm.calls) == engine.MAX_SUMMARY_ATTEMPTS
+        assert "no checkpoint text" in failure_text(caught.value)
+
+    @pytest.mark.asyncio
+    async def test_exhausted_output_budget_is_a_distinct_reason(self):
+        llm = ScriptedSummarizer([
+            _fake_response(content=None, finish_reason="length", reasoning_tokens=2950),
+        ])
+        with pytest.raises(EmptyCheckpointError) as caught:
+            await _summarize(llm)
+        assert caught.value.reason == CHECKPOINT_FAILURE_TOKEN_EXHAUSTION
+        assert caught.value.diagnostics["reasoning_tokens"] == 2950
+        assert "output-token budget" in failure_text(caught.value)
+        # A drained budget is the one cause more headroom can fix, and it gets it.
+        assert llm.calls[1]["max_tokens"] > llm.calls[0]["max_tokens"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_only_reply_is_a_distinct_reason(self):
+        llm = ScriptedSummarizer([
+            _fake_response(content=None, finish_reason="stop", reasoning_content="internal thinking"),
+        ])
+        with pytest.raises(EmptyCheckpointError) as caught:
+            await _summarize(llm)
+        assert caught.value.reason == CHECKPOINT_FAILURE_REASONING_ONLY
+        # The reasoning text itself is never copied into the diagnostics.
+        assert "internal thinking" not in str(caught.value.diagnostics)
+
+    @pytest.mark.asyncio
+    async def test_provider_error_is_not_retried(self, caplog):
+        llm = SummaryLLM(fail=True)
+        caplog.set_level(logging.WARNING)
+        with pytest.raises(RuntimeError):
+            await _summarize(llm)
+        # A failed call is a different cause from an empty one, and it is
+        # reported as such instead of burning the retry.
+        assert len(llm.calls) == 1
+        assert CHECKPOINT_FAILURE_PROVIDER_ERROR in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_recovery_folds_into_the_checkpoint(self):
+        # The retry's answer is the checkpoint, not a second attempt's prefix.
+        llm = ScriptedSummarizer([
+            _fake_response(content="", finish_reason="stop"),
+            "## Goal\naudit done",
+        ])
+        assert (await _summarize(llm)).endswith("## Goal\naudit done")
+
+    @pytest.mark.asyncio
+    async def test_every_chunk_gets_its_own_bounded_retry(self):
+        # Six chunks; the script fails the first and third. The bound is per
+        # chunk: 2 calls for chunk 1, 1 for chunk 2, 2 for chunk 3, and the
+        # failure stops the fold where it happens.
+        llm = ScriptedSummarizer([
+            _fake_response(content=None, finish_reason="stop"), "FIRST",
+            "SECOND",
+            _fake_response(content=None, finish_reason="stop"),
+        ])
+        messages = [{"role": "user", "content": f"chunk {i} " + "w" * 7000} for i in range(60)]
+        with pytest.raises(EmptyCheckpointError):
+            await engine.summarize_messages(llm, "m", messages, user_email="u@x", input_budget_tokens=4000)
+        assert len(llm.calls) == 5
+        # The checkpoint recovered for chunk 1 is what chunk 2 folds into.
+        assert "<existing_checkpoint>\nFIRST" in llm.calls[2]["messages"][1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_model_gets_a_larger_first_budget(self):
+        # A model configured with reasoning_effort spends part of its output
+        # budget on reasoning before any final text, so the first attempt gets
+        # more room (#1138).
+        llm = ScriptedSummarizer(
+            ["## Goal\nok"],
+            llm_config=LLMConfig(models={"m": ModelConfig(
+                model_name="m", model_url="http://localhost/v1", context_window=20000,
+                max_tokens=1000, reasoning_effort="low",
+            )}),
+        )
+        assert await _summarize(llm) == "## Goal\nok"
+        assert llm.calls[0]["max_tokens"] == engine.SUMMARY_REASONING_MAX_TOKENS
+        assert engine.SUMMARY_REASONING_MAX_TOKENS > engine.SUMMARY_MAX_TOKENS
+
+    @pytest.mark.asyncio
+    async def test_unconfigured_llm_keeps_the_default_budget(self):
+        # An LLM object with no config (a double, another implementation) still
+        # gets the plain budget instead of failing the compaction.
+        llm = ScriptedSummarizer(["## Goal\nok"])
+        await _summarize(llm)
+        assert llm.calls[0]["max_tokens"] == engine.SUMMARY_MAX_TOKENS
+
+    @pytest.mark.asyncio
+    async def test_retry_falls_back_to_plain_call_plain(self):
+        # Only the LiteLLM caller implements the detailed method; a provider
+        # built on plain call_plain still gets its one bounded retry.
+        class PlainLLM:
+            def __init__(self):
+                self.calls = []
+
+            async def call_plain(self, model, messages, temperature=None, max_tokens=None, user_email=None):
+                self.calls.append({"max_tokens": max_tokens, "temperature": temperature})
+                return "## Goal\nrecovered" if len(self.calls) > 1 else "   "
+
+        llm = PlainLLM()
+        assert await _summarize(llm) == "## Goal\nrecovered"
+        assert [c["max_tokens"] for c in llm.calls] == [
+            engine.SUMMARY_MAX_TOKENS, engine.SUMMARY_RETRY_MAX_TOKENS,
+        ]
+
+    def test_classification_covers_the_three_causes(self):
+        assert engine.classify_empty_response({"finish_reason": "length"}) == CHECKPOINT_FAILURE_TOKEN_EXHAUSTION
+        assert engine.classify_empty_response({"has_reasoning_content": True}) == CHECKPOINT_FAILURE_REASONING_ONLY
+        assert engine.classify_empty_response({}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        assert engine.classify_empty_response(None) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        # An unrecognized finish reason is provider text: it only counts as a
+        # blank reply, never as a distinct category.
+        assert engine.classify_empty_response({"finish_reason": "other"}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+
+
+class TestEmptyCheckpointRunGuard:
+    """The run guard keeps the transcript when a checkpoint never arrives."""
+
+    def _guard(self, llm, publisher):
+        compactor = _compactor(llm, publisher)
+        policy = CompactionPolicy(auto=True, threshold_percent=50, keep_recent_percent=20, max_retries=2)
+        return compactor.run_guard(model="m", user_email="u@x", history=ConversationHistory(),
+                                   policy=policy), compactor
+
+    @pytest.mark.asyncio
+    async def test_failed_retry_leaves_the_run_as_it_was(self):
+        llm = ScriptedSummarizer([_fake_response(content=None, finish_reason="length")])
+        guard, _ = self._guard(llm, Publisher())
+        messages = _chatty()
+        snapshot = [dict(m) for m in messages]
+        outcome = await guard.before_llm_call(messages, [])
+        assert outcome["status"] == "failed"
+        assert outcome["reason"] == CHECKPOINT_FAILURE_TOKEN_EXHAUSTION
+        assert messages == snapshot
+        # No partial state is carried into the run's next compaction.
+        assert guard._summary is None and guard._ledger == []
+
+    @pytest.mark.asyncio
+    async def test_recovered_retry_compacts_and_keeps_the_request(self):
+        llm = ScriptedSummarizer([
+            _fake_response(content=None, finish_reason="stop"),
+            "## Goal\naudit the repository",
+        ])
+        pub = Publisher()
+        guard, _ = self._guard(llm, pub)
+        messages = _chatty()
+        outcome = await guard.before_llm_call(messages, [])
+        assert outcome["status"] == "completed"
+        assert outcome["summary"].startswith("## Goal\naudit the repository")
+        assert outcome["after_tokens"] < outcome["before_tokens"]
+        checkpoint = next(m for m in messages if m["role"] == "user")
+        assert "Please audit the repository" in checkpoint["content"]
+        assert pub.statuses() == ["started", "completed"]
+
+    @pytest.mark.asyncio
+    async def test_failure_frame_names_the_reason(self):
+        frame = failure_frame(
+            {"type": "context_compaction", "trigger": "auto"},
+            EmptyCheckpointError(CHECKPOINT_FAILURE_EMPTY_CONTENT, {"finish_reason": "stop"}),
+        )
+        assert frame["status"] == "failed" and frame["reason"] == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        assert "no checkpoint text" in frame["error"]
+        # Raw diagnostics are not part of the frame the browser receives.
+        assert "finish_reason" not in frame
+
+    def test_failure_frame_stays_generic_for_other_errors(self):
+        frame = failure_frame({"type": "context_compaction"},
+                              RuntimeError("connect to http://10.0.0.5:4000 failed"))
+        assert "reason" not in frame and "10.0.0.5" not in frame["error"]
+
+
+class TestEmptyCheckpointHistory:
+    """A failed checkpoint leaves stored history untouched (#1138)."""
+
+    @pytest.mark.asyncio
+    async def test_failure_discards_the_row(self):
+        llm = ScriptedSummarizer([_fake_response(content=None, finish_reason="stop")])
+        history = _long_history()
+        before = list(history.messages)
+        pub = Publisher()
+        outcome = await _compactor(llm, pub).compact_history(
+            history=history, model="m", user_email=None, build_request=_builder(history),
+            trigger=TRIGGER_MANUAL, keep_tokens=0,
+        )
+        assert outcome["status"] == "failed"
+        assert outcome["reason"] == CHECKPOINT_FAILURE_EMPTY_CONTENT
+        assert history.messages == before
+        assert pub.statuses() == ["started", "failed"]
+
+    @pytest.mark.asyncio
+    async def test_retry_recovers_the_checkpoint(self):
+        llm = ScriptedSummarizer([
+            _fake_response(content=None, finish_reason="stop"),
+            "## Goal\nconserved",
+        ])
+        history = _long_history()
+        outcome = await _compactor(llm, Publisher()).compact_history(
+            history=history, model="m", user_email=None, build_request=_builder(history),
+            trigger=TRIGGER_MANUAL, keep_tokens=0,
+        )
+        assert outcome["status"] == "completed"
+        assert outcome["summary"] == "## Goal\nconserved"

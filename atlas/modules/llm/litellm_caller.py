@@ -61,8 +61,8 @@ from atlas.modules.config.litellm_gateway_models import parse_gateway_model_key,
 from atlas.modules.config.models import LLMConfig, lookup_model_config
 
 from .litellm_gateway_client import get_gateway_client, mint_delegated_llm_token
-from .litellm_streaming import LiteLLMStreamingMixin
-from .models import LLMResponse, split_provider
+from .litellm_streaming import KNOWN_FINISH_REASONS, LiteLLMStreamingMixin
+from .models import LLMResponse, PlainCompletion, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
 from .usage_tracking import record_response_usage
 
@@ -159,6 +159,90 @@ def _llm_response_attrs(response: Any, attempt: int) -> Dict[str, Any]:
         if tool_calls:
             attrs["tool_calls_count"] = len(tool_calls)
     return attrs
+
+
+def _usage_count(container: Any, name: str) -> Optional[int]:
+    """One non-negative int out of a usage block, whether object or dict."""
+    if container is None:
+        return None
+    value = container.get(name) if isinstance(container, dict) else getattr(container, name, None)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _reasoning_tokens(usage: Any) -> Optional[int]:
+    """The output tokens a reasoning model spent before its final answer.
+
+    Providers put this in different places -- OpenAI nests it under
+    ``completion_tokens_details``; others report a top-level reasoning or
+    thinking count. Missing (or a provider that does not report it) is None,
+    which is a fact in itself: an empty reply with no completion tokens at all
+    is not a drained budget.
+    """
+    if isinstance(usage, dict):
+        details = usage.get("completion_tokens_details")
+    else:
+        details = getattr(usage, "completion_tokens_details", None)
+    for source, name in ((details, "reasoning_tokens"), (usage, "reasoning_tokens"), (usage, "thinking_tokens")):
+        count = _usage_count(source, name)
+        if count is not None:
+            return count
+    return None
+
+
+URL_AUTHORITY = re.compile(r"[a-z][a-z0-9+.\-]*://[^\s/]+", re.IGNORECASE)
+
+
+def _safe_model_id(value: Any) -> str:
+    """A model id safe to log.
+
+    Control characters go first (log injection), then any URL authority: a
+    custom endpoint's alias can carry its internal host, and this metadata is
+    meant to be loggable as-is. The scheme and path survive, which is what
+    identifies a misconfigured alias.
+    """
+    text = sanitize_for_logging(value)
+    return URL_AUTHORITY.sub(lambda match: f"{match.group(0).split('://', 1)[0]}://[host]", text)
+
+
+def describe_plain_response(response: Any, model_name: str = "") -> Dict[str, Any]:
+    """The non-sensitive metadata that explains an empty plain completion.
+
+    Logged and returned with the text so a caller can tell three cases apart
+    (issue #1138): the model wrote nothing, it used up its whole output budget
+    first -- what a reasoning model does when reasoning drains the cap before
+    any final text, reported by litellm as ``finish_reason == "length"`` -- or
+    the provider failed, which surfaces as a raised domain error instead.
+
+    Only counts, structure flags and the allow-listed finish reason are kept:
+    never content, reasoning text or the request body. A ``finish_reason``
+    outside the OpenAI vocabulary is provider text and is reported as
+    ``"other"``.
+    """
+    choices = getattr(response, "choices", None)
+    first = choices[0] if choices else None
+    message = getattr(first, "message", None) if first is not None else None
+    content = getattr(message, "content", None)
+    finish_reason = getattr(first, "finish_reason", None) if first is not None else None
+    usage = getattr(response, "usage", None)
+    resolved = str(getattr(response, "model", "") or "")
+    return {
+        "model": sanitize_for_logging(model_name),
+        "litellm_model": _safe_model_id(resolved),
+        "provider": sanitize_for_logging(split_provider(resolved)[0]),
+        "choice_count": len(choices) if isinstance(choices, (list, tuple)) else (0 if not choices else 1),
+        "content_present": content is not None,
+        "content_chars": len(content) if isinstance(content, str) else 0,
+        "has_reasoning_content": bool(getattr(message, "reasoning_content", None)),
+        "finish_reason": (
+            finish_reason if isinstance(finish_reason, str) and finish_reason in KNOWN_FINISH_REASONS else "other"
+        ),
+        "prompt_tokens": _usage_count(usage, "prompt_tokens"),
+        "completion_tokens": _usage_count(usage, "completion_tokens"),
+        "reasoning_tokens": _reasoning_tokens(usage),
+        "total_tokens": _usage_count(usage, "total_tokens"),
+    }
 
 
 class LiteLLMCaller(LiteLLMStreamingMixin):
@@ -1328,6 +1412,32 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             max_tokens: Optional max_tokens override (uses config default if None)
             user_email: Optional user email for metrics logging
         """
+        completion = await self.call_plain_detailed(
+            model_name, messages, temperature=temperature, max_tokens=max_tokens, user_email=user_email,
+        )
+        return completion.text
+
+    async def call_plain_detailed(
+        self,
+        model_name: str,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        user_email: Optional[str] = None
+    ) -> PlainCompletion:
+        """Plain LLM call that also reports why the reply is empty.
+
+        Same request, same model resolution, same hooks as :meth:`call_plain`;
+        the difference is the return value: a :class:`PlainCompletion` whose
+        ``diagnostics`` (see :func:`describe_plain_response`) lets a caller
+        such as context compaction distinguish "the model produced no text"
+        from "the output-token budget ran out", and log enough to act on
+        without logging content (issue #1138).
+
+        A response that carries no choice at all is reported as an empty
+        completion with ``choice_count`` 0 rather than raising ``IndexError``:
+        it is a provider anomaly, and the caller still sees what happened.
+        """
         litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
         # Override max_tokens if provided
@@ -1353,16 +1463,27 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 **model_kwargs
             )
 
-            content = response.choices[0].message.content or ""
-            # Log response preview only at DEBUG level to avoid logging sensitive data
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+            # Diagnostics first: they explain this response whatever it holds,
+            # and they survive a response with no choice at all.
+            diagnostics = describe_plain_response(response, model_name)
+            diagnostics["requested_max_tokens"] = model_kwargs.get("max_tokens")
+            content = ""
+            if getattr(response, "choices", None):
+                content = response.choices[0].message.content or ""
+            if content:
+                # Log response preview only at DEBUG level to avoid logging sensitive data
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"LLM response preview: '{content[:200]}{'...' if len(content) > 200 else ''}'")
+                else:
+                    logger.info(f"LLM response length: {len(content)} chars")
             else:
-                logger.info(f"LLM response length: {len(content)} chars")
+                # Enough to tell an empty reply from an exhausted budget without
+                # logging content, reasoning text or the request (#1138).
+                logger.warning("Plain LLM call returned no content: %s", diagnostics)
 
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
 
-            return content
+            return PlainCompletion(text=content, diagnostics=diagnostics)
 
         except HookBlockedError:
             # A PreLlmCall hook blocked the call: surface the reason, do not

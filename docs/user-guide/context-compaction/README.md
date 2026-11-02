@@ -1,6 +1,6 @@
 # Context Usage and Compaction
 
-Last updated: 2026-10-24
+Last updated: 2026-11-01
 
 Every model can only read so much at once (its *context window*). In a long
 conversation, or a long agent run, Atlas keeps you informed of how full that
@@ -36,3 +36,12 @@ Each compaction appears in the conversation as a divider such as
 `Context compacted (manual): ~95K -> ~12K tokens`. Use **Show checkpoint** to
 read the summary the model now works from. Everything above the divider is
 still in your transcript and in your saved conversation.
+
+### If a compaction fails
+
+The model writing the checkpoint may come back with no summary at all -- for
+example a reasoning model that spends its whole reply budget on reasoning.
+Atlas retries the summary once and, if that also comes back blank, shows a
+notice saying which kind of failure it was and keeps your conversation exactly
+as it was. Nothing is lost or rewritten; the conversation simply continues
+uncompacted, and you can try **Compact** again or send a shorter message.

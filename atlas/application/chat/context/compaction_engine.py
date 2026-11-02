@@ -20,11 +20,21 @@ Nothing here touches stored history. Callers decide what the result replaces.
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from atlas.modules.config.models import lookup_model_config
 from atlas.modules.llm.token_estimation import HEURISTIC_CHARS_PER_TOKEN, IMAGE_TOKENS
+
+from .compaction_policy import (
+    CHECKPOINT_FAILURE_EMPTY_CONTENT,
+    CHECKPOINT_FAILURE_PROVIDER_ERROR,
+    CHECKPOINT_FAILURE_REASONING_ONLY,
+    CHECKPOINT_FAILURE_TOKEN_EXHAUSTION,
+    EmptyCheckpointError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +51,20 @@ SUMMARY_ARGUMENT_CHARS = 600
 # each chunk is one LLM call, and compaction must stay bounded.
 MAX_SUMMARY_CHUNKS = 6
 SUMMARY_MAX_TOKENS = 3000
+# A reasoning model spends output tokens on reasoning before it writes any
+# final text, so a cap that is comfortable for a chat model can come back with
+# finish_reason "length" and no checkpoint at all. Models configured with a
+# reasoning_effort -- the codebase's marker for a reasoning model -- start with
+# a larger budget (issue #1138).
+SUMMARY_REASONING_MAX_TOKENS = 6000
+# One retry per chunk, and the retry gets this much more headroom. Two calls
+# per chunk is the whole recovery budget: compaction must stay bounded.
+SUMMARY_RETRY_MAX_TOKENS = 8000
+MAX_SUMMARY_ATTEMPTS = 2
+SUMMARY_TEMPERATURE = 0.2
+# The retry is deterministic: sampling a second empty reply from the same
+# distribution is not recovery.
+SUMMARY_RETRY_TEMPERATURE = 0.0
 LATEST_REQUEST_MAX_CHARS = 6000
 
 CHECKPOINT_SECTIONS = (
@@ -261,6 +285,142 @@ def _chunk(items: List[str], chunk_chars: int) -> List[str]:
     return chunks
 
 
+def summarizer_model_config(llm: Any, model: str) -> Optional[Any]:
+    """The summarizer model's own config, when the LLM object carries one.
+
+    Only used to size the output budget for a reasoning model; an LLM that
+    exposes no config (a test double, or another implementation) gets the plain
+    budget. Never raises: a missing config costs an early retry, an exception
+    here would cost the compaction.
+    """
+    config = getattr(llm, "llm_config", None)
+    if config is None:
+        return None
+    try:
+        return lookup_model_config(config, model)
+    except Exception:
+        logger.debug("Could not read the summarizer model config", exc_info=True)
+        return None
+
+
+def is_reasoning_model(model_config: Any) -> bool:
+    """Whether a model is configured as a reasoning model (issue #1138).
+
+    ``reasoning_effort`` is the marker this codebase has: it is validated when
+    llmconfig loads and sent on every request to that model (GH #756). A model
+    without one keeps today's budget, so no working configuration changes.
+    """
+    return bool(getattr(model_config, "reasoning_effort", None))
+
+
+def checkpoint_output_budget(*, reasoning: bool = False, attempt: int = 0) -> int:
+    """Output-token cap for one summarizer call (issue #1138).
+
+    Reasoning models get a larger budget from the first attempt; the single
+    retry gets more headroom than the first attempt either way, because the
+    usual cause of a blank checkpoint is a budget the model drained before it
+    wrote anything.
+    """
+    base = max(SUMMARY_MAX_TOKENS, SUMMARY_REASONING_MAX_TOKENS) if reasoning else SUMMARY_MAX_TOKENS
+    return base if attempt <= 0 else max(base, SUMMARY_RETRY_MAX_TOKENS)
+
+
+def classify_empty_response(diagnostics: Optional[Dict[str, Any]]) -> str:
+    """Why a summarizer response carried no checkpoint text (issue #1138).
+
+    Reads only the non-sensitive metadata :func:`describe_plain_response`
+    reports: an exhausted output budget is the one cause a retry can fix, so it
+    is the one that gets its own reason.
+    """
+    details = diagnostics or {}
+    if details.get("finish_reason") == "length":
+        return CHECKPOINT_FAILURE_TOKEN_EXHAUSTION
+    if details.get("has_reasoning_content"):
+        return CHECKPOINT_FAILURE_REASONING_ONLY
+    return CHECKPOINT_FAILURE_EMPTY_CONTENT
+
+
+async def _call_summarizer(
+    llm: Any,
+    model: str,
+    request: List[Dict[str, Any]],
+    *,
+    user_email: Optional[str],
+    temperature: float,
+    max_tokens: int,
+) -> Tuple[str, Dict[str, Any]]:
+    """One summarizer request and the metadata that explains a blank reply.
+
+    ``call_plain_detailed`` is optional on the LLM interface -- only the
+    LiteLLM caller implements it -- so a plain ``call_plain`` is the fallback,
+    with no diagnostics to report. The probe is deliberately defensive rather
+    than typed: a test double can hand back a plain mock for the detailed
+    method, and a mock result is not awaitable, which is exactly when the plain
+    path is the right one.
+    """
+    detailed = getattr(llm, "call_plain_detailed", None)
+    if callable(detailed):
+        pending = detailed(
+            model, request, temperature=temperature, max_tokens=max_tokens, user_email=user_email,
+        )
+        if inspect.isawaitable(pending):
+            completion = await pending
+            text = getattr(completion, "text", None)
+            if text is None and isinstance(completion, str):
+                text = completion
+            return (text or "").strip(), dict(getattr(completion, "diagnostics", None) or {})
+    text = await llm.call_plain(
+        model, request, temperature=temperature, max_tokens=max_tokens, user_email=user_email,
+    )
+    return (text or "").strip(), {}
+
+
+async def _summarize_chunk(
+    llm: Any,
+    model: str,
+    request: List[Dict[str, Any]],
+    *,
+    user_email: Optional[str],
+    reasoning: bool,
+    position: int,
+    total: int,
+) -> str:
+    """One chunk's summary: a single call, retried once, or the reason it failed.
+
+    A model that answers with no text and no reasoning is usually going to do
+    the same thing again, so recovery is one bounded attempt -- never a loop --
+    with a larger output budget and deterministic sampling. A provider error is
+    an exception, not an empty reply, so it is never swallowed by the retry.
+    """
+    reason = CHECKPOINT_FAILURE_EMPTY_CONTENT
+    diagnostics: Dict[str, Any] = {}
+    for attempt in range(MAX_SUMMARY_ATTEMPTS):
+        try:
+            text, response_meta = await _call_summarizer(
+                llm, model, request, user_email=user_email,
+                max_tokens=checkpoint_output_budget(reasoning=reasoning, attempt=attempt),
+                temperature=SUMMARY_RETRY_TEMPERATURE if attempt else SUMMARY_TEMPERATURE,
+            )
+        except Exception as exc:
+            # The third cause: the provider, the transport or authorization
+            # refused the call. Nothing here can fix it, so it goes on as the
+            # domain error it already is -- only the log says which it was.
+            logger.warning(
+                "Checkpoint summarization call failed for %s (chunk %d/%d, reason=%s): %s",
+                model, position, total, CHECKPOINT_FAILURE_PROVIDER_ERROR, type(exc).__name__,
+            )
+            raise
+        if text:
+            return text
+        diagnostics = response_meta
+        reason = classify_empty_response(diagnostics)
+        logger.warning(
+            "Empty checkpoint from %s (chunk %d/%d, attempt %d/%d, reason=%s): %s",
+            model, position, total, attempt + 1, MAX_SUMMARY_ATTEMPTS, reason, diagnostics or {},
+        )
+    raise EmptyCheckpointError(reason, diagnostics)
+
+
 async def summarize_messages(
     llm: Any,
     model: str,
@@ -281,6 +441,11 @@ async def summarize_messages(
     The call goes through the normal ``call_plain`` path, so the same model the
     conversation is already cleared to use sees the content -- no other model
     is ever given it -- and PreLlmCall hooks apply to it as to any other call.
+
+    An empty reply is retried once with a larger output budget and then raised
+    as :class:`EmptyCheckpointError`, whose message names the classified cause
+    (issue #1138). Nothing here edits the caller's messages, so a failed
+    summary leaves the original context for the caller to keep.
     """
     chunk_chars = max(4000, int(input_budget_tokens * HEURISTIC_CHARS_PER_TOKEN * 0.5))
     chunks = _chunk(render_transcript(messages), chunk_chars)
@@ -295,6 +460,7 @@ async def summarize_messages(
         "Give that topic the most detail; still keep everything needed to continue."
         if focus and focus.strip() else ""
     )
+    reasoning = is_reasoning_model(summarizer_model_config(llm, model))
     for position, chunk in enumerate(chunks, start=1):
         parts = []
         if summary:
@@ -310,13 +476,10 @@ async def summarize_messages(
             {"role": "system", "content": SUMMARIZER_INSTRUCTIONS + focus_line},
             {"role": "user", "content": "\n\n".join(parts)},
         ]
-        result = await llm.call_plain(
-            model, request, temperature=0.2, max_tokens=SUMMARY_MAX_TOKENS, user_email=user_email,
+        summary = await _summarize_chunk(
+            llm, model, request, user_email=user_email, reasoning=reasoning,
+            position=position, total=len(chunks),
         )
-        result = (result or "").strip()
-        if not result:
-            raise ValueError("The model returned an empty checkpoint")
-        summary = result
     return summary
 
 

@@ -44,11 +44,12 @@ from .compaction_policy import (
     TRIGGER_TURN_INTERVAL,
     USAGE_TOTALS_KEY,
     CompactionPolicy,
+    EmptyCheckpointError,
     NothingToCompact,
     RequestBuilder,
     checkpoint_row_content,
     count_checkpoints,
-    failure_text,
+    failure_frame,
     user_turns_since_checkpoint,
 )
 from .run_compaction_guard import RunCompactionGuard
@@ -250,8 +251,16 @@ class ContextCompactor:
             return skipped
         except Exception as exc:
             self._discard(history, added)
-            logger.warning("Context compaction failed (%s)", type(exc).__name__, exc_info=True)
-            failed = {**base, "status": "failed", "error": failure_text(exc)}
+            failed = failure_frame(base, exc)
+            if isinstance(exc, EmptyCheckpointError):
+                # Enough to tell a blank reply from a drained output budget,
+                # without content, reasoning text or the request (#1138).
+                logger.warning(
+                    "Context compaction failed (%s): %s",
+                    exc.reason, exc.diagnostics, exc_info=True,
+                )
+            else:
+                logger.warning("Context compaction failed (%s)", type(exc).__name__, exc_info=True)
             await self._send(failed)
             return failed
         except BaseException:
