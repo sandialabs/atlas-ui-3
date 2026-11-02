@@ -8,9 +8,30 @@ from pydantic import AliasChoices, Field, PrivateAttr, field_validator, model_va
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
+from atlas.core.dotenv_policy import dotenv_loading_disabled
 from atlas.core.security_config import validate_capability_secret
 
 logger = logging.getLogger(__name__)
+
+# Log-deduplication only (per process): the skipped-.env warning below fires
+# once rather than on every AppSettings() construction.
+_env_file_skip_state = {"warned": False}
+
+
+def _warn_env_file_skipped(env_file) -> None:
+    """Warn once that ``PYTHON_DOTENV_DISABLED`` made settings skip an env file."""
+    if _env_file_skip_state["warned"] or not env_file:
+        return
+    paths = env_file if isinstance(env_file, (list, tuple)) else [env_file]
+    existing = [str(path) for path in paths if path and os.path.isfile(path)]
+    if not existing:
+        return
+    _env_file_skip_state["warned"] = True
+    logger.warning(
+        "PYTHON_DOTENV_DISABLED is set: settings ignore env file(s) %s; only the "
+        "process environment is used.",
+        ", ".join(existing),
+    )
 
 
 def warn_removed_agent_portal_settings() -> None:
@@ -1559,3 +1580,22 @@ class AppSettings(BaseSettings):
         "extra": "ignore",
         "env_prefix": "",
     }
+
+    def __init__(self, **values) -> None:
+        """Skip the ``.env`` file entirely when ``PYTHON_DOTENV_DISABLED`` is set.
+
+        The switch is python-dotenv's own opt-out (it already turns
+        ``load_dotenv`` into a no-op); honoring it here as well means one
+        variable disables every ``.env`` read, including in subprocesses that
+        inherit it. The test harness sets it (issue #1149). ``_env_file`` is
+        resolved to ``None`` *before* pydantic-settings builds its sources, so
+        the file is never opened or parsed -- an unreadable file cannot fail
+        construction -- and an explicit ``_env_file=`` is skipped too. A
+        one-time warning names any existing file that was skipped. With the
+        switch unset, construction is exactly pydantic-settings' default.
+        """
+        if dotenv_loading_disabled():
+            requested = values.get("_env_file") if "_env_file" in values else self.model_config.get("env_file")
+            _warn_env_file_skipped(requested)
+            values["_env_file"] = None
+        super().__init__(**values)

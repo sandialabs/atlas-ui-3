@@ -1,6 +1,6 @@
 # Test Isolation
 
-Last updated: 2026-10-27
+Last updated: 2026-11-02
 
 The Python suite runs in a single process, in one pass, with no per-test
 forking, and is also supported under `pytest-xdist` for parallel execution
@@ -19,9 +19,10 @@ guards are in place even for state that app code establishes at *import* time.
 
 | Guard | What it prevents |
 | --- | --- |
-| `AppSettings.model_config["env_file"] = None` | The developer's `.env` changing results from machine to machine |
+| `PYTHON_DOTENV_DISABLED=1`, set before any import | Every `.env` read -- `atlas/main.py`'s import-time `load_dotenv("../.env")`, `litellm`'s bare `load_dotenv()`, and `AppSettings`' dotenv source -- refilling the environment after the scrub, in the pytest process and in every subprocess a test spawns (issue #1149) |
+| `DEBUG_MODE` defaults to `true` when the harness does not provide it | Debug vs. production mode being decided by a checkout-local `.env` |
+| `AppSettings.model_config["env_file"] = None` | The developer's `.env` changing results from machine to machine (defense in depth alongside the switch above) |
 | Settings-derived env vars scrubbed (`_scrub_session_environment`) | Deployment-style variables exported in the invoking shell (`AUTH_STATIC_GROUPS`, `ADMIN_USERS`, `ADMIN_GROUP`, `APP_CONFIG_DIR`, `OIDC_*`, `FEATURE_*`, ...) changing test results (issue #1070) |
-| Foreign `.env` refused during conftest imports (`_guarded_load_dotenv`) | Import-time dotenv loads (bare `load_dotenv()` in `litellm`) pulling a foreign `.env` found by `find_dotenv`'s parent-directory walk back into the session after the scrub; the checkout's own `.env` stays load-bearing |
 | `APP_LOG_DIR` -> temp dir | Test spans and security-risk records landing in the repository's `logs/` |
 | `CHAT_HISTORY_DB_URL`, `RUNTIME_FEEDBACK_DIR`, `RUNTIME_CAPTURE_DIR`, `MCP_TOKEN_STORAGE_DIR` -> temp dirs | Tests reading and writing the developer's real `data/`, `runtime/` and `config/secure/` state |
 | `AUTH_GROUP_CHECK_URL` / `AUTH_GROUP_CHECK_API_KEY` cleared | Authorization tests calling a live external authorizer |
@@ -81,21 +82,47 @@ foreign entry is exported.
 once when conftest is imported; it cannot undo variables a test sets, and
 nothing a test does re-triggers it.
 
-**Imports made by conftest itself cannot load a foreign .env.** `litellm` calls
-bare `load_dotenv()` at import time, and python-dotenv's `find_dotenv` walks up
-parent directories — a checkout without its own `.env` picks up whatever
-`.env` an ancestor directory contains (observed live: a sibling project's
-`.env` with a placeholder `CAPABILITY_TOKEN_SECRET` failed conftest import
-outright). While conftest's own imports run, `load_dotenv` refuses any file
-that resolves outside the checkout under test and passes everything else
-(including the checkout's own `.env`, which CI's baked `/app/.env` relies on)
-through to the real implementation; the real function is restored before the
-first test module is imported. A bare `load_dotenv()` that goes through the
-guard walks up from `atlas/tests/` (the guard's own file), not from the real
-caller's directory. This is deliberate: when the venv lives outside the
-checkout (or a worktree symlinks `.venv`), a walk from `site-packages/litellm/`
-never reaches the checkout's `.env`, and the mock-admin tests need the
-`DEBUG_MODE` it supplies during these imports.
+### No `.env` is read during tests
+
+Scrubbing the environment is not enough on its own: application imports used
+to load a `.env` straight back in afterwards (issue #1149). `atlas/main.py`
+calls `load_dotenv("../.env")` at import, which refills any variable the scrub
+removed; `litellm` calls a bare `load_dotenv()` whose `find_dotenv` walk
+starts at litellm's own file, so a venv shared with another checkout loads
+*that* checkout's `.env`; and a subprocess test that imports the real app
+reads `AppSettings`' `env_file="../.env"`. Results then depended on each
+machine's `.env` and on import order.
+
+conftest therefore sets `PYTHON_DOTENV_DISABLED=1` as its first action,
+before any app or third-party import. This is python-dotenv's own opt-out:
+`load_dotenv` returns `False` without touching `os.environ`. Atlas's own
+`.env` reads that do not go through `load_dotenv` (the pre-import
+`FEATURE_SUPPRESS_LITELLM_LOGGING` peek in `atlas/main.py`, and the
+`AppSettings` dotenv source) honor the same switch through
+`atlas/core/dotenv_policy.py`. Subprocesses spawned by tests inherit it.
+Nothing in Atlas sets the variable, so a deployment's `.env` handling is
+unchanged unless it exports `PYTHON_DOTENV_DISABLED` itself; such a process
+already skipped `main.py`'s `load_dotenv`, and now also skips the
+`AppSettings` `.env` source, logging a one-time warning when a file is
+present. `atlas/init_cli.py`'s `dotenv_values` read is out of scope on
+purpose: it only preserves a signing key while writing a new env file.
+
+Test configuration comes only from the process environment: the
+harness-provided `DEBUG_MODE` / `ENVIRONMENT` / `MCP_CONFIG_FILE`, conftest's
+session pins, and per-test `monkeypatch`. When nothing provides `DEBUG_MODE`,
+conftest pins it to `true` -- the value `Dockerfile-test` bakes and the
+debug-only test gates assume -- so CI's per-leg `docker run -e
+DEBUG_MODE=true|false` matrix works exactly as before, and a bare local run is
+deterministic.
+
+A test that exercises dotenv loading itself requests the
+`dotenv_loading_enabled` fixture (it removes the switch for that one test via
+`monkeypatch`); wrap the load in `mock.patch.dict(os.environ)` so loaded values
+cannot outlive the test. A test that spawns a subprocess which must read an
+env file (a CLI `--env-file` check, say) removes `PYTHON_DOTENV_DISABLED`
+from that subprocess's `env`. `atlas/tests/test_dotenv_isolation.py` covers
+the guarantees, including fresh child sessions run with and without a
+conflicting `.env` and in different import orders.
 
 ## Rules for test authors
 
