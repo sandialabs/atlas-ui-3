@@ -125,15 +125,18 @@ def constant(name):
     return int(result.stdout.strip())
 
 
-async def grow_until(ws, frames, tag, status):
+async def grow_until(ws, frames, tag, status, turns=6, model=None):
     """Send long turns until a compaction frame with ``status`` appears."""
     conversation = None
     sent = 0
-    for i in range(6):
+    for i in range(turns):
+
         sent += 1
         # A marker rides along in every turn: it must never reach the log.
         content = f"{tag}{i} " + long_text(f"{tag}{i}") + f" {CONTENT_MARKER}"
-        conversation = await turn(ws, chat(content, conversation), frames) or conversation
+        conversation = await turn(
+            ws, chat(content, conversation, model=model), frames,
+        ) or conversation
         if of(frames, "context_compaction", status=status):
             break
     return conversation, sent
@@ -226,17 +229,10 @@ async def reasoning_model_gets_the_larger_budget():
     set_mode("empty_once")
     ws = await connect()
     frames = []
-    conversation = None
-    sent = 0
-    for i in range(6):
-        sent += 1
-        conversation = await turn(
-            ws, chat(f"R{i} " + long_text(f"R{i}"), conversation, model=REASONING_MODEL), frames,
-        ) or conversation
-        if of(frames, "context_compaction", status="completed"):
-            break
+    _, sent = await grow_until(ws, frames, "R", "completed", turns=24, model=REASONING_MODEL)
     done = of(frames, "context_compaction", status="completed")
-    check(bool(done), "compaction completes for a model configured with a reasoning effort")
+    check(bool(done) and sent > 0,
+          "compaction completes for a model configured with a reasoning effort")
     if not done:
         await ws.close()
         return

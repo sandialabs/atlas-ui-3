@@ -85,6 +85,13 @@ provider error is an exception, not a blank reply, so it propagates — the retr
 never swallows the error class callers depend on (`RateLimitError`,
 `ContextWindowExceededError`, ...).
 
+The budget is clamped to a share of the model's usable context
+(`SUMMARY_FIRST_OUTPUT_SHARE` 35%, `SUMMARY_RETRY_OUTPUT_SHARE` 50%), so the six
+and eight thousand token nominals only apply where they fit. Compaction
+chunks already occupy about half the usable context, and an endpoint that
+enforces the combined prompt-plus-completion limit would reject an
+over-sized budget outright rather than give the retry a chance.
+
 `checkpoint_output_budget()` sizes the cap: reasoning models (those configured
 with a `reasoning_effort`, the codebase's marker for one) start from the larger
 budget, and the retry always gets more headroom than the first attempt. The

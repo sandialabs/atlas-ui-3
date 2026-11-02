@@ -25,6 +25,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.config.models import lookup_model_config
 from atlas.modules.llm.token_estimation import HEURISTIC_CHARS_PER_TOKEN, IMAGE_TOKENS
 
@@ -60,6 +61,14 @@ SUMMARY_REASONING_MAX_TOKENS = 6000
 # One retry per chunk, and the retry gets this much more headroom. Two calls
 # per chunk is the whole recovery budget: compaction must stay bounded.
 SUMMARY_RETRY_MAX_TOKENS = 8000
+# An attempt never asks for more than this share of the model's usable
+# context: the summarizer's own prompt -- instructions, the previous
+# checkpoint and the chunk -- has to fit beside the reply, and an endpoint
+# that enforces the combined limit would otherwise reject the larger budgets
+# outright instead of letting the retry help.
+SUMMARY_FIRST_OUTPUT_SHARE = 0.35
+SUMMARY_RETRY_OUTPUT_SHARE = 0.5
+SUMMARY_MIN_OUTPUT_TOKENS = 800
 MAX_SUMMARY_ATTEMPTS = 2
 SUMMARY_TEMPERATURE = 0.2
 # The retry is deterministic: sampling a second empty reply from the same
@@ -313,16 +322,27 @@ def is_reasoning_model(model_config: Any) -> bool:
     return bool(getattr(model_config, "reasoning_effort", None))
 
 
-def checkpoint_output_budget(*, reasoning: bool = False, attempt: int = 0) -> int:
+def checkpoint_output_budget(
+    *, reasoning: bool = False, attempt: int = 0, input_budget_tokens: int = 0,
+) -> int:
     """Output-token cap for one summarizer call (issue #1138).
 
     Reasoning models get a larger budget from the first attempt; the single
-    retry gets more headroom than the first attempt either way, because the
-    usual cause of a blank checkpoint is a budget the model drained before it
-    wrote anything.
+    retry gets more headroom either way, because the usual cause of a blank
+    checkpoint is a budget the model drained before it wrote anything. The cap
+    is then clamped to the share of the model's usable context that is left for
+    the reply, so a small window shrinks both attempts instead of asking for a
+    reply that cannot fit beside its own prompt.
     """
-    base = max(SUMMARY_MAX_TOKENS, SUMMARY_REASONING_MAX_TOKENS) if reasoning else SUMMARY_MAX_TOKENS
-    return base if attempt <= 0 else max(base, SUMMARY_RETRY_MAX_TOKENS)
+    if attempt <= 0:
+        nominal = SUMMARY_REASONING_MAX_TOKENS if reasoning else SUMMARY_MAX_TOKENS
+        share = SUMMARY_FIRST_OUTPUT_SHARE
+    else:
+        nominal = SUMMARY_RETRY_MAX_TOKENS
+        share = SUMMARY_RETRY_OUTPUT_SHARE
+    if input_budget_tokens > 0:
+        return max(1, min(nominal, int(input_budget_tokens * share)))
+    return max(SUMMARY_MIN_OUTPUT_TOKENS, nominal)
 
 
 def classify_empty_response(diagnostics: Optional[Dict[str, Any]]) -> str:
@@ -384,13 +404,15 @@ async def _summarize_chunk(
     reasoning: bool,
     position: int,
     total: int,
+    input_budget_tokens: int,
 ) -> str:
     """One chunk's summary: a single call, retried once, or the reason it failed.
 
     A model that answers with no text and no reasoning is usually going to do
     the same thing again, so recovery is one bounded attempt -- never a loop --
-    with a larger output budget and deterministic sampling. A provider error is
-    an exception, not an empty reply, so it is never swallowed by the retry.
+    with a larger output budget (bounded by the model's window) and
+    deterministic sampling. A provider error is an exception, not an empty
+    reply, so it is never swallowed by the retry.
     """
     reason = CHECKPOINT_FAILURE_EMPTY_CONTENT
     diagnostics: Dict[str, Any] = {}
@@ -398,7 +420,9 @@ async def _summarize_chunk(
         try:
             text, response_meta = await _call_summarizer(
                 llm, model, request, user_email=user_email,
-                max_tokens=checkpoint_output_budget(reasoning=reasoning, attempt=attempt),
+                max_tokens=checkpoint_output_budget(
+                    reasoning=reasoning, attempt=attempt, input_budget_tokens=input_budget_tokens,
+                ),
                 temperature=SUMMARY_RETRY_TEMPERATURE if attempt else SUMMARY_TEMPERATURE,
             )
         except Exception as exc:
@@ -407,7 +431,8 @@ async def _summarize_chunk(
             # domain error it already is -- only the log says which it was.
             logger.warning(
                 "Checkpoint summarization call failed for %s (chunk %d/%d, reason=%s): %s",
-                model, position, total, CHECKPOINT_FAILURE_PROVIDER_ERROR, type(exc).__name__,
+                sanitize_for_logging(model), position, total,
+                CHECKPOINT_FAILURE_PROVIDER_ERROR, type(exc).__name__,
             )
             raise
         if text:
@@ -416,7 +441,8 @@ async def _summarize_chunk(
         reason = classify_empty_response(diagnostics)
         logger.warning(
             "Empty checkpoint from %s (chunk %d/%d, attempt %d/%d, reason=%s): %s",
-            model, position, total, attempt + 1, MAX_SUMMARY_ATTEMPTS, reason, diagnostics or {},
+            sanitize_for_logging(model), position, total, attempt + 1,
+            MAX_SUMMARY_ATTEMPTS, reason, sanitize_for_logging(diagnostics),
         )
     raise EmptyCheckpointError(reason, diagnostics)
 
@@ -478,7 +504,7 @@ async def summarize_messages(
         ]
         summary = await _summarize_chunk(
             llm, model, request, user_email=user_email, reasoning=reasoning,
-            position=position, total=len(chunks),
+            position=position, total=len(chunks), input_budget_tokens=input_budget_tokens,
         )
     return summary
 

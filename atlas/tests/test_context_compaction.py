@@ -695,9 +695,11 @@ class ScriptedSummarizer:
 
 
 def _summarize(llm, **extra):
+    # A window large enough that the budgets below are not clamped; the
+    # clamping itself is covered by its own test.
     return engine.summarize_messages(
         llm, "m", [{"role": "user", "content": "audit the repository"}],
-        user_email="u@x", input_budget_tokens=4000, **extra,
+        user_email="u@x", input_budget_tokens=20000, **extra,
     )
 
 
@@ -841,6 +843,18 @@ class TestEmptyCheckpoint:
         # An unrecognized finish reason is provider text: it only counts as a
         # blank reply, never as a distinct category.
         assert engine.classify_empty_response({"finish_reason": "other"}) == CHECKPOINT_FAILURE_EMPTY_CONTENT
+
+    def test_output_budget_is_capped_by_the_window(self):
+        # A tiny window shrinks both attempts to what can still fit beside the
+        # summarizer's own prompt, and the retry is never the smaller one.
+        assert engine.checkpoint_output_budget(attempt=0, input_budget_tokens=1000) == 350
+        assert engine.checkpoint_output_budget(attempt=1, input_budget_tokens=1000) == 500
+        # A comfortably large window leaves the nominal budgets alone.
+        assert engine.checkpoint_output_budget(attempt=0, input_budget_tokens=1_000_000) == engine.SUMMARY_MAX_TOKENS
+        assert engine.checkpoint_output_budget(attempt=1, input_budget_tokens=1_000_000) == engine.SUMMARY_RETRY_MAX_TOKENS
+        # Unknown budget: fall back to the nominal budget, floored.
+        assert engine.checkpoint_output_budget(attempt=1) == engine.SUMMARY_RETRY_MAX_TOKENS
+        assert engine.checkpoint_output_budget(attempt=0) == engine.SUMMARY_MAX_TOKENS
 
 
 class TestEmptyCheckpointRunGuard:

@@ -95,6 +95,12 @@ the compaction is given up. A model configured with a `reasoning_effort` starts
 with the larger budget, because a reasoning model spends output tokens on
 reasoning before it writes any final text and can drain a small cap entirely.
 
+Both budgets are then capped to the share of the model's usable context that is
+left for a reply (`SUMMARY_FIRST_OUTPUT_SHARE`, 35%, and
+`SUMMARY_RETRY_OUTPUT_SHARE`, 50%): the summarizer's own prompt has to fit beside
+its answer, so a model with a small window asks for less instead of asking for a
+reply the endpoint would reject.
+
 The result is classified, and the class is what reaches the user:
 
 | Reason | Meaning |

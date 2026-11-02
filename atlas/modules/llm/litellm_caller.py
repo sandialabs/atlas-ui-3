@@ -206,8 +206,14 @@ def _safe_model_id(value: Any) -> str:
     return URL_AUTHORITY.sub(lambda match: f"{match.group(0).split('://', 1)[0]}://[host]", text)
 
 
-def describe_plain_response(response: Any, model_name: str = "") -> Dict[str, Any]:
+def describe_plain_response(
+    response: Any, model_name: str = "", litellm_model: str = ""
+) -> Dict[str, Any]:
     """The non-sensitive metadata that explains an empty plain completion.
+
+    ``litellm_model`` is the target the request was actually routed to; the
+    provider may echo a different id (``reported_model``), and that mismatch is
+    itself worth having when an alias or proxy is in the path.
 
     Logged and returned with the text so a caller can tell three cases apart
     (issue #1138): the model wrote nothing, it used up its whole output budget
@@ -226,10 +232,12 @@ def describe_plain_response(response: Any, model_name: str = "") -> Dict[str, An
     content = getattr(message, "content", None)
     finish_reason = getattr(first, "finish_reason", None) if first is not None else None
     usage = getattr(response, "usage", None)
-    resolved = str(getattr(response, "model", "") or "")
+    reported = str(getattr(response, "model", "") or "")
+    resolved = litellm_model or reported
     return {
         "model": sanitize_for_logging(model_name),
         "litellm_model": _safe_model_id(resolved),
+        "reported_model": _safe_model_id(reported),
         "provider": sanitize_for_logging(split_provider(resolved)[0]),
         "choice_count": len(choices) if isinstance(choices, (list, tuple)) else (0 if not choices else 1),
         "content_present": content is not None,
@@ -1465,7 +1473,7 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
 
             # Diagnostics first: they explain this response whatever it holds,
             # and they survive a response with no choice at all.
-            diagnostics = describe_plain_response(response, model_name)
+            diagnostics = describe_plain_response(response, model_name, litellm_model)
             diagnostics["requested_max_tokens"] = model_kwargs.get("max_tokens")
             content = ""
             if getattr(response, "choices", None):
@@ -1479,7 +1487,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             else:
                 # Enough to tell an empty reply from an exhausted budget without
                 # logging content, reasoning text or the request (#1138).
-                logger.warning("Plain LLM call returned no content: %s", diagnostics)
+                logger.warning(
+                    "Plain LLM call returned no content: %s", sanitize_for_logging(diagnostics),
+                )
 
             log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
 
