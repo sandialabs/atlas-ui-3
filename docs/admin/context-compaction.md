@@ -115,6 +115,13 @@ count, whether content was present and how many characters, and
 prompt/completion/reasoning/total tokens. It never contains transcript content,
 reasoning text, or the request body.
 
+Compaction never overrides a model's configured `reasoning_effort`; it only
+asks for more room. When a reasoning model's effort setting starves its own
+summary, the operator lever is still that model's `reasoning_effort` (see
+[LLM Configuration](llm-config.md)), or a model without reasoning for long
+runs. The `reasoning_only` reason in the log is the signal that a reply came
+back with reasoning but no final text.
+
 Recovery is bounded: at most two summarization calls per transcript chunk
 (chunks are capped at 6), and neither the retry nor the failure edits the
 caller's messages, so the uncompacted context is what the next request uses.
