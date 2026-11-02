@@ -1579,6 +1579,7 @@ class AppSettings(BaseSettings):
         inherit it. The test harness sets it (issue #1149); with it unset the
         sources are exactly pydantic-settings' defaults.
         """
+        sources = (init_settings, env_settings, dotenv_settings, file_secret_settings)
         if dotenv_loading_disabled():
-            return init_settings, env_settings, file_secret_settings
-        return init_settings, env_settings, dotenv_settings, file_secret_settings
+            sources = tuple(source for source in sources if source is not dotenv_settings)
+        return sources

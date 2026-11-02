@@ -47,6 +47,7 @@ unset PYTHON_DOTENV_DISABLED DEBUG_MODE ADMIN_GROUP AUTH_GROUP_CHECK_URL AUTH_GR
 export PYTHONPATH="$PROJECT_ROOT"
 
 write_conflicting_env() {
+    mkdir -p "$(dirname "$1")" || exit 1
     cat > "$1" <<'EOF'
 ATLAS_1149_DOTENV_SENTINEL=loaded-from-dotenv
 AUTH_GROUP_CHECK_URL=http://127.0.0.1:9/never-contact-me
@@ -83,6 +84,10 @@ run_session() {
 print_header "1. Same results with and without a conflicting .env"
 CLEAN="$(run_session "$WORK/clean" "${FILES_FWD[@]}")"
 write_conflicting_env "$WORK/dotenv/.env"
+if ! grep -q '^ADMIN_GROUP=dotenv_admins$' "$WORK/dotenv/.env" 2>/dev/null; then
+    echo "conflicting .env was not written; aborting" >&2
+    exit 1
+fi
 DOTENV="$(run_session "$WORK/dotenv" "${FILES_FWD[@]}")"
 echo "  clean : $CLEAN"
 echo "  .env  : $DOTENV"
