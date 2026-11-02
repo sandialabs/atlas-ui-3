@@ -252,19 +252,21 @@ def log_checks():
         return
     with open(BACKEND_LOG, encoding="utf-8", errors="replace") as handle:
         text = handle.read()
-    lines = [line for line in text.splitlines()
-             if "Empty checkpoint" in line or "returned no content" in line]
-    check(bool(lines), "the empty checkpoint is logged with diagnostics")
+    lines = text.splitlines()
+    check(any("returned no content" in line for line in lines),
+          "an empty plain completion is logged with its diagnostics")
+    # The classification is what a reader acts on, and it rides on the
+    # compaction failure line.
     check(any("output_token_exhaustion" in line for line in lines),
           "the log names the exhausted-budget reason")
-    check(any("'finish_reason': 'length'" in line or '"finish_reason": "length"' in line
-              for line in lines),
+    check(any("'finish_reason': 'length'" in line for line in lines),
           "the log carries the provider finish reason")
-    check(any("reasoning_tokens" in line for line in lines if "Empty checkpoint" in line),
+    check(any("reasoning_tokens" in line for line in lines),
           "the log reports reasoning-token usage")
     check(CONTENT_MARKER not in text, "the log carries none of the transcript content")
-    check(all("http://" not in line for line in lines),
-          "the log lines carry no provider URL")
+    diagnostics_lines = [line for line in lines if "finish_reason" in line]
+    check(bool(diagnostics_lines) and all("http://" not in line for line in diagnostics_lines),
+          "the diagnostic lines carry no provider URL")
 
 
 async def main():
