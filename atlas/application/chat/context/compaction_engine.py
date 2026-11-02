@@ -432,7 +432,7 @@ async def _summarize_chunk(
             logger.warning(
                 "Checkpoint summarization call failed for %s (chunk %d/%d, reason=%s): %s",
                 sanitize_for_logging(model), position, total,
-                CHECKPOINT_FAILURE_PROVIDER_ERROR, type(exc).__name__,
+                CHECKPOINT_FAILURE_PROVIDER_ERROR, sanitize_for_logging(type(exc).__name__),
             )
             raise
         if text:
@@ -440,9 +440,10 @@ async def _summarize_chunk(
         diagnostics = response_meta
         reason = classify_empty_response(diagnostics)
         logger.warning(
-            "Empty checkpoint from %s (chunk %d/%d, attempt %d/%d, reason=%s): %s",
+            "Empty checkpoint text for %s (chunk %d/%d, attempt %d/%d, reason=%s): %s",
             sanitize_for_logging(model), position, total, attempt + 1,
-            MAX_SUMMARY_ATTEMPTS, reason, sanitize_for_logging(diagnostics),
+            MAX_SUMMARY_ATTEMPTS, sanitize_for_logging(reason),
+            sanitize_for_logging(diagnostics),
         )
     raise EmptyCheckpointError(reason, diagnostics)
 
