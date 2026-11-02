@@ -26,6 +26,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from atlas.modules.llm.token_estimation import HEURISTIC_CHARS_PER_TOKEN, IMAGE_TOKENS
 
+from .compaction_summarizer import (
+    is_reasoning_model,
+    summarize_chunk,
+    summarizer_model_config,
+)
+
 logger = logging.getLogger(__name__)
 
 # A tool output shorter than this is cheaper to keep than to describe.
@@ -41,6 +47,28 @@ SUMMARY_ARGUMENT_CHARS = 600
 # each chunk is one LLM call, and compaction must stay bounded.
 MAX_SUMMARY_CHUNKS = 6
 SUMMARY_MAX_TOKENS = 3000
+# A reasoning model spends output tokens on reasoning before it writes any
+# final text, so a cap that is comfortable for a chat model can come back with
+# finish_reason "length" and no checkpoint at all. Models configured with a
+# reasoning_effort -- the codebase's marker for a reasoning model -- start with
+# a larger budget (issue #1138).
+SUMMARY_REASONING_MAX_TOKENS = 6000
+# One retry per chunk, and the retry gets this much more headroom. Two calls
+# per chunk is the whole recovery budget: compaction must stay bounded.
+SUMMARY_RETRY_MAX_TOKENS = 8000
+# An attempt never asks for more than this share of the model's usable
+# context: the summarizer's own prompt -- instructions, the previous
+# checkpoint and the chunk -- has to fit beside the reply, and an endpoint
+# that enforces the combined limit would otherwise reject the larger budgets
+# outright instead of letting the retry help.
+SUMMARY_FIRST_OUTPUT_SHARE = 0.35
+SUMMARY_RETRY_OUTPUT_SHARE = 0.5
+SUMMARY_MIN_OUTPUT_TOKENS = 800
+MAX_SUMMARY_ATTEMPTS = 2
+SUMMARY_TEMPERATURE = 0.2
+# The retry is deterministic: sampling a second empty reply from the same
+# distribution is not recovery.
+SUMMARY_RETRY_TEMPERATURE = 0.0
 LATEST_REQUEST_MAX_CHARS = 6000
 
 CHECKPOINT_SECTIONS = (
@@ -281,6 +309,11 @@ async def summarize_messages(
     The call goes through the normal ``call_plain`` path, so the same model the
     conversation is already cleared to use sees the content -- no other model
     is ever given it -- and PreLlmCall hooks apply to it as to any other call.
+
+    An empty reply is retried once with a larger output budget and then raised
+    as :class:`EmptyCheckpointError`, whose message names the classified cause
+    (issue #1138). Nothing here edits the caller's messages, so a failed
+    summary leaves the original context for the caller to keep.
     """
     chunk_chars = max(4000, int(input_budget_tokens * HEURISTIC_CHARS_PER_TOKEN * 0.5))
     chunks = _chunk(render_transcript(messages), chunk_chars)
@@ -295,6 +328,7 @@ async def summarize_messages(
         "Give that topic the most detail; still keep everything needed to continue."
         if focus and focus.strip() else ""
     )
+    reasoning = is_reasoning_model(summarizer_model_config(llm, model))
     for position, chunk in enumerate(chunks, start=1):
         parts = []
         if summary:
@@ -310,13 +344,10 @@ async def summarize_messages(
             {"role": "system", "content": SUMMARIZER_INSTRUCTIONS + focus_line},
             {"role": "user", "content": "\n\n".join(parts)},
         ]
-        result = await llm.call_plain(
-            model, request, temperature=0.2, max_tokens=SUMMARY_MAX_TOKENS, user_email=user_email,
+        summary = await summarize_chunk(
+            llm, model, request, user_email=user_email, reasoning=reasoning,
+            position=position, total=len(chunks), input_budget_tokens=input_budget_tokens,
         )
-        result = (result or "").strip()
-        if not result:
-            raise ValueError("The model returned an empty checkpoint")
-        summary = result
     return summary
 
 

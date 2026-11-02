@@ -1,0 +1,22 @@
+models:
+  compaction-mock:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/compaction-mock"
+    api_key: "mock"
+    description: "Scripted mock model for empty checkpoint recovery (issue #1138)"
+    supports_tools: true
+    # A small window so a handful of turns reaches the compaction threshold.
+    context_window: 6000
+    max_tokens: 400
+  # The same scripted mock, configured as a reasoning model. Its larger window
+  # keeps the summarizer's reasoning-aware output budget (6K) inside the context,
+  # which is the point of the check it backs.
+  reasoning-mock:
+    model_url: "http://127.0.0.1:__MOCK_LLM_PORT__/v1"
+    model_name: "openai/reasoning-mock"
+    api_key: "mock"
+    description: "The same mock, configured with a reasoning effort"
+    supports_tools: true
+    context_window: 20000
+    max_tokens: 400
+    reasoning_effort: "low"

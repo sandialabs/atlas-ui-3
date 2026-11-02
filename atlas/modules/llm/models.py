@@ -2,8 +2,8 @@
 Data models for LLM responses and related structures.
 """
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -24,6 +24,23 @@ class LLMResponse:
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
         return self.tool_calls is not None and len(self.tool_calls) > 0
+
+
+@dataclass
+class PlainCompletion:
+    """The text of one plain LLM call plus non-sensitive metadata (#1138).
+
+    ``diagnostics`` never carries content, reasoning text or the request body:
+    counts, the allow-listed finish reason and a few structure flags are enough
+    to tell an empty reply, a drained output budget and a provider failure
+    apart. Callers that only want the text use :attr:`text`.
+    """
+
+    text: str = ""
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
+
+    def __str__(self) -> str:
+        return self.text
 
 
 def split_provider(litellm_model: str) -> Tuple[str, str]:

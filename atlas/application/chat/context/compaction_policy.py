@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from atlas.domain.errors import DomainError
 from atlas.domain.messages.models import (
     CONTEXT_CHECKPOINT_MESSAGE_TYPE,
     DISPLAY_ONLY_MESSAGE_TYPES,
@@ -36,6 +37,51 @@ RequestBuilder = Callable[[], Awaitable[Tuple[List[Dict[str, Any]], List[Dict[st
 
 class NothingToCompact(Exception):
     """The context holds nothing older than the newest unit to summarize."""
+
+
+# Why a summarizer call produced no checkpoint text (issue #1138).
+# The model answered with no content at all -- an empty reply or a response
+# with no visible text.
+CHECKPOINT_FAILURE_EMPTY_CONTENT = "empty_content"
+# The model spent the whole output-token budget before writing any final text,
+# which litellm reports as finish_reason "length". A reasoning model can drain
+# the budget on reasoning tokens alone.
+CHECKPOINT_FAILURE_TOKEN_EXHAUSTION = "output_token_exhaustion"
+# The model reasoned but wrote no final text. Reported as a flag only: the
+# reasoning content is never read, logged or stored.
+CHECKPOINT_FAILURE_REASONING_ONLY = "reasoning_only"
+# The call itself failed (provider, transport, authorization). It arrives as a
+# raised domain error, not as an empty checkpoint, and is never retried here.
+CHECKPOINT_FAILURE_PROVIDER_ERROR = "provider_error"
+
+CHECKPOINT_FAILURE_TEXT = {
+    CHECKPOINT_FAILURE_EMPTY_CONTENT: "the summarization model returned no checkpoint text",
+    CHECKPOINT_FAILURE_TOKEN_EXHAUSTION: (
+        "the summarization model used its whole output-token budget before writing a checkpoint"
+    ),
+    CHECKPOINT_FAILURE_REASONING_ONLY: (
+        "the summarization model returned reasoning but no checkpoint text"
+    ),
+    CHECKPOINT_FAILURE_PROVIDER_ERROR: "the summarization call failed",
+}
+
+
+class EmptyCheckpointError(DomainError):
+    """The summarizer answered, but there was no checkpoint in the reply (#1138).
+
+    Carries the classified ``reason`` and the non-sensitive response
+    ``diagnostics`` (finish reason, token counts, content presence) so an
+    operator can tell a blank reply from a drained output budget. Neither is
+    ever shown raw: :func:`failure_text` renders one short line, and raw
+    provider text is kept out of both.
+    """
+
+    def __init__(self, reason: str, diagnostics: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(CHECKPOINT_FAILURE_TEXT.get(reason, CHECKPOINT_FAILURE_TEXT[
+            CHECKPOINT_FAILURE_EMPTY_CONTENT
+        ]), code=reason)
+        self.reason = reason
+        self.diagnostics = dict(diagnostics or {})
 
 
 @dataclass(frozen=True)
@@ -110,3 +156,15 @@ def failure_text(exc: Exception) -> str:
         if message:
             return f"Context compaction failed: {str(message)[:300]}"
     return "Context compaction failed: the model could not produce a checkpoint."
+
+
+def failure_frame(base: Dict[str, Any], exc: Exception) -> Dict[str, Any]:
+    """The ``failed`` frame for one compaction error.
+
+    Adds the classified ``reason`` for an empty checkpoint; the response
+    diagnostics stay in the log, because the frame reaches the browser.
+    """
+    frame = {**base, "status": "failed", "error": failure_text(exc)}
+    if isinstance(exc, EmptyCheckpointError):
+        frame["reason"] = exc.reason
+    return frame

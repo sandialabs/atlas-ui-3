@@ -1,6 +1,6 @@
 # Context Tracking and Compaction
 
-Last updated: 2026-10-24
+Last updated: 2026-11-01
 
 Issue #877.
 
@@ -86,6 +86,48 @@ automatic compaction off, the error is shown as before.
 A failed summary (provider error, empty reply, or a checkpoint that would not
 shrink the context) leaves the history and the run exactly as they were, shows
 a notice, and the turn continues uncompacted.
+
+### Empty checkpoint replies
+
+A summarization call whose reply carries no text is retried **once**, with a
+larger output-token budget and deterministic sampling (`temperature` 0), before
+the compaction is given up. A model configured with a `reasoning_effort` starts
+with the larger budget, because a reasoning model spends output tokens on
+reasoning before it writes any final text and can drain a small cap entirely.
+
+Both budgets are then capped to the share of the model's usable context that is
+left for a reply (`SUMMARY_FIRST_OUTPUT_SHARE`, 35%, and
+`SUMMARY_RETRY_OUTPUT_SHARE`, 50%): the summarizer's own prompt has to fit beside
+its answer, so a model with a small window asks for less instead of asking for a
+reply the endpoint would reject.
+
+The result is classified, and the class is what reaches the user:
+
+| Reason | Meaning |
+|---|---|
+| `empty_content` | The model answered with no text (or an empty string). |
+| `output_token_exhaustion` | The model spent the whole output budget first -- litellm reports `finish_reason: length`. The retry raises the budget. |
+| `reasoning_only` | The model returned reasoning but no final text. |
+
+The operator log line for the failed attempt carries only counts and
+allow-listed values -- resolved model id and provider, `finish_reason`, choice
+count, whether content was present and how many characters, and
+prompt/completion/reasoning/total tokens. It never contains transcript content,
+reasoning text, or the request body.
+
+Compaction never overrides a model's configured `reasoning_effort`; it only
+asks for more room. When a reasoning model's effort setting starves its own
+summary, the operator lever is still that model's `reasoning_effort` (see
+[LLM Configuration](llm-config.md)), or a model without reasoning for long
+runs. The `reasoning_only` reason in the log is the signal that a reply came
+back with reasoning but no final text.
+
+Recovery is bounded: at most two summarization calls per transcript chunk
+(chunks are capped at 6), and neither the retry nor the failure edits the
+caller's messages, so the uncompacted context is what the next request uses.
+Retries go through the same `call_plain` path as the first attempt, so the
+model authorization, the conversation's recorded data classification and any
+`PreLlmCall` hooks apply to them unchanged.
 
 ## Security and data handling
 

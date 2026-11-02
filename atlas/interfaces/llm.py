@@ -14,9 +14,16 @@ class LLMProtocol(Protocol):
         model_name: str,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
         user_email: Optional[str] = None,
     ) -> str:
-        """Plain LLM call without tools or RAG."""
+        """Plain LLM call without tools or RAG.
+
+        ``LiteLLMCaller`` also offers ``call_plain_detailed``, which returns
+        the text together with non-sensitive response metadata. It is optional,
+        so it is not part of this protocol: callers probe for it and fall back
+        to this method.
+        """
         ...
 
     async def call_with_tools(
