@@ -29,6 +29,13 @@ from dotenv import load_dotenv
 from atlas.core.dotenv_policy import DOTENV_DISABLED_ENV_VAR, dotenv_loading_disabled
 from atlas.modules.config.settings import AppSettings
 
+# Recorded at collection: in a child session this tells the parent whether an
+# earlier-collected module had already imported ``main`` (and run its
+# import-time ``load_dotenv``) before this module was collected. Every test
+# body sees ``main`` imported -- conftest's autouse middleware guard imports it
+# -- so the collection-time state is the ordering that actually varies.
+_MAIN_IMPORTED_AT_COLLECTION = "main" in sys.modules
+
 _TESTS_DIR = Path(__file__).resolve().parent
 _ATLAS_DIR = _TESTS_DIR.parent
 
@@ -87,13 +94,22 @@ def test_import_time_style_load_cannot_restore_scrubbed_variables(tmp_path):
         assert os.environ.get("ADMIN_GROUP") is None
 
 
-def test_settings_ignore_an_env_file_while_disabled(tmp_path, monkeypatch):
-    """``AppSettings`` drops its dotenv source under the switch, even when asked."""
+def test_settings_ignore_an_env_file_while_disabled(tmp_path, monkeypatch, caplog):
+    """``AppSettings`` drops its dotenv source under the switch, and says so once."""
+    from atlas.modules.config import settings as settings_module
+
     env_file = tmp_path / ".env"
     env_file.write_text("ADMIN_GROUP=dotenv_admins\n")
     monkeypatch.delenv("ADMIN_GROUP", raising=False)
+    monkeypatch.setattr(settings_module, "_env_file_skip_warned", False)
 
-    assert AppSettings(_env_file=str(env_file)).admin_group == "admin"
+    with caplog.at_level("WARNING", logger=settings_module.__name__):
+        assert AppSettings(_env_file=str(env_file)).admin_group == "admin"
+        assert AppSettings(_env_file=str(env_file)).admin_group == "admin"
+
+    skipped = [r for r in caplog.records if "PYTHON_DOTENV_DISABLED" in r.getMessage()]
+    assert len(skipped) == 1
+    assert str(env_file) in skipped[0].getMessage()
 
 
 def test_settings_read_an_env_file_when_dotenv_is_enabled(
@@ -199,6 +215,9 @@ def _effective_configuration() -> dict:
         "skip_authorization_checks": settings.skip_authorization_checks,
         "external_authorizer_posts": len(posts),
         "is_admin_in_debug_mock": is_admin,
+        # Not part of the configuration: lets the parent verify that the
+        # "main imported at collection" ordering really happened.
+        "main_imported_at_collection": _MAIN_IMPORTED_AT_COLLECTION,
     }
 
 
@@ -219,9 +238,11 @@ def _run_child_session(tmp_path: Path, name: str, *, with_dotenv: bool, order: l
     The child's working directory is ``<root>/work``, so ``main``'s
     ``load_dotenv("../.env")`` and ``AppSettings``' ``env_file="../.env"`` both
     resolve to ``<root>/.env`` -- the conflicting file when ``with_dotenv``.
-    ``order`` lists the test node ids to run, so collection/import order can be
-    varied (a module that imports ``main`` at collection, before the probe, or
-    the probe alone).
+    ``order`` lists whole test files, collected in that order, so import order
+    can be varied (a module that imports ``main`` at collection, before the
+    probe, or the probe alone). Files rather than ``file::test`` node ids,
+    because pytest does not keep a node id in argument order; ``-k`` then
+    deselects everything in this module except the probe.
     """
     root = tmp_path / name
     work = root / "work"
@@ -252,6 +273,8 @@ def _run_child_session(tmp_path: Path, name: str, *, with_dotenv: bool, order: l
             "-q",
             "-p",
             "no:cacheprovider",
+            "-k",
+            "not test_dotenv_isolation or test_probe_effective_configuration",
             *order,
         ],
         cwd=work,
@@ -274,8 +297,9 @@ def test_child_sessions_ignore_a_conflicting_dotenv(tmp_path):
     whether the probe runs first or after a module that imports ``main`` at
     collection time.
     """
-    probe = f"{_TESTS_DIR / 'test_dotenv_isolation.py'}::test_probe_effective_configuration"
-    imports_main_first = f"{_TESTS_DIR / 'test_health_route.py'}"
+    probe = str(_TESTS_DIR / "test_dotenv_isolation.py")
+    # ``from main import app`` at module level, so main is imported at collection.
+    imports_main_first = f"{_TESTS_DIR / 'test_config_shell_endpoint.py'}"
 
     baseline = _run_child_session(tmp_path, "clean", with_dotenv=False, order=[probe])
     observations = {
@@ -287,6 +311,15 @@ def test_child_sessions_ignore_a_conflicting_dotenv(tmp_path):
         ),
     }
 
+    # The orderings really differ: an earlier-collected module had imported
+    # main before this module was collected in one child and not in the others.
+    assert baseline.pop("main_imported_at_collection") is False
+    assert observations["conflicting .env, probe first"].pop("main_imported_at_collection") is False
+    assert (
+        observations["conflicting .env, main imported at collection"].pop("main_imported_at_collection")
+        is True
+    )
+
     assert baseline["sentinel"] is None
     assert baseline["auth_group_check_url"] is None
     assert baseline["external_authorizer_posts"] == 0
@@ -294,3 +327,30 @@ def test_child_sessions_ignore_a_conflicting_dotenv(tmp_path):
     assert baseline["debug_mode"] is True
     for label, observed in observations.items():
         assert observed == baseline, f"{label}: {observed} != {baseline}"
+
+
+def test_planted_dotenv_is_where_the_app_reads_it(tmp_path):
+    """Positive control for the child-session test: the planted file is live.
+
+    Without the switch, a plain interpreter importing ``main`` from the same
+    ``<root>/work`` layout loads ``<root>/.env`` into ``os.environ`` and into
+    ``AppSettings``. This proves the isolation test above passes because the
+    switch blocks a real read, not because the file sits somewhere unread.
+    """
+    root = tmp_path / "control"
+    work = root / "work"
+    work.mkdir(parents=True)
+    (root / ".env").write_text(f"{_SENTINEL_VAR}=loaded-from-dotenv\nADMIN_GROUP=dotenv_admins\n")
+
+    env = {k: v for k, v in os.environ.items() if k not in (DOTENV_DISABLED_ENV_VAR, "ADMIN_GROUP")}
+    env["PYTHONPATH"] = os.pathsep.join([str(_ATLAS_DIR.parent), str(_ATLAS_DIR)])
+    code = (
+        "import json, os, main\n"
+        "from atlas.modules.config.config_manager import config_manager\n"
+        f"print(json.dumps([os.environ.get({_SENTINEL_VAR!r}), config_manager.app_settings.admin_group]))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=work, env=env, capture_output=True, text=True, timeout=300
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == ["loaded-from-dotenv", "dotenv_admins"]

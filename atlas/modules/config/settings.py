@@ -13,6 +13,27 @@ from atlas.core.security_config import validate_capability_secret
 
 logger = logging.getLogger(__name__)
 
+# Log-deduplication only (per process): the skipped-.env warning below fires
+# once rather than on every AppSettings() construction.
+_env_file_skip_warned = False
+
+
+def _warn_env_file_skipped(env_file) -> None:
+    """Warn once that ``PYTHON_DOTENV_DISABLED`` made settings skip an env file."""
+    global _env_file_skip_warned
+    if _env_file_skip_warned or not env_file:
+        return
+    paths = env_file if isinstance(env_file, (list, tuple)) else [env_file]
+    existing = [str(path) for path in paths if path and os.path.isfile(path)]
+    if not existing:
+        return
+    _env_file_skip_warned = True
+    logger.warning(
+        "PYTHON_DOTENV_DISABLED is set: settings ignore env file(s) %s; only the "
+        "process environment is used.",
+        ", ".join(existing),
+    )
+
 
 def warn_removed_agent_portal_settings() -> None:
     """Log if a removed Agent Portal setting is still present in the environment.
@@ -1577,9 +1598,12 @@ class AppSettings(BaseSettings):
         ``load_dotenv`` into a no-op); honoring it here as well means one
         variable disables every ``.env`` read, including in subprocesses that
         inherit it. The test harness sets it (issue #1149); with it unset the
-        sources are exactly pydantic-settings' defaults.
+        sources are exactly pydantic-settings' defaults. A process that sets
+        it while an env file exists gets a one-time warning, so the skipped
+        file is never silent.
         """
         sources = (init_settings, env_settings, dotenv_settings, file_secret_settings)
         if dotenv_loading_disabled():
             sources = tuple(source for source in sources if source is not dotenv_settings)
+            _warn_env_file_skipped(getattr(dotenv_settings, "env_file", None))
         return sources

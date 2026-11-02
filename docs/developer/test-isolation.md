@@ -100,8 +100,12 @@ before any app or third-party import. This is python-dotenv's own opt-out:
 `FEATURE_SUPPRESS_LITELLM_LOGGING` peek in `atlas/main.py`, and the
 `AppSettings` dotenv source) honor the same switch through
 `atlas/core/dotenv_policy.py`. Subprocesses spawned by tests inherit it.
-Nothing sets the variable at runtime, so a deployment's `.env` handling is
-unchanged.
+Nothing in Atlas sets the variable, so a deployment's `.env` handling is
+unchanged unless it exports `PYTHON_DOTENV_DISABLED` itself; such a process
+already skipped `main.py`'s `load_dotenv`, and now also skips the
+`AppSettings` `.env` source, logging a one-time warning when a file is
+present. `atlas/init_cli.py`'s `dotenv_values` read is out of scope on
+purpose: it only preserves a signing key while writing a new env file.
 
 Test configuration comes only from the process environment: the
 harness-provided `DEBUG_MODE` / `ENVIRONMENT` / `MCP_CONFIG_FILE`, conftest's
