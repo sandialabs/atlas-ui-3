@@ -10,7 +10,6 @@ from atlas.application.chat.context import compaction_engine as engine
 from atlas.application.chat.context.compaction_controller import ContextCompactor
 from atlas.application.chat.context.compaction_policy import (
     CHECKPOINT_FAILURE_EMPTY_CONTENT,
-    CHECKPOINT_FAILURE_PROVIDER_ERROR,
     CHECKPOINT_FAILURE_REASONING_ONLY,
     CHECKPOINT_FAILURE_TOKEN_EXHAUSTION,
     TRIGGER_AUTO,
@@ -762,10 +761,11 @@ class TestEmptyCheckpoint:
         caplog.set_level(logging.WARNING)
         with pytest.raises(RuntimeError):
             await _summarize(llm)
-        # A failed call is a different cause from an empty one, and it is
-        # reported as such instead of burning the retry.
+        # A refused call is the third cause, distinct from a blank reply:
+        # it propagates as the domain error it already is, so the retry is
+        # never spent on a provider or authorization failure.
         assert len(llm.calls) == 1
-        assert CHECKPOINT_FAILURE_PROVIDER_ERROR in caplog.text
+        assert "Checkpoint summarization call failed" in caplog.text
 
     @pytest.mark.asyncio
     async def test_recovery_folds_into_the_checkpoint(self):

@@ -24,6 +24,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     CHECKPOINT_SCOPE_CONVERSATION,
@@ -257,7 +258,8 @@ class ContextCompactor:
                 # without content, reasoning text or the request (#1138).
                 logger.warning(
                     "Context compaction failed (%s): %s",
-                    exc.reason, exc.diagnostics, exc_info=True,
+                    sanitize_for_logging(exc.reason), sanitize_for_logging(exc.diagnostics),
+                    exc_info=True,
                 )
             else:
                 logger.warning("Context compaction failed (%s)", type(exc).__name__, exc_info=True)

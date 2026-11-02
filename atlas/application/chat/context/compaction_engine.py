@@ -25,13 +25,11 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.modules.config.models import lookup_model_config
 from atlas.modules.llm.token_estimation import HEURISTIC_CHARS_PER_TOKEN, IMAGE_TOKENS
 
 from .compaction_policy import (
     CHECKPOINT_FAILURE_EMPTY_CONTENT,
-    CHECKPOINT_FAILURE_PROVIDER_ERROR,
     CHECKPOINT_FAILURE_REASONING_ONLY,
     CHECKPOINT_FAILURE_TOKEN_EXHAUSTION,
     EmptyCheckpointError,
@@ -425,14 +423,15 @@ async def _summarize_chunk(
                 ),
                 temperature=SUMMARY_RETRY_TEMPERATURE if attempt else SUMMARY_TEMPERATURE,
             )
-        except Exception as exc:
+        except Exception:
             # The third cause: the provider, the transport or authorization
             # refused the call. Nothing here can fix it, so it goes on as the
-            # domain error it already is -- only the log says which it was.
+            # domain error it already is. The response metadata is logged
+            # once by the caller, which is the code that sees the response --
+            # this line only says the compaction is giving up, and keeps no
+            # provider-derived text at all.
             logger.warning(
-                "Checkpoint summarization call failed for %s (chunk %d/%d, reason=%s): %s",
-                sanitize_for_logging(model), position, total,
-                CHECKPOINT_FAILURE_PROVIDER_ERROR, sanitize_for_logging(type(exc).__name__),
+                "Checkpoint summarization call failed (chunk %d/%d)", position, total,
             )
             raise
         if text:
@@ -440,10 +439,8 @@ async def _summarize_chunk(
         diagnostics = response_meta
         reason = classify_empty_response(diagnostics)
         logger.warning(
-            "Empty checkpoint text for %s (chunk %d/%d, attempt %d/%d, reason=%s): %s",
-            sanitize_for_logging(model), position, total, attempt + 1,
-            MAX_SUMMARY_ATTEMPTS, sanitize_for_logging(reason),
-            sanitize_for_logging(diagnostics),
+            "Empty checkpoint text (chunk %d/%d, attempt %d of %d)",
+            position, total, attempt + 1, MAX_SUMMARY_ATTEMPTS,
         )
     raise EmptyCheckpointError(reason, diagnostics)
 
