@@ -76,6 +76,9 @@ def test_concurrent_admission_is_atomic_across_replicas(cluster):
             lambda pair: cluster.launch(pair[1], user, directive(f"race{pair[0]}", sleep=8)),
             enumerate(targets),
         ))
+    # Transport contract first: every answer is a JSON object, so a proxy error
+    # page fails the test instead of hiding behind the criterion.
+    assert all(isinstance(body, dict) for _, body in results), results
     admitted = [body["run_id"] for status, body in results if status in (200, 202)]
     try:
         refused = [status for status, _ in results if status not in (200, 202)]
