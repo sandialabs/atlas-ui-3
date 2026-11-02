@@ -101,7 +101,7 @@ def test_settings_ignore_an_env_file_while_disabled(tmp_path, monkeypatch, caplo
     env_file = tmp_path / ".env"
     env_file.write_text("ADMIN_GROUP=dotenv_admins\n")
     monkeypatch.delenv("ADMIN_GROUP", raising=False)
-    monkeypatch.setattr(settings_module, "_env_file_skip_warned", False)
+    monkeypatch.setitem(settings_module._env_file_skip_state, "warned", False)
 
     with caplog.at_level("WARNING", logger=settings_module.__name__):
         assert AppSettings(_env_file=str(env_file)).admin_group == "admin"
@@ -313,12 +313,15 @@ def test_child_sessions_ignore_a_conflicting_dotenv(tmp_path):
 
     # The orderings really differ: an earlier-collected module had imported
     # main before this module was collected in one child and not in the others.
-    assert baseline.pop("main_imported_at_collection") is False
-    assert observations["conflicting .env, probe first"].pop("main_imported_at_collection") is False
-    assert (
-        observations["conflicting .env, main imported at collection"].pop("main_imported_at_collection")
-        is True
-    )
+    collection_order = {
+        label: observed.pop("main_imported_at_collection")
+        for label, observed in [("clean", baseline), *observations.items()]
+    }
+    assert collection_order == {
+        "clean": False,
+        "conflicting .env, probe first": False,
+        "conflicting .env, main imported at collection": True,
+    }
 
     assert baseline["sentinel"] is None
     assert baseline["auth_group_check_url"] is None

@@ -15,19 +15,18 @@ logger = logging.getLogger(__name__)
 
 # Log-deduplication only (per process): the skipped-.env warning below fires
 # once rather than on every AppSettings() construction.
-_env_file_skip_warned = False
+_env_file_skip_state = {"warned": False}
 
 
 def _warn_env_file_skipped(env_file) -> None:
     """Warn once that ``PYTHON_DOTENV_DISABLED`` made settings skip an env file."""
-    global _env_file_skip_warned
-    if _env_file_skip_warned or not env_file:
+    if _env_file_skip_state["warned"] or not env_file:
         return
     paths = env_file if isinstance(env_file, (list, tuple)) else [env_file]
     existing = [str(path) for path in paths if path and os.path.isfile(path)]
     if not existing:
         return
-    _env_file_skip_warned = True
+    _env_file_skip_state["warned"] = True
     logger.warning(
         "PYTHON_DOTENV_DISABLED is set: settings ignore env file(s) %s; only the "
         "process environment is used.",
