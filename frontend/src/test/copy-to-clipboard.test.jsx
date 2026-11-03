@@ -36,12 +36,16 @@ const mockWriteText = vi.fn()
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
+  // Reset implementations too, so no test inherits a resolved/rejected
+  // writeText from an earlier one (tests must pass when run alone with -t).
+  mockWriteText.mockReset().mockResolvedValue(undefined)
   Object.assign(navigator, { clipboard: { writeText: mockWriteText } })
   document.execCommand = vi.fn(() => true)
 })
 
 afterEach(() => {
   cleanup()
+  document.body.innerHTML = ''
   vi.useRealTimers()
 })
 
@@ -121,6 +125,17 @@ describe('code-block copy button feedback (#1151)', () => {
     })
     expect(button.innerHTML).toBe('Copy')
     expect(button.classList.contains('bg-red-600')).toBe(false)
+  })
+
+  it('labels the flash for screen readers, not just with colour and an icon', async () => {
+    mockWriteText.mockRejectedValue(new Error('denied'))
+    document.execCommand = vi.fn(() => false)
+    const { button } = mountCodeBlock('x')
+
+    copyCodeBlock(button)
+    await flush()
+    expect(button.querySelector('.sr-only').textContent).toBe('Copy failed')
+    expect(button.querySelector('svg').getAttribute('aria-hidden')).toBe('true')
   })
 
   it('swaps the neutral hover background so the flash shows while the pointer is still on the button', async () => {
@@ -326,6 +341,46 @@ describe('Canvas panel copy (#1151)', () => {
   }
   const setChat = (over = {}) => useChat.mockReturnValue({ ...baseChat, ...over })
   const renderPanel = () => render(<CanvasPanel isOpen onClose={() => {}} />)
+
+  it('drops a clipboard result that resolves after the displayed content changed', async () => {
+    let resolveWrite
+    mockWriteText.mockImplementation(() => new Promise((r) => { resolveWrite = r }))
+    setChat({ canvasContent: 'first' })
+    const { rerender } = renderPanel()
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('canvas-copy-button'))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    setChat({ canvasContent: 'second' })
+    rerender(<CanvasPanel isOpen onClose={() => {}} />)
+    await act(async () => {
+      resolveWrite()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(screen.getByTestId('canvas-copy-button').title).toBe('Copy canvas content to clipboard')
+  })
+
+  it('disables Copy for custom UI with no content instead of copying "undefined"', () => {
+    setChat({ customUIContent: { type: 'html_injection' } })
+    renderPanel()
+    expect(screen.getByTestId('canvas-copy-button')).toBeDisabled()
+  })
+
+  it('exposes the copy outcome to assistive technology', async () => {
+    setChat({ canvasContent: 'text' })
+    renderPanel()
+    const copyButton = screen.getByTestId('canvas-copy-button')
+
+    await act(async () => {
+      fireEvent.click(copyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(copyButton.getAttribute('aria-label')).toBe('Copied to clipboard')
+    expect(screen.getByRole('status').textContent).toBe('Copied to clipboard')
+  })
 
   it('copies the displayed custom-UI error, not stale canvas content hidden behind it', async () => {
     setChat({

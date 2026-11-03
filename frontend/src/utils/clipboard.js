@@ -41,11 +41,14 @@ const restoreAfter = (button, original) => {
 // the thin border changed colour (#1151).
 const NEUTRAL_CLASSES = ['bg-gray-700', 'hover:bg-gray-600', 'border-gray-600']
 
-const flashButton = (button, flashClasses, { iconPath = null, extraNeutral = [], extraFlash = [] } = {}) => {
+// The swapped-in icon is decorative; the sr-only text (and aria-live on the
+// span) carries the outcome for screen-reader users, since colour and icon
+// alone are not perceivable to everyone.
+const flashButton = (button, flashClasses, { iconPath = null, srText = '', extraNeutral = [], extraFlash = [] } = {}) => {
   const original = beginFlash(button, { swapMarkup: iconPath !== null })
 
   if (iconPath !== null) {
-    button.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>`
+    button.innerHTML = `<svg class="w-3 h-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg><span class="sr-only" aria-live="polite">${srText}</span>`
   }
   button.className = original.className
   button.classList.remove(...NEUTRAL_CLASSES, ...extraNeutral)
@@ -59,9 +62,9 @@ const ERROR_CLASSES = ['bg-red-600', 'hover:bg-red-700', 'border-red-500']
 const CHECK_ICON = 'M5 13l4 4L19 7'
 const CROSS_ICON = 'M6 18L18 6M6 6l12 12'
 
-const showCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, { iconPath: CHECK_ICON })
+const showCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, { iconPath: CHECK_ICON, srText: 'Copied' })
 
-const showCopyError = (button) => flashButton(button, ERROR_CLASSES, { iconPath: CROSS_ICON })
+const showCopyError = (button) => flashButton(button, ERROR_CLASSES, { iconPath: CROSS_ICON, srText: 'Copy failed' })
 
 // Legacy fallback for insecure contexts and denied Clipboard API permissions.
 // Returns whether the copy actually succeeded so callers can surface a

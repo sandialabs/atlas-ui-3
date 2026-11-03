@@ -80,6 +80,9 @@ const CanvasPanel = ({
   // Feedback state for the header Copy button: 'idle' | 'copied' | 'failed'.
   const [copyState, setCopyState] = useState('idle');
   const copyTimerRef = useRef(null);
+  // Bumped whenever the displayed content changes or the panel unmounts, so a
+  // clipboard write that resolves late cannot flash feedback on new content.
+  const copyTokenRef = useRef(0);
   // The scrollable content container. Code blocks rendered from markdown carry
   // the shared renderer's Copy button, whose clicks are handled here by
   // delegation (Message.jsx uses the same pattern) — without this listener the
@@ -122,6 +125,7 @@ const CanvasPanel = ({
   // Drop any copied/failed feedback when the displayed content changes, so
   // switching files never leaves a stale "Copied" on the new content.
   useEffect(() => {
+    copyTokenRef.current += 1;
     if (copyTimerRef.current) {
       clearTimeout(copyTimerRef.current);
       copyTimerRef.current = null;
@@ -132,6 +136,7 @@ const CanvasPanel = ({
   // Clear a pending feedback timeout on unmount so the state update never
   // fires on a dead component.
   useEffect(() => () => {
+    copyTokenRef.current += 1;
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
   }, []);
 
@@ -313,21 +318,26 @@ const CanvasPanel = ({
   // clipboard-worthy is displayed. Deriving both the text and the enabled
   // state from this one decision keeps Copy from grabbing content that is not
   // on screen (e.g. stale canvasContent hidden behind an error).
+  // Empty or missing text counts as nothing to copy, so the button is
+  // disabled rather than copying "undefined" and reporting success.
+  const textOrNull = (value) =>
+    value === null || value === undefined || value === '' ? null : String(value);
+
   const getCanvasTextToCopy = () => {
     if (canvasFiles && canvasFiles.length > 0) {
       if (isTextualCanvasFile(currentFileContent)) {
-        return currentFileContent.content;
+        return textOrNull(currentFileContent.content);
       }
       return null;
     }
     if (customUIContent && customUIContent.type === 'html_injection') {
-      return customUIContent.content;
+      return textOrNull(customUIContent.content);
     }
     if (customUIContent && customUIContent.type === 'error') {
-      return customUIContent.content ? String(customUIContent.content) : null;
+      return textOrNull(customUIContent.content);
     }
     if (canvasContent) {
-      return processCanvasContent(canvasContent);
+      return textOrNull(processCanvasContent(canvasContent));
     }
     return null;
   };
@@ -341,11 +351,21 @@ const CanvasPanel = ({
     const text = getCanvasTextToCopy();
     if (text === null) return;
 
+    const token = copyTokenRef.current;
     const succeeded = await copyTextToClipboard(text);
+    // Content changed or the panel unmounted while the write was pending.
+    if (token !== copyTokenRef.current) return;
     setCopyState(succeeded ? 'copied' : 'failed');
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     copyTimerRef.current = setTimeout(() => setCopyState('idle'), 2000);
   };
+
+  const copyButtonLabel =
+    copyState === 'copied'
+      ? 'Copied to clipboard'
+      : copyState === 'failed'
+        ? 'Copy failed'
+        : 'Copy canvas content to clipboard';
 
   const getFileIcon = (fileType) => {
     switch (fileType) {
@@ -591,14 +611,8 @@ const CanvasPanel = ({
                     ? 'bg-red-600 hover:bg-red-700'
                     : 'bg-gray-700 hover:bg-gray-600'
               }`}
-              title={
-                copyState === 'copied'
-                  ? 'Copied to clipboard'
-                  : copyState === 'failed'
-                    ? 'Copy failed'
-                    : 'Copy canvas content to clipboard'
-              }
-              aria-label="Copy canvas content to clipboard"
+              title={copyButtonLabel}
+              aria-label={copyButtonLabel}
               data-testid="canvas-copy-button"
             >
               {copyState === 'copied' ? (
@@ -609,6 +623,11 @@ const CanvasPanel = ({
                 <Copy className="w-4 h-4" />
               )}
             </button>
+            {/* Announce the outcome to screen readers; the icon and colour
+                alone are not perceivable to everyone. */}
+            <span role="status" className="sr-only" data-testid="canvas-copy-status">
+              {copyState === 'copied' ? 'Copied to clipboard' : copyState === 'failed' ? 'Copy failed' : ''}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {!orientationLocked && (
