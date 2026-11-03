@@ -23,7 +23,7 @@ import { render, screen, fireEvent, act, cleanup } from '@testing-library/react'
 import { marked } from 'marked'
 
 import '../utils/markdownRenderer' // configure the shared marked singleton
-import { copyCodeBlock, copyTextToClipboard } from '../utils/clipboard'
+import { copyCodeBlock, copyMessageContent, copyTextToClipboard } from '../utils/clipboard'
 import CanvasPanel from '../components/CanvasPanel'
 import { useChat } from '../contexts/ChatContext'
 
@@ -157,6 +157,80 @@ describe('code-block copy button feedback (#1151)', () => {
   })
 })
 
+describe('message copy button feedback (#1151)', () => {
+  const NEUTRAL = 'copy-message-button bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200'
+  const mountMessageButton = () => {
+    const button = document.createElement('button')
+    button.className = NEUTRAL
+    const icon = document.createElement('span')
+    icon.textContent = 'icon'
+    button.appendChild(icon)
+    document.body.appendChild(button)
+    return { button, icon }
+  }
+
+  it('flashes red when both copy paths fail, then restores the original classes', async () => {
+    mockWriteText.mockRejectedValue(new Error('permission denied'))
+    document.execCommand = vi.fn(() => false)
+    const { button } = mountMessageButton()
+
+    copyMessageContent('hello', button)
+    await flush()
+    expect(button.classList.contains('bg-red-600')).toBe(true)
+    expect(button.classList.contains('hover:bg-gray-600')).toBe(false)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(button.className).toBe(NEUTRAL)
+  })
+
+  it('does not get stuck green after two quick clicks', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const { button } = mountMessageButton()
+
+    copyMessageContent('hello', button)
+    await flush()
+    copyMessageContent('hello', button) // second click inside the 2 s flash
+    await flush()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(button.className).toBe(NEUTRAL)
+  })
+
+  it('does not get stuck green after a success followed by a failure', async () => {
+    mockWriteText.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'))
+    document.execCommand = vi.fn(() => false)
+    const { button } = mountMessageButton()
+
+    copyMessageContent('hello', button)
+    await flush()
+    copyMessageContent('hello', button)
+    await flush()
+    expect(button.classList.contains('bg-red-600')).toBe(true)
+    expect(button.classList.contains('bg-green-600')).toBe(false)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(button.className).toBe(NEUTRAL)
+  })
+
+  it('never replaces the React-rendered children of the message button', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const { button, icon } = mountMessageButton()
+
+    copyMessageContent('hello', button)
+    await flush()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(button.firstChild).toBe(icon)
+  })
+})
+
 describe('full-content copying for long code blocks (#1151)', () => {
   it('copies the full contents of a long code block, not just the visible part', async () => {
     mockWriteText.mockResolvedValue(undefined)
@@ -229,6 +303,11 @@ describe('transcript CSS contract for the sticky toolbar (#1151)', () => {
     expect(css).toMatch(/@media \(min-width: 640px\)\s*\{\s*\.chat-messages \.code-block-header\s*\{\s*top:\s*-1rem;/)
   })
 
+  it('reveals the copy button for keyboard focus, not just hover', () => {
+    expect(css).toMatch(/\.code-block-container:focus-within \.copy-button/)
+    expect(css).toMatch(/\.copy-button:focus-visible/)
+  })
+
   it('keeps the copy button visible on touch devices', () => {
     const touchBlock = css.match(/@media \(hover: none\)\s*\{[\s\S]*?\n\}/)
     expect(touchBlock).not.toBeNull()
@@ -247,6 +326,38 @@ describe('Canvas panel copy (#1151)', () => {
   }
   const setChat = (over = {}) => useChat.mockReturnValue({ ...baseChat, ...over })
   const renderPanel = () => render(<CanvasPanel isOpen onClose={() => {}} />)
+
+  it('copies the displayed custom-UI error, not stale canvas content hidden behind it', async () => {
+    setChat({
+      canvasContent: 'stale markdown that is not on screen',
+      customUIContent: { type: 'error', content: 'Tool UI failed to render' },
+    })
+    renderPanel()
+    const copyButton = screen.getByTestId('canvas-copy-button')
+
+    await act(async () => {
+      fireEvent.click(copyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockWriteText).toHaveBeenCalledWith('Tool UI failed to render')
+  })
+
+  it('clears "Copied" feedback when the displayed content changes', async () => {
+    setChat({ canvasContent: 'first' })
+    const { rerender } = renderPanel()
+    const copyButton = screen.getByTestId('canvas-copy-button')
+
+    await act(async () => {
+      fireEvent.click(copyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(copyButton.title).toBe('Copied to clipboard')
+
+    setChat({ canvasContent: 'second' })
+    rerender(<CanvasPanel isOpen onClose={() => {}} />)
+    expect(screen.getByTestId('canvas-copy-button').title).toBe('Copy canvas content to clipboard')
+  })
 
   it('copies the displayed canvas content and shows success feedback', async () => {
     setChat({ canvasContent: '# Atlas report\n\nGenerated **summary**.' })

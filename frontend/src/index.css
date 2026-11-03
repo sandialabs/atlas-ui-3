@@ -259,7 +259,11 @@
     }
   }
 
-  .code-block-container:hover .copy-button {
+  /* Keyboard users reach the button by Tab, not hover: reveal it on focus so
+     a focused control is never invisible (#1151). */
+  .code-block-container:hover .copy-button,
+  .code-block-container:focus-within .copy-button,
+  .copy-button:focus-visible {
     @apply opacity-100;
   }
 

@@ -119,6 +119,16 @@ const CanvasPanel = ({
     };
   }, []);
 
+  // Drop any copied/failed feedback when the displayed content changes, so
+  // switching files never leaves a stale "Copied" on the new content.
+  useEffect(() => {
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = null;
+    }
+    setCopyState('idle');
+  }, [currentCanvasFileIndex, canvasFiles, canvasContent, customUIContent]);
+
   // Clear a pending feedback timeout on unmount so the state update never
   // fires on a dead component.
   useEffect(() => () => {
@@ -298,8 +308,11 @@ const CanvasPanel = ({
     Boolean(fileContent) && !['image', 'pdf', 'iframe'].includes(fileContent.type);
 
   // What the Copy button would copy, mirroring renderContent()'s display
-  // priority: the current canvas file, then inline custom UI, then legacy
-  // canvas content. Null when nothing clipboard-worthy is displayed.
+  // priority: the current canvas file, then inline custom UI, then a custom-UI
+  // error message, then legacy canvas content. Null when nothing
+  // clipboard-worthy is displayed. Deriving both the text and the enabled
+  // state from this one decision keeps Copy from grabbing content that is not
+  // on screen (e.g. stale canvasContent hidden behind an error).
   const getCanvasTextToCopy = () => {
     if (canvasFiles && canvasFiles.length > 0) {
       if (isTextualCanvasFile(currentFileContent)) {
@@ -310,21 +323,16 @@ const CanvasPanel = ({
     if (customUIContent && customUIContent.type === 'html_injection') {
       return customUIContent.content;
     }
+    if (customUIContent && customUIContent.type === 'error') {
+      return customUIContent.content ? String(customUIContent.content) : null;
+    }
     if (canvasContent) {
       return processCanvasContent(canvasContent);
     }
     return null;
   };
 
-  const canCopyCanvasContent = () => {
-    if (isLoadingFile) return false;
-    if (canvasFiles && canvasFiles.length > 0) {
-      return isTextualCanvasFile(currentFileContent);
-    }
-    return Boolean(
-      (customUIContent && customUIContent.type === 'html_injection') || canvasContent
-    );
-  };
+  const canCopyCanvasContent = () => !isLoadingFile && getCanvasTextToCopy() !== null;
 
   // Copy the displayed canvas text and flash visible feedback on the header
   // button — green check on success, red cross on failure (#1151).

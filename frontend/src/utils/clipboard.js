@@ -8,27 +8,29 @@
 
 const FLASH_MS = 2000
 
-// A flash temporarily swaps the button's markup. If a previous flash is still
-// running (two quick clicks), cancel its pending restore and reuse the state
-// it captured, so the second click cannot leave the button stuck showing the
-// check or cross icon.
-// The original markup AND class list are captured once and restored verbatim,
-// so a flash never leaves stray classes behind.
-const beginMarkupFlash = (button) => {
+// A flash temporarily restyles the button (and, for code blocks, swaps its
+// markup for a check or cross icon). The original class list -- and markup,
+// when swapped -- is captured once per flash and restored verbatim. If a
+// previous flash is still running (two quick clicks, or a success followed by
+// a failure), its pending restore is cancelled and the state it captured is
+// reused, so the button can never be left stuck green or red.
+const beginFlash = (button, { swapMarkup }) => {
   if (button._copyFlashTimer) clearTimeout(button._copyFlashTimer)
-  if (button._copyOriginalHTML === undefined) {
-    button._copyOriginalHTML = button.innerHTML
+  if (button._copyOriginalClassName === undefined) {
     button._copyOriginalClassName = button.className
+    if (swapMarkup) button._copyOriginalHTML = button.innerHTML
   }
   return { html: button._copyOriginalHTML, className: button._copyOriginalClassName }
 }
 
-const restoreMarkupAfter = (button, original) => {
+const restoreAfter = (button, original) => {
   button._copyFlashTimer = setTimeout(() => {
     button._copyFlashTimer = null
     delete button._copyOriginalHTML
     delete button._copyOriginalClassName
-    button.innerHTML = original.html
+    // Message copy buttons are React-rendered: their children must never be
+    // replaced, so markup is only restored when a flash swapped it.
+    if (original.html !== undefined) button.innerHTML = original.html
     button.className = original.className
   }, FLASH_MS)
 }
@@ -39,22 +41,27 @@ const restoreMarkupAfter = (button, original) => {
 // the thin border changed colour (#1151).
 const NEUTRAL_CLASSES = ['bg-gray-700', 'hover:bg-gray-600', 'border-gray-600']
 
-const flashButton = (button, iconPath, flashClasses) => {
-  const original = beginMarkupFlash(button)
+const flashButton = (button, flashClasses, { iconPath = null, extraNeutral = [], extraFlash = [] } = {}) => {
+  const original = beginFlash(button, { swapMarkup: iconPath !== null })
 
-  button.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>`
+  if (iconPath !== null) {
+    button.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>`
+  }
   button.className = original.className
-  button.classList.remove(...NEUTRAL_CLASSES)
-  button.classList.add(...flashClasses)
+  button.classList.remove(...NEUTRAL_CLASSES, ...extraNeutral)
+  button.classList.add(...flashClasses, ...extraFlash)
 
-  restoreMarkupAfter(button, original)
+  restoreAfter(button, original)
 }
 
-const showCopySuccess = (button) =>
-  flashButton(button, 'M5 13l4 4L19 7', ['bg-green-600', 'hover:bg-green-700', 'border-green-500'])
+const SUCCESS_CLASSES = ['bg-green-600', 'hover:bg-green-700', 'border-green-500']
+const ERROR_CLASSES = ['bg-red-600', 'hover:bg-red-700', 'border-red-500']
+const CHECK_ICON = 'M5 13l4 4L19 7'
+const CROSS_ICON = 'M6 18L18 6M6 6l12 12'
 
-const showCopyError = (button) =>
-  flashButton(button, 'M6 18L18 6M6 6l12 12', ['bg-red-600', 'hover:bg-red-700', 'border-red-500'])
+const showCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, { iconPath: CHECK_ICON })
+
+const showCopyError = (button) => flashButton(button, ERROR_CLASSES, { iconPath: CROSS_ICON })
 
 // Legacy fallback for insecure contexts and denied Clipboard API permissions.
 // Returns whether the copy actually succeeded so callers can surface a
@@ -128,27 +135,11 @@ export const copyCodeBlock = (button) => {
   }
 }
 
-const showMessageCopySuccess = (button) => {
-  const originalClasses = button.className
+const MESSAGE_TEXT = { extraNeutral: ['text-gray-200'], extraFlash: ['text-white'] }
 
-  button.classList.remove('bg-gray-700', 'hover:bg-gray-600', 'border-gray-600', 'text-gray-200')
-  button.classList.add('bg-green-600', 'hover:bg-green-700', 'border-green-500', 'text-white')
+const showMessageCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, MESSAGE_TEXT)
 
-  setTimeout(() => {
-    button.className = originalClasses
-  }, FLASH_MS)
-}
-
-const showMessageCopyError = (button) => {
-  const originalClasses = button.className
-
-  button.classList.remove('bg-gray-700', 'hover:bg-gray-600', 'border-gray-600', 'text-gray-200')
-  button.classList.add('bg-red-600', 'hover:bg-red-700', 'border-red-500', 'text-white')
-
-  setTimeout(() => {
-    button.className = originalClasses
-  }, FLASH_MS)
-}
+const showMessageCopyError = (button) => flashButton(button, ERROR_CLASSES, MESSAGE_TEXT)
 
 export const copyMessageContent = (content, button) => {
   try {
