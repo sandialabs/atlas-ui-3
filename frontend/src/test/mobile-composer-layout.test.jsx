@@ -171,6 +171,18 @@ describe('phone-width composer layout', () => {
     expect(phone).toMatch(/right:\s*calc\(var\(--atlas-canvas-width, 0px\) \+ 0\.75rem\) !important/)
   })
 
+  it('keeps the transcript padding the sticky code-block toolbar offsets by', () => {
+    // #1151 pulls the sticky code-block header up by the transcript's own
+    // padding (p-2 under sm, p-4 from sm) so it sits flush with the top. The
+    // phone block clears the floating feedback button with the scroll
+    // sentinel instead of transcript padding, so the two stay in step.
+    renderChat()
+    expect(document.querySelector('.chat-messages')).toHaveClass('p-2', 'sm:p-4')
+    expect(css).toMatch(/\.chat-messages \.code-block-header \{\s*top: -0\.5rem;/)
+    const phoneBlock = css.search(/@media \(max-width: 639px\) \{\s*\[data-testid="composer-footer"\]/)
+    expect(css.slice(phoneBlock)).not.toMatch(/\.chat-messages\s*\{[^}]*padding/)
+  })
+
   it('does not opt into edge-to-edge (viewport-fit=cover)', () => {
     // viewport-fit=cover would draw fixed overlays (header menu, sidebar
     // drawer, RAG panel, toasts) under the notch and home indicator unless
