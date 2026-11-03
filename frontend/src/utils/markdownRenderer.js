@@ -186,7 +186,7 @@ renderer.code = function(code, language) {
   const safeLang = sanitizeLanguageTag(actualLanguage) || 'text'
 
   return `<div class="code-block-container relative bg-gray-900 rounded-lg my-4 border border-gray-700">
-    <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+    <div class="code-block-header sticky top-0 z-10 rounded-t-lg flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
       <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">${safeLang}</span>
       <button
         class="copy-button bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 px-3 py-1 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -195,7 +195,7 @@ renderer.code = function(code, language) {
         type="button"
       >Copy</button>
     </div>
-    <pre class="p-4 overflow-x-auto bg-gray-900 m-0"><code class="hljs language-${safeLang} text-sm leading-relaxed">${highlightedCode}</code></pre>
+    <pre class="p-4 overflow-x-auto bg-gray-900 m-0 rounded-b-lg"><code class="hljs language-${safeLang} text-sm leading-relaxed">${highlightedCode}</code></pre>
   </div>`
 }
 

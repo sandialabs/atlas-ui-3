@@ -1,0 +1,339 @@
+/**
+ * Regression tests for copy-to-clipboard behavior (#1151).
+ *
+ * jsdom has no layout or real clipboard, so the tests assert the structural
+ * contract that makes the feature work, plus the observable button states:
+ *
+ * - every copy path flashes visible success AND failure feedback on the
+ *   triggering button (previously failures were console-only)
+ * - a long code block copies its full contents, not just the visible part
+ *   (the copy core reads textContent of the whole code element)
+ * - the code-block toolbar is sticky so it stays visible while a long block
+ *   scrolls in the transcript, and the container must not clip it
+ * - the Canvas panel has a working Copy button with feedback, and the Copy
+ *   buttons the shared markdown renderer emits inside canvas content are
+ *   actually wired up (the reported "Canvas Copy button does not work" bug:
+ *   only Message.jsx had the delegated click listener)
+ */
+
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react'
+import { marked } from 'marked'
+
+import '../utils/markdownRenderer' // configure the shared marked singleton
+import { copyCodeBlock, copyTextToClipboard } from '../utils/clipboard'
+import CanvasPanel from '../components/CanvasPanel'
+import { useChat } from '../contexts/ChatContext'
+
+vi.mock('../contexts/ChatContext', () => ({
+  useChat: vi.fn(),
+}))
+
+const mockWriteText = vi.fn()
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  Object.assign(navigator, { clipboard: { writeText: mockWriteText } })
+  document.execCommand = vi.fn(() => true)
+})
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
+
+// Flush microtask chains (clipboard promise callbacks) under fake timers.
+const flush = async () => {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+}
+
+// Build a code block exactly like markdownRenderer.js emits it.
+const mountCodeBlock = (codeText) => {
+  const container = document.createElement('div')
+  container.className = 'code-block-container relative bg-gray-900 rounded-lg'
+  const header = document.createElement('div')
+  header.className = 'code-block-header sticky top-0 z-10 flex'
+  const button = document.createElement('button')
+  button.className = 'copy-button bg-gray-700 border-gray-600'
+  button.setAttribute('data-action', 'copy-code')
+  button.textContent = 'Copy'
+  header.appendChild(button)
+  container.appendChild(header)
+  const pre = document.createElement('pre')
+  pre.className = 'p-4 overflow-x-auto rounded-b-lg'
+  const code = document.createElement('code')
+  code.textContent = codeText
+  pre.appendChild(code)
+  container.appendChild(pre)
+  document.body.appendChild(container)
+  return { container, button }
+}
+
+describe('code-block copy button feedback (#1151)', () => {
+  it('flashes success on the button when the Clipboard API succeeds', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const { button } = mountCodeBlock('print("hi")')
+
+    copyCodeBlock(button)
+    await flush()
+
+    expect(mockWriteText).toHaveBeenCalledWith('print("hi")')
+    expect(button.classList.contains('bg-green-600')).toBe(true)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    // The flash is temporary: original markup and classes return.
+    expect(button.innerHTML).toBe('Copy')
+    expect(button.classList.contains('bg-green-600')).toBe(false)
+    expect(button.classList.contains('bg-gray-700')).toBe(true)
+  })
+
+  it('falls back to execCommand and flashes success when the Clipboard API is unavailable', async () => {
+    Object.assign(navigator, { clipboard: {} }) // no writeText -> fallback
+    const { button } = mountCodeBlock('print("hi")')
+
+    copyCodeBlock(button)
+    await flush()
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(button.classList.contains('bg-green-600')).toBe(true)
+  })
+
+  it('flashes visible failure when the Clipboard API rejects and the fallback fails too', async () => {
+    mockWriteText.mockRejectedValue(new Error('permission denied'))
+    document.execCommand = vi.fn(() => false)
+    const { button } = mountCodeBlock('print("hi")')
+
+    copyCodeBlock(button)
+    await flush()
+
+    expect(button.classList.contains('bg-red-600')).toBe(true)
+    expect(button.classList.contains('bg-green-600')).toBe(false)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(button.innerHTML).toBe('Copy')
+    expect(button.classList.contains('bg-red-600')).toBe(false)
+  })
+
+  it('does not leave the button stuck in the success state after two quick clicks', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const { button } = mountCodeBlock('x')
+
+    copyCodeBlock(button)
+    await flush()
+    copyCodeBlock(button) // second click before the first flash restored
+    await flush()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(button.innerHTML).toBe('Copy')
+    expect(button.classList.contains('bg-green-600')).toBe(false)
+  })
+})
+
+describe('full-content copying for long code blocks (#1151)', () => {
+  it('copies the full contents of a long code block, not just the visible part', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const lines = Array.from({ length: 2000 }, (_, i) => `line ${i}: value_${i}`)
+    const longCode = lines.join('\n')
+    const { button } = mountCodeBlock(longCode)
+
+    copyCodeBlock(button)
+    await flush()
+
+    expect(mockWriteText).toHaveBeenCalledTimes(1)
+    expect(mockWriteText.mock.calls[0][0]).toBe(longCode)
+    expect(mockWriteText.mock.calls[0][0].split('\n')).toHaveLength(2000)
+  })
+
+  it('copies full contents of rendered markdown code blocks', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const longCode = Array.from({ length: 1000 }, (_, i) => `value = ${i}`).join('\n')
+    const html = marked.parse('```\n' + longCode + '\n```')
+
+    const wrapper = document.createElement('div')
+    wrapper.innerHTML = html
+    const button = wrapper.querySelector('[data-action="copy-code"]')
+    copyCodeBlock(button)
+    await flush()
+
+    expect(mockWriteText.mock.calls[0][0]).toBe(longCode)
+  })
+})
+
+describe('sticky code-block toolbar (#1151)', () => {
+  it('renders the toolbar sticky so it stays visible while a long block scrolls', () => {
+    const html = marked.parse('```python\nprint("hi")\n```')
+    expect(html).toMatch(/code-block-header[^"]*sticky top-0 z-10/)
+
+    const wrapper = document.createElement('div')
+    wrapper.innerHTML = html
+    const header = wrapper.querySelector('.code-block-header')
+    // The Copy button rides inside the toolbar, so it sticks with it.
+    expect(header.querySelector('[data-action="copy-code"]')).not.toBeNull()
+  })
+
+  it('preserves syntax highlighting and the horizontal scroller', () => {
+    const html = marked.parse('```python\nprint("hi")\n```')
+    expect(html).toContain('hljs language-python')
+    expect(html).toMatch(/<pre class="p-4 overflow-x-auto[^"]*rounded-b-lg/)
+  })
+})
+
+describe('transcript CSS contract for the sticky toolbar (#1151)', () => {
+  // vitest runs with the frontend/ directory as its root.
+  const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
+
+  it('does not clip the code-block container, so the sticky toolbar tracks the transcript scroller', () => {
+    // An overflow-hidden ancestor becomes the sticky containing box; the
+    // toolbar would pin to a container that never scrolls instead of the
+    // transcript scroller it must follow.
+    expect(css).not.toMatch(/\.code-block-container\s*\{[^}]*overflow-hidden/)
+  })
+
+  it('keeps the copy button in the toolbar flow instead of the container', () => {
+    const rule = css.match(/(?<![\w.-])\.copy-button\s*\{[^}]*\}/)
+    expect(rule).not.toBeNull()
+    expect(rule[0]).not.toContain('absolute')
+  })
+
+  it('keeps the copy button visible on touch devices', () => {
+    const touchBlock = css.match(/@media \(hover: none\)\s*\{[\s\S]*?\n\}/)
+    expect(touchBlock).not.toBeNull()
+    expect(touchBlock[0]).toMatch(/\.copy-button/)
+  })
+})
+
+describe('Canvas panel copy (#1151)', () => {
+  const baseChat = {
+    canvasContent: null,
+    customUIContent: null,
+    canvasFiles: [],
+    currentCanvasFileIndex: 0,
+    setCurrentCanvasFileIndex: vi.fn(),
+    downloadFile: vi.fn(),
+  }
+  const setChat = (over = {}) => useChat.mockReturnValue({ ...baseChat, ...over })
+  const renderPanel = () => render(<CanvasPanel isOpen onClose={() => {}} />)
+
+  it('copies the displayed canvas content and shows success feedback', async () => {
+    setChat({ canvasContent: '# Atlas report\n\nGenerated **summary**.' })
+    renderPanel()
+    const copyButton = screen.getByTestId('canvas-copy-button')
+    expect(copyButton).not.toBeDisabled()
+
+    await act(async () => {
+      fireEvent.click(copyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockWriteText).toHaveBeenCalledWith('# Atlas report\n\nGenerated **summary**.')
+    expect(copyButton.title).toBe('Copied to clipboard')
+    expect(copyButton.className).toContain('bg-green-600')
+
+    // Feedback is temporary.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(copyButton.title).toBe('Copy canvas content to clipboard')
+    expect(copyButton.className).toContain('bg-gray-700')
+  })
+
+  it('shows failure feedback when the clipboard is unavailable', async () => {
+    mockWriteText.mockRejectedValue(new Error('permission denied'))
+    document.execCommand = vi.fn(() => false)
+    setChat({ canvasContent: 'plain text content' })
+    renderPanel()
+    const copyButton = screen.getByTestId('canvas-copy-button')
+
+    await act(async () => {
+      fireEvent.click(copyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(copyButton.title).toBe('Copy failed')
+    expect(copyButton.className).toContain('bg-red-600')
+  })
+
+  it('copies the content of the currently displayed inline canvas file', async () => {
+    const file = {
+      filename: 'script.py',
+      type: 'code',
+      isInline: true,
+      content_base64: btoa('print("hello from file")'),
+    }
+    setChat({ canvasFiles: [file] })
+    renderPanel()
+    const copyButton = screen.getByTestId('canvas-copy-button')
+    expect(copyButton).not.toBeDisabled()
+
+    await act(async () => {
+      fireEvent.click(copyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockWriteText).toHaveBeenCalledWith('print("hello from file")')
+    expect(copyButton.title).toBe('Copied to clipboard')
+  })
+
+  it('wires up the Copy buttons that canvas-rendered markdown emits (the reported bug)', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    setChat({ canvasContent: '```python\nprint("from canvas")\n```' })
+    const { container: panelWrapper } = renderPanel()
+
+    // The shared markdown renderer emits the toolbar Copy button inside the
+    // canvas content; before the fix its clicks were handled nowhere here.
+    // Scope to the panel: earlier tests leave manually-mounted code blocks in
+    // document.body, and the leaked button must not be picked up.
+    const codeCopyButton = panelWrapper.querySelector('[data-action="copy-code"]')
+    expect(codeCopyButton).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.click(codeCopyButton)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockWriteText).toHaveBeenCalledWith('print("from canvas")')
+    expect(codeCopyButton.classList.contains('bg-green-600')).toBe(true)
+  })
+
+  it('disables copying for image files and for an empty canvas', async () => {
+    // Image content has nothing clipboard-worthy to copy.
+    URL.createObjectURL = vi.fn(() => 'blob:image')
+    const imageFile = {
+      filename: 'chart.png',
+      type: 'image',
+      isInline: true,
+      content_base64: btoa('notreallyanimage'),
+    }
+    setChat({ canvasFiles: [imageFile] })
+    const { unmount } = renderPanel()
+    expect(screen.getByTestId('canvas-copy-button')).toBeDisabled()
+    unmount()
+    cleanup()
+
+    // Same for the empty state.
+    setChat({})
+    renderPanel()
+    expect(screen.getByTestId('canvas-copy-button')).toBeDisabled()
+  })
+
+  it('copies plain text via copyTextToClipboard and reports failure as false', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    await expect(copyTextToClipboard('text')).resolves.toBe(true)
+    expect(mockWriteText).toHaveBeenCalledWith('text')
+
+    mockWriteText.mockRejectedValue(new Error('denied'))
+    document.execCommand = vi.fn(() => false)
+    await expect(copyTextToClipboard('text')).resolves.toBe(false)
+  })
+})

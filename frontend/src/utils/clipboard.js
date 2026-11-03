@@ -1,23 +1,59 @@
-// Clipboard helpers for code blocks and message content.
+// Clipboard helpers for code blocks, message content, and canvas content.
 //
 // Extracted from Message.jsx to keep that component focused on rendering.
-// Behavior is unchanged from the inline versions.
+// Every copy path prefers the async Clipboard API and falls back to the
+// legacy hidden-textarea + execCommand trick (insecure contexts, older
+// browsers, denied permissions). Every path flashes visible success or
+// failure feedback on the button that triggered it (#1151).
+
+const FLASH_MS = 2000
+
+// A flash temporarily swaps the button's markup. If a previous flash is still
+// running (two quick clicks), cancel its pending restore and reuse the state
+// it captured, so the second click cannot leave the button stuck showing the
+// check or cross icon.
+const beginMarkupFlash = (button) => {
+  if (button._copyFlashTimer) clearTimeout(button._copyFlashTimer)
+  if (button._copyOriginalHTML === undefined) {
+    button._copyOriginalHTML = button.innerHTML
+  }
+  return button._copyOriginalHTML
+}
+
+const restoreMarkupAfter = (button, originalHTML, removeClasses, addClasses) => {
+  button._copyFlashTimer = setTimeout(() => {
+    button._copyFlashTimer = null
+    delete button._copyOriginalHTML
+    button.innerHTML = originalHTML
+    button.classList.remove(...removeClasses)
+    button.classList.add(...addClasses)
+  }, FLASH_MS)
+}
 
 const showCopySuccess = (button) => {
-  const originalHTML = button.innerHTML
+  const originalHTML = beginMarkupFlash(button)
 
   button.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>'
   button.classList.add('bg-green-600', 'border-green-500')
   button.classList.remove('bg-gray-700', 'border-gray-600')
 
-  setTimeout(() => {
-    button.innerHTML = originalHTML
-    button.classList.remove('bg-green-600', 'border-green-500')
-    button.classList.add('bg-gray-700', 'border-gray-600')
-  }, 2000)
+  restoreMarkupAfter(button, originalHTML, ['bg-green-600', 'border-green-500'], ['bg-gray-700', 'border-gray-600'])
 }
 
-const fallbackCopy = (text, button) => {
+const showCopyError = (button) => {
+  const originalHTML = beginMarkupFlash(button)
+
+  button.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>'
+  button.classList.add('bg-red-600', 'border-red-500')
+  button.classList.remove('bg-gray-700', 'border-gray-600')
+
+  restoreMarkupAfter(button, originalHTML, ['bg-red-600', 'border-red-500'], ['bg-gray-700', 'border-gray-600'])
+}
+
+// Legacy fallback for insecure contexts and denied Clipboard API permissions.
+// Returns whether the copy actually succeeded so callers can surface a
+// visible failure when both paths fail (#1151).
+const execCommandCopy = (text) => {
   try {
     const textArea = document.createElement('textarea')
     textArea.value = text
@@ -30,14 +66,34 @@ const fallbackCopy = (text, button) => {
 
     const successful = document.execCommand('copy')
     document.body.removeChild(textArea)
-
-    if (successful) {
-      showCopySuccess(button)
-    } else {
-      console.error('Fallback copy failed')
+    if (!successful) {
+      console.error('execCommand copy failed')
     }
+    return successful
   } catch (err) {
-    console.error('Fallback copy error: ', err)
+    console.error('execCommand copy error: ', err)
+    return false
+  }
+}
+
+// Shared copy core: try the async Clipboard API, fall back to execCommand,
+// then flash success or failure feedback on the triggering button (#1151).
+const copyWithFeedback = (text, button, successFeedback, errorFeedback) => {
+  const report = (success) => (success ? successFeedback(button) : errorFeedback(button))
+  const viaFallback = (apiError) => {
+    if (apiError) {
+      console.error('Clipboard API copy failed, trying execCommand fallback: ', apiError)
+    }
+    report(execCommandCopy(text))
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => report(true),
+      (err) => viaFallback(err)
+    )
+  } else {
+    viaFallback(null)
   }
 }
 
@@ -55,18 +111,12 @@ export const copyCodeBlock = (button) => {
       return
     }
 
+    // textContent reads every character of the code element regardless of
+    // scroll position or on-screen visibility, so a long block that is
+    // scrolled past in the transcript still copies in full (#1151).
     const text = codeBlock.textContent || codeBlock.innerText || ''
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => {
-        showCopySuccess(button)
-      }).catch(err => {
-        console.error('Failed to copy with Clipboard API: ', err)
-        fallbackCopy(text, button)
-      })
-    } else {
-      fallbackCopy(text, button)
-    }
+    copyWithFeedback(text, button, showCopySuccess, showCopyError)
   } catch (err) {
     console.error('Error in copyCodeBlock: ', err)
   }
@@ -80,31 +130,18 @@ const showMessageCopySuccess = (button) => {
 
   setTimeout(() => {
     button.className = originalClasses
-  }, 2000)
+  }, FLASH_MS)
 }
 
-const fallbackMessageCopy = (text, button) => {
-  try {
-    const textArea = document.createElement('textarea')
-    textArea.value = text
-    textArea.style.position = 'fixed'
-    textArea.style.left = '-999999px'
-    textArea.style.top = '-999999px'
-    document.body.appendChild(textArea)
-    textArea.focus()
-    textArea.select()
+const showMessageCopyError = (button) => {
+  const originalClasses = button.className
 
-    const successful = document.execCommand('copy')
-    document.body.removeChild(textArea)
+  button.classList.remove('bg-gray-700', 'hover:bg-gray-600', 'border-gray-600', 'text-gray-200')
+  button.classList.add('bg-red-600', 'hover:bg-red-700', 'border-red-500', 'text-white')
 
-    if (successful) {
-      showMessageCopySuccess(button)
-    } else {
-      console.error('Fallback message copy failed')
-    }
-  } catch (err) {
-    console.error('Fallback message copy error: ', err)
-  }
+  setTimeout(() => {
+    button.className = originalClasses
+  }, FLASH_MS)
 }
 
 export const copyMessageContent = (content, button) => {
@@ -125,17 +162,23 @@ export const copyMessageContent = (content, button) => {
       textToCopy = String(content || '')
     }
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        showMessageCopySuccess(button)
-      }).catch(err => {
-        console.error('Failed to copy message with Clipboard API: ', err)
-        fallbackMessageCopy(textToCopy, button)
-      })
-    } else {
-      fallbackMessageCopy(textToCopy, button)
-    }
+    copyWithFeedback(textToCopy, button, showMessageCopySuccess, showMessageCopyError)
   } catch (err) {
     console.error('Error in copyMessageContent: ', err)
   }
+}
+
+// Copy plain text without any button feedback. CanvasPanel uses this and
+// renders its own copied/failed state in React (#1151).
+export const copyTextToClipboard = (text) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      (err) => {
+        console.error('Clipboard API copy failed: ', err)
+        return execCommandCopy(text)
+      }
+    )
+  }
+  return Promise.resolve(execCommandCopy(text))
 }

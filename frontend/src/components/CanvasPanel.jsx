@@ -1,8 +1,9 @@
-import { X, ChevronLeft, ChevronRight, Download, FileText, Image, File, Code, Maximize2, Minimize2, PanelRight, PanelTop } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Download, FileText, Image, File, Code, Maximize2, Minimize2, PanelRight, PanelTop, Copy, Check } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
-import { marked } from 'marked'
+import { marked } from '../utils/markdownRenderer'
 import DOMPurify from 'dompurify'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { copyCodeBlock, copyTextToClipboard } from '../utils/clipboard'
 
 // DOMPurify configuration for allowing iframes in HTML content
 const IFRAME_SANITIZE_CONFIG = {
@@ -76,6 +77,14 @@ const CanvasPanel = ({
   const [currentFileContent, setCurrentFileContent] = useState(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [fileError, setFileError] = useState(null);
+  // Feedback state for the header Copy button: 'idle' | 'copied' | 'failed'.
+  const [copyState, setCopyState] = useState('idle');
+  const copyTimerRef = useRef(null);
+  // The scrollable content container. Code blocks rendered from markdown carry
+  // the shared renderer's Copy button, whose clicks are handled here by
+  // delegation (Message.jsx uses the same pattern) — without this listener the
+  // buttons inside the canvas are inert (#1151).
+  const contentRef = useRef(null);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -89,6 +98,31 @@ const CanvasPanel = ({
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Delegate code-block copy clicks on the canvas content container, exactly
+  // like Message.jsx does for transcript code blocks. markdownRenderer.js
+  // emits the Copy button markup, so without this effect the buttons it
+  // renders inside the canvas do nothing (#1151).
+  useEffect(() => {
+    const container = contentRef.current;
+    if (!container) return;
+    const handleCodeCopyClick = (event) => {
+      const button = event.target.closest('[data-action="copy-code"]');
+      if (!button || !container.contains(button)) return;
+      event.preventDefault();
+      copyCodeBlock(button);
+    };
+    container.addEventListener('click', handleCodeCopyClick);
+    return () => {
+      container.removeEventListener('click', handleCodeCopyClick);
+    };
+  }, []);
+
+  // Clear a pending feedback timeout on unmount so the state update never
+  // fires on a dead component.
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
   }, []);
 
   // Notify parent component when width changes
@@ -257,6 +291,52 @@ const CanvasPanel = ({
     if (canDownloadFile(currentFile) && downloadFile) {
       downloadFile(currentFile.filename, currentFile.s3_key);
     }
+  };
+
+  // File types that have no text representation to put on the clipboard.
+  const isTextualCanvasFile = (fileContent) =>
+    Boolean(fileContent) && !['image', 'pdf', 'iframe'].includes(fileContent.type);
+
+  // What the Copy button would copy, mirroring renderContent()'s display
+  // priority: the current canvas file, then inline custom UI, then legacy
+  // canvas content. Null when nothing clipboard-worthy is displayed.
+  const getCanvasTextToCopy = () => {
+    if (canvasFiles && canvasFiles.length > 0) {
+      if (isTextualCanvasFile(currentFileContent)) {
+        return currentFileContent.content;
+      }
+      return null;
+    }
+    if (customUIContent && customUIContent.type === 'html_injection') {
+      return customUIContent.content;
+    }
+    if (canvasContent) {
+      return processCanvasContent(canvasContent);
+    }
+    return null;
+  };
+
+  const canCopyCanvasContent = () => {
+    if (isLoadingFile) return false;
+    if (canvasFiles && canvasFiles.length > 0) {
+      return isTextualCanvasFile(currentFileContent);
+    }
+    return Boolean(
+      (customUIContent && customUIContent.type === 'html_injection') || canvasContent
+    );
+  };
+
+  // Copy the displayed canvas text and flash visible feedback on the header
+  // button — green check on success, red cross on failure (#1151).
+  const handleCopyCanvasContent = async () => {
+    if (isLoadingFile) return;
+    const text = getCanvasTextToCopy();
+    if (text === null) return;
+
+    const succeeded = await copyTextToClipboard(text);
+    setCopyState(succeeded ? 'copied' : 'failed');
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopyState('idle'), 2000);
   };
 
   const getFileIcon = (fileType) => {
@@ -488,7 +568,38 @@ const CanvasPanel = ({
       {/* Header */}
       <div className="border-b border-gray-700 bg-gray-900">
         <div className="flex items-center justify-between p-4">
-          <h2 className="text-lg font-semibold text-gray-100">Canvas</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-gray-100">Canvas</h2>
+            {/* Copy the currently displayed content to the clipboard with
+                visible feedback; disabled for image/PDF/iframe content, which
+                has no text representation to copy (#1151). */}
+            <button
+              onClick={handleCopyCanvasContent}
+              disabled={!canCopyCanvasContent()}
+              className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                copyState === 'copied'
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : copyState === 'failed'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title={
+                copyState === 'copied'
+                  ? 'Copied to clipboard'
+                  : copyState === 'failed'
+                    ? 'Copy failed'
+                    : 'Copy canvas content to clipboard'
+              }
+              aria-label="Copy canvas content to clipboard"
+              data-testid="canvas-copy-button"
+            >
+              {copyState === 'copied' ? (
+                <Check className="w-4 h-4" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             {!orientationLocked && (
             <button
@@ -574,7 +685,7 @@ const CanvasPanel = ({
         )}
       </div>
       {/* Content */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div ref={contentRef} className="flex-1 overflow-y-auto custom-scrollbar">
         {renderContent()}
       </div>
     </aside>
