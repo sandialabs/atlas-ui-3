@@ -83,7 +83,7 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
   const shortLabel = usage ? `~${formatTokens(used)}${assumed ? '?' : ''}` : '…'
 
   return (
-    <div className="relative shrink-0" ref={panelRef}>
+    <div className="composer-toolbar-anchor relative shrink-0" ref={panelRef}>
       <button
         type="button"
         ref={buttonRef}
@@ -92,7 +92,7 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
         aria-haspopup="dialog"
         aria-label={`${fullLabel}. Estimated context of the next request. Click for details and compaction.`}
         title="Estimated context of the next request. Click for details and compaction."
-        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap ${FOCUS_RING}`}
+        className={`flex items-center gap-1.5 rounded px-2 py-1 max-sm:h-8 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap ${FOCUS_RING}`}
         data-testid="context-usage-meter"
       >
         {isCompacting
@@ -111,7 +111,7 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
         <div
           role="dialog"
           aria-label="Context usage and compaction"
-          className={`absolute bottom-full mb-2 w-80 max-w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto rounded-lg border border-gray-600 bg-gray-800 p-3 text-xs text-gray-300 shadow-xl z-30 ${
+          className={`composer-toolbar-popover absolute bottom-full mb-2 w-80 max-w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto rounded-lg border border-gray-600 bg-gray-800 p-3 text-xs text-gray-300 shadow-xl z-50 ${
             panelSide === 'right' ? 'right-0' : 'left-0'
           }`}
         >

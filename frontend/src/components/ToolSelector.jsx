@@ -156,14 +156,14 @@ const ToolSelector = () => {
     + (searchAutoEnabled && !isSearchSelected(selectedTools) ? 1 : 0)
 
   return (
-    <div ref={dropdownRef} className="relative">
+    <div ref={dropdownRef} className="composer-toolbar-anchor relative">
       <button
         type="button"
         ref={triggerRef}
         onPointerDown={(e) => { lastPointerRef.current = { type: e.pointerType, at: Date.now() } }}
         onPointerCancel={() => { lastPointerRef.current = null }}
         onClick={handleTriggerClick}
-        className={`flex items-center gap-1 text-xs rounded transition-colors ${FOCUS_RING} ${
+        className={`flex items-center gap-1 text-xs rounded transition-colors flex-shrink-0 max-sm:h-8 max-sm:px-2 max-sm:bg-gray-700/70 ${FOCUS_RING} ${
           isOpen || selectedCount > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-blue-400'
         }`}
         title="Choose which tools the model can use"
@@ -183,7 +183,7 @@ const ToolSelector = () => {
           id={popoverId}
           role="dialog"
           aria-label="Tools"
-          className="absolute bottom-full left-0 mb-1 w-96 max-w-[90vw] bg-gray-800 border border-gray-600 rounded-lg shadow-lg max-h-96 overflow-y-auto z-50"
+          className="composer-toolbar-popover absolute bottom-full left-0 mb-1 w-96 max-w-[90vw] bg-gray-800 border border-gray-600 rounded-lg shadow-lg max-h-96 overflow-y-auto z-50"
         >
           <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-800">
             <div className="relative">

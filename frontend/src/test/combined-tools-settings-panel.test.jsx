@@ -151,7 +151,7 @@ describe('PromptSelector quick access to custom prompts', () => {
 
   const openDropdown = () => {
     render(<PromptSelector />)
-    fireEvent.click(screen.getByTitle('Select custom prompts'))
+    fireEvent.click(screen.getByTitle(/^Select custom prompts/))
   }
 
   it('asks to open the prompt editor for a specific prompt', () => {

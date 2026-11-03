@@ -93,12 +93,12 @@ const ModelSelector = () => {
     : 'Select a model'
 
   return (
-    <div className="relative">
+    <div className="composer-toolbar-anchor relative min-w-0">
       <button
         type="button"
         ref={triggerRef}
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className={`flex items-center gap-1 px-2 py-1 rounded transition-colors max-w-[16rem] ${
+        className={`flex items-center gap-1 px-2 py-1 max-sm:h-8 max-sm:max-w-full rounded transition-colors max-w-[16rem] ${
           currentOutsideFilter
             ? 'bg-amber-900/60 hover:bg-amber-900 text-amber-200 border border-amber-600'
             : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
@@ -125,7 +125,7 @@ const ModelSelector = () => {
       {dropdownOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }} />
-          <div className="absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
+          <div className="composer-toolbar-popover absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
             {listedModels.length === 0 && llmGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (

@@ -129,7 +129,10 @@ const EnabledToolsIndicator = () => {
         }`}
         title={`Auto-approve tool calls is ${autoApproveOn ? 'on' : 'off'}. ${describeAutoApprove(autoApproveOn)} Click to turn it ${autoApproveOn ? 'off' : 'on'}.`}
       >
-        {autoApproveOn ? 'Auto-approve: On' : 'Auto-approve: Off'}
+        {/* Shorter label on phones so the strip leaves room for the pills;
+            the switch keeps its full accessible name either way. */}
+        <span className="sm:hidden">{autoApproveOn ? 'Auto: On' : 'Auto: Off'}</span>
+        <span className="hidden sm:inline">{autoApproveOn ? 'Auto-approve: On' : 'Auto-approve: Off'}</span>
       </button>
     </div>
   )

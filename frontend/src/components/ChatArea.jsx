@@ -903,7 +903,7 @@ const ChatArea = () => {
       {isWelcomeVisible && showPoweredByAtlas && (
         <div
           style={{ bottom: 'calc(var(--atlas-composer-height, 8rem) + 1rem)' }}
-          className="absolute left-0 right-0 z-10 px-4"
+          className="welcome-powered-by absolute left-0 right-0 z-10 px-4"
         >
           <div className="max-w-4xl mx-auto flex justify-end">
             <img
@@ -1017,13 +1017,15 @@ const ChatArea = () => {
           activity={currentTurnIsSleeping(messages) ? 'sleeping' : undefined}
           appName={appName}
         />
-        {/* Sentinel for auto-scroll */}
-        <div ref={endRef} />
+        {/* Sentinel for auto-scroll. On phones index.css gives it height so
+            scrolling to the end leaves the last message clear of the floating
+            feedback button (container padding is ignored by scrollIntoView). */}
+        <div ref={endRef} className="chat-scroll-sentinel" />
       </main>
 
       {/* Follow-up suggestion buttons */}
       {followUpSuggestions.length > 0 && !isThinking && !isStreaming && (
-        <div className="px-2 sm:px-4 py-1 flex-shrink-0">
+        <div className="followup-chips px-2 sm:px-4 py-1 flex-shrink-0">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-0 sm:ml-11">
             {followUpSuggestions.map((question, idx) => (
               <button
@@ -1369,11 +1371,15 @@ const ChatArea = () => {
 
           <div className="composer-pinned">
           <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-            <div className="flex gap-3">
+            {/* Phone widths (under sm) get a deliberate mobile row instead of
+                the desktop row squeezed down: square 48px buttons and a tighter
+                gap so the textarea, the only flexible item, keeps most of the
+                width; buttons stay at the bottom as the draft grows. */}
+            <div className="flex items-end sm:items-stretch gap-2 sm:gap-3 w-full min-w-0">
               <button
                 type="button"
                 onClick={triggerFileUpload}
-                className="px-4 py-3 min-w-[48px] min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                className="w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 min-w-[48px] min-h-[48px] bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                 title="Upload files"
                 aria-label="Upload files"
               >
@@ -1384,19 +1390,23 @@ const ChatArea = () => {
                   toggle button), and the user must still be able to stop a
                   running agent. isAgentRunning is only ever set on an agent-mode
                   send and agentPendingQuestion is agent-specific, so neither
-                  fires during a normal chat turn. */}
+                  fires during a normal chat turn.
+                  On phones (under sm) this is the single stop control: it is
+                  in the pinned row, so it cannot scroll out of view the way
+                  the capped aux stack above can, and the status row hides its
+                  own Stop there. It is drawn as an outline on phones. */}
               {agentRunActive && (
                 <button
                   type="button"
                   onClick={stopAgent}
-                  className="px-4 py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                  className="composer-stop-button w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white max-sm:bg-transparent max-sm:border max-sm:border-red-500/70 max-sm:text-red-300 max-sm:hover:bg-red-900/40 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                   title="Stop agent"
                   aria-label="Stop agent"
                 >
                   <Square className="w-5 h-5" />
                 </button>
               )}
-              <div className="flex-1 relative">
+              <div className="flex-1 min-w-0 relative">
               <textarea
                 ref={textareaRef}
                 value={inputValue}
@@ -1486,7 +1496,7 @@ const ChatArea = () => {
               <button
                 type="button"
                 onClick={stopStreaming}
-                className="px-5 py-3 min-w-[56px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                className="w-12 h-12 sm:w-auto sm:h-auto sm:px-5 sm:py-3 min-w-[48px] sm:min-w-[56px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                 title="Stop streaming"
                 aria-label="Stop streaming"
               >
@@ -1499,7 +1509,7 @@ const ChatArea = () => {
                 title="Send message"
                 aria-label="Send message"
                 data-testid="send-button"
-                className={`px-5 py-3 min-w-[56px] min-h-[48px] rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
+                className={`w-12 h-12 sm:w-auto sm:h-auto sm:px-5 sm:py-3 min-w-[48px] sm:min-w-[56px] min-h-[48px] rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
                   canSend
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-gray-700 text-gray-400 cursor-not-allowed'
@@ -1521,19 +1531,31 @@ const ChatArea = () => {
             accept=".pdf,.txt,.doc,.docx,.jpg,.jpeg,.png,.gif,.tif,.tiff,.csv,.xlsx,.xls,.json,.md,.log"
           />
           
-          <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
+          <div className="flex items-center justify-between mt-1.5 sm:mt-2 text-xs text-gray-400 min-w-0">
             {/* Chat-bar controls (issue #839 review): the model, tools, and
                 prompts are all changed from where the work happens instead of
                 from the top bar. The workspace panel opens upward because this
                 row is pinned to the bottom of the viewport and a downward
                 panel is clipped by the chat area's overflow-hidden root. */}
-            <div role="group" aria-label="Chat controls" className="flex items-center gap-3 flex-wrap min-w-0">
+            {/* Under sm the row is one line of equal-height pills: the model
+                pill is the flexible item (min-w-0, truncates) and the rest are
+                compact, so the row fits instead of wrapping one control onto
+                a line of its own. Panels open upward from the row itself
+                (composer-toolbar in index.css) so they use the full width. */}
+            <div role="group" aria-label="Chat controls" className="composer-toolbar flex items-center gap-2 sm:gap-3 flex-nowrap sm:flex-wrap min-w-0 w-full sm:w-auto">
               <ModelSelector />
               <ToolSelector />
               {/* The header already has a workspace switcher. On a short window
                   the second one is the duplicate that crowded the transcript
                   (issue #1135); tall windows keep it here (issue #839). */}
-              {features?.workspaces && !shortViewport && <WorkspaceSelector placement="up" />}
+              {/* Phones also skip it (hidden under sm): the one-row phone
+                  toolbar has no room for it, and a tall narrow window would
+                  otherwise overflow the row. */}
+              {features?.workspaces && !shortViewport && (
+                <div className="hidden sm:block">
+                  <WorkspaceSelector placement="up" />
+                </div>
+              )}
               <PromptSelector />
               {/* Context meter (issue #877) sits on this row with the model
                   and prompt. */}

@@ -37,29 +37,37 @@ export default function AgentRunStatus({
       role="group"
       aria-label="Agent run status"
       data-testid="agent-run-status"
-      className="mb-2 px-3 py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-3"
+      className="mb-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-2 sm:gap-3 min-w-0"
     >
       <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden="true">
         <span className="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-400" />
       </span>
-      <Sparkles className="w-4 h-4 flex-shrink-0 text-blue-300" aria-hidden="true" />
+      {/* Phones draw one slim line: the pulsing dot already marks the run,
+          so the second icon is dropped there to give the text room. */}
+      <Sparkles className="w-4 h-4 flex-shrink-0 text-blue-300 hidden sm:block" aria-hidden="true" />
       {/* Only the state text is a live region, so a step change announces
           "Agent is running, step 3" rather than the whole row and its Stop. */}
       <div className="min-w-0 flex-1" role="status" aria-live="polite" aria-atomic="true">
-        <div className="text-sm font-semibold text-blue-50">
+        <div className="text-xs sm:text-sm font-semibold text-blue-50 max-sm:truncate">
           {title}
           {hasStep && !waitingForAnswer && (
             <span className="font-normal text-blue-200"> · step {step}</span>
           )}
         </div>
-        <div className={compact ? 'sr-only' : 'text-xs text-blue-200'}>{subtitle}</div>
+        {/* The explanation is screen-reader only on short windows and on phones,
+            where it wrapped the row to three lines and repeated what the
+            transcript already shows. */}
+        <div className={compact ? 'sr-only' : 'sr-only sm:not-sr-only text-xs text-blue-200'}>{subtitle}</div>
       </div>
+      {/* Hidden on phones (under sm): there the composer's pinned Stop is the
+          single stop control, because this row sits in the capped aux stack
+          and can scroll out of view behind warnings. */}
       {typeof onStop === 'function' && (
         <button
           type="button"
           onClick={onStop}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-medium transition-colors flex-shrink-0"
+          className="max-sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-medium transition-colors flex-shrink-0"
           title="Stop agent run"
           aria-label="Stop agent run"
         >

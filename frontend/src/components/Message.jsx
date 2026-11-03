@@ -783,7 +783,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           shrink (min-w-0): with the default min-width:auto a single unbroken
           token inside would push the row past the viewport. */}
       <div ref={containerRef} className={`min-w-0 ${isUser ? 'max-w-[85%] sm:max-w-[70%] user-message-bubble' : 'flex-1 bg-gray-800'} rounded-lg p-3 sm:p-4`}>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1 sm:mb-2">
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium text-gray-300">
               {authorName}
@@ -801,7 +801,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 <button
                   ref={editButtonRef}
                   onClick={startEdit}
-                  className="edit-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  className="edit-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-1 sm:ml-2"
                   title="Edit and resubmit (replaces the rest of the conversation)"
                   aria-label="Edit and resubmit message"
                   type="button"
@@ -812,7 +812,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               {canCorrect && (
                 <button
                   onClick={() => onCorrect(message)}
-                  className="correct-turn-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  className="correct-turn-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-1 sm:ml-2"
                   title="Correct this turn (pick the tool the assistant should have used)"
                   aria-label="Correct this turn"
                   type="button"
@@ -827,7 +827,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 // clears on STREAM_END).
                 <button
                   onClick={handleCopyMessage}
-                  className="copy-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-2"
+                  className="copy-message-button opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200 p-1.5 rounded text-xs transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ml-1 sm:ml-2"
                   title="Copy message to clipboard"
                   type="button"
                 >
