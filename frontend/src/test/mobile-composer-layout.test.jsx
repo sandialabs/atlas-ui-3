@@ -179,16 +179,36 @@ describe('phone-width composer layout', () => {
     expect(float).toMatch(/\.followup-chips,\s*\.welcome-powered-by\s*\{\s*padding-right:\s*3\.75rem;/)
   })
 
-  it('caps phone toolbar panels to the room above the composer without a tall floor', () => {
+  it('caps phone toolbar panels to the room between the toolbar and the chat top', () => {
     // A floor taller than the room (the old 12rem) pushed the panel top, and
     // the tools search field with it, under the header once the keyboard was
-    // up. The panels scroll inside, so the cap follows the visible room.
+    // up; a constant chrome height did the same once an admin banner message
+    // showed. The cap follows the measured top of the chat area instead.
     const phoneBlock = css.search(/@media \(max-width: 639px\) \{\s*\[data-testid="composer-footer"\]/)
-    const phone = css.slice(phoneBlock)
+    // Only the phone block: from its opening brace to the matching close.
+    let depth = 0
+    let end = phoneBlock
+    for (let i = css.indexOf('{', phoneBlock); i < css.length; i++) {
+      if (css[i] === '{') depth++
+      else if (css[i] === '}' && --depth === 0) { end = i; break }
+    }
+    const phone = css.slice(phoneBlock, end)
     const cap = phone.match(/\.composer-toolbar \.composer-toolbar-popover \{[^}]*max-height:\s*([^;]+);/)
     expect(cap).not.toBeNull()
-    expect(cap[1]).toContain('calc(var(--app-viewport-height, 100vh) - 8.5rem)')
-    expect(cap[1]).not.toMatch(/max\(12rem/)
+    expect(cap[1]).toContain('calc(var(--app-viewport-height, 100vh) - var(--atlas-chat-top, 5rem) - 3.5rem)')
+    // Any floor must stay a sliver: one taller than the room clips the top.
+    const floor = cap[1].match(/max\(\s*([\d.]+)rem/)
+    expect(floor).not.toBeNull()
+    expect(Number(floor[1])).toBeLessThanOrEqual(3)
+  })
+
+  it('publishes the chat top that the phone panel cap reads', () => {
+    renderChat()
+    // ChatArea's root is the element under the header and banners; jsdom
+    // places it at 0.
+    expect(document.documentElement.style.getPropertyValue('--atlas-chat-top')).toBe('0px')
+    cleanup()
+    expect(document.documentElement.style.getPropertyValue('--atlas-chat-top')).toBe('')
   })
 
   it('keeps the transcript padding the sticky code-block toolbar offsets by', () => {
