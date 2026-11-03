@@ -156,19 +156,27 @@ describe('phone-width composer layout', () => {
     }
   })
 
-  it('places the phone block after the short-window block so it wins', () => {
+  it('places the phone blocks after the short-window block so they win', () => {
     const shortBlock = css.indexOf('@media (max-height: 950px)')
+    const floatQuery = '@media (max-width: 639px), (hover: none) and (pointer: coarse) and (max-height: 950px) {'
+    const floatBlock = css.indexOf(floatQuery)
     const phoneBlock = css.search(/@media \(max-width: 639px\) \{\s*\[data-testid="composer-footer"\]/)
     expect(shortBlock).toBeGreaterThan(-1)
+    expect(floatBlock).toBeGreaterThan(shortBlock)
     expect(phoneBlock).toBeGreaterThan(shortBlock)
 
-    const phone = css.slice(phoneBlock)
-    // No feedback-button gutter on a phone; the button floats above the
-    // composer instead.
-    expect(phone).toMatch(/\.composer-stack\s*\{\s*padding-right:\s*0 !important;/)
-    expect(phone).toMatch(/\[data-testid="feedback-button"\]\s*\{\s*bottom:\s*calc\(var\(--atlas-composer-height/)
+    // The feedback button never takes composer width on a phone or on a
+    // short touch screen (a phone or tablet in landscape): no gutter, and the
+    // button floats above the composer instead of docking inside it.
+    const float = css.slice(floatBlock, phoneBlock)
+    expect(float).toMatch(/\.composer-stack\s*\{\s*padding-right:\s*0 !important;/)
+    expect(float).toMatch(/\[data-testid="feedback-button"\]\s*\{\s*bottom:\s*calc\(var\(--atlas-composer-height/)
     // It still clears an open side-by-side canvas, like the short-window dock.
-    expect(phone).toMatch(/right:\s*calc\(var\(--atlas-canvas-width, 0px\) \+ 0\.75rem\) !important/)
+    expect(float).toMatch(/right:\s*calc\(var\(--atlas-canvas-width, 0px\) \+ 0\.75rem\) !important/)
+    // It steps aside while the user types.
+    expect(float).toMatch(/textarea:focus\) \[data-testid="feedback-button"\]\s*\{\s*display:\s*none;/)
+    // Right-aligned content at the button's height steps clear of it.
+    expect(float).toMatch(/\.followup-chips,\s*\.welcome-powered-by\s*\{\s*padding-right:\s*3\.75rem;/)
   })
 
   it('keeps the transcript padding the sticky code-block toolbar offsets by', () => {

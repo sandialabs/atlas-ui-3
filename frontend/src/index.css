@@ -921,30 +921,20 @@
   }
 }
 
-/* Phone widths (under Tailwind's sm, 640px).
-   The components switch to a deliberate mobile layout with sm: utilities
-   (square composer buttons, one Stop, a one-line agent status, a one-row
-   toolbar). This block holds the pieces a utility cannot express, and it
-   comes after the short-window block above because a portrait phone is also
-   a short window (under 950px tall) and these rules must win there.
-   - The composer uses the full width. The short-window rules reserve a right
-     gutter for the docked feedback button; on a phone that gutter cost 52px
-     of a 375px row. The button floats above the composer here instead, the
-     way tall windows place it, and the transcript's scroll sentinel gets height so
-     the last message scrolls clear of it.
-   - Safe areas: the viewport meta tag deliberately does not opt into
-     viewport-fit=cover, so the browser keeps the page inside the safe area
-     (notch, home indicator). Opting in would need every fixed overlay
-     (header menu, sidebar drawer, RAG panel, toasts) to pad for the insets.
-     The on-screen keyboard is handled by --app-viewport-height
-     (utils/visualViewportHeight.js), which tracks the visual viewport.
-   - Toolbar panels open from the toolbar row, not from each trigger, so a
-     panel from a trigger near the right edge is not clipped off-screen. */
-@media (max-width: 639px) {
-  [data-testid="composer-footer"] {
-    padding: 0.5rem;
-  }
-
+/* Floating feedback button on phones and touch screens.
+   The short-window rules above dock the feedback button at the bottom-right
+   of the composer band and reserve a right gutter for it, so the whole
+   composer (message box row included) loses 52px. On a phone that was 52px of
+   a 375px row; on a touch screen in landscape the 44px button also overlaps
+   the message box row, so a gutter on the toolbar row alone cannot clear it.
+   Phones (under Tailwind's sm, 640px) and short touch-only screens (a phone or
+   tablet in landscape) use the full composer width instead: the button floats
+   just above the composer, the way tall windows place it, steps aside while
+   the user types, and the transcript's scroll sentinel gets height so the last
+   message scrolls clear of it. Mouse and trackpad windows keep the dock.
+   This block comes after the short-window block because these screens are
+   also short windows (under 950px tall) and these rules must win there. */
+@media (max-width: 639px), (hover: none) and (pointer: coarse) and (max-height: 950px) {
   .composer-stack {
     padding-right: 0 !important;
   }
@@ -962,12 +952,42 @@
     display: none;
   }
 
-  .chat-messages {
-    overscroll-behavior-y: contain;
-  }
-
   .chat-scroll-sentinel {
     height: 2.75rem;
+  }
+
+  /* The follow-up suggestion strip sits just above the composer, under the
+     floating button; keep its last chip clear of the button. The welcome
+     screen's Powered by ATLAS logo is right-aligned at the same height, so it
+     steps clear the same way. */
+  .followup-chips,
+  .welcome-powered-by {
+    padding-right: 3.75rem;
+  }
+}
+
+/* Phone widths (under Tailwind's sm, 640px).
+   The components switch to a deliberate mobile layout with sm: utilities
+   (square composer buttons, one Stop, a one-line agent status, a one-row
+   toolbar). This block holds the pieces a utility cannot express, and it
+   comes after the short-window block above because a portrait phone is also
+   a short window (under 950px tall) and these rules must win there. The
+   feedback button's phone placement is in the block above.
+   - Safe areas: the viewport meta tag deliberately does not opt into
+     viewport-fit=cover, so the browser keeps the page inside the safe area
+     (notch, home indicator). Opting in would need every fixed overlay
+     (header menu, sidebar drawer, RAG panel, toasts) to pad for the insets.
+     The on-screen keyboard is handled by --app-viewport-height
+     (utils/visualViewportHeight.js), which tracks the visual viewport.
+   - Toolbar panels open from the toolbar row, not from each trigger, so a
+     panel from a trigger near the right edge is not clipped off-screen. */
+@media (max-width: 639px) {
+  [data-testid="composer-footer"] {
+    padding: 0.5rem;
+  }
+
+  .chat-messages {
+    overscroll-behavior-y: contain;
   }
 
   .composer-toolbar {
@@ -989,12 +1009,6 @@
     /* The desktop caps (24-28rem) can exceed the space above the composer on
        a short phone or with the keyboard up; cap to what is visible. */
     max-height: min(24rem, max(12rem, calc(var(--app-viewport-height, 100vh) - var(--atlas-composer-height, 8rem) - 4rem)));
-  }
-
-  /* The follow-up suggestion strip sits just above the composer, under the
-     floating feedback button; keep its last chip clear of the button. */
-  .followup-chips {
-    padding-right: 3.75rem;
   }
 
   /* The outline Stop is the only stop control on a phone. Its dark-theme

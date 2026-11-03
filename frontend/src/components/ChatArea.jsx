@@ -903,7 +903,7 @@ const ChatArea = () => {
       {isWelcomeVisible && showPoweredByAtlas && (
         <div
           style={{ bottom: 'calc(var(--atlas-composer-height, 8rem) + 1rem)' }}
-          className="absolute left-0 right-0 z-10 px-4"
+          className="welcome-powered-by absolute left-0 right-0 z-10 px-4"
         >
           <div className="max-w-4xl mx-auto flex justify-end">
             <img

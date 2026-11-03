@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-11-02
+Last updated: 2026-11-03
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -71,8 +71,10 @@ window is also wide, the agent status and the active-tools row share one
 line. The longer status explanation is still there for a screen reader. The
 workspace switcher stays in the header on these windows, so it is not repeated
 under the message box. The Shift+Enter hint appears while the message box is
-focused. The feedback button sits in the composer band, beside the controls,
-instead of over the transcript. Taller windows keep the previous layout.
+focused. With a mouse or trackpad the feedback button sits in the composer
+band, beside the controls, instead of over the transcript; on a touch screen
+it floats above the composer instead (see below). Taller windows keep the
+previous layout.
 
 On a phone (narrower than 640px) the composer switches to a mobile layout
 rather than the desktop one squeezed down. The message box takes the full
@@ -85,9 +87,10 @@ The Active Tools row shortens its switch to **Auto: On/Off**. The model, tools,
 prompt and context controls sit on one row of equal-height buttons (the prompt
 shows its icon only; the active prompt is named in its tooltip), and their
 panels open across the full composer width. The feedback button floats above
-the composer instead of taking a column beside it, and hides while you type.
-The layout follows the on-screen keyboard. 640px and wider keep the desktop
-layout.
+the composer instead of taking a column beside it, and hides while you type;
+a phone or tablet held in landscape (a short touch screen) places it the same
+way, so the message box keeps the full width there too. The layout follows the
+on-screen keyboard. 640px and wider keep the desktop layout.
 
 **General → Max Agent Iterations** bounds how many tool steps one agent turn
 may take. The slider's upper end is the ceiling your ATLAS administrator
