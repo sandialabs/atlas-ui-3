@@ -111,7 +111,7 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
         <div
           role="dialog"
           aria-label="Context usage and compaction"
-          className={`composer-toolbar-popover absolute bottom-full mb-2 w-80 max-w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto rounded-lg border border-gray-600 bg-gray-800 p-3 text-xs text-gray-300 shadow-xl z-30 ${
+          className={`composer-toolbar-popover absolute bottom-full mb-2 w-80 max-w-[calc(100vw-2rem)] max-h-[60vh] overflow-y-auto rounded-lg border border-gray-600 bg-gray-800 p-3 text-xs text-gray-300 shadow-xl z-50 ${
             panelSide === 'right' ? 'right-0' : 'left-0'
           }`}
         >

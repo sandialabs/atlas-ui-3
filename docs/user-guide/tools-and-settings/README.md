@@ -87,9 +87,7 @@ shows its icon only; the active prompt is named in its tooltip), and their
 panels open across the full composer width. The feedback button floats above
 the composer instead of taking a column beside it, and hides while you type.
 The layout follows the on-screen keyboard. 640px and wider keep the desktop
-layout. At every width, the app now keeps clear of notches, rounded corners
-and the home indicator on devices that have them (portrait and landscape
-phones, iPads).
+layout.
 
 **General → Max Agent Iterations** bounds how many tool steps one agent turn
 may take. The slider's upper end is the ceiling your ATLAS administrator

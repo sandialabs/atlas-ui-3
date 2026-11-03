@@ -5,7 +5,7 @@
  * layout instead of the desktop row squeezed down. jsdom has no layout engine,
  * so these tests pin the contract the CSS then sizes -- one stop control, a
  * flexible message box, a one-row toolbar, the mobile block in index.css
- * winning over the short-window rules, and the safe-area viewport -- rather
+ * winning over the short-window rules, and the viewport meta tag -- rather
  * than measuring pixels. The pixel checks were done with Playwright at
  * 360/375/390px widths.
  */
@@ -145,10 +145,14 @@ describe('phone-width composer layout', () => {
     // The selectors mark their wrappers so the phone CSS can open their
     // panels from the row rather than from each trigger. (The context meter
     // carries the same marker but renders nothing without usage data.)
-    for (const name of [/GPT-4/, /tools/i, 'Select custom prompts']) {
-      const trigger = within(controls).getAllByRole('button').find((b) =>
-        typeof name === 'string' ? b.title === name : name.test(b.textContent))
-      expect(trigger?.closest('.composer-toolbar-anchor')).not.toBeNull()
+    const triggers = {
+      model: within(controls).getByRole('button', { name: /GPT-4/ }),
+      tools: within(controls).getByTitle('Choose which tools the model can use'),
+      prompt: within(controls).getByTitle(/^Select custom prompts/),
+    }
+    for (const trigger of Object.values(triggers)) {
+      expect(trigger).toBeInTheDocument()
+      expect(trigger.closest('.composer-toolbar-anchor')).not.toBeNull()
     }
   })
 
@@ -163,17 +167,16 @@ describe('phone-width composer layout', () => {
     // composer instead.
     expect(phone).toMatch(/\.composer-stack\s*\{\s*padding-right:\s*0 !important;/)
     expect(phone).toMatch(/\[data-testid="feedback-button"\]\s*\{\s*bottom:\s*calc\(var\(--atlas-composer-height/)
-    // The footer clears the home indicator.
-    expect(phone).toMatch(/env\(safe-area-inset-bottom/)
+    // It still clears an open side-by-side canvas, like the short-window dock.
+    expect(phone).toMatch(/right:\s*calc\(var\(--atlas-canvas-width, 0px\) \+ 0\.75rem\) !important/)
   })
 
-  it('opts into safe-area insets at every width', () => {
-    expect(html).toMatch(/name="viewport"[^>]*viewport-fit=cover/)
-    // viewport-fit=cover is global, so the shell and footer insets must not
-    // live only inside the phone block (landscape phones and iPads are wider).
-    const firstMedia = css.indexOf('@media (max-height: 950px)')
-    const global = css.slice(0, firstMedia)
-    expect(global).toMatch(/\.app-shell\s*\{\s*padding:\s*env\(safe-area-inset-top/)
-    expect(global).toMatch(/\[data-testid="composer-footer"\]\s*\{\s*padding-bottom:\s*max\(1rem, env\(safe-area-inset-bottom/)
+  it('does not opt into edge-to-edge (viewport-fit=cover)', () => {
+    // viewport-fit=cover would draw fixed overlays (header menu, sidebar
+    // drawer, RAG panel, toasts) under the notch and home indicator unless
+    // each one pads for the safe-area insets. Until they do, the browser's
+    // default keeps the whole page inside the safe area.
+    expect(html).toMatch(/name="viewport"/)
+    expect(html).not.toMatch(/viewport-fit=cover/)
   })
 })
