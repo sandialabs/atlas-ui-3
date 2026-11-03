@@ -179,6 +179,18 @@ describe('phone-width composer layout', () => {
     expect(float).toMatch(/\.followup-chips,\s*\.welcome-powered-by\s*\{\s*padding-right:\s*3\.75rem;/)
   })
 
+  it('caps phone toolbar panels to the room above the composer without a tall floor', () => {
+    // A floor taller than the room (the old 12rem) pushed the panel top, and
+    // the tools search field with it, under the header once the keyboard was
+    // up. The panels scroll inside, so the cap follows the visible room.
+    const phoneBlock = css.search(/@media \(max-width: 639px\) \{\s*\[data-testid="composer-footer"\]/)
+    const phone = css.slice(phoneBlock)
+    const cap = phone.match(/\.composer-toolbar \.composer-toolbar-popover \{[^}]*max-height:\s*([^;]+);/)
+    expect(cap).not.toBeNull()
+    expect(cap[1]).toContain('calc(var(--app-viewport-height, 100vh) - 8.5rem)')
+    expect(cap[1]).not.toMatch(/max\(12rem/)
+  })
+
   it('keeps the transcript padding the sticky code-block toolbar offsets by', () => {
     // #1151 pulls the sticky code-block header up by the transcript's own
     // padding (p-2 under sm, p-4 from sm) so it sits flush with the top. The

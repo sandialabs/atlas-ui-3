@@ -1006,9 +1006,17 @@
     right: 0;
     width: auto;
     max-width: none;
-    /* The desktop caps (24-28rem) can exceed the space above the composer on
-       a short phone or with the keyboard up; cap to what is visible. */
-    max-height: min(24rem, max(12rem, calc(var(--app-viewport-height, 100vh) - var(--atlas-composer-height, 8rem) - 4rem)));
+    /* The desktop caps (24-28rem) can exceed the visible room on a short
+       phone or with the keyboard up; cap to what is visible. The panel
+       opens up from the toolbar, which is the composer's bottom row on a
+       phone, and may cover the message box above it, so the room is the
+       visual viewport less the toolbar band (about 3rem) and the header
+       with the compliance banner (77px on a phone): 8.5rem in all. There
+       is deliberately no comfortable floor: the panels scroll inside (the
+       tools search stays pinned), whereas a floor taller than the room
+       pushed the panel top, search field included, under the header.
+       3rem only keeps a sliver usable. */
+    max-height: min(24rem, max(3rem, calc(var(--app-viewport-height, 100vh) - 8.5rem)));
   }
 
   /* The outline Stop is the only stop control on a phone. Its dark-theme
