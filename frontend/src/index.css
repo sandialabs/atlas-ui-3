@@ -945,11 +945,14 @@
     position: relative;
   }
 
-  .composer-toolbar > div {
+  /* The selectors mark their wrapper and panel with these classes (Model,
+     Tools, Prompt, Context), so a refactor of their markup keeps the phone
+     positioning instead of silently missing a DOM-shape selector. */
+  .composer-toolbar .composer-toolbar-anchor {
     position: static;
   }
 
-  .composer-toolbar > div > .absolute.bottom-full {
+  .composer-toolbar .composer-toolbar-popover {
     left: 0;
     right: 0;
     width: auto;

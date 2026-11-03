@@ -93,7 +93,7 @@ const ModelSelector = () => {
     : 'Select a model'
 
   return (
-    <div className="relative min-w-0">
+    <div className="composer-toolbar-anchor relative min-w-0">
       <button
         type="button"
         ref={triggerRef}
@@ -125,7 +125,7 @@ const ModelSelector = () => {
       {dropdownOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }} />
-          <div className="absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
+          <div className="composer-toolbar-popover absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
             {listedModels.length === 0 && llmGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (

@@ -117,6 +117,14 @@ describe('phone-width composer layout', () => {
 
     const controls = screen.getByRole('group', { name: 'Chat controls' })
     expect(controls).toHaveClass('composer-toolbar', 'flex-nowrap', 'sm:flex-wrap', 'min-w-0')
+    // The selectors mark their wrappers so the phone CSS can open their
+    // panels from the row rather than from each trigger. (The context meter
+    // carries the same marker but renders nothing without usage data.)
+    for (const name of [/GPT-4/, /tools/i, 'Select custom prompts']) {
+      const trigger = within(controls).getAllByRole('button').find((b) =>
+        typeof name === 'string' ? b.title === name : name.test(b.textContent))
+      expect(trigger?.closest('.composer-toolbar-anchor')).not.toBeNull()
+    }
   })
 
   it('places the phone block after the short-window block so it wins', () => {
