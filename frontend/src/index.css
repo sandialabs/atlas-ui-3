@@ -936,7 +936,7 @@
 
   [data-testid="feedback-button"] {
     bottom: calc(var(--atlas-composer-height, 8rem) + 0.5rem) !important;
-    right: calc(0.75rem + env(safe-area-inset-right, 0px)) !important;
+    right: calc(var(--atlas-canvas-width, 0px) + 0.75rem + env(safe-area-inset-right, 0px)) !important;
     width: 2.75rem;
     height: 2.75rem;
   }
