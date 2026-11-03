@@ -3,7 +3,8 @@ import { useChat } from '../contexts/ChatContext'
 import { marked } from '../utils/markdownRenderer'
 import DOMPurify from 'dompurify'
 import { useState, useEffect, useRef } from 'react'
-import { copyCodeBlock, copyTextToClipboard } from '../utils/clipboard'
+import { copyTextToClipboard } from '../utils/clipboard'
+import { useCodeBlockCopy } from '../hooks/useCodeBlockCopy'
 
 // DOMPurify configuration for allowing iframes in HTML content
 const IFRAME_SANITIZE_CONFIG = {
@@ -85,9 +86,9 @@ const CanvasPanel = ({
   const copyTokenRef = useRef(0);
   // The scrollable content container. Code blocks rendered from markdown carry
   // the shared renderer's Copy button, whose clicks are handled here by
-  // delegation (Message.jsx uses the same pattern) — without this listener the
-  // buttons inside the canvas are inert (#1151).
-  const contentRef = useRef(null);
+  // delegation (shared with Message.jsx) — without this listener the buttons
+  // inside the canvas are inert (#1151).
+  const contentRef = useCodeBlockCopy();
 
   useEffect(() => {
     const checkMobile = () => {
@@ -101,25 +102,6 @@ const CanvasPanel = ({
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Delegate code-block copy clicks on the canvas content container, exactly
-  // like Message.jsx does for transcript code blocks. markdownRenderer.js
-  // emits the Copy button markup, so without this effect the buttons it
-  // renders inside the canvas do nothing (#1151).
-  useEffect(() => {
-    const container = contentRef.current;
-    if (!container) return;
-    const handleCodeCopyClick = (event) => {
-      const button = event.target.closest('[data-action="copy-code"]');
-      if (!button || !container.contains(button)) return;
-      event.preventDefault();
-      copyCodeBlock(button);
-    };
-    container.addEventListener('click', handleCodeCopyClick);
-    return () => {
-      container.removeEventListener('click', handleCodeCopyClick);
-    };
   }, []);
 
   // Drop any copied/failed feedback when the displayed content changes, so

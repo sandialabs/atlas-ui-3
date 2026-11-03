@@ -41,18 +41,54 @@ const restoreAfter = (button, original) => {
 // the thin border changed colour (#1151).
 const NEUTRAL_CLASSES = ['bg-gray-700', 'hover:bg-gray-600', 'border-gray-600']
 
-// The swapped-in icon is decorative; the sr-only text (and aria-live on the
-// span) carries the outcome for screen-reader users, since colour and icon
-// alone are not perceivable to everyone.
+// Screen-reader announcement of the copy outcome. A live region only
+// announces *changes* to a region that already exists in the accessibility
+// tree, so one persistent, initially empty status element is reused: it is
+// cleared, then filled after a short delay. It is created lazily on the
+// first copy -- inserted empty, so the delayed fill is still a change -- to
+// avoid putting an extra role="status" node on every page. (Inserting a live
+// span that already contains its text is often skipped by screen readers.)
+const LIVE_REGION_ID = 'atlas-copy-status'
+let announceTimer = null
+
+const getLiveRegion = () => {
+  let region = document.getElementById(LIVE_REGION_ID)
+  if (!region) {
+    region = document.createElement('div')
+    region.id = LIVE_REGION_ID
+    region.setAttribute('role', 'status')
+    region.setAttribute('aria-live', 'polite')
+    region.className = 'sr-only'
+    document.body.appendChild(region)
+  }
+  return region
+}
+
+export const announceCopyOutcome = (text) => {
+  if (typeof document === 'undefined' || !document.body) return
+  const region = getLiveRegion()
+  region.textContent = ''
+  if (announceTimer) clearTimeout(announceTimer)
+  announceTimer = setTimeout(() => {
+    announceTimer = null
+    region.textContent = text
+  }, 100)
+}
+
+// The swapped-in icon is decorative. The sr-only text keeps the button's
+// accessible name meaningful during the flash, and the shared live region
+// announces the outcome, since colour and icon alone are not perceivable to
+// everyone.
 const flashButton = (button, flashClasses, { iconPath = null, srText = '', extraNeutral = [], extraFlash = [] } = {}) => {
   const original = beginFlash(button, { swapMarkup: iconPath !== null })
 
   if (iconPath !== null) {
-    button.innerHTML = `<svg class="w-3 h-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg><span class="sr-only" aria-live="polite">${srText}</span>`
+    button.innerHTML = `<svg class="w-3 h-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg><span class="sr-only">${srText}</span>`
   }
   button.className = original.className
   button.classList.remove(...NEUTRAL_CLASSES, ...extraNeutral)
   button.classList.add(...flashClasses, ...extraFlash)
+  if (srText) announceCopyOutcome(srText)
 
   restoreAfter(button, original)
 }
@@ -140,9 +176,11 @@ export const copyCodeBlock = (button) => {
 
 const MESSAGE_TEXT = { extraNeutral: ['text-gray-200'], extraFlash: ['text-white'] }
 
-const showMessageCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, MESSAGE_TEXT)
+// Message buttons keep their React-rendered icon, so the outcome reaches
+// screen readers through the shared live region only.
+const showMessageCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, { ...MESSAGE_TEXT, srText: 'Copied' })
 
-const showMessageCopyError = (button) => flashButton(button, ERROR_CLASSES, MESSAGE_TEXT)
+const showMessageCopyError = (button) => flashButton(button, ERROR_CLASSES, { ...MESSAGE_TEXT, srText: 'Copy failed' })
 
 export const copyMessageContent = (content, button) => {
   try {

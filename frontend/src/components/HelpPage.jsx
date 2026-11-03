@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { useCodeBlockCopy } from '../hooks/useCodeBlockCopy'
 
 // The Help page renders whatever the server says the Help source is
 // (issue #1107):
@@ -23,6 +24,9 @@ const HelpPage = () => {
   const [helpData, setHelpData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Code blocks in the help markdown get the shared renderer's Copy button;
+  // this makes it work (#1151).
+  const contentRef = useCodeBlockCopy()
 
   useEffect(() => {
     const fetchHelpContent = async () => {
@@ -146,6 +150,7 @@ const HelpPage = () => {
 
           {!loading && !error && mode !== 'external_link' && (
             <div
+              ref={contentRef}
               className="prose prose-invert max-w-none"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(helpData?.content || '') }}
             />

@@ -24,6 +24,7 @@ import { marked } from 'marked'
 
 import '../utils/markdownRenderer' // configure the shared marked singleton
 import { copyCodeBlock, copyMessageContent, copyTextToClipboard } from '../utils/clipboard'
+import { useCodeBlockCopy } from '../hooks/useCodeBlockCopy'
 import CanvasPanel from '../components/CanvasPanel'
 import { useChat } from '../contexts/ChatContext'
 
@@ -526,5 +527,76 @@ describe('Canvas panel copy (#1151)', () => {
     mockWriteText.mockRejectedValue(new Error('denied'))
     document.execCommand = vi.fn(() => false)
     await expect(copyTextToClipboard('text')).resolves.toBe(false)
+  })
+})
+
+describe('screen-reader announcement of the copy outcome (#1151)', () => {
+  it('announces through one persistent live region, filled after it is cleared', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const { button } = mountCodeBlock('x')
+
+    copyCodeBlock(button)
+    await flush()
+    const region = document.getElementById('atlas-copy-status')
+    expect(region).not.toBeNull()
+    expect(region.getAttribute('aria-live')).toBe('polite')
+    expect(region.textContent).toBe('') // cleared first ...
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(region.textContent).toBe('Copied') // ... then filled, so it is a change
+    // The in-button text is not itself a live region.
+    expect(button.querySelector('[aria-live]')).toBeNull()
+  })
+
+  it('announces message copy failures too, not only colour', async () => {
+    mockWriteText.mockRejectedValue(new Error('denied'))
+    document.execCommand = vi.fn(() => false)
+    const button = document.createElement('button')
+    button.className = 'copy-message-button bg-gray-700'
+    document.body.appendChild(button)
+
+    copyMessageContent('hello', button)
+    await flush()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(document.getElementById('atlas-copy-status').textContent).toBe('Copy failed')
+  })
+})
+
+describe('useCodeBlockCopy (#1151)', () => {
+  const Rendered = ({ html, show = true }) => {
+    const ref = useCodeBlockCopy()
+    if (!show) return null
+    return <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />
+  }
+
+  it('makes renderer Copy buttons work in any container that uses it', async () => {
+    const html = marked.parse('```python\nprint("help")\n```')
+    const { container } = render(<Rendered html={html} />)
+
+    fireEvent.click(container.querySelector('[data-action="copy-code"]'))
+    await flush()
+    expect(mockWriteText).toHaveBeenCalledWith('print("help")')
+  })
+
+  it('attaches when the container mounts after the first render (splash screen)', async () => {
+    const html = marked.parse('```\nsplash code\n```')
+    const { container, rerender } = render(<Rendered html={html} show={false} />)
+    rerender(<Rendered html={html} show />)
+
+    fireEvent.click(container.querySelector('[data-action="copy-code"]'))
+    await flush()
+    expect(mockWriteText).toHaveBeenCalledWith('splash code')
+  })
+
+  it('is wired into the Help page and splash screen', () => {
+    for (const file of ['src/components/HelpPage.jsx', 'src/components/SplashScreen.jsx']) {
+      const src = readFileSync(resolve(process.cwd(), file), 'utf8')
+      expect(src).toMatch(/useCodeBlockCopy\(\)/)
+      expect(src).toMatch(/ref=\{contentRef\}/)
+    }
   })
 })
