@@ -5,6 +5,10 @@ import { test, expect } from '@playwright/test';
 // header -- first from a 12rem minimum height, then from a fixed guess at the
 // chrome height when an admin banner message was showing. The cap now follows
 // the measured top of the chat area (--atlas-chat-top).
+//
+// Runs locally, not in CI: the CI e2e step (test/e2e_tests.sh) runs only
+// simple_e2e_test.py. With a server on port 8000:
+//   cd test_e2e && npm ci && npx playwright test mobile-toolbar-panel
 
 test.describe('phone toolbar panel stays below the header', () => {
   test.use({ viewport: { width: 360, height: 300 }, hasTouch: true, isMobile: true });
@@ -52,7 +56,11 @@ test.describe('phone toolbar panel stays below the header', () => {
       strip.style.flexShrink = '0';
       header.parentElement.insertBefore(strip, header);
     });
-    await page.waitForTimeout(200);
+    // Wait for the hook to republish the chat top below the taller chrome.
+    await expect.poll(() => page.evaluate(() => {
+      const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--atlas-chat-top'));
+      return top >= document.querySelector('header').getBoundingClientRect().bottom;
+    })).toBe(true);
     await openFirstPanel(page);
     const { panelTop, highestTop, headerBottom } = await geometry(page);
     expect(panelTop).toBeGreaterThanOrEqual(headerBottom);

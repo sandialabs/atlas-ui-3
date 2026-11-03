@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 /**
- * Publishes the top edge of the chat area (in viewport pixels) as the CSS
+ * Publishes the top edge of the chat area, in document pixels, as the CSS
  * custom property `--atlas-chat-top` on <html>.
  *
  * Everything above the chat area is chrome of varying height: the admin
@@ -11,9 +11,16 @@ import { useEffect } from 'react'
  * guess at the chrome height let a panel's top, and the tools search field
  * with it, slide under the header once a banner message was showing.
  *
- * The chat area fills the app shell under that chrome, so a change in the
- * chrome resizes it and the ResizeObserver republishes. Window and visual
- * viewport resizes (rotation, on-screen keyboard) are covered as well.
+ * The value is document-relative (rect top plus the page scroll), so it does
+ * not move when the page or the visual viewport pans -- iOS pans the page
+ * while the on-screen keyboard is up. The app shell starts at the top of the
+ * document and is sized to the visual viewport (--app-viewport-height), so the
+ * room for a panel is that height less this edge less the toolbar band.
+ *
+ * The chat area fills the app shell under the chrome, so a change in the
+ * chrome resizes it and the ResizeObserver republishes; window and visual
+ * viewport resizes (rotation, keyboard) are covered as well. Writes are
+ * skipped when the value is unchanged.
  *
  * Returns nothing; consumers read the variable from CSS.
  */
@@ -25,9 +32,13 @@ export function useChatTopVar(ref) {
     const root = typeof document !== 'undefined' ? document.documentElement : null
     if (!el || !root) return
 
+    let last = null
     const publish = () => {
-      const top = el.getBoundingClientRect?.().top ?? 0
-      root.style.setProperty(CHAT_TOP_VAR, `${Math.max(0, Math.round(top))}px`)
+      const top = (el.getBoundingClientRect?.().top ?? 0) + (window.scrollY || 0)
+      const value = `${Math.max(0, Math.round(top))}px`
+      if (value === last) return
+      last = value
+      root.style.setProperty(CHAT_TOP_VAR, value)
     }
 
     publish()
