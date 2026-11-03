@@ -13,9 +13,13 @@ import { test, expect } from '@playwright/test';
 test.describe('phone toolbar panel stays below the header', () => {
   test.use({ viewport: { width: 360, height: 300 }, hasTouch: true, isMobile: true });
 
+  // The Tools panel (pinned search field, long list) when the deployment has
+  // tools; otherwise the first toolbar panel (Model).
   const openFirstPanel = async (page) => {
     const controls = page.getByRole('group', { name: 'Chat controls' });
-    await controls.getByRole('button').first().click();
+    const tools = controls.getByTitle('Choose which tools the model can use');
+    if (await tools.count()) await tools.first().click();
+    else await controls.getByRole('button').first().click();
     const panel = page.locator('[aria-label="Chat controls"] .composer-toolbar-popover').first();
     await expect(panel).toBeVisible();
     return panel;

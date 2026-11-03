@@ -11,10 +11,17 @@ import { useEffect } from 'react'
  * guess at the chrome height let a panel's top, and the tools search field
  * with it, slide under the header once a banner message was showing.
  *
- * The value is document-relative (rect top plus the page scroll), so it does
+ * The chat area's top is also the panels' clipping edge: its root is
+ * overflow-hidden, so a panel can never paint above it. That is why the edge
+ * is the chat area itself and not just the header and banners -- on a phone an
+ * open canvas stacks between the header and the chat area, and a panel capped
+ * to the header alone ran under the canvas and lost its top (search field
+ * included) to the clip.
+ *
+ * The value is measured against the app's root element (#root), so it does
  * not move when the page or the visual viewport pans -- iOS pans the page
- * while the on-screen keyboard is up. The app shell starts at the top of the
- * document and is sized to the visual viewport (--app-viewport-height), so the
+ * while the on-screen keyboard is up -- because both rects shift together. The
+ * app shell is sized to the visual viewport (--app-viewport-height), so the
  * room for a panel is that height less this edge less the toolbar band.
  *
  * The chat area fills the app shell under the chrome, so a change in the
@@ -34,8 +41,12 @@ export function useChatTopVar(ref) {
 
     let last = null
     const publish = () => {
-      const top = (el.getBoundingClientRect?.().top ?? 0) + (window.scrollY || 0)
-      const value = `${Math.max(0, Math.round(top))}px`
+      // A hidden chat area (a full-size canvas) has no box; keep the last
+      // value rather than publishing 0.
+      if (!el.getClientRects?.().length) return
+      const origin = document.getElementById('root') ?? root
+      const top = el.getBoundingClientRect().top - origin.getBoundingClientRect().top
+      const value = `${Math.round(top)}px`
       if (value === last) return
       last = value
       root.style.setProperty(CHAT_TOP_VAR, value)

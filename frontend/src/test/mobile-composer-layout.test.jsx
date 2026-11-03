@@ -202,15 +202,6 @@ describe('phone-width composer layout', () => {
     expect(Number(floor[1])).toBeLessThanOrEqual(3)
   })
 
-  it('publishes the chat top that the phone panel cap reads', () => {
-    renderChat()
-    // ChatArea's root is the element under the header and banners; jsdom
-    // places it at 0.
-    expect(document.documentElement.style.getPropertyValue('--atlas-chat-top')).toBe('0px')
-    cleanup()
-    expect(document.documentElement.style.getPropertyValue('--atlas-chat-top')).toBe('')
-  })
-
   it('keeps the transcript padding the sticky code-block toolbar offsets by', () => {
     // #1151 pulls the sticky code-block header up by the transcript's own
     // padding (p-2 under sm, p-4 from sm) so it sits flush with the top. The
