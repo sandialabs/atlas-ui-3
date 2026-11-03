@@ -123,6 +123,23 @@ describe('code-block copy button feedback (#1151)', () => {
     expect(button.classList.contains('bg-red-600')).toBe(false)
   })
 
+  it('swaps the neutral hover background so the flash shows while the pointer is still on the button', async () => {
+    mockWriteText.mockResolvedValue(undefined)
+    const { button } = mountCodeBlock('x')
+    button.className = 'copy-button bg-gray-700 hover:bg-gray-600 border border-gray-600'
+
+    copyCodeBlock(button)
+    await flush()
+    expect(button.classList.contains('hover:bg-gray-600')).toBe(false)
+    expect(button.classList.contains('hover:bg-green-700')).toBe(true)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    // The original class list comes back verbatim.
+    expect(button.className).toBe('copy-button bg-gray-700 hover:bg-gray-600 border border-gray-600')
+  })
+
   it('does not leave the button stuck in the success state after two quick clicks', async () => {
     mockWriteText.mockResolvedValue(undefined)
     const { button } = mountCodeBlock('x')
@@ -206,6 +223,12 @@ describe('transcript CSS contract for the sticky toolbar (#1151)', () => {
     expect(rule[0]).not.toContain('absolute')
   })
 
+  it('offsets the sticky toolbar by the transcript padding so it sits flush with the scroller top', () => {
+    // Sticky offsets are measured inside the scroller's padding (p-2 sm:p-4).
+    expect(css).toMatch(/\.chat-messages \.code-block-header\s*\{\s*top:\s*-0\.5rem;/)
+    expect(css).toMatch(/@media \(min-width: 640px\)\s*\{\s*\.chat-messages \.code-block-header\s*\{\s*top:\s*-1rem;/)
+  })
+
   it('keeps the copy button visible on touch devices', () => {
     const touchBlock = css.match(/@media \(hover: none\)\s*\{[\s\S]*?\n\}/)
     expect(touchBlock).not.toBeNull()
@@ -262,6 +285,8 @@ describe('Canvas panel copy (#1151)', () => {
 
     expect(copyButton.title).toBe('Copy failed')
     expect(copyButton.className).toContain('bg-red-600')
+    // A cross replaces the copy icon so failure is not signalled by colour alone.
+    expect(copyButton.querySelector('svg.lucide-x')).not.toBeNull()
   })
 
   it('copies the content of the currently displayed inline canvas file', async () => {

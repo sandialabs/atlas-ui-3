@@ -595,6 +595,8 @@ const CanvasPanel = ({
             >
               {copyState === 'copied' ? (
                 <Check className="w-4 h-4" />
+              ) : copyState === 'failed' ? (
+                <X className="w-4 h-4" />
               ) : (
                 <Copy className="w-4 h-4" />
               )}

@@ -12,43 +12,49 @@ const FLASH_MS = 2000
 // running (two quick clicks), cancel its pending restore and reuse the state
 // it captured, so the second click cannot leave the button stuck showing the
 // check or cross icon.
+// The original markup AND class list are captured once and restored verbatim,
+// so a flash never leaves stray classes behind.
 const beginMarkupFlash = (button) => {
   if (button._copyFlashTimer) clearTimeout(button._copyFlashTimer)
   if (button._copyOriginalHTML === undefined) {
     button._copyOriginalHTML = button.innerHTML
+    button._copyOriginalClassName = button.className
   }
-  return button._copyOriginalHTML
+  return { html: button._copyOriginalHTML, className: button._copyOriginalClassName }
 }
 
-const restoreMarkupAfter = (button, originalHTML, removeClasses, addClasses) => {
+const restoreMarkupAfter = (button, original) => {
   button._copyFlashTimer = setTimeout(() => {
     button._copyFlashTimer = null
     delete button._copyOriginalHTML
-    button.innerHTML = originalHTML
-    button.classList.remove(...removeClasses)
-    button.classList.add(...addClasses)
+    delete button._copyOriginalClassName
+    button.innerHTML = original.html
+    button.className = original.className
   }, FLASH_MS)
 }
 
-const showCopySuccess = (button) => {
-  const originalHTML = beginMarkupFlash(button)
+// Neutral classes swapped out during a flash. The hover background must go
+// too: the pointer is still over the button right after the click, and
+// `hover:bg-gray-600` would otherwise paint over the green/red flash so only
+// the thin border changed colour (#1151).
+const NEUTRAL_CLASSES = ['bg-gray-700', 'hover:bg-gray-600', 'border-gray-600']
 
-  button.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>'
-  button.classList.add('bg-green-600', 'border-green-500')
-  button.classList.remove('bg-gray-700', 'border-gray-600')
+const flashButton = (button, iconPath, flashClasses) => {
+  const original = beginMarkupFlash(button)
 
-  restoreMarkupAfter(button, originalHTML, ['bg-green-600', 'border-green-500'], ['bg-gray-700', 'border-gray-600'])
+  button.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>`
+  button.className = original.className
+  button.classList.remove(...NEUTRAL_CLASSES)
+  button.classList.add(...flashClasses)
+
+  restoreMarkupAfter(button, original)
 }
 
-const showCopyError = (button) => {
-  const originalHTML = beginMarkupFlash(button)
+const showCopySuccess = (button) =>
+  flashButton(button, 'M5 13l4 4L19 7', ['bg-green-600', 'hover:bg-green-700', 'border-green-500'])
 
-  button.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>'
-  button.classList.add('bg-red-600', 'border-red-500')
-  button.classList.remove('bg-gray-700', 'border-gray-600')
-
-  restoreMarkupAfter(button, originalHTML, ['bg-red-600', 'border-red-500'], ['bg-gray-700', 'border-gray-600'])
-}
+const showCopyError = (button) =>
+  flashButton(button, 'M6 18L18 6M6 6l12 12', ['bg-red-600', 'hover:bg-red-700', 'border-red-500'])
 
 // Legacy fallback for insecure contexts and denied Clipboard API permissions.
 // Returns whether the copy actually succeeded so callers can surface a

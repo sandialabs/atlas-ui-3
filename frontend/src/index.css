@@ -244,6 +244,21 @@
     @apply bg-gray-700 border border-gray-600 text-gray-200 px-2 py-1 rounded text-xs cursor-pointer opacity-0 transition-opacity;
   }
 
+  /* Sticky offsets are measured from the scroller's padding edge, so a
+     top-0 toolbar in the transcript (p-2 sm:p-4) stuck 8-16px below the
+     scroller's top and code lines showed through the gap above it. Pull it up
+     by the transcript padding so it sits flush (#1151). The canvas scroller
+     has no padding, so top-0 is already flush there. */
+  .chat-messages .code-block-header {
+    top: -0.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .chat-messages .code-block-header {
+      top: -1rem;
+    }
+  }
+
   .code-block-container:hover .copy-button {
     @apply opacity-100;
   }
