@@ -1547,7 +1547,14 @@ const ChatArea = () => {
               {/* The header already has a workspace switcher. On a short window
                   the second one is the duplicate that crowded the transcript
                   (issue #1135); tall windows keep it here (issue #839). */}
-              {features?.workspaces && !shortViewport && <WorkspaceSelector placement="up" />}
+              {/* Phones also skip it (hidden under sm): the one-row phone
+                  toolbar has no room for it, and a tall narrow window would
+                  otherwise overflow the row. */}
+              {features?.workspaces && !shortViewport && (
+                <div className="hidden sm:block">
+                  <WorkspaceSelector placement="up" />
+                </div>
+              )}
               <PromptSelector />
               {/* Context meter (issue #877) sits on this row with the model
                   and prompt. */}

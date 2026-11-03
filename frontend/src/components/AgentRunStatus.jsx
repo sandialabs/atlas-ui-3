@@ -49,7 +49,7 @@ export default function AgentRunStatus({
       {/* Only the state text is a live region, so a step change announces
           "Agent is running, step 3" rather than the whole row and its Stop. */}
       <div className="min-w-0 flex-1" role="status" aria-live="polite" aria-atomic="true">
-        <div className="text-xs sm:text-sm font-semibold text-blue-50 truncate">
+        <div className="text-xs sm:text-sm font-semibold text-blue-50 max-sm:truncate">
           {title}
           {hasStep && !waitingForAnswer && (
             <span className="font-normal text-blue-200"> · step {step}</span>
@@ -67,7 +67,7 @@ export default function AgentRunStatus({
         <button
           type="button"
           onClick={onStop}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-700 hover:bg-red-600 text-white max-sm:min-h-[32px] max-sm:border max-sm:border-red-500/70 max-sm:bg-transparent max-sm:hover:bg-red-900/50 max-sm:text-red-200 text-xs font-medium transition-colors flex-shrink-0"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-700 hover:bg-red-600 text-white max-sm:min-h-[40px] max-sm:px-3 max-sm:border max-sm:border-red-500/70 max-sm:bg-transparent max-sm:hover:bg-red-900/50 max-sm:text-red-200 text-xs font-medium transition-colors flex-shrink-0"
           title="Stop agent run"
           aria-label="Stop agent run"
         >

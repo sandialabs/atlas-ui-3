@@ -917,13 +917,13 @@
   [data-testid="feedback-button"] {
     bottom: calc(var(--atlas-composer-height, 8rem) + 0.5rem) !important;
     right: 0.75rem !important;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 2.75rem;
+    height: 2.75rem;
   }
 
   /* While the user is typing (keyboard up) the screen is at its smallest;
      the floating button would sit on the transcript, so it steps aside. */
-  body:has([data-testid="composer-footer"]:focus-within) [data-testid="feedback-button"] {
+  body:has([data-testid="composer-footer"] textarea:focus) [data-testid="feedback-button"] {
     display: none;
   }
 
@@ -932,7 +932,7 @@
   }
 
   .chat-scroll-sentinel {
-    height: 2.5rem;
+    height: 2.75rem;
   }
 
   .composer-stack textarea::placeholder {
