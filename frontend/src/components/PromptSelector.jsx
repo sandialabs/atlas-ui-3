@@ -126,7 +126,7 @@ const PromptSelector = () => {
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-400 transition-colors max-sm:h-8 max-sm:px-2 max-sm:rounded max-sm:bg-gray-700/70 flex-shrink-0"
-        title="Select custom prompts"
+        title={`Select custom prompts (active: ${getButtonText()})`}
       >
         <Sparkles className="w-3 h-3" />
         {/* Phones show the icon only; the prompt name stays in the title and

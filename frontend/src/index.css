@@ -805,6 +805,32 @@
   }
 }
 
+/* Safe areas. index.html sets viewport-fit=cover, which applies at every
+   width (portrait and landscape phones, iPads), so the insets are applied
+   globally. Each value is max()/calc() with the padding or offset the element
+   already had, so on a device without insets nothing moves. The short-window
+   and phone blocks below restate their own padding with the same insets. */
+.app-shell {
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+}
+
+[data-testid="composer-footer"] {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+[data-testid="feedback-button"] {
+  right: calc(1rem + env(safe-area-inset-right, 0px));
+}
+
+/* The composer placeholder stays on one line and ellipsizes instead of
+   wrapping into a second, clipped line when the message box is narrow (a
+   landscape phone with the sidebar open, a narrowed desktop window). */
+.composer-stack textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Short windows (issue #1135).
    `useShortViewport` flips the JS-driven pieces (the attached-files collapse,
    the compact status row, the hidden workspace switcher) at the same
@@ -822,7 +848,7 @@
 @media (max-height: 950px) {
   [data-testid="composer-footer"] {
     container-type: inline-size;
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 1rem max(0.5rem, env(safe-area-inset-bottom, 0px));
   }
 
   .composer-aux {
@@ -861,12 +887,12 @@
   [data-testid="feedback-button"] {
     /* Beat the inline composer-height offset. 2.75rem is a 44px touch target,
        and it sits inside the composer band instead of over the transcript. */
-    bottom: 0.5rem !important;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px)) !important;
     /* An open side-by-side canvas takes the right edge of the viewport.
        CanvasPanel publishes its live width as --atlas-canvas-width, so the
        dock moves left of the panel instead of covering its corner. A closed
        or stacked canvas publishes 0 and the dock stays at the edge. */
-    right: calc(var(--atlas-canvas-width, 0px) + 0.5rem) !important;
+    right: calc(var(--atlas-canvas-width, 0px) + 0.5rem + env(safe-area-inset-right, 0px)) !important;
     width: 2.75rem;
     height: 2.75rem;
   }
@@ -893,19 +919,13 @@
      of a 375px row. The button floats above the composer here instead, the
      way tall windows place it, and the transcript's scroll sentinel gets height so
      the last message scrolls clear of it.
-   - Safe areas: index.html sets viewport-fit=cover, so the footer pads for
-     the home indicator and the shell pads for side notches in landscape.
-     The on-screen keyboard is handled by --app-viewport-height
+   - Safe areas: the global rules above pad the shell and footer; this block
+     keeps the home-indicator inset in its tighter footer padding. The
+     on-screen keyboard is handled by --app-viewport-height
      (utils/visualViewportHeight.js), which tracks the visual viewport.
    - Toolbar panels open from the toolbar row, not from each trigger, so a
      panel from a trigger near the right edge is not clipped off-screen. */
 @media (max-width: 639px) {
-  .app-shell {
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-left: env(safe-area-inset-left, 0px);
-    padding-right: env(safe-area-inset-right, 0px);
-  }
-
   [data-testid="composer-footer"] {
     padding: 0.5rem 0.5rem max(0.5rem, env(safe-area-inset-bottom, 0px));
   }
@@ -916,7 +936,7 @@
 
   [data-testid="feedback-button"] {
     bottom: calc(var(--atlas-composer-height, 8rem) + 0.5rem) !important;
-    right: 0.75rem !important;
+    right: calc(0.75rem + env(safe-area-inset-right, 0px)) !important;
     width: 2.75rem;
     height: 2.75rem;
   }
@@ -933,12 +953,6 @@
 
   .chat-scroll-sentinel {
     height: 2.75rem;
-  }
-
-  .composer-stack textarea::placeholder {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .composer-toolbar {

@@ -125,7 +125,7 @@ describe('short-viewport composer (issue #1135)', () => {
     expect(css).toContain('[data-testid="composer-footer"]')
     expect(css).toContain('max-height: max(4.5rem, calc(50vh - 18rem))')
     expect(css).toContain('[data-testid="feedback-button"]')
-    expect(css).toContain('bottom: 0.5rem !important')
+    expect(css).toContain('bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px)) !important')
     expect(css).toContain('--atlas-canvas-width')
   })
 

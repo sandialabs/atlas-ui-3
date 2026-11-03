@@ -78,15 +78,18 @@ On a phone (narrower than 640px) the composer switches to a mobile layout
 rather than the desktop one squeezed down. The message box takes the full
 width between square attach and send buttons, and the short placeholder stays
 on one line. During an agent run there is a single **Stop**, an outline button
-on the one-line status row; the longer explanation is kept for screen readers.
+beside the message box that stays in view however far the panels above it
+scroll; the run status above shrinks to one line, and its longer explanation
+is kept for screen readers.
 The Active Tools row shortens its switch to **Auto: On/Off**. The model, tools,
 prompt and context controls sit on one row of equal-height buttons (the prompt
-shows its icon only; its name is in the tooltip and accessible name), and their
+shows its icon only; the active prompt is named in its tooltip), and their
 panels open across the full composer width. The feedback button floats above
 the composer instead of taking a column beside it, and hides while you type.
-The footer leaves room for the home indicator on devices that have one, and
-the layout follows the on-screen keyboard. 640px and wider keep the desktop
-layout.
+The layout follows the on-screen keyboard. 640px and wider keep the desktop
+layout. At every width, the app now keeps clear of notches, rounded corners
+and the home indicator on devices that have them (portrait and landscape
+phones, iPads).
 
 **General → Max Agent Iterations** bounds how many tool steps one agent turn
 may take. The slider's upper end is the ceiling your ATLAS administrator

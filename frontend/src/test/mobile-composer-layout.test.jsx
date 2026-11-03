@@ -88,17 +88,42 @@ describe('phone-width composer layout', () => {
     </BrowserRouter>
   )
 
-  it('shows one stop control under sm during an agent run', () => {
-    renderChat()
-
-    // The composer duplicate is hidden under sm and shown from sm up.
-    const composerStop = screen.getByRole('button', { name: 'Stop agent' })
-    expect(composerStop).toHaveClass('hidden', 'sm:flex')
-
-    // The status row's labelled Stop is the phone's single stop control.
+  // A phone's stop control must never be able to scroll away. The aux stack
+  // above the message box is height-capped and scrolls on short windows, so
+  // the phone's single Stop lives in the pinned composer row instead, and
+  // nothing on it or its ancestors may hide it.
+  const HIDING = ['hidden', 'max-sm:hidden', 'sr-only', 'invisible']
+  const expectPinnedPhoneStop = () => {
+    const stop = screen.getByRole('button', { name: 'Stop agent' })
+    expect(stop.closest('.composer-pinned')).not.toBeNull()
+    expect(stop.closest('.composer-aux')).toBeNull()
+    for (let el = stop; el; el = el.parentElement) {
+      for (const cls of HIDING) expect(el.classList.contains(cls)).toBe(false)
+    }
+    // The status row keeps its Stop for wider screens only.
     const statusStop = within(screen.getByTestId('agent-run-status'))
       .getByRole('button', { name: 'Stop agent run' })
-    expect(statusStop).not.toHaveClass('hidden')
+    expect(statusStop).toHaveClass('max-sm:hidden')
+    expect(statusStop.closest('.composer-aux')).not.toBeNull()
+  }
+
+  it('keeps one pinned stop control on phones with a warning above the status', () => {
+    // A disconnect banner renders above the status row in the aux stack.
+    useWS.mockReturnValue({ isConnected: false, connectionStatus: 'Reconnecting', sendMessage: vi.fn() })
+    renderChat()
+
+    expect(screen.getByTestId('ws-disconnected-banner')).toBeInTheDocument()
+    expectPinnedPhoneStop()
+  })
+
+  it('keeps the pinned stop control while the agent waits for an answer', () => {
+    useChat.mockReturnValue(chatContext({
+      isAgentRunning: false,
+      agentPendingQuestion: 'Which file should I use?',
+    }))
+    renderChat()
+
+    expectPinnedPhoneStop()
   })
 
   it('lets the message box take the remaining row width', () => {
@@ -129,7 +154,7 @@ describe('phone-width composer layout', () => {
 
   it('places the phone block after the short-window block so it wins', () => {
     const shortBlock = css.indexOf('@media (max-height: 950px)')
-    const phoneBlock = css.search(/@media \(max-width: 639px\) \{\s*\.app-shell/)
+    const phoneBlock = css.search(/@media \(max-width: 639px\) \{\s*\[data-testid="composer-footer"\]/)
     expect(shortBlock).toBeGreaterThan(-1)
     expect(phoneBlock).toBeGreaterThan(shortBlock)
 
@@ -142,7 +167,13 @@ describe('phone-width composer layout', () => {
     expect(phone).toMatch(/env\(safe-area-inset-bottom/)
   })
 
-  it('opts into safe-area insets in the viewport meta tag', () => {
+  it('opts into safe-area insets at every width', () => {
     expect(html).toMatch(/name="viewport"[^>]*viewport-fit=cover/)
+    // viewport-fit=cover is global, so the shell and footer insets must not
+    // live only inside the phone block (landscape phones and iPads are wider).
+    const firstMedia = css.indexOf('@media (max-height: 950px)')
+    const global = css.slice(0, firstMedia)
+    expect(global).toMatch(/\.app-shell\s*\{\s*padding:\s*env\(safe-area-inset-top/)
+    expect(global).toMatch(/\[data-testid="composer-footer"\]\s*\{\s*padding-bottom:\s*max\(1rem, env\(safe-area-inset-bottom/)
   })
 })

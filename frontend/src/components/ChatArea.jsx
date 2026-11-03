@@ -1391,14 +1391,15 @@ const ChatArea = () => {
                   running agent. isAgentRunning is only ever set on an agent-mode
                   send and agentPendingQuestion is agent-specific, so neither
                   fires during a normal chat turn.
-                  Under sm this duplicate is hidden: the agent status row above
-                  renders on the same agentRunActive gate and carries its own
-                  labelled Stop, so a phone shows one stop control, not two. */}
+                  On phones (under sm) this is the single stop control: it is
+                  in the pinned row, so it cannot scroll out of view the way
+                  the capped aux stack above can, and the status row hides its
+                  own Stop there. It is drawn as an outline on phones. */}
               {agentRunActive && (
                 <button
                   type="button"
                   onClick={stopAgent}
-                  className="px-4 py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-lg hidden sm:flex items-center justify-center transition-colors flex-shrink-0"
+                  className="w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white max-sm:bg-transparent max-sm:border max-sm:border-red-500/70 max-sm:text-red-300 max-sm:hover:bg-red-900/40 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                   title="Stop agent"
                   aria-label="Stop agent"
                 >

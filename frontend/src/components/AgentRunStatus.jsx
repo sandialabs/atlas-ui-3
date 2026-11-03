@@ -37,7 +37,7 @@ export default function AgentRunStatus({
       role="group"
       aria-label="Agent run status"
       data-testid="agent-run-status"
-      className="mb-2 px-2 py-1 sm:px-3 sm:py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-2 sm:gap-3 min-w-0"
+      className="mb-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-2 sm:gap-3 min-w-0"
     >
       <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden="true">
         <span className="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -60,14 +60,14 @@ export default function AgentRunStatus({
             transcript already shows. */}
         <div className={compact ? 'sr-only' : 'sr-only sm:not-sr-only text-xs text-blue-200'}>{subtitle}</div>
       </div>
-      {/* On phones this is the only Stop (the composer's duplicate is hidden
-          under sm), drawn as an outline so it reads as available rather than
-          as an alarm; wider screens keep the solid button. */}
+      {/* Hidden on phones (under sm): there the composer's pinned Stop is the
+          single stop control, because this row sits in the capped aux stack
+          and can scroll out of view behind warnings. */}
       {typeof onStop === 'function' && (
         <button
           type="button"
           onClick={onStop}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-700 hover:bg-red-600 text-white max-sm:min-h-[40px] max-sm:px-3 max-sm:border max-sm:border-red-500/70 max-sm:bg-transparent max-sm:hover:bg-red-900/50 max-sm:text-red-200 text-xs font-medium transition-colors flex-shrink-0"
+          className="max-sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-medium transition-colors flex-shrink-0"
           title="Stop agent run"
           aria-label="Stop agent run"
         >
