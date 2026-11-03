@@ -3,6 +3,7 @@ import { X, CheckCircle } from 'lucide-react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { isKnownUser, userStorageKey } from '../utils/userStorage'
+import { useCodeBlockCopy } from '../hooks/useCodeBlockCopy'
 
 const DISMISS_KEY = 'splash-screen-dismissed'
 
@@ -19,6 +20,9 @@ const DISMISS_KEY = 'splash-screen-dismissed'
  */
 const SplashScreen = ({ config, user, onClose }) => {
   const [isVisible, setIsVisible] = useState(false)
+  // Code blocks in the splash markdown get the shared renderer's Copy button;
+  // this makes it work (#1151).
+  const contentRef = useCodeBlockCopy()
   
   useEffect(() => {
     // Don't show if not enabled
@@ -127,6 +131,7 @@ const SplashScreen = ({ config, user, onClose }) => {
         {/* Content */}
         <div className="px-6 py-4 overflow-y-auto flex-1">
           <div
+            ref={contentRef}
             className="prose prose-invert max-w-none text-gray-300"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(config.markdown) }}
           />

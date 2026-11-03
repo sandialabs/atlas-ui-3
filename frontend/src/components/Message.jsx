@@ -12,7 +12,8 @@ import {
   renderReferencesSection,
 } from '../utils/ragCitations'
 import { processMessageContent } from '../utils/messageContent'
-import { copyCodeBlock, copyMessageContent } from '../utils/clipboard'
+import { copyMessageContent } from '../utils/clipboard'
+import { useCodeBlockCopy } from '../hooks/useCodeBlockCopy'
 import {
   filterArgumentsForDisplay,
   processToolResult,
@@ -197,21 +198,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // than `document`. A document-level listener per Message multiplies the
   // handler count by the number of messages in the chat, so one click fired
   // `copyCodeBlock` N times — wasteful even when idempotent.
-  const containerRef = useRef(null)
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    const handleCodeCopyClick = (event) => {
-      const button = event.target.closest('[data-action="copy-code"]')
-      if (!button || !container.contains(button)) return
-      event.preventDefault()
-      copyCodeBlock(button)
-    }
-    container.addEventListener('click', handleCodeCopyClick)
-    return () => {
-      container.removeEventListener('click', handleCodeCopyClick)
-    }
-  }, [])
+  const containerRef = useCodeBlockCopy()
 
   const avatarBg = isUser ? 'bg-green-600' : isSystem ? 'bg-yellow-600' : 'bg-blue-600'
   const avatarText = isUser ? 'Y' : isSystem ? 'S' : 'A'
