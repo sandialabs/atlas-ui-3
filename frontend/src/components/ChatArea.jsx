@@ -1025,7 +1025,7 @@ const ChatArea = () => {
 
       {/* Follow-up suggestion buttons */}
       {followUpSuggestions.length > 0 && !isThinking && !isStreaming && (
-        <div className="px-2 sm:px-4 py-1 flex-shrink-0">
+        <div className="followup-chips px-2 sm:px-4 py-1 flex-shrink-0">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide ml-0 sm:ml-11">
             {followUpSuggestions.map((question, idx) => (
               <button
@@ -1399,7 +1399,7 @@ const ChatArea = () => {
                 <button
                   type="button"
                   onClick={stopAgent}
-                  className="w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white max-sm:bg-transparent max-sm:border max-sm:border-red-500/70 max-sm:text-red-300 max-sm:hover:bg-red-900/40 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
+                  className="composer-stop-button w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 min-w-[48px] min-h-[48px] bg-red-700 hover:bg-red-600 text-white max-sm:bg-transparent max-sm:border max-sm:border-red-500/70 max-sm:text-red-300 max-sm:hover:bg-red-900/40 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
                   title="Stop agent"
                   aria-label="Stop agent"
                 >

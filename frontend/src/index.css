@@ -956,6 +956,22 @@
     right: 0;
     width: auto;
     max-width: none;
+    /* The desktop caps (24-28rem) can exceed the space above the composer on
+       a short phone or with the keyboard up; cap to what is visible. */
+    max-height: min(24rem, max(12rem, calc(var(--app-viewport-height, 100vh) - var(--atlas-composer-height, 8rem) - 4rem)));
+  }
+
+  /* The follow-up suggestion strip sits just above the composer, under the
+     floating feedback button; keep its last chip clear of the button. */
+  .followup-chips {
+    padding-right: 3.75rem;
+  }
+
+  /* The outline Stop is the only stop control on a phone. Its dark-theme
+     red-300 text is too light on the light theme's white; use red-700. */
+  [data-theme="light"] .composer-stop-button {
+    color: rgb(185 28 28);
+    border-color: rgb(185 28 28);
   }
 }
 
