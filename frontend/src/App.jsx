@@ -286,7 +286,7 @@ function AppRoutes() {
 
   return (
     <div
-      className="flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
+      className="app-shell flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
       style={{ height: 'var(--app-viewport-height, 100vh)' }}
     >
       {/* Compliance classification banner: shared shell, above every route, so

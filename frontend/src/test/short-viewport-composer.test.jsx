@@ -185,8 +185,10 @@ describe('short-viewport composer (issue #1135)', () => {
 
     expect(screen.getByRole('button', { name: 'Workspaces' })).toBeInTheDocument()
     expect(screen.getByText(/Press Shift \+ Enter/)).toBeInTheDocument()
+    // Visible from the sm breakpoint up; under sm (a phone) it is
+    // screen-reader only so the status stays one line.
     expect(within(screen.getByTestId('agent-run-status')).getByText(/using tools as needed/i))
-      .not.toHaveClass('sr-only')
+      .toHaveClass('sm:not-sr-only')
     expect(document.querySelector('.composer-status-row')).toBeNull()
 
     dropFile('notes.txt')

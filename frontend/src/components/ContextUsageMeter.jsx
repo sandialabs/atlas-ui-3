@@ -92,7 +92,7 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
         aria-haspopup="dialog"
         aria-label={`${fullLabel}. Estimated context of the next request. Click for details and compaction.`}
         title="Estimated context of the next request. Click for details and compaction."
-        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap ${FOCUS_RING}`}
+        className={`flex items-center gap-1.5 rounded px-2 py-1 max-sm:h-8 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap ${FOCUS_RING}`}
         data-testid="context-usage-meter"
       >
         {isCompacting

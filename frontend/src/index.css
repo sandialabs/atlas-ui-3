@@ -882,6 +882,81 @@
   }
 }
 
+/* Phone widths (under Tailwind's sm, 640px).
+   The components switch to a deliberate mobile layout with sm: utilities
+   (square composer buttons, one Stop, a one-line agent status, a one-row
+   toolbar). This block holds the pieces a utility cannot express, and it
+   comes after the short-window block above because a portrait phone is also
+   a short window (under 950px tall) and these rules must win there.
+   - The composer uses the full width. The short-window rules reserve a right
+     gutter for the docked feedback button; on a phone that gutter cost 52px
+     of a 375px row. The button floats above the composer here instead, the
+     way tall windows place it, and the transcript's scroll sentinel gets height so
+     the last message scrolls clear of it.
+   - Safe areas: index.html sets viewport-fit=cover, so the footer pads for
+     the home indicator and the shell pads for side notches in landscape.
+     The on-screen keyboard is handled by --app-viewport-height
+     (utils/visualViewportHeight.js), which tracks the visual viewport.
+   - Toolbar panels open from the toolbar row, not from each trigger, so a
+     panel from a trigger near the right edge is not clipped off-screen. */
+@media (max-width: 639px) {
+  .app-shell {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  [data-testid="composer-footer"] {
+    padding: 0.5rem 0.5rem max(0.5rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .composer-stack {
+    padding-right: 0 !important;
+  }
+
+  [data-testid="feedback-button"] {
+    bottom: calc(var(--atlas-composer-height, 8rem) + 0.5rem) !important;
+    right: 0.75rem !important;
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  /* While the user is typing (keyboard up) the screen is at its smallest;
+     the floating button would sit on the transcript, so it steps aside. */
+  body:has([data-testid="composer-footer"]:focus-within) [data-testid="feedback-button"] {
+    display: none;
+  }
+
+  .chat-messages {
+    overscroll-behavior-y: contain;
+  }
+
+  .chat-scroll-sentinel {
+    height: 2.5rem;
+  }
+
+  .composer-stack textarea::placeholder {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .composer-toolbar {
+    position: relative;
+  }
+
+  .composer-toolbar > div {
+    position: static;
+  }
+
+  .composer-toolbar > div > .absolute.bottom-full {
+    left: 0;
+    right: 0;
+    width: auto;
+    max-width: none;
+  }
+}
+
 /* Print styles for chat export (#150) */
 @media print {
   /* Hide non-content UI elements */

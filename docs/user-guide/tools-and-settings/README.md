@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-10-30
+Last updated: 2026-11-02
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -73,6 +73,20 @@ workspace switcher stays in the header on these windows, so it is not repeated
 under the message box. The Shift+Enter hint appears while the message box is
 focused. The feedback button sits in the composer band, beside the controls,
 instead of over the transcript. Taller windows keep the previous layout.
+
+On a phone (narrower than 640px) the composer switches to a mobile layout
+rather than the desktop one squeezed down. The message box takes the full
+width between square attach and send buttons, and the short placeholder stays
+on one line. During an agent run there is a single **Stop**, an outline button
+on the one-line status row; the longer explanation is kept for screen readers.
+The Active Tools row shortens its switch to **Auto: On/Off**. The model, tools,
+prompt and context controls sit on one row of equal-height buttons (the prompt
+shows its icon only; its name is in the tooltip and accessible name), and their
+panels open across the full composer width. The feedback button floats above
+the composer instead of taking a column beside it, and hides while you type.
+The footer leaves room for the home indicator on devices that have one, and
+the layout follows the on-screen keyboard. 640px and wider keep the desktop
+layout.
 
 **General → Max Agent Iterations** bounds how many tool steps one agent turn
 may take. The slider's upper end is the ceiling your ATLAS administrator

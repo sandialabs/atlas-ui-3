@@ -125,11 +125,13 @@ const PromptSelector = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-400 transition-colors"
+        className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-400 transition-colors max-sm:h-8 max-sm:px-2 max-sm:rounded max-sm:bg-gray-700/70 flex-shrink-0"
         title="Select custom prompts"
       >
         <Sparkles className="w-3 h-3" />
-        <span className="underline decoration-dotted">
+        {/* Phones show the icon only; the prompt name stays in the title and
+            the accessible name. */}
+        <span className="sr-only sm:not-sr-only sm:underline sm:decoration-dotted">
           {getButtonText()}
         </span>
         <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />

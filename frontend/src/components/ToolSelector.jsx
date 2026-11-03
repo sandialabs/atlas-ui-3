@@ -163,7 +163,7 @@ const ToolSelector = () => {
         onPointerDown={(e) => { lastPointerRef.current = { type: e.pointerType, at: Date.now() } }}
         onPointerCancel={() => { lastPointerRef.current = null }}
         onClick={handleTriggerClick}
-        className={`flex items-center gap-1 text-xs rounded transition-colors ${FOCUS_RING} ${
+        className={`flex items-center gap-1 text-xs rounded transition-colors flex-shrink-0 max-sm:h-8 max-sm:px-2 max-sm:bg-gray-700/70 ${FOCUS_RING} ${
           isOpen || selectedCount > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-blue-400'
         }`}
         title="Choose which tools the model can use"

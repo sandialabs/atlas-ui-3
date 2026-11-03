@@ -93,12 +93,12 @@ const ModelSelector = () => {
     : 'Select a model'
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <button
         type="button"
         ref={triggerRef}
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className={`flex items-center gap-1 px-2 py-1 rounded transition-colors max-w-[16rem] ${
+        className={`flex items-center gap-1 px-2 py-1 max-sm:h-8 max-sm:max-w-full rounded transition-colors max-w-[16rem] ${
           currentOutsideFilter
             ? 'bg-amber-900/60 hover:bg-amber-900 text-amber-200 border border-amber-600'
             : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
