@@ -235,11 +235,35 @@
     @apply relative my-4;
   }
 
+  /* The Copy button is a flex child of the sticky .code-block-header emitted
+     by markdownRenderer.js, so it rides along when the toolbar sticks to the
+     top of the transcript while a long block scrolls (#1151). It used to be
+     absolutely positioned to the container, which stranded it at the
+     container's original top once the toolbar started sticking. */
   .copy-button {
-    @apply absolute top-2 right-2 bg-gray-700 border border-gray-600 text-gray-200 px-2 py-1 rounded text-xs cursor-pointer opacity-0 transition-opacity;
+    @apply bg-gray-700 border border-gray-600 text-gray-200 px-2 py-1 rounded text-xs cursor-pointer opacity-0 transition-opacity;
   }
 
-  .code-block-container:hover .copy-button {
+  /* Sticky offsets are measured from the scroller's padding edge, so a
+     top-0 toolbar in the transcript (p-2 sm:p-4) stuck 8-16px below the
+     scroller's top and code lines showed through the gap above it. Pull it up
+     by the transcript padding so it sits flush (#1151). The canvas scroller
+     has no padding, so top-0 is already flush there. */
+  .chat-messages .code-block-header {
+    top: -0.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .chat-messages .code-block-header {
+      top: -1rem;
+    }
+  }
+
+  /* Keyboard users reach the button by Tab, not hover: reveal it on focus so
+     a focused control is never invisible (#1151). */
+  .code-block-container:hover .copy-button,
+  .code-block-container:focus-within .copy-button,
+  .copy-button:focus-visible {
     @apply opacity-100;
   }
 
@@ -370,7 +394,13 @@
 
   /* Syntax highlighting enhancements */
   .code-block-container {
-    @apply rounded-lg overflow-hidden border border-gray-700;
+    /* No clipping on this container: a clipped ancestor becomes the sticky
+       containing box, which would pin the .code-block-header toolbar to a
+       container that never scrolls instead of the transcript scroller it must
+       follow (#1151). The rounded silhouette is preserved by rounding the
+       toolbar's top corners and the <pre>'s bottom corners in the renderer
+       markup. */
+    @apply rounded-lg border border-gray-700;
   }
 
   .code-block-container .hljs {
@@ -1027,10 +1057,14 @@
 }
 /* Touch / pointer-only devices have no hover, so hover-revealed message
    affordances (edit & copy) would be unreachable. Keep them visible there so
-   the rewind/edit entry point is discoverable on mobile and tablets. (#142) */
+   the rewind/edit entry point is discoverable on mobile and tablets. (#142)
+   The code-block Copy button joins them for #1151: it lives in the sticky
+   toolbar, and on touch devices a hover-revealed control inside an
+   always-visible toolbar must be visible to be tappable. */
 @media (hover: none) {
   .edit-message-button,
-  .copy-message-button {
+  .copy-message-button,
+  .copy-button {
     opacity: 1;
   }
 }

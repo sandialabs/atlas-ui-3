@@ -1,23 +1,111 @@
-// Clipboard helpers for code blocks and message content.
+// Clipboard helpers for code blocks, message content, and canvas content.
 //
 // Extracted from Message.jsx to keep that component focused on rendering.
-// Behavior is unchanged from the inline versions.
+// Every copy path prefers the async Clipboard API and falls back to the
+// legacy hidden-textarea + execCommand trick (insecure contexts, older
+// browsers, denied permissions). Every path flashes visible success or
+// failure feedback on the button that triggered it (#1151).
 
-const showCopySuccess = (button) => {
-  const originalHTML = button.innerHTML
+const FLASH_MS = 2000
 
-  button.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>'
-  button.classList.add('bg-green-600', 'border-green-500')
-  button.classList.remove('bg-gray-700', 'border-gray-600')
-
-  setTimeout(() => {
-    button.innerHTML = originalHTML
-    button.classList.remove('bg-green-600', 'border-green-500')
-    button.classList.add('bg-gray-700', 'border-gray-600')
-  }, 2000)
+// A flash temporarily restyles the button (and, for code blocks, swaps its
+// markup for a check or cross icon). The original class list -- and markup,
+// when swapped -- is captured once per flash and restored verbatim. If a
+// previous flash is still running (two quick clicks, or a success followed by
+// a failure), its pending restore is cancelled and the state it captured is
+// reused, so the button can never be left stuck green or red.
+const beginFlash = (button, { swapMarkup }) => {
+  if (button._copyFlashTimer) clearTimeout(button._copyFlashTimer)
+  if (button._copyOriginalClassName === undefined) {
+    button._copyOriginalClassName = button.className
+    if (swapMarkup) button._copyOriginalHTML = button.innerHTML
+  }
+  return { html: button._copyOriginalHTML, className: button._copyOriginalClassName }
 }
 
-const fallbackCopy = (text, button) => {
+const restoreAfter = (button, original) => {
+  button._copyFlashTimer = setTimeout(() => {
+    button._copyFlashTimer = null
+    delete button._copyOriginalHTML
+    delete button._copyOriginalClassName
+    // Message copy buttons are React-rendered: their children must never be
+    // replaced, so markup is only restored when a flash swapped it.
+    if (original.html !== undefined) button.innerHTML = original.html
+    button.className = original.className
+  }, FLASH_MS)
+}
+
+// Neutral classes swapped out during a flash. The hover background must go
+// too: the pointer is still over the button right after the click, and
+// `hover:bg-gray-600` would otherwise paint over the green/red flash so only
+// the thin border changed colour (#1151).
+const NEUTRAL_CLASSES = ['bg-gray-700', 'hover:bg-gray-600', 'border-gray-600']
+
+// Screen-reader announcement of the copy outcome. A live region only
+// announces *changes* to a region that already exists in the accessibility
+// tree, so one persistent, initially empty status element is reused: it is
+// cleared, then filled after a short delay. It is created lazily on the
+// first copy -- inserted empty, so the delayed fill is still a change -- to
+// avoid putting an extra role="status" node on every page. (Inserting a live
+// span that already contains its text is often skipped by screen readers.)
+const LIVE_REGION_ID = 'atlas-copy-status'
+let announceTimer = null
+
+const getLiveRegion = () => {
+  let region = document.getElementById(LIVE_REGION_ID)
+  if (!region) {
+    region = document.createElement('div')
+    region.id = LIVE_REGION_ID
+    region.setAttribute('role', 'status')
+    region.setAttribute('aria-live', 'polite')
+    region.className = 'sr-only'
+    document.body.appendChild(region)
+  }
+  return region
+}
+
+export const announceCopyOutcome = (text) => {
+  if (typeof document === 'undefined' || !document.body) return
+  const region = getLiveRegion()
+  region.textContent = ''
+  if (announceTimer) clearTimeout(announceTimer)
+  announceTimer = setTimeout(() => {
+    announceTimer = null
+    region.textContent = text
+  }, 100)
+}
+
+// The swapped-in icon is decorative. The sr-only text keeps the button's
+// accessible name meaningful during the flash, and the shared live region
+// announces the outcome, since colour and icon alone are not perceivable to
+// everyone.
+const flashButton = (button, flashClasses, { iconPath = null, srText = '', extraNeutral = [], extraFlash = [] } = {}) => {
+  const original = beginFlash(button, { swapMarkup: iconPath !== null })
+
+  if (iconPath !== null) {
+    button.innerHTML = `<svg class="w-3 h-3" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg><span class="sr-only">${srText}</span>`
+  }
+  button.className = original.className
+  button.classList.remove(...NEUTRAL_CLASSES, ...extraNeutral)
+  button.classList.add(...flashClasses, ...extraFlash)
+  if (srText) announceCopyOutcome(srText)
+
+  restoreAfter(button, original)
+}
+
+const SUCCESS_CLASSES = ['bg-green-600', 'hover:bg-green-700', 'border-green-500']
+const ERROR_CLASSES = ['bg-red-600', 'hover:bg-red-700', 'border-red-500']
+const CHECK_ICON = 'M5 13l4 4L19 7'
+const CROSS_ICON = 'M6 18L18 6M6 6l12 12'
+
+const showCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, { iconPath: CHECK_ICON, srText: 'Copied' })
+
+const showCopyError = (button) => flashButton(button, ERROR_CLASSES, { iconPath: CROSS_ICON, srText: 'Copy failed' })
+
+// Legacy fallback for insecure contexts and denied Clipboard API permissions.
+// Returns whether the copy actually succeeded so callers can surface a
+// visible failure when both paths fail (#1151).
+const execCommandCopy = (text) => {
   try {
     const textArea = document.createElement('textarea')
     textArea.value = text
@@ -30,14 +118,34 @@ const fallbackCopy = (text, button) => {
 
     const successful = document.execCommand('copy')
     document.body.removeChild(textArea)
-
-    if (successful) {
-      showCopySuccess(button)
-    } else {
-      console.error('Fallback copy failed')
+    if (!successful) {
+      console.error('execCommand copy failed')
     }
+    return successful
   } catch (err) {
-    console.error('Fallback copy error: ', err)
+    console.error('execCommand copy error: ', err)
+    return false
+  }
+}
+
+// Shared copy core: try the async Clipboard API, fall back to execCommand,
+// then flash success or failure feedback on the triggering button (#1151).
+const copyWithFeedback = (text, button, successFeedback, errorFeedback) => {
+  const report = (success) => (success ? successFeedback(button) : errorFeedback(button))
+  const viaFallback = (apiError) => {
+    if (apiError) {
+      console.error('Clipboard API copy failed, trying execCommand fallback: ', apiError)
+    }
+    report(execCommandCopy(text))
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => report(true),
+      (err) => viaFallback(err)
+    )
+  } else {
+    viaFallback(null)
   }
 }
 
@@ -55,57 +163,24 @@ export const copyCodeBlock = (button) => {
       return
     }
 
+    // textContent reads every character of the code element regardless of
+    // scroll position or on-screen visibility, so a long block that is
+    // scrolled past in the transcript still copies in full (#1151).
     const text = codeBlock.textContent || codeBlock.innerText || ''
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => {
-        showCopySuccess(button)
-      }).catch(err => {
-        console.error('Failed to copy with Clipboard API: ', err)
-        fallbackCopy(text, button)
-      })
-    } else {
-      fallbackCopy(text, button)
-    }
+    copyWithFeedback(text, button, showCopySuccess, showCopyError)
   } catch (err) {
     console.error('Error in copyCodeBlock: ', err)
   }
 }
 
-const showMessageCopySuccess = (button) => {
-  const originalClasses = button.className
+const MESSAGE_TEXT = { extraNeutral: ['text-gray-200'], extraFlash: ['text-white'] }
 
-  button.classList.remove('bg-gray-700', 'hover:bg-gray-600', 'border-gray-600', 'text-gray-200')
-  button.classList.add('bg-green-600', 'hover:bg-green-700', 'border-green-500', 'text-white')
+// Message buttons keep their React-rendered icon, so the outcome reaches
+// screen readers through the shared live region only.
+const showMessageCopySuccess = (button) => flashButton(button, SUCCESS_CLASSES, { ...MESSAGE_TEXT, srText: 'Copied' })
 
-  setTimeout(() => {
-    button.className = originalClasses
-  }, 2000)
-}
-
-const fallbackMessageCopy = (text, button) => {
-  try {
-    const textArea = document.createElement('textarea')
-    textArea.value = text
-    textArea.style.position = 'fixed'
-    textArea.style.left = '-999999px'
-    textArea.style.top = '-999999px'
-    document.body.appendChild(textArea)
-    textArea.focus()
-    textArea.select()
-
-    const successful = document.execCommand('copy')
-    document.body.removeChild(textArea)
-
-    if (successful) {
-      showMessageCopySuccess(button)
-    } else {
-      console.error('Fallback message copy failed')
-    }
-  } catch (err) {
-    console.error('Fallback message copy error: ', err)
-  }
-}
+const showMessageCopyError = (button) => flashButton(button, ERROR_CLASSES, { ...MESSAGE_TEXT, srText: 'Copy failed' })
 
 export const copyMessageContent = (content, button) => {
   try {
@@ -125,17 +200,23 @@ export const copyMessageContent = (content, button) => {
       textToCopy = String(content || '')
     }
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        showMessageCopySuccess(button)
-      }).catch(err => {
-        console.error('Failed to copy message with Clipboard API: ', err)
-        fallbackMessageCopy(textToCopy, button)
-      })
-    } else {
-      fallbackMessageCopy(textToCopy, button)
-    }
+    copyWithFeedback(textToCopy, button, showMessageCopySuccess, showMessageCopyError)
   } catch (err) {
     console.error('Error in copyMessageContent: ', err)
   }
+}
+
+// Copy plain text without any button feedback. CanvasPanel uses this and
+// renders its own copied/failed state in React (#1151).
+export const copyTextToClipboard = (text) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      (err) => {
+        console.error('Clipboard API copy failed: ', err)
+        return execCommandCopy(text)
+      }
+    )
+  }
+  return Promise.resolve(execCommandCopy(text))
 }
