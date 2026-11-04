@@ -20,8 +20,12 @@ import pytest
 from harness.cluster import directive
 from harness.infra import freeze_container, thaw_container
 
+# Generous: on a loaded machine a bounded probe can time out once on its own,
+# and recovery waits for the next probe after the container thaws.
+WAIT_SECONDS = 60.0
 
-def _wait(predicate, what: str, timeout: float = 30.0, interval: float = 0.5):
+
+def _wait(predicate, what: str, timeout: float = WAIT_SECONDS, interval: float = 0.5):
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
@@ -99,6 +103,12 @@ def test_graceful_stop_reports_run_interrupted(cluster):
     assert len(cluster.side_effects(key)) == 1, "side effect replayed after shutdown"
 
 
+def _attributed(coord, *, down: str, up: str):
+    deps = coord["dependencies"]
+    ok = coord["status"] == "degraded" and deps[down]["status"] == "unavailable" and deps[up]["status"] == "ok"
+    return coord if ok else False
+
+
 def _require_container(name):
     if not name:
         pytest.skip("dependency outage exercises need the harness's own podman containers")
@@ -110,14 +120,14 @@ def test_redis_outage_is_visible_and_recovers(cluster):
     freeze_container(container)
     try:
         health = _wait(
-            lambda: (h := cluster.health(cluster.a))["status"] == "degraded" and h,
+            lambda: (h := cluster.health(cluster.a))["status"] == "degraded"
+            and h.get("session_store", {}).get("status") == "unavailable" and h,
             "degraded /api/health during the Redis outage",
         )
-        assert health["session_store"]["status"] == "unavailable"
-        coord = cluster.coordination(cluster.a)
-        assert coord["status"] == "degraded"
-        assert coord["dependencies"]["redis"]["status"] == "unavailable"
-        assert coord["dependencies"]["postgres"]["status"] == "ok"  # the outage is attributed, not blanket
+        assert health["session_store"]["status"] == "unavailable", health
+        # The outage is attributed to Redis, not reported as a blanket failure.
+        _wait(lambda: _attributed(cluster.coordination(cluster.a), down="redis", up="postgres"),
+              "/admin/coordination attributing the outage to Redis")
         _wait(lambda: _log_lines(cluster.a, "event=dependency_down", "dependency=redis"), "dependency_down log")
     finally:
         thaw_container(container)
@@ -133,18 +143,17 @@ def test_postgres_outage_is_visible_and_recovers(cluster):
     freeze_container(container)
     try:
         health = _wait(
-            lambda: (h := cluster.health(cluster.b))["status"] == "degraded" and h,
+            lambda: (h := cluster.health(cluster.b))["status"] == "degraded"
+            and h["checks"].get("chat_history_db") == "unavailable" and h,
             "degraded /api/health during the PostgreSQL outage",
         )
-        assert health["checks"]["chat_history_db"] == "unavailable"
-        assert health["checks"]["chat_history"] == "ok"  # startup outcome is unchanged
-        coord = cluster.coordination(cluster.b)
-        assert coord["dependencies"]["postgres"]["status"] == "unavailable"
-        assert coord["dependencies"]["redis"]["status"] == "ok"
+        assert health["checks"]["chat_history_db"] == "unavailable", health
+        assert health["checks"]["chat_history"] == "ok", health  # startup outcome is unchanged
+        _wait(lambda: _attributed(cluster.coordination(cluster.b), down="postgres", up="redis"),
+              "/admin/coordination attributing the outage to PostgreSQL")
         _wait(lambda: _log_lines(cluster.b, "event=dependency_down", "dependency=postgres"), "dependency_down log")
     finally:
         thaw_container(container)
-    _wait(lambda: cluster.health(cluster.b)["status"] == "healthy", "healthy /api/health after PostgreSQL returned",
-          timeout=45)
+    _wait(lambda: cluster.health(cluster.b)["status"] == "healthy", "healthy /api/health after PostgreSQL returned")
     _wait(lambda: _log_lines(cluster.b, "event=dependency_recovered", "dependency=postgres"),
           "dependency_recovered log")
