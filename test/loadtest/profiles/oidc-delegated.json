@@ -5,17 +5,71 @@
   "auth": "oidc",
   "users": 20,
   "phases": [
-    {"name": "login-connect", "kind": "connect", "connections": 20, "ramp_seconds": 2, "concurrency": 20},
-    {"name": "chat", "kind": "chat", "turns": 3, "directive": {"tool": "none", "words": 20, "stream_ms": 5}},
-    {"name": "agent-turns", "kind": "chat", "agent": true, "turns": 1,
-     "directive": {"tool": "sleep", "sleep": 1, "steps": 2, "words": 10, "stream_ms": 5}},
-    {"name": "cross-replica-reconnect", "kind": "reconnect_storm", "trigger": "client_drop", "to": "other"},
-    {"name": "chat-after-reconnect", "kind": "chat", "turns": 1, "directive": {"tool": "none", "words": 10, "stream_ms": 5}},
-    {"name": "disconnect", "kind": "disconnect"}
+    {
+      "name": "login-connect",
+      "kind": "connect",
+      "connections": 20,
+      "ramp_seconds": 2,
+      "concurrency": 20
+    },
+    {
+      "name": "chat",
+      "kind": "chat",
+      "turns": 3,
+      "directive": {
+        "tool": "none",
+        "words": 20,
+        "stream_ms": 5
+      }
+    },
+    {
+      "name": "agent-turns",
+      "kind": "chat",
+      "agent": true,
+      "turns": 1,
+      "directive": {
+        "tool": "sleep",
+        "sleep": 1,
+        "steps": 2,
+        "words": 10,
+        "stream_ms": 5
+      }
+    },
+    {
+      "name": "cross-replica-reconnect",
+      "kind": "reconnect_storm",
+      "trigger": "client_drop",
+      "to": "other"
+    },
+    {
+      "name": "chat-after-reconnect",
+      "kind": "chat",
+      "turns": 1,
+      "directive": {
+        "tool": "none",
+        "words": 10,
+        "stream_ms": 5
+      }
+    },
+    {
+      "name": "disconnect",
+      "kind": "disconnect"
+    }
   ],
   "slo": {
-    "max_error_rate": {"*": 0},
-    "min_count": {"oidc_login": 20, "chat_turn": 100, "ws_reconnect": 20},
-    "p95_ms": {"oidc_login": 3000}
+    "max_error_rate": {
+      "*": 0
+    },
+    "min_count": {
+      "oidc_login": 20,
+      "chat_turn": 100,
+      "ws_reconnect": 20
+    },
+    "p95_ms": {
+      "oidc_login": 3000
+    },
+    "counters_max": {
+      "connections_closed_by_server": 0
+    }
   }
 }

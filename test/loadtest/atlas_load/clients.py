@@ -29,6 +29,7 @@ from urllib.parse import urlencode, urlsplit
 
 import httpx
 import websockets
+import websockets.exceptions
 
 from .metrics import Metrics, classify_error
 
@@ -120,6 +121,9 @@ class Connection:
         self._frames: asyncio.Queue = asyncio.Queue()
         self.closed_by_server = asyncio.Event()
         self.had_turn = False
+        # Set before the client closes or deliberately loses the socket, so
+        # any other close is counted as the server dropping it.
+        self.expect_close = False
         # Like the browser: once a turn is saved, later turns on this socket
         # continue that conversation (``conversation_id`` on the chat frame).
         self.conversation_id: Optional[str] = None
@@ -165,6 +169,7 @@ class Connection:
                 raise AuthRefused(f"HTTP {exc.response.status_code}") from exc
             raise
         self.closed_by_server.clear()
+        self.expect_close = False
         self._frames = asyncio.Queue()
         self._reader = asyncio.create_task(self._read())
         if resume:
@@ -191,6 +196,8 @@ class Connection:
         except websockets.exceptions.ConnectionClosed:
             pass  # reported through closed_by_server
         finally:
+            if not self.expect_close:
+                self.metrics.count("connections_closed_by_server")
             self.closed_by_server.set()
             code = getattr(self.ws, "close_code", None)
             reason = getattr(self.ws, "close_reason", None)
@@ -277,6 +284,7 @@ class Connection:
 
     async def drop(self) -> None:
         """Close from the client side without ceremony (a network blip)."""
+        self.expect_close = True
         if self.ws is not None:
             transport = getattr(self.ws, "transport", None)
             if transport is not None:
@@ -286,6 +294,7 @@ class Connection:
         await self._stop_reader()
 
     async def close(self) -> None:
+        self.expect_close = True
         if self.ws is not None:
             try:
                 await asyncio.wait_for(self.ws.close(), 5)

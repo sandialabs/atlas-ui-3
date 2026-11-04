@@ -5,16 +5,53 @@
   "auth": "header",
   "users": 250,
   "phases": [
-    {"name": "ramp", "kind": "connect", "connections": 1000, "ramp_seconds": 30, "concurrency": 200},
-    {"name": "idle-hold", "kind": "hold", "seconds": 20},
-    {"name": "light-chat", "kind": "chat", "turns": 2, "fraction": 0.1, "concurrency": 100, "directive": {"tool": "none", "words": 30, "stream_ms": 5}},
-    {"name": "hold", "kind": "hold", "seconds": 10},
-    {"name": "disconnect", "kind": "disconnect"}
+    {
+      "name": "ramp",
+      "kind": "connect",
+      "connections": 1000,
+      "ramp_seconds": 30,
+      "concurrency": 200
+    },
+    {
+      "name": "idle-hold",
+      "kind": "hold",
+      "seconds": 20
+    },
+    {
+      "name": "light-chat",
+      "kind": "chat",
+      "turns": 2,
+      "fraction": 0.1,
+      "concurrency": 100,
+      "directive": {
+        "tool": "none",
+        "words": 30,
+        "stream_ms": 5
+      }
+    },
+    {
+      "name": "hold",
+      "kind": "hold",
+      "seconds": 10
+    },
+    {
+      "name": "disconnect",
+      "kind": "disconnect"
+    }
   ],
   "slo": {
-    "max_error_rate": {"*": 0.01},
-    "min_count": {"ws_connect": 990},
-    "p95_ms": {"ws_connect": 3000},
-    "counters_max": {"connections_lost_while_idle": 0}
+    "max_error_rate": {
+      "*": 0.01
+    },
+    "min_count": {
+      "ws_connect": 990
+    },
+    "p95_ms": {
+      "ws_connect": 3000
+    },
+    "counters_max": {
+      "connections_lost_while_idle": 0,
+      "connections_closed_by_server": 0
+    }
   }
 }

@@ -218,3 +218,40 @@ def test_same_seed_gives_the_same_plan():
     assert plan(1129) == plan(1129)
     assert plan(1129)[0] != plan(1130)[0]
     assert plan(1)[1] == ["http://a", "http://b", "http://c", "http://a", "http://b"]
+
+
+def test_server_side_closes_are_counted_unless_expected():
+    import asyncio
+
+    import websockets.exceptions
+    from atlas_load.clients import Connection
+
+    class ClosingSocket:
+        """Delivers one frame, then the server closes the connection."""
+
+        close_code, close_reason = 1011, "overloaded"
+
+        def __aiter__(self):
+            return self
+
+        def __init__(self):
+            self.sent = False
+
+        async def __anext__(self):
+            if not self.sent:
+                self.sent = True
+                return '{"type": "token_stream"}'
+            raise websockets.exceptions.ConnectionClosedError(None, None)
+
+    async def scenario(expected: bool) -> Metrics:
+        metrics = Metrics()
+        conn = Connection(user=None, base_url="http://x", metrics=metrics)
+        conn.ws = ClosingSocket()
+        conn.expect_close = expected
+        await conn._read()
+        frames = [conn._frames.get_nowait() for _ in range(conn._frames.qsize())]
+        assert frames[-1] == {"type": "__closed__", "code": 1011, "reason": "overloaded"}
+        return metrics
+
+    assert asyncio.run(scenario(False)).counters["connections_closed_by_server"] == 1
+    assert "connections_closed_by_server" not in asyncio.run(scenario(True)).counters

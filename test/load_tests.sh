@@ -14,6 +14,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+CALLER_DIR="$PWD"
 cd "$PROJECT_ROOT"
 
 if [ -f .venv/bin/activate ]; then
@@ -36,5 +37,8 @@ args=("$@")
 if [ ${#args[@]} -gt 0 ] && [[ "${args[0]}" != -* ]]; then
     args=(--profile "${args[0]}" "${args[@]:1}")
 fi
-cd "$PROJECT_ROOT/test/loadtest"
+# Run from the caller's directory so relative profile paths and --out mean
+# what they say; the package is found through PYTHONPATH.
+export PYTHONPATH="$PROJECT_ROOT/test/loadtest:$PYTHONPATH"
+cd "$CALLER_DIR"
 exec python -m atlas_load "${args[@]}"

@@ -60,6 +60,9 @@
     "min_count": {
       "chat_turn": 120,
       "api_run_total": 40
+    },
+    "counters_max": {
+      "connections_closed_by_server": 0
     }
   }
 }

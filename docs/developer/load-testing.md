@@ -212,6 +212,7 @@ profiles.
 | `oidc_relogin` | a replica refused the user's session cookie and the user logged in again there |
 | `tool_approvals_sent` | approval requests answered |
 | `approval_unknown` | the server answered an approval with `unknown_tool_approval` (it does not end the turn, so the client carries on) |
+| `connections_closed_by_server` | sockets that closed without the client closing or dropping them, in any phase (a `replica_kill` storm's own victims are excluded); every bundled profile requires 0 |
 | `connections_lost_while_idle` | sockets the server closed during a `hold` |
 
 Each phase line in the summary carries its own counter deltas, so you can see

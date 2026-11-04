@@ -217,6 +217,8 @@ class Runner:
             victim = self.env.cluster[spec.get("replica", "A")]
             killed_url = victim.url
             affected = [c for c in self.connections if c.base_url == killed_url and c.ws is not None]
+            for conn in affected:
+                conn.expect_close = True  # the kill is the point; not an unexpected drop
             await asyncio.to_thread(victim.kill)
             await asyncio.gather(*(asyncio.wait_for(c.closed_by_server.wait(), 30) for c in affected),
                                  return_exceptions=True)

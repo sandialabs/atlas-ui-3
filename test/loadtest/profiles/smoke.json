@@ -77,6 +77,9 @@
     },
     "p95_ms": {
       "ws_connect": 2000
+    },
+    "counters_max": {
+      "connections_closed_by_server": 0
     }
   }
 }
