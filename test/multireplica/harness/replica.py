@@ -28,6 +28,8 @@ from .manifest import record_process
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+ADMIN_USER = "mr-admin@example.com"
+
 # Variables a child process needs to run at all; everything else is explicit.
 _PASSTHROUGH = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR")
 
@@ -305,6 +307,10 @@ def replica_env(
         # only takes effect once a browser connects to that replica.
         "MAX_CONCURRENT_RUNS_PER_USER": "5",
         "USE_MOCK_S3": "true",
+        # Admin identity for /admin/coordination (issue #1129).
+        "ADMIN_USERS": ADMIN_USER,
+        # Names the replica in [COORD] log lines and metrics.
+        "ATLAS_REPLICA_ID": f"replica-{name}",
         "LLM_MAX_RETRIES": "0",
         # Side-effect tool bookkeeping (inherited by the MCP child process).
         "HARNESS_SIDE_EFFECT_DIR": str(side_effect_dir),

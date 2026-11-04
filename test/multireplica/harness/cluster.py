@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from .infra import SharedInfra
-from .replica import MockLLM, Replica, free_port, replica_env, write_config
+from .replica import ADMIN_USER, MockLLM, Replica, free_port, replica_env, write_config
 from .side_effect_keys import log_name, read_records
 
 TERMINAL = ("completed", "failed", "cancelled")
@@ -177,6 +177,19 @@ class Cluster:
                 return body
             time.sleep(0.2)
         raise AssertionError(f"run {run_id} never reached {wanted!r} on {replica.name}: {body}")
+
+    def health(self, replica: Replica) -> Dict[str, Any]:
+        status, body = self.call(replica, "GET", "/api/health", timeout=10)
+        assert status == 200 and isinstance(body, dict), (status, body)
+        return body
+
+    def coordination(self, replica: Replica, *, include_terminal: bool = False) -> Dict[str, Any]:
+        """``GET /admin/coordination`` on ``replica`` (issue #1129)."""
+        # refresh: tests poll for state changes and must not read a cached probe.
+        path = "/admin/coordination?refresh=true" + ("&include_terminal=true" if include_terminal else "")
+        status, body = self.call(replica, "GET", path, user=ADMIN_USER, timeout=10)
+        assert status == 200 and isinstance(body, dict), (status, body)
+        return body
 
     def conversation_ids(self, replica: Replica, user: str) -> List[str]:
         status, body = self.call(replica, "GET", "/api/conversations", user=user)

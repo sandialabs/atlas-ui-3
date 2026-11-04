@@ -221,6 +221,13 @@ class RunStatusModel(BaseModel):
     updated_at: float
     ended_at: Optional[float] = None
     error: Optional[str] = None
+    end_reason: Optional[str] = Field(
+        None,
+        description=(
+            "Why a terminal run ended: completed, user_cancelled, error, "
+            "wall_clock_limit or replica_shutdown (interrupted)."
+        ),
+    )
     title: Optional[str] = None
     detached: bool = False
     depth: int = 0

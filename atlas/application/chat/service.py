@@ -83,6 +83,27 @@ _MAX_WORKSPACE_ID_LEN = 128
 _SAVE_FLOOR_KEY = SAVE_FLOOR_CONTEXT_KEY
 
 
+def _record_persist_failure(exc: BaseException) -> None:
+    """Count a failed conversation save; a connectivity error marks the DB down (#1129).
+
+    Constraint violations and other statement errors are counted but do not
+    mark the database unavailable: they would raise false outage alerts.
+    """
+    try:
+        from atlas.core.coordination_metrics import coordination_metrics
+        from atlas.infrastructure.dependency_probes import is_db_connectivity_error
+
+        metrics = coordination_metrics()
+        metrics.incr("atlas_conversation_persist_failures_total", error=type(exc).__name__)
+        if is_db_connectivity_error(exc):
+            from atlas.infrastructure.dependency_probes import database_dependency_name
+            from atlas.modules.chat_history import get_engine
+
+            metrics.dependency_failed(database_dependency_name(get_engine()), exc, op="conversation_save")
+    except Exception:  # pragma: no cover - bookkeeping must never escape the save handler
+        logger.debug("recording a persistence failure failed", exc_info=True)
+
+
 def _has_save_floor(session: Session) -> bool:
     """Whether the session's history begins with turns never saved (incognito)."""
     floor = session.context.get(_SAVE_FLOOR_KEY)
@@ -1058,6 +1079,7 @@ class ChatService:
                 raise
             except Exception as e:
                 logger.error("Failed to persist conversation: %s", e, exc_info=True)
+                _record_persist_failure(e)
 
         # Publish the session snapshot so a reconnect to any replica resumes
         # it. After the conversation save: the database is the record, the

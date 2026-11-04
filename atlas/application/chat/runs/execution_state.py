@@ -338,6 +338,10 @@ def _apply_run_status(doc: dict, event: dict) -> bool:
     doc["status"] = status
     doc["activity"] = status
     doc["waiting_on"] = None
+    # Why it ended (issue #1129), so a replica that did not run it can tell
+    # "interrupted by a shutdown" (replica_shutdown) from a plain failure.
+    if event.get("end_reason"):
+        doc["end_reason"] = str(event["end_reason"])
     doc["pending_requests"] = {}
     # A run that ended cannot still be running a tool. Close any row that never
     # reported, so a client reconciling this snapshot stops spinning it.
@@ -421,6 +425,7 @@ def public_projection(doc: dict) -> dict:
         "status": doc.get("status") or "running",
         "activity": doc.get("activity") or "executing",
         "waiting_on": doc.get("waiting_on"),
+        "end_reason": doc.get("end_reason"),
         "invocations": invocations,
         "pending_requests": list(doc.get("pending_requests", {}).values()),
     }
@@ -1030,9 +1035,29 @@ async def publish_execution_event(event: dict) -> Optional[dict]:
     """
     try:
         return await get_execution_store().apply_event(event)
-    except Exception:
+    except Exception as exc:
         logger.warning("execution projection update failed", exc_info=True)
+        _record_projection_failure(exc, "projection_write")
         return None
+
+
+def _record_projection_failure(exc: BaseException, op: str) -> None:
+    """Count a projection error; a Redis error also marks Redis down (#1129).
+
+    The projection is best effort, so its callers swallow these errors. Without
+    this a Redis outage that only hit the projection would show up as nothing
+    more than a warning with a traceback.
+    """
+    try:
+        from atlas.core.coordination_metrics import coordination_metrics
+        from atlas.infrastructure.redis.client import is_redis_connectivity_error
+
+        metrics = coordination_metrics()
+        metrics.incr("atlas_projection_failures_total", op=op)
+        if is_redis_connectivity_error(exc):
+            metrics.dependency_failed("redis", exc, op=op)
+    except Exception:  # pragma: no cover - bookkeeping must never escape a best-effort path
+        logger.debug("recording a projection failure failed", exc_info=True)
 
 
 async def attach_execution(conversation: Optional[dict], user_email: Optional[str]) -> Optional[dict]:
@@ -1041,8 +1066,9 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
         return conversation
     try:
         doc = await get_execution_store().get(str(conversation["id"]), user_email)
-    except Exception:
+    except Exception as exc:
         logger.warning("execution projection read failed", exc_info=True)
+        _record_projection_failure(exc, "projection_read")
         return conversation
     if not doc:
         return conversation

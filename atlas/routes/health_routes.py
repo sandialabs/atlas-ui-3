@@ -4,6 +4,7 @@ Provides simple health check endpoint for monitoring tools, orchestrators,
 and load balancers to verify service availability.
 """
 
+import asyncio
 import logging
 import subprocess
 from datetime import datetime, timezone
@@ -45,6 +46,10 @@ GIT_COMMIT = _resolve_git_commit()
 
 router = APIRouter(prefix="/api", tags=["health"])
 
+# Both dependency probes run concurrently within this budget, so a black-holed
+# dependency keeps /api/health under the default kubelet probe timeout (1 s).
+HEALTH_PROBE_BUDGET_SECONDS = 0.8
+
 
 @router.get("/heartbeat")
 async def heartbeat() -> Dict[str, str]:
@@ -72,7 +77,9 @@ async def health_check() -> Dict[str, Any]:
         - version: Service version
         - timestamp: Current UTC timestamp in ISO-8601 format
         - checks: Startup outcomes of optional features (issue #992), e.g.
-          ``{"chat_history": "ok" | "failed" | "disabled"}``
+          ``{"chat_history": "ok" | "failed" | "disabled"}``, plus
+          ``chat_history_db`` ("ok" | "unavailable"): a live probe of the
+          database when chat history started (issue #1129)
         - session_store: Only with a shared session store (issue #1091):
           its backend, reachability and latency.
 
@@ -101,8 +108,26 @@ async def health_check() -> Dict[str, Any]:
     if report["checks"]["chat_history"] == "failed":
         report["status"] = "degraded"
 
-    if getattr(app_factory, "redis", None) is not None:
-        store = await app_factory.session_store_health()
+    # The startup outcome alone hid a database outage that began after boot
+    # (issue #1129): probe the database now (bounded, single-flight), at the
+    # same time as the session store so the two bounds do not add up.
+    from atlas.infrastructure.dependency_probes import probe_chat_history_db
+
+    async def _skip() -> None:
+        return None
+
+    has_redis = getattr(app_factory, "redis", None) is not None
+    db, store = await asyncio.gather(
+        probe_chat_history_db(app_factory, timeout=HEALTH_PROBE_BUDGET_SECONDS)
+        if report["checks"]["chat_history"] == "ok" else _skip(),
+        app_factory.session_store_health(timeout=HEALTH_PROBE_BUDGET_SECONDS) if has_redis else _skip(),
+    )
+    if db is not None and db["status"] != "disabled":
+        report["checks"]["chat_history_db"] = db["status"]
+        if db["status"] != "ok":
+            report["status"] = "degraded"
+
+    if store is not None:
         # This endpoint is unauthenticated: report reachability only. The
         # store's address, namespace and counters stay in the startup and
         # error logs, not in an anonymous response.

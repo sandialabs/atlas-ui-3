@@ -40,6 +40,12 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from atlas.application.chat.runs.stream_replay import StreamReplay
+from atlas.core.coordination_metrics import (
+    EndReason,
+    coordination_metrics,
+    default_end_reason,
+    outcome_for,
+)
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 
@@ -138,6 +144,11 @@ class RunRecord:
     updated_at: float = field(default_factory=time.time)
     ended_at: Optional[float] = None
     error: Optional[str] = None
+    # Why the run reached its terminal state (issue #1129): an
+    # ``EndReason`` value. It is what lets operators tell a run that failed
+    # on its own from one that was interrupted because its replica went away;
+    # both are ``FAILED`` on the public run API.
+    end_reason: Optional[str] = None
     # Set once the socket that started the run goes away. Purely informational
     # -- a detached run keeps executing; this is what distinguishes "still
     # running for a user who is watching" from "still running unattended" in
@@ -200,6 +211,9 @@ class RunRecord:
             "updated_at": self.updated_at,
             "ended_at": self.ended_at,
             "error": self.error,
+            # completed | user_cancelled | error | wall_clock_limit |
+            # replica_shutdown (issue #1129); None while the run is live.
+            "end_reason": self.end_reason,
             "detached": self.detached,
             "parent_run_id": self.parent_run_id,
             # The conversation that launched this run (issue #1081). The sidebar
@@ -388,12 +402,14 @@ class RunRegistry:
         self.reap_terminal()
 
         if self.active_for_conversation(conversation_id, user_email) is not None:
+            coordination_metrics().run_rejected("conversation_busy")
             raise ConversationBusyError(
                 "This conversation already has a run in progress."
             )
 
         active = self.active_for_user(user_email)
         if len(active) >= self._max_concurrent:
+            coordination_metrics().run_rejected("user_concurrency_limit")
             raise ConcurrencyLimitError(self._max_concurrent)
 
         if parent_conversation_id is None and parent_run_id:
@@ -428,6 +444,9 @@ class RunRegistry:
             record.run_id,
             sanitize_for_logging(str(conversation_id)),
             len(active) + 1,
+        )
+        coordination_metrics().run_admitted(
+            record.run_id, kind="launched" if record.parent_run_id else "top_level", depth=record.depth
         )
         # A previous run's projection may never have received its terminal
         # write (a lost publish, a dead replica). This run replaces it, so a
@@ -466,8 +485,12 @@ class RunRegistry:
         *,
         error: Optional[str] = None,
         waiting_on: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> Optional[RunRecord]:
         """Move a run to a new state and notify listeners.
+
+        ``reason`` is the ``EndReason`` recorded with a terminal state; it
+        defaults from the status (completed / user_cancelled / error).
 
         Terminal is sticky: once a run is cancelled/failed/completed, a late
         status update from the unwinding task cannot resurrect it. Without this
@@ -481,6 +504,7 @@ class RunRegistry:
         if record.is_terminal:
             return record
 
+        old_status = record.status
         record.status = status
         record.updated_at = time.time()
         record.error = error
@@ -490,6 +514,7 @@ class RunRegistry:
             record.pending_requests.clear()
         if status.is_terminal:
             record.ended_at = record.updated_at
+            record.end_reason = reason or default_end_reason(status.value)
             record.steering = None
             record.task = None
             # Whatever the run was streaming closed with it (issue #957): the
@@ -497,6 +522,15 @@ class RunRegistry:
             # would replay a finished answer over a reopen's fresh one.
             record.stream.clear()
             self._publish_terminal(record)
+        if old_status != status:
+            coordination_metrics().run_transition(
+                record.run_id,
+                old_status.value,
+                status.value,
+                end_reason=record.end_reason if status.is_terminal else None,
+                duration_s=(record.ended_at - record.created_at) if status.is_terminal else None,
+                detached=record.detached,
+            )
         self._notify(record)
         return record
 
@@ -518,6 +552,8 @@ class RunRegistry:
         }
         if record.error:
             event["error"] = record.error
+        if record.end_reason:
+            event["end_reason"] = record.end_reason
         self._publish_projection(event)
 
     @staticmethod
@@ -741,6 +777,7 @@ class RunRegistry:
         *,
         status: RunStatus = RunStatus.CANCELLED,
         error: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> bool:
         """Cancel one run, addressed by id and checked for ownership.
 
@@ -769,14 +806,16 @@ class RunRegistry:
         # whole branch from the stop. Cancelling a terminal record is a no-op
         # beyond its own cascade.
         for child in self.children_of(run_id, include_terminal=True):
-            cascaded = self.cancel(child.run_id, user_email, status=status, error=error) or cascaded
+            cascaded = self.cancel(
+                child.run_id, user_email, status=status, error=error, reason=reason
+            ) or cascaded
         if record.is_terminal:
             return cascaded
         task = record.task
         # Mark first: the cancellation propagates asynchronously, and the run
         # must never be observable as still running once the user has stopped
         # it.
-        self.set_status(run_id, status, error=error)
+        self.set_status(run_id, status, error=error, reason=reason)
         if task is not None and not task.done():
             task.cancel()
             return True
@@ -889,8 +928,14 @@ class RunRegistry:
                     child.user_email,
                     status=RunStatus.FAILED,
                     error=timeout_error,
+                    reason=EndReason.WALL_CLOCK_LIMIT.value,
                 )
-            self.set_status(record.run_id, RunStatus.FAILED, error=timeout_error)
+            self.set_status(
+                record.run_id,
+                RunStatus.FAILED,
+                error=timeout_error,
+                reason=EndReason.WALL_CLOCK_LIMIT.value,
+            )
             if task is not None and not task.done():
                 task.cancel()
             expired.append(record.run_id)
@@ -899,6 +944,44 @@ class RunRegistry:
     def active_for_user_all(self) -> List[RunRecord]:
         """Every non-terminal run, across all users."""
         return [r for r in self._runs.values() if not r.is_terminal]
+
+    def interrupt_active(self, reason: str = EndReason.REPLICA_SHUTDOWN.value) -> List[str]:
+        """Mark every non-terminal run on this replica interrupted, and cancel it.
+
+        Called when the replica shuts down (issue #1129). Without it the event
+        loop cancels the run tasks as it closes and their own handlers record
+        ``CANCELLED`` -- indistinguishable from a user pressing stop -- or the
+        process exits before any terminal state is published at all. The run
+        is recorded ``FAILED`` with an interrupted ``end_reason``; completed
+        steps stay in history and nothing is retried.
+        """
+        error = (
+            "This run was interrupted because the server running it shut down "
+            "(restart, rollout or scale-in). Completed steps were kept; it was not retried."
+        )
+        interrupted: List[str] = []
+        for record in list(self.active_for_user_all()):
+            if record.is_terminal:  # a cascade above may have ended it already
+                continue
+            task = record.task
+            self.set_status(record.run_id, RunStatus.FAILED, error=error, reason=reason)
+            if task is not None and not task.done():
+                task.cancel()
+            interrupted.append(record.run_id)
+        return interrupted
+
+    def status_counts(self) -> Dict[str, int]:
+        """Runs on this replica by status, plus detached and interrupted counts."""
+        counts: Dict[str, int] = {s.value: 0 for s in RunStatus.__members__.values()}
+        counts["detached"] = 0
+        counts["interrupted"] = 0
+        for record in self._runs.values():
+            counts[record.status.value] += 1
+            if record.detached and not record.is_terminal:
+                counts["detached"] += 1
+            if record.is_terminal and outcome_for(record.status.value, record.end_reason) == "interrupted":
+                counts["interrupted"] += 1
+        return counts
 
     # ------------------------------------------------------------------
     # Status notifications
