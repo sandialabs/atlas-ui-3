@@ -29,7 +29,7 @@ import os
 import secrets
 import time
 from collections import Counter
-from urllib.parse import unquote, urlencode
+from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
 import jwt
 import uvicorn
@@ -45,6 +45,11 @@ REFRESH_TTL = int(os.environ.get("OIDC_REFRESH_TTL", "3600"))
 AUDIENCES = set(os.environ.get("OIDC_ALLOWED_AUDIENCES", "atlas,mock-litellm").split(","))
 EMAIL_DOMAIN = os.environ.get("OIDC_EMAIL_DOMAIN", "load.test")
 TOKEN_DELAY = float(os.environ.get("OIDC_TOKEN_DELAY_MS", "0")) / 1000.0
+# Where /authorize may send the browser back to: Atlas's callback path on
+# these hosts only, so the mock is not an open redirect.
+REDIRECT_HOSTS = frozenset(h.strip() for h in os.environ.get(
+    "OIDC_REDIRECT_HOSTS", "127.0.0.1,localhost,::1").split(",") if h.strip())
+CALLBACK_PATH = os.environ.get("OIDC_CALLBACK_PATH", "/auth/oidc/callback")
 
 app = FastAPI(title="Atlas load-test OIDC")
 PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -150,10 +155,15 @@ def authorize(response_type: str, client_id: str, redirect_uri: str, code_challe
         raise _fail("authorize", 400, "invalid_request")
     if not login_hint.startswith("loaduser-"):
         raise _fail("authorize", 400, "synthetic users must start with loaduser-")
+    target = urlsplit(redirect_uri)
+    if (target.scheme not in ("http", "https") or target.hostname not in REDIRECT_HOSTS
+            or target.path != CALLBACK_PATH or target.query or target.fragment):
+        raise _fail("authorize", 400, "redirect_uri is not an allowed Atlas callback")
     code = secrets.token_urlsafe(24)
     CODES[code] = (login_hint, redirect_uri, code_challenge, scope, nonce, time.time() + 90)
-    sep = "&" if "?" in redirect_uri else "?"
-    return RedirectResponse(redirect_uri + sep + urlencode({"code": code, "state": state}), status_code=302)
+    location = urlunsplit((target.scheme, target.netloc, CALLBACK_PATH,
+                           urlencode({"code": code, "state": state}), ""))
+    return RedirectResponse(location, status_code=302)
 
 
 @app.post("/token")

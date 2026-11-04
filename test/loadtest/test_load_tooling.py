@@ -167,16 +167,24 @@ def test_mock_idp_code_flow_and_token_exchange(monkeypatch):
     verifier = "v" * 50
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     redirect = client.get("/authorize", params={
-        "response_type": "code", "client_id": "atlas-loadtest", "redirect_uri": "http://atlas/cb",
+        "response_type": "code", "client_id": "atlas-loadtest", "redirect_uri": "http://127.0.0.1:8000/auth/oidc/callback",
         "code_challenge": challenge, "nonce": "n-1", "state": "st", "login_hint": "loaduser-0007",
     }, follow_redirects=False)
     assert redirect.status_code == 302
+    assert redirect.headers["location"].startswith("http://127.0.0.1:8000/auth/oidc/callback?code=")
     query = parse_qs(urlsplit(redirect.headers["location"]).query)
+    # Not an open redirect: other hosts and paths are refused.
+    for elsewhere in ("https://evil.example/auth/oidc/callback", "http://127.0.0.1:8000/other",
+                      "http://127.0.0.1:8000/auth/oidc/callback?x=1"):
+        refused = client.get("/authorize", params={
+            "response_type": "code", "client_id": "atlas-loadtest", "redirect_uri": elsewhere,
+            "code_challenge": challenge, "login_hint": "loaduser-0007"}, follow_redirects=False)
+        assert refused.status_code == 400, elsewhere
     assert query["state"] == ["st"]
     basic = base64.b64encode(b"atlas-loadtest:s3").decode()
     tokens = client.post("/token", headers={"Authorization": f"Basic {basic}"}, data={
         "grant_type": "authorization_code", "code": query["code"][0],
-        "redirect_uri": "http://atlas/cb", "code_verifier": verifier}).json()
+        "redirect_uri": "http://127.0.0.1:8000/auth/oidc/callback", "code_verifier": verifier}).json()
     public_key = idp.PRIVATE_KEY.public_key()
     id_claims = jwt.decode(tokens["id_token"], public_key, algorithms=["RS256"], audience="atlas-loadtest")
     assert id_claims["nonce"] == "n-1" and id_claims["email"] == "loaduser-0007@load.test"
@@ -184,7 +192,7 @@ def test_mock_idp_code_flow_and_token_exchange(monkeypatch):
     # The code is single-use, and the wrong client secret is refused.
     reused = client.post("/token", headers={"Authorization": f"Basic {basic}"}, data={
         "grant_type": "authorization_code", "code": query["code"][0],
-        "redirect_uri": "http://atlas/cb", "code_verifier": verifier})
+        "redirect_uri": "http://127.0.0.1:8000/auth/oidc/callback", "code_verifier": verifier})
     assert reused.status_code == 400
     bad = base64.b64encode(b"atlas-loadtest:nope").decode()
     assert client.post("/token", headers={"Authorization": f"Basic {bad}"},

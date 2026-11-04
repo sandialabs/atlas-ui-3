@@ -140,7 +140,7 @@ bash test/load_tests.sh ws-capacity --target https://atlas.staging.example \
 `--target` may be one load balancer or each replica (repeat the flag; sockets
 are spread round robin). Header auth sends `X-User-Email` (plus `X-Proxy-Secret`
 when given), so the target must trust the client the way it trusts its proxy;
-use an isolated staging deployment. `auth: "oidc"` profiles work against a
+use an isolated staging deployment. The bundled mock IdP only redirects back to `/auth/oidc/callback` on loopback hosts; set `OIDC_REDIRECT_HOSTS` (comma-separated) when you run it for another host. `auth: "oidc"` profiles work against a
 deployment whose IdP auto-logs-in `loaduser-NNNN` names from `login_hint`
 (the mock IdP here, or the helper repo's image). `api_runs` phases need the
 deployment's `AGENT_RUNS_API_KEY`; `replica_kill` is local only. Server-side
