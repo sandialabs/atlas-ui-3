@@ -53,6 +53,20 @@ in an overlay of your own.
   | Another pod's migration holding the lock | `ATLAS_MIGRATION_LOCK_WAIT_SECONDS` (600), logged every 30s | 3 |
   | A migration statement waiting on a table lock | PostgreSQL `lock_timeout`, `ATLAS_MIGRATION_DDL_LOCK_TIMEOUT_SECONDS` (60) | 1 |
 
+  Credentials the server rejects fail at once with exit 4 and say so, rather
+  than being retried as an outage. The usual cause is a regenerated
+  `secrets.env` against a kept volume: PostgreSQL keeps the password it was
+  initialized with. Restore the old `secrets.env`, change the role's
+  password in PostgreSQL to match the new one, or `teardown --purge`.
+
+  The advisory lock is a session lock, so the `migrate` container needs a
+  direct or session-mode connection to PostgreSQL. Behind a
+  transaction-mode PgBouncer, consecutive statements can run on different
+  server connections and the lock serializes nothing. If the replicas use
+  such a pooler (see [Connection budgets](#connection-budgets)), give the
+  init container's `CHAT_HISTORY_DB_URL` a separate Secret key that points
+  at the database directly.
+
   Two other cases:
   - A database at a revision the image doesn't know, such as a rollback
     after a newer release migrated, is left unchanged with a warning.
@@ -195,7 +209,8 @@ Proxy secret checks and header auth are documented in
 
 ## Validation
 
-`./staging.sh validate` port-forwards to **each ready API pod separately**
+`./staging.sh validate` first checks that every desired replica is ready,
+then port-forwards to **each API pod separately**
 and runs `validate_replicas.py` against them. Requests go to the replica the
 check chooses, never through load balancing, so the cross-replica checks
 really cross replicas:

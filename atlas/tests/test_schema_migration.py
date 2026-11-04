@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from atlas.modules.chat_history import schema_migration
 from atlas.modules.chat_history.database import init_database, reset_engine
 from atlas.modules.chat_history.schema_migration import (
+    DatabaseAuthFailed,
     DatabaseUnreachable,
     MigrationLockTimeout,
     MigrationRefused,
@@ -180,3 +181,33 @@ def test_main_reports_a_lock_timeout_with_its_own_exit_code(monkeypatch):
 
     monkeypatch.setattr(schema_migration, "upgrade_to_head", timeout)
     assert schema_migration.main([]) == 3
+
+
+def _operational_error(message, sqlstate=None):
+    from sqlalchemy.exc import OperationalError
+
+    orig = Exception(message)
+    orig.sqlstate = sqlstate
+    return OperationalError("connect", {}, orig)
+
+
+def test_rejected_credentials_fail_fast_instead_of_retrying():
+    error = _operational_error(
+        'connection to server at "db", port 5432 failed: FATAL:  password authentication failed for user "atlas"'
+    )
+
+    class Engine:
+        def connect(self):
+            raise error
+
+    sleeps = []
+    with pytest.raises(DatabaseAuthFailed, match="old password"):
+        schema_migration._connect_with_retry(Engine(), 300, sleeps.append)
+    assert sleeps == []
+
+
+def test_auth_failures_are_told_apart_from_outages():
+    assert schema_migration._is_auth_failure(_operational_error("anything", sqlstate="28P01"))
+    assert schema_migration._is_auth_failure(_operational_error('FATAL:  no pg_hba.conf entry for host "10.0.0.1"'))
+    assert not schema_migration._is_auth_failure(_operational_error("connection refused"))
+    assert not schema_migration._is_auth_failure(_operational_error("connection timeout expired"))

@@ -110,7 +110,10 @@ EOF
 }
 
 cmd_init_secrets() {
-    [ ! -e "$SECRETS_FILE" ] || die "$SECRETS_FILE already exists; delete it first to rotate every secret"
+    [ ! -e "$SECRETS_FILE" ] || die "$SECRETS_FILE already exists. New values do not rotate a deployed
+PostgreSQL password: the kept volume (data-atlas-postgres-0) still holds the old one, and every pod would
+stop in Init with 'PostgreSQL rejected the credentials'. To start over, run 'teardown --purge' first; to
+rotate in place, change the role password in PostgreSQL (ALTER ROLE) and edit secrets.env to match."
     local pg redis s3_user s3_key
     pg="$(openssl rand -hex 24)"; redis="$(openssl rand -hex 24)"
     s3_user="atlas$(openssl rand -hex 4)"; s3_key="$(openssl rand -hex 24)"
@@ -176,6 +179,16 @@ cmd_status() {
     kc get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 15 || true
 }
 
+# Validation describes the deployment only when every desired replica is
+# ready: a pass with two of three pods up would hide the third's failure.
+require_all_ready() {
+    local ready="$1" desired
+    desired="$(kc get deployment atlas-api -o jsonpath='{.spec.replicas}')"
+    [ -n "$desired" ] || die "could not read spec.replicas of deployment/atlas-api"
+    [ "$desired" -ge 2 ] || die "deployment/atlas-api wants $desired replica(s); cross-replica checks need at least 2"
+    [ "$ready" -eq "$desired" ] || die "only $ready of $desired atlas-api pods are ready; see 'staging.sh status'"
+}
+
 ready_api_pods() {
     kc get pods -l app.kubernetes.io/name=atlas-api \
         -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}'
@@ -205,7 +218,7 @@ port_forward() {
 cmd_validate() {
     local pods=() args=() pod
     mapfile -t pods < <(ready_api_pods)
-    [ "${#pods[@]}" -ge 2 ] || die "need at least two ready atlas-api pods, found ${#pods[@]}"
+    require_all_ready "${#pods[@]}"
     echo "Validating ${#pods[@]} ready API pods: ${pods[*]}"
     for pod in "${pods[@]}"; do
         port_forward "$pod"
@@ -217,7 +230,7 @@ cmd_validate() {
 cmd_failover_drill() {
     local pods=() victim survivor victim_url survivor_url user holder_out session_id
     mapfile -t pods < <(ready_api_pods)
-    [ "${#pods[@]}" -ge 2 ] || die "need at least two ready atlas-api pods, found ${#pods[@]}"
+    require_all_ready "${#pods[@]}"
     victim="${pods[0]}"; survivor="${pods[1]}"
     port_forward "$victim"; victim_url="$PF_URL"
     port_forward "$survivor"; survivor_url="$PF_URL"

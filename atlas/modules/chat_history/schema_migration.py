@@ -56,6 +56,26 @@ class DatabaseUnreachable(RuntimeError):
     """No connection could be opened before the wait ran out."""
 
 
+class DatabaseAuthFailed(RuntimeError):
+    """The server rejected the credentials; retrying cannot help."""
+
+
+# Invalid password / invalid authorization specification. libpq reports a
+# connect-time FATAL without a SQLSTATE through both psycopg drivers, so the
+# server's message text is matched as well.
+_AUTH_SQLSTATES = ("28P01", "28000")
+_AUTH_MESSAGES = ("password authentication failed", "no pg_hba.conf entry", "role \"")
+
+
+def _is_auth_failure(exc: OperationalError) -> bool:
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    if code in _AUTH_SQLSTATES:
+        return True
+    message = str(orig or exc)
+    return any(marker in message for marker in _AUTH_MESSAGES) and "FATAL" in message
+
+
 class MigrationLockTimeout(RuntimeError):
     """Another migration held the advisory lock for longer than the wait."""
 
@@ -131,6 +151,12 @@ def _connect_with_retry(engine, wait_seconds: float, sleep: Callable[[float], No
         try:
             return engine.connect()
         except OperationalError as exc:
+            if _is_auth_failure(exc):
+                raise DatabaseAuthFailed(
+                    f"PostgreSQL rejected the credentials ({_reason(exc)}). If secrets.env was regenerated "
+                    "against a kept database volume, the volume still has the old password: restore the old "
+                    "secrets.env, change the password in PostgreSQL (ALTER ROLE), or purge the volume."
+                ) from exc
             if time.monotonic() >= deadline:
                 raise DatabaseUnreachable(f"Database unreachable after {wait_seconds:.0f}s: {_reason(exc)}") from exc
             logger.info("Database not reachable yet (%s); retrying in %.0fs", _reason(exc), delay)
@@ -302,6 +328,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     except DatabaseUnreachable as exc:
         logger.error("%s", exc)
         return 1
+    except DatabaseAuthFailed as exc:
+        logger.error("%s", exc)
+        return 4
     except MigrationLockTimeout as exc:
         logger.error("%s", exc)
         return 3
