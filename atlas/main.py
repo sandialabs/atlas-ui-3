@@ -55,7 +55,14 @@ from atlas.application.chat.runs import (
     RunStatus,
     get_run_registry,
 )
+from atlas.application.chat.runs.admission import (
+    admit_run,
+    apply_run_limit,
+    drain_pending_releases,
+    run_lease_heartbeat,
+)
 from atlas.application.chat.runs.context import set_current_run, tag_event
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
@@ -1430,11 +1437,23 @@ async def lifespan(app: FastAPI):
     # sweeper is the wall-clock backstop, and it also reaps run records that
     # have aged past their retention window.
     run_reaper_task = asyncio.create_task(_run_limit_sweeper(config))
+    # Issue #1128: the cap applies from the first request, whatever transport
+    # it arrives on (admission re-applies it, so admin changes still land).
+    apply_run_limit(config.app_settings)
+    # Cluster-wide run claims are leases; this keeps the live ones alive.
+    run_lease_task = asyncio.create_task(run_lease_heartbeat())
 
     yield
 
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
+    run_lease_task.cancel()
+    # Releases scheduled by runs that just ended must reach Redis before the
+    # pool closes, or their slots stay held until the lease expires.
+    try:
+        await asyncio.wait_for(drain_pending_releases(), timeout=5)
+    except Exception:  # pragma: no cover - shutdown must not raise
+        logger.warning("Some run claim releases did not complete before shutdown")
     # Stop auto-reconnect task
     await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
@@ -1960,9 +1979,6 @@ async def websocket_endpoint(websocket: WebSocket):
     # listener below, which is what lets any open tab render the
     # "still running" indicator in conversation history.
     run_registry = get_run_registry()
-    run_registry.set_max_concurrent_runs_per_user(
-        config_manager.app_settings.max_concurrent_runs_per_user
-    )
     connection_run_ids: set = set()
     # Strong references to in-flight status sends: asyncio only holds weak
     # references to tasks, so without this a status frame can be garbage
@@ -2289,9 +2305,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json(refusal)
                         continue
                     try:
-                        run_record = run_registry.start(
+                        # One admission path for every transport (#1128):
+                        # applies MAX_CONCURRENT_RUNS_PER_USER and claims the
+                        # conversation and a user slot cluster-wide.
+                        run_record = await admit_run(
                             conversation_id=turn_conversation_id,
                             user_email=user_email,
+                            app_settings=config_manager.app_settings,
                             steering=steering_channel,
                             # Multimodal turns carry a list as `content`; the
                             # title wants the first text part, never a crash
@@ -2313,6 +2333,16 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": str(e),
                             "error_type": "conversation_busy",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
+                    except RunCoordinationUnavailableError as e:
+                        # Fail closed: an untracked turn here would bypass the
+                        # cluster-wide cap for as long as Redis is down.
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "error_type": "run_coordination_unavailable",
                             "conversation_id": data.get("conversation_id"),
                         })
                         continue

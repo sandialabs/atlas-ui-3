@@ -1,6 +1,6 @@
 # Agent Runs REST API
 
-Last updated: 2026-10-29
+Last updated: 2026-11-04
 
 The agent-runs API lets one trusted external service -- a scheduler, a CI job, a webhook
 relay -- start an ATLAS agent conversation on behalf of a user, with no browser or CLI session,
@@ -124,7 +124,7 @@ Refusals are JSON `{"detail": {"code": "...", "message": "..."}}`:
 | 409 | `idempotency_conflict` / `idempotency_in_progress` | Key reused with a different body / first request still admitting |
 | 422 | `model_not_available` / `no_authorized_tools` / `classification_refused` | The user may not use the model, has no usable tools in the workspace, or the classification does not allow a component |
 | 429 | `concurrency_limit` | The user is at `MAX_CONCURRENT_RUNS_PER_USER` |
-| 503 | `not_configured` / `persistence_unavailable` / `unavailable` | Key missing or weak, chat history unavailable, workspaces or a dependency unavailable |
+| 503 | `not_configured` / `persistence_unavailable` / `unavailable` | Key missing or weak, chat history unavailable, workspaces or a dependency (such as the Redis run coordinator) unavailable |
 
 A body that fails schema validation (a wrong type, a missing `message`, a body that is not JSON) is answered
 before any of the above with FastAPI's standard `422`, whose `detail` is a **list** of
@@ -161,7 +161,7 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
 ## Limits, replicas and restarts
 
 - `MAX_CONCURRENT_RUNS_PER_USER` and `MAX_RUN_WALL_CLOCK_SECONDS` apply to API runs as to any
-  other; the `atlas_launch` depth and fan-out caps do not apply to the API run itself (it is a
+  other. With Redis the cap counts the user's runs on every replica, browser runs included; the `atlas_launch` depth and fan-out caps do not apply to the API run itself (it is a
   root, depth 0) but do apply to anything it launches. The global HTTP rate limiter applies to
   these endpoints. Messages are limited to 20,000 characters.
 - **Run state is in memory.** Status, follow-up, cancel and idempotency are served by the
