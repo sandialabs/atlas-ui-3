@@ -7,6 +7,7 @@ import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
 import { autoResizeComposer, resetComposerHeight, COMPOSER_MAX_HEIGHT } from '../utils/composerAutoResize'
 import { useComposerHeightVar } from '../hooks/useComposerHeightVar'
+import { useChatTopVar } from '../hooks/useChatTopVar'
 import { useShortViewport } from '../hooks/useShortViewport'
 import { FOCUS_RING } from '../utils/focusRing'
 import EnabledToolsIndicator from './EnabledToolsIndicator'
@@ -68,6 +69,7 @@ const ChatArea = () => {
   const fileInputRef = useRef(null)
   const dragCounterRef = useRef(0)
   const composerRef = useRef(null)
+  const chatRootRef = useRef(null)
   
   const {
     messages,
@@ -215,6 +217,10 @@ const ChatArea = () => {
   // Keep --atlas-composer-height in sync so floating controls (the feedback
   // button) can sit above the composer instead of on top of Send.
   useComposerHeightVar(composerRef)
+
+  // Keep --atlas-chat-top in sync so phone toolbar panels, which open up
+  // from the composer, stop at the chrome (header and banners) above.
+  useChatTopVar(chatRootRef)
 
   // Short windows (issue #1135) cap the composer in CSS and collapse the
   // pieces that were stacking into a second screen of controls.
@@ -871,6 +877,7 @@ const ChatArea = () => {
 
   return (
     <div 
+      ref={chatRootRef}
       className="flex flex-col flex-1 min-h-0 overflow-hidden relative"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}

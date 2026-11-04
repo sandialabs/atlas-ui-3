@@ -1006,9 +1006,25 @@
     right: 0;
     width: auto;
     max-width: none;
-    /* The desktop caps (24-28rem) can exceed the space above the composer on
-       a short phone or with the keyboard up; cap to what is visible. */
-    max-height: min(24rem, max(12rem, calc(var(--app-viewport-height, 100vh) - var(--atlas-composer-height, 8rem) - 4rem)));
+    /* The desktop caps (24-28rem) can exceed the visible room on a short
+       phone or with the keyboard up; cap to what is visible. The panel
+       opens up from the toolbar, the composer's bottom row on a phone, and
+       may cover the message box above it, so its room runs from the toolbar
+       to the top of the chat area. --atlas-chat-top is that top edge,
+       measured live (hooks/useChatTopVar.js), so the header, the compliance
+       banner and any admin banner messages, wrapped or not, all count. The
+       3.5rem is the toolbar band under the panel: the 2rem toolbar and the
+       0.5rem footer padding below it, plus 1rem for the panel's own gap
+       (0.25rem, or 0.5rem for the Context panel) and clearance under the
+       chrome. The 5rem fallback is a phone's header plus a compliance
+       banner.
+       The panels scroll inside (the tools search stays pinned), so there is
+       no comfortable floor; a floor taller than the room is what pushed the
+       panel top under the header. The 3rem floor only keeps max-height
+       valid and a sliver usable, and it wins only when the computed room is
+       under 3rem -- a visible height under the chrome plus 6.5rem -- where
+       nothing above the composer fits anyway. */
+    max-height: min(24rem, max(3rem, calc(var(--app-viewport-height, 100vh) - var(--atlas-chat-top, 5rem) - 3.5rem)));
   }
 
   /* The outline Stop is the only stop control on a phone. Its dark-theme
