@@ -71,8 +71,9 @@ COPY --from=python-build /app/.venv /app/.venv
 # depending on an editable package's build-time source directory.
 COPY --from=python-build /app/atlas /app/atlas
 COPY --from=python-build /app/prompts /app/prompts
-# Schema migrations, run once per deployment from a Job before replicas start
-# (`alembic -c /app/alembic.ini upgrade head`; see docs/admin/kubernetes-staging.md).
+# Schema migrations: each pod's init container runs
+# `python -m atlas.modules.chat_history.schema_migration` (alembic upgrade head
+# under a PostgreSQL advisory lock); see docs/admin/kubernetes-staging.md.
 COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic/
 COPY --from=python-build --chown=atlas:atlas /app/config /app/config

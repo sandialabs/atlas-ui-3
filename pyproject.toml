@@ -69,8 +69,8 @@ pptx = [
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Schema migrations (`alembic upgrade head`). The container image installs
-# it so a deployment can migrate once, from a Job, before any replica starts
-# (docs/admin/kubernetes-staging.md).
+# it for the per-pod migration init container, which serializes upgrades with
+# a PostgreSQL advisory lock (docs/admin/kubernetes-staging.md).
 migrations = [
     "alembic>=1.18.5,<2.0.0",
 ]

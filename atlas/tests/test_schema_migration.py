@@ -1,7 +1,7 @@
 """Schema migration runner used by the Kubernetes init container (issue #1129).
 
 The PostgreSQL advisory-lock path (concurrent pods, one upgrade) needs a real
-server and is exercised by test/pr-validation/test_issue1129_k8s_staging.sh; these
+server and is exercised by test/pr-validation/test_pr1165_k8s_staging.sh; these
 tests cover the database-independent behaviour on SQLite (Alembic has no DuckDB dialect).
 """
 

@@ -59,6 +59,8 @@ def require(condition: bool, message: str) -> None:
 
 class Replica:
     def __init__(self, label: str, url: str):
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"replica URL must start with http:// or https://, got {url!r}")
         self.label = label
         self.url = url.rstrip("/")
 
@@ -175,7 +177,9 @@ class Validator:
             detail = fn()
             self.results.append((name, True, detail))
             print(f"PASS  {name}: {detail}", flush=True)
-        except (CheckFailed, httpx.HTTPError, WebSocketException, OSError, TimeoutError) as exc:
+        except (CheckFailed, httpx.HTTPError, WebSocketException, OSError, TimeoutError,
+                KeyError, TypeError, ValueError) as exc:
+            # An unexpected response shape is a failed check, not a crash.
             self.results.append((name, False, str(exc)))
             print(f"FAIL  {name}: {type(exc).__name__}: {exc}", flush=True)
 
@@ -215,11 +219,15 @@ class Validator:
             "name": name, "description": "issue #1129 validation", "config": {},
         })
         require(status == 200, f"create on {first.label}: {status} {body}")
-        workspace_id = body["workspace"]["id"]
+        workspace = body.get("workspace") if isinstance(body, dict) else None
+        require(isinstance(workspace, dict) and workspace.get("id"),
+                f"create on {first.label} returned no workspace id: {str(body)[:300]}")
+        workspace_id = workspace["id"]
         try:
             for replica in others:
                 status, body = self.request(replica, "GET", "/api/workspaces", user=user)
                 require(status == 200, f"list on {replica.label}: {status} {body}")
+                require(isinstance(body, dict), f"list on {replica.label} returned {str(body)[:300]}")
                 names = [w.get("name") for w in body.get("workspaces", [])]
                 require(name in names, f"{replica.label} does not see the workspace created on {first.label}")
         finally:
@@ -279,8 +287,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     replicas = []
     for index, spec in enumerate(args.replica, start=1):
+        # LABEL=URL or a bare URL (a URL's own "=" only appears after "://").
         label, sep, url = spec.partition("=")
-        replicas.append(Replica(label if sep else f"replica-{index}", url if sep else spec))
+        if not sep or "://" in label:
+            label, url = f"replica-{index}", spec
+        try:
+            replicas.append(Replica(label, url))
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
     if not replicas:
         print("at least one --replica is required", file=sys.stderr)
         return 2

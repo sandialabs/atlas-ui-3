@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for issue #1129: reproducible multi-replica staging deployment
+# Test script for PR #1165 (issue #1129): reproducible multi-replica staging deployment
 # (Kubernetes/OpenShift overlay, lock-serialized schema migrations).
 #
 # 1. Offline render checks of deploy/kubernetes (both flavors).

@@ -223,7 +223,7 @@ environment and startup-probe command, with three API containers and the
 and a failover drill: SIGTERM to a replica with a live socket, and the
 session resumes on another replica. It can't show scheduling, Service load
 balancing, ingress, PVC binding or SCC admission.
-`test/pr-validation/test_issue1129_k8s_staging.sh` runs it.
+`test/pr-validation/test_pr1165_k8s_staging.sh` runs it.
 
 `bash test/k8s_render_checks.sh` (run in CI) renders both flavors offline
 and checks the properties above: replicas, no affinity or sticky sessions,
