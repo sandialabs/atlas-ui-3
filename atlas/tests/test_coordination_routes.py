@@ -38,7 +38,7 @@ def fake_engine(monkeypatch):
     """Keep the probes off the process-wide chat-history engine."""
     import atlas.modules.chat_history as chat_history
 
-    monkeypatch.setattr(chat_history, "get_engine", lambda: object())
+    monkeypatch.setattr(chat_history, "get_engine", object)
 
 
 def _admin():
@@ -140,7 +140,7 @@ def test_database_probe_is_bounded_and_single_flight(monkeypatch, fake_engine):
     assert first["status"] == second["status"] == "unavailable"
     assert first["error"] == "Timeout"
     assert len(calls) == 1  # the hung probe was reused, not stacked
-    assert dependency_probes._db_last is None  # forced probes do not populate the cache
+    assert dependency_probes._db_state["last"] is None  # forced probes do not populate the cache
 
 
 def test_cached_probe_is_reused_within_the_window(monkeypatch, fake_engine):

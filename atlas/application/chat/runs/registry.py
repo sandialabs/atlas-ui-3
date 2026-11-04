@@ -972,7 +972,7 @@ class RunRegistry:
 
     def status_counts(self) -> Dict[str, int]:
         """Runs on this replica by status, plus detached and interrupted counts."""
-        counts: Dict[str, int] = {s.value: 0 for s in RunStatus}
+        counts: Dict[str, int] = {s.value: 0 for s in RunStatus.__members__.values()}
         counts["detached"] = 0
         counts["interrupted"] = 0
         for record in self._runs.values():

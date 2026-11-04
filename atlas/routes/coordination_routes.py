@@ -55,7 +55,7 @@ def _run_rows(include_terminal: bool) -> List[Dict[str, Any]]:
 
 def _gauges(counts: Dict[str, int]) -> List[Tuple[str, Dict[str, Any], float]]:
     gauges: List[Tuple[str, Dict[str, Any], float]] = []
-    for status in RunStatus:
+    for status in RunStatus.__members__.values():
         gauges.append(("atlas_runs", {"status": status.value}, counts.get(status.value, 0)))
     gauges.append(("atlas_runs_detached", {}, counts.get("detached", 0)))
     gauges.append(("atlas_runs_interrupted_retained", {}, counts.get("interrupted", 0)))

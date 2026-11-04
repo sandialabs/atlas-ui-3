@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 DB_PROBE_TIMEOUT_SECONDS = 1.5
 DB_PROBE_CACHE_SECONDS = 2.0
 
-_db_inflight: Optional["asyncio.Future"] = None
-_db_last: Optional[Dict[str, Any]] = None
-_db_last_at = 0.0
+# Probe state for this process: the in-flight probe future, the last cached
+# result and when it was taken (monotonic). Mutated in place, never rebound.
+_db_state: Dict[str, Any] = {"inflight": None, "last": None, "last_at": 0.0}
 
 
 def database_dependency_name(engine: Any) -> str:
@@ -54,7 +54,7 @@ async def probe_chat_history_db(
     ``disabled`` covers both a disabled feature and a failed startup (the
     startup outcome is reported separately as ``checks.chat_history``).
     """
-    global _db_inflight, _db_last, _db_last_at
+    state = _db_state
     if getattr(app_factory, "conversation_repository", None) is None:
         return {"dependency": "chat_history", "status": "disabled"}
     from atlas.modules.chat_history import get_engine
@@ -65,18 +65,19 @@ async def probe_chat_history_db(
         return {"dependency": "chat_history", "status": "unavailable", "error": type(exc).__name__}
     name = database_dependency_name(engine)
     now = time.monotonic()
-    if use_cache and _db_last is not None and now - _db_last_at < DB_PROBE_CACHE_SECONDS:
-        return dict(_db_last)
+    if use_cache and state["last"] is not None and now - state["last_at"] < DB_PROBE_CACHE_SECONDS:
+        return dict(state["last"])
 
     loop = asyncio.get_running_loop()
     # A probe started on another event loop (tests create one per client)
     # cannot be awaited here; start a fresh one.
-    if _db_inflight is None or _db_inflight.done() or _db_inflight.get_loop() is not loop:
-        _db_inflight = loop.run_in_executor(None, _select_one, engine)
+    inflight = state["inflight"]
+    if inflight is None or inflight.done() or inflight.get_loop() is not loop:
+        inflight = state["inflight"] = loop.run_in_executor(None, _select_one, engine)
     started = time.perf_counter()
     metrics = coordination_metrics()
     try:
-        await asyncio.wait_for(asyncio.shield(_db_inflight), timeout)
+        await asyncio.wait_for(asyncio.shield(inflight), timeout)
     except asyncio.TimeoutError:
         result = {"dependency": name, "status": "unavailable", "error": "Timeout"}
         metrics.dependency_failed(name, "Timeout", op="probe")
@@ -93,7 +94,7 @@ async def probe_chat_history_db(
     if use_cache:
         # A forced probe (use_cache=False) answers its caller only; it does not
         # replace what the cached path serves.
-        _db_last, _db_last_at = dict(result), time.monotonic()
+        state["last"], state["last_at"] = dict(result), time.monotonic()
     return result
 
 
@@ -120,5 +121,4 @@ async def probe_all(app_factory: Any, *, use_cache: bool = True) -> Dict[str, Di
 
 def reset_probe_cache() -> None:
     """Tests only."""
-    global _db_inflight, _db_last, _db_last_at
-    _db_inflight, _db_last, _db_last_at = None, None, 0.0
+    _db_state.update(inflight=None, last=None, last_at=0.0)
