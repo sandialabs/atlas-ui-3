@@ -26,10 +26,9 @@ import logging
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from atlas.application.chat.runs.coordination import (  # noqa: F401 - re-exported
+from atlas.application.chat.runs.coordination import (
     RUN_LEASE_RENEW_INTERVAL_SECONDS,
     RunClaim,
-    drain_pending_releases,
     get_run_coordinator,
     release_claim_soon,
 )

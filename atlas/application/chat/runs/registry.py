@@ -40,11 +40,10 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
 # The admission errors live in their own module so the coordinator can raise
-# them without importing the registry; re-exported here for existing callers.
-from atlas.application.chat.runs.admission_errors import (  # noqa: F401
+# them without importing the registry.
+from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
-    RunRegistryError,
 )
 from atlas.application.chat.runs.coordination import release_claim_soon
 from atlas.application.chat.runs.stream_replay import StreamReplay

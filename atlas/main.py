@@ -58,11 +58,13 @@ from atlas.application.chat.runs import (
 from atlas.application.chat.runs.admission import (
     admit_run,
     apply_run_limit,
-    drain_pending_releases,
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
-from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.coordination import (
+    RunCoordinationUnavailableError,
+    drain_pending_releases,
+)
 from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async

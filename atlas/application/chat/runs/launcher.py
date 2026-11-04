@@ -38,12 +38,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from atlas.application.chat.runs.admission import admit_run
-from atlas.application.chat.runs.context import set_current_run, tag_event
-from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
-from atlas.application.chat.runs.registry import (
+from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
     RunRegistryError,
+)
+from atlas.application.chat.runs.context import set_current_run, tag_event
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.registry import (
     RunStatus,
     get_run_registry,
 )
