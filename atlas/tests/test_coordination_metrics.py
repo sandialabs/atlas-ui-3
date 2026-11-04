@@ -212,3 +212,30 @@ class TestPrometheus:
         assert metrics.maybe_log_summary({"running": 1}) is True
         assert metrics.maybe_log_summary({"running": 1}) is False
         assert metrics.maybe_log_summary({"running": 2}) is True
+
+
+class TestReviewFollowUps:
+    def test_prometheus_values_keep_full_precision(self):
+        metrics = CoordinationMetrics(replica_id="r1")
+        metrics.started_at = 1762279473.125
+        metrics.incr("atlas_runs_admitted_total", 1234567, kind="top_level")
+        text = metrics.render_prometheus()
+        samples = {line.split("{")[0]: line.rsplit(" ", 1)[1] for line in text.splitlines() if not line.startswith("#")}
+        assert float(samples["atlas_replica_start_time_seconds"]) == 1762279473.125
+        assert samples["atlas_runs_admitted_total"] == "1234567"
+
+    def test_only_connectivity_errors_mark_the_database_down(self, monkeypatch):
+        from sqlalchemy.exc import IntegrityError, OperationalError
+
+        import atlas.infrastructure.dependency_probes as probes
+        import atlas.modules.chat_history as chat_history
+        from atlas.application.chat.service import _record_persist_failure
+
+        monkeypatch.setattr(chat_history, "get_engine", object)
+        monkeypatch.setattr(probes, "database_dependency_name", lambda engine: "postgres")
+        _record_persist_failure(IntegrityError("INSERT", {}, Exception("duplicate key")))
+        metrics = coordination_metrics()
+        assert "postgres" not in metrics.dependencies()
+        assert metrics.counter("atlas_conversation_persist_failures_total", error="IntegrityError") == 1
+        _record_persist_failure(OperationalError("SELECT", {}, Exception("server closed the connection")))
+        assert metrics.dependencies()["postgres"]["status"] == "unavailable"

@@ -84,14 +84,21 @@ _SAVE_FLOOR_KEY = SAVE_FLOOR_CONTEXT_KEY
 
 
 def _record_persist_failure(exc: BaseException) -> None:
-    """Count a failed conversation save; a database error marks the DB down (#1129)."""
-    from sqlalchemy.exc import DBAPIError
+    """Count a failed conversation save; a connectivity error marks the DB down (#1129).
+
+    Constraint violations and other statement errors are counted but do not
+    mark the database unavailable: they would raise false outage alerts.
+    """
+    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
     from atlas.core.coordination_metrics import coordination_metrics
 
     metrics = coordination_metrics()
     metrics.incr("atlas_conversation_persist_failures_total", error=type(exc).__name__)
-    if isinstance(exc, DBAPIError):
+    connectivity = isinstance(exc, (OperationalError, InterfaceError)) or (
+        isinstance(exc, DBAPIError) and exc.connection_invalidated
+    )
+    if connectivity:
         from atlas.infrastructure.dependency_probes import database_dependency_name
         from atlas.modules.chat_history import get_engine
 

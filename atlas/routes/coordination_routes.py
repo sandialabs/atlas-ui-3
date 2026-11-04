@@ -73,14 +73,17 @@ async def coordination_status(
     admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
 ) -> Dict[str, Any]:
     metrics = coordination_metrics()
-    dependencies = await probe_all(app_factory, use_cache=not refresh)
+    probed = await probe_all(app_factory, use_cache=not refresh)
+    # The status is the live probes' verdict. A dependency known only from
+    # past errors (no probe for it) is listed but cannot pin "degraded".
+    status = "degraded" if any(d.get("status") != "ok" for d in probed.values()) else "ok"
+    dependencies = {name: dict(report) for name, report in probed.items()}
     counts = get_run_registry().status_counts()
-    states = metrics.dependencies()
-    for name, state in states.items():
+    for name, state in metrics.dependencies().items():
         dependencies.setdefault(name, {}).update({"state": state})
     return {
         "replica": metrics.identity(),
-        "status": "degraded" if any(d.get("status") != "ok" for d in dependencies.values()) else "ok",
+        "status": status,
         "runs": {
             "counts": counts,
             "max_concurrent_per_user": get_run_registry().max_concurrent_runs_per_user,

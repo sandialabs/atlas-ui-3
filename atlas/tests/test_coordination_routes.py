@@ -183,3 +183,41 @@ def test_shutdown_interrupts_runs_and_waits_for_them():
     # Sticky terminal state: the handler's own CANCELLED did not overwrite it.
     assert record.status == RunStatus.FAILED and record.end_reason == "replica_shutdown"
     assert not registry_module._PROJECTION_TASKS
+
+
+def test_dependency_known_only_from_errors_does_not_pin_degraded(client, monkeypatch):
+    """Top-level status comes from live probes; a past error alone is listed, not a verdict."""
+    coordination_metrics().dependency_failed("postgres", ConnectionError("x"), op="conversation_save")
+
+    async def _all_ok(factory, use_cache=True):
+        return {"redis": {"status": "ok"}}
+
+    import atlas.routes.coordination_routes as routes
+
+    monkeypatch.setattr(routes, "probe_all", _all_ok)
+    body = client.get("/admin/coordination", headers=_admin()).json()
+    assert body["status"] == "ok"
+    assert body["dependencies"]["postgres"]["state"]["status"] == "unavailable"
+
+
+def test_shutdown_failure_does_not_skip_cleanup(monkeypatch):
+    """A failing interrupt step is logged; MCP cleanup and shared-infra teardown still run."""
+    import main
+
+    calls = []
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("interrupt failed")
+
+    async def _stop():
+        calls.append("stop_shared_infrastructure")
+
+    import atlas.core.security_config as security_config
+
+    # This module runs with DEBUG_MODE on (admin fixture); startup would refuse it.
+    monkeypatch.setattr(security_config, "validate_debug_configuration", lambda *a, **k: None)
+    monkeypatch.setattr(main, "interrupt_runs_for_shutdown", _boom)
+    monkeypatch.setattr(app_factory, "stop_shared_infrastructure", _stop)
+    with TestClient(app):
+        pass
+    assert calls == ["stop_shared_infrastructure"]

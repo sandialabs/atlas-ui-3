@@ -49,6 +49,7 @@ esac
 if [ -n "$PODMAN_CONTAINER" ]; then
     [ "${#URLS[@]}" -gt 0 ] || die "--podman needs at least one --url of an Atlas replica"
     init_out_dir "outage-$DEPENDENCY"
+    confirm "About to freeze container $PODMAN_CONTAINER for ${DURATION}s ($DEPENDENCY outage)." "$PODMAN_CONTAINER"
     poll_urls() {
         local label="$1" url
         for url in "${URLS[@]}"; do
@@ -85,13 +86,30 @@ fi
 confirm "About to scale $TARGET from $ORIGINAL to 0 for ${DURATION}s ($DEPENDENCY outage)."
 snapshot before
 start_log_capture
-# Always restore, even if observation fails or is interrupted.
-restore() { act kc scale "$TARGET" --replicas="$ORIGINAL" || log "RESTORE FAILED: run: $KUBECTL -n $NAMESPACE scale $TARGET --replicas=$ORIGINAL"; }
-trap 'restore; stop_log_capture' EXIT
+# Always restore, even if observation fails or is interrupted. The trap stays
+# armed until a scale-up has actually succeeded, and a failed restore makes
+# the script exit non-zero instead of reporting success.
+RESTORED=0
+restore() {
+    if act kc scale "$TARGET" --replicas="$ORIGINAL"; then
+        RESTORED=1
+        return 0
+    fi
+    log "RESTORE FAILED: run: $KUBECTL -n $NAMESPACE scale $TARGET --replicas=$ORIGINAL"
+    return 1
+}
+on_exit() {
+    local rc=$?
+    if [ "$RESTORED" != 1 ]; then
+        restore || rc=1
+    fi
+    stop_log_capture
+    exit "$rc"
+}
+trap on_exit EXIT
 act kc scale "$TARGET" --replicas=0
 observe during "$DURATION" 5
-restore
-trap stop_log_capture EXIT
+restore || die "$TARGET was not restored to $ORIGINAL replicas"
 act kc rollout status "$TARGET" --timeout=300s
 observe recovery 45 5
 summarize

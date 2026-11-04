@@ -139,6 +139,14 @@ def _fmt(value: Any) -> str:
     return text
 
 
+def _sample_value(value: float) -> str:
+    """Full precision: ``:g`` keeps 6 digits, which corrupts timestamps and large counters."""
+    number = float(value)
+    if number.is_integer() and abs(number) < 2**53:
+        return str(int(number))
+    return repr(number)
+
+
 def _label_value(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
@@ -373,7 +381,7 @@ class CoordinationMetrics:
                 lines.append(f"# TYPE {family} {kind}")
             merged = {**base, **labels}
             rendered = ",".join(f'{k}="{_label_value(v)}"' for k, v in sorted(merged.items()))
-            lines.append(f"{name}{{{rendered}}} {float(value):g}")
+            lines.append(f"{name}{{{rendered}}} {_sample_value(value)}")
 
         emit("atlas_replica_info", "gauge", {"instance": self.instance_id, "version": self.identity()["version"]}, 1)
         emit("atlas_replica_start_time_seconds", "gauge", {}, self.started_at)

@@ -26,10 +26,15 @@ logger = logging.getLogger(__name__)
 
 DB_PROBE_TIMEOUT_SECONDS = 1.5
 DB_PROBE_CACHE_SECONDS = 2.0
+# A probe still blocked after this long (a black-holed connection that TCP
+# has not given up on yet) is abandoned and a fresh one started, so recovery
+# is noticed within this bound. Costs at most one parked worker thread per
+# interval during such an outage.
+DB_PROBE_STALE_SECONDS = 15.0
 
 # Probe state for this process: the in-flight probe future, the last cached
 # result and when it was taken (monotonic). Mutated in place, never rebound.
-_db_state: Dict[str, Any] = {"inflight": None, "last": None, "last_at": 0.0}
+_db_state: Dict[str, Any] = {"inflight": None, "inflight_at": 0.0, "last": None, "last_at": 0.0}
 
 
 def database_dependency_name(engine: Any) -> str:
@@ -42,6 +47,10 @@ def _select_one(engine: Any) -> None:
     from sqlalchemy import text
 
     with engine.connect() as conn:
+        if engine.dialect.name == "postgresql":
+            # Server-side bound as well; transaction-scoped, so a pooled
+            # connection goes back without it.
+            conn.execute(text("SET LOCAL statement_timeout = 1500"))
         conn.execute(text("SELECT 1"))
 
 
@@ -72,8 +81,14 @@ async def probe_chat_history_db(
     # A probe started on another event loop (tests create one per client)
     # cannot be awaited here; start a fresh one.
     inflight = state["inflight"]
-    if inflight is None or inflight.done() or inflight.get_loop() is not loop:
+    if (
+        inflight is None
+        or inflight.done()
+        or inflight.get_loop() is not loop
+        or now - state["inflight_at"] > DB_PROBE_STALE_SECONDS
+    ):
         inflight = state["inflight"] = loop.run_in_executor(None, _select_one, engine)
+        state["inflight_at"] = now
     started = time.perf_counter()
     metrics = coordination_metrics()
     try:
@@ -121,4 +136,4 @@ async def probe_all(app_factory: Any, *, use_cache: bool = True) -> Dict[str, Di
 
 def reset_probe_cache() -> None:
     """Tests only."""
-    _db_state.update(inflight=None, last=None, last_at=0.0)
+    _db_state.update(inflight=None, inflight_at=0.0, last=None, last_at=0.0)

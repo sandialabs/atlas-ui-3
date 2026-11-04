@@ -18,7 +18,8 @@
 #   ATLAS_PORT          port the API listens on in the pod (default: 8000)
 #   ATLAS_ADMIN_EMAIL   identity sent as X-User-Email for /admin/coordination
 #   ATLAS_AUTH_HEADER   header that carries it             (default: X-User-Email)
-#   ATLAS_PROXY_SECRET  value for X-Proxy-Secret, when FEATURE_PROXY_SECRET_ENABLED
+#   ATLAS_PROXY_SECRET  proxy secret, when FEATURE_PROXY_SECRET_ENABLED (sent over stdin, never argv)
+#   ATLAS_PROXY_SECRET_HEADER  its header name                (default: X-Proxy-Secret)
 #   OUT_DIR             where evidence is written          (default: $TMPDIR/atlas-failure-<name>-<ts>)
 
 set -euo pipefail
@@ -81,12 +82,14 @@ require_target() {
 
 confirm() {
     # Interactive confirmation for anything destructive, unless --yes/--dry-run.
+    # The operator types the target's name (default: the namespace).
+    local token="${2:-$NAMESPACE}"
     [ "$DRY_RUN" = 1 ] && return 0
     [ "$ASSUME_YES" = 1 ] && return 0
-    printf '%s\nType the namespace (%s) to continue: ' "$1" "$NAMESPACE" >&2
+    printf '%s\nType %s to continue: ' "$1" "$token" >&2
     local answer
     read -r answer
-    [ "$answer" = "$NAMESPACE" ] || die "not confirmed"
+    [ "$answer" = "$token" ] || die "not confirmed"
 }
 
 init_out_dir() {
@@ -108,27 +111,35 @@ _container_flag() {
 
 # GET a path on one pod from inside the pod (the image has python, not curl).
 # Prints the response body; never fails the exercise.
+# Headers travel over stdin, built with json.dumps from the environment: the
+# proxy secret never appears in argv (ps, API-server exec audit logs) and
+# values with quotes or backslashes stay valid JSON.
+_request_headers() {
+    local with_admin="$1"
+    WITH_ADMIN="$with_admin" python3 -c '
+import json, os
+headers = {}
+if os.environ.get("WITH_ADMIN") == "1" and os.environ.get("ATLAS_ADMIN_EMAIL"):
+    headers[os.environ.get("ATLAS_AUTH_HEADER") or "X-User-Email"] = os.environ["ATLAS_ADMIN_EMAIL"]
+    if os.environ.get("ATLAS_PROXY_SECRET"):
+        headers[os.environ.get("ATLAS_PROXY_SECRET_HEADER") or "X-Proxy-Secret"] = os.environ["ATLAS_PROXY_SECRET"]
+print(json.dumps(headers))
+'
+}
+
 pod_get() {
     local pod="$1" path="$2" with_admin="${3:-0}"
-    local headers="{}"
-    if [ "$with_admin" = 1 ] && [ -n "${ATLAS_ADMIN_EMAIL:-}" ]; then
-        headers="{\"$ATLAS_AUTH_HEADER\": \"$ATLAS_ADMIN_EMAIL\""
-        if [ -n "${ATLAS_PROXY_SECRET:-}" ]; then
-            headers="$headers, \"X-Proxy-Secret\": \"$ATLAS_PROXY_SECRET\""
-        fi
-        headers="$headers}"
-    fi
     local container_args=()
     mapfile -t container_args < <(_container_flag)
-    kc exec "$pod" "${container_args[@]}" -- python3 -c '
+    _request_headers "$with_admin" | kc exec -i "$pod" "${container_args[@]}" -- python3 -c '
 import json, sys, urllib.request
-req = urllib.request.Request(sys.argv[1], headers=json.loads(sys.argv[2]))
+req = urllib.request.Request(sys.argv[1], headers=json.load(sys.stdin))
 try:
     with urllib.request.urlopen(req, timeout=5) as resp:
         print(resp.read().decode())
 except Exception as exc:
     print(json.dumps({"probe_error": type(exc).__name__, "detail": str(exc)[:200]}))
-' "http://127.0.0.1:${ATLAS_PORT}${path}" "$headers" 2>&1 || echo '{"probe_error": "exec_failed"}'
+' "http://127.0.0.1:${ATLAS_PORT}${path}" 2>&1 || echo '{"probe_error": "exec_failed"}'
 }
 
 # Record health (+ coordination when an admin identity is set) for every pod.

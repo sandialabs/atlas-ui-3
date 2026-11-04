@@ -4,6 +4,7 @@ Provides simple health check endpoint for monitoring tools, orchestrators,
 and load balancers to verify service availability.
 """
 
+import asyncio
 import logging
 import subprocess
 from datetime import datetime, timezone
@@ -102,19 +103,26 @@ async def health_check() -> Dict[str, Any]:
     report["checks"] = {"chat_history": outcomes.get("chat_history", "disabled")}
     if report["checks"]["chat_history"] == "failed":
         report["status"] = "degraded"
-    elif report["checks"]["chat_history"] == "ok":
-        # The startup outcome alone hid an outage that began after boot
-        # (issue #1129): probe the database now, bounded and single-flight.
-        from atlas.infrastructure.dependency_probes import probe_chat_history_db
 
-        db = await probe_chat_history_db(app_factory)
-        if db["status"] != "disabled":
-            report["checks"]["chat_history_db"] = db["status"]
-            if db["status"] != "ok":
-                report["status"] = "degraded"
+    # The startup outcome alone hid a database outage that began after boot
+    # (issue #1129): probe the database now (bounded, single-flight), at the
+    # same time as the session store so the two bounds do not add up.
+    from atlas.infrastructure.dependency_probes import probe_chat_history_db
 
-    if getattr(app_factory, "redis", None) is not None:
-        store = await app_factory.session_store_health()
+    async def _skip() -> None:
+        return None
+
+    has_redis = getattr(app_factory, "redis", None) is not None
+    db, store = await asyncio.gather(
+        probe_chat_history_db(app_factory) if report["checks"]["chat_history"] == "ok" else _skip(),
+        app_factory.session_store_health() if has_redis else _skip(),
+    )
+    if db is not None and db["status"] != "disabled":
+        report["checks"]["chat_history_db"] = db["status"]
+        if db["status"] != "ok":
+            report["status"] = "degraded"
+
+    if store is not None:
         # This endpoint is unauthenticated: report reachability only. The
         # store's address, namespace and counters stay in the startup and
         # error logs, not in an anonymous response.
