@@ -74,6 +74,32 @@ describe('useChatTopVar', () => {
     expect(value()).toBe('125px')
   })
 
+  it('republishes on visual viewport resize and on ResizeObserver callbacks', () => {
+    const vv = new EventTarget()
+    const originalVV = window.visualViewport
+    const originalRO = globalThis.ResizeObserver
+    let observed = null
+    globalThis.ResizeObserver = class {
+      constructor(cb) { observed = cb }
+      observe() {}
+      disconnect() {}
+    }
+    Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true })
+    try {
+      mount()
+      box.chatTop += 10
+      act(() => { vv.dispatchEvent(new Event('resize')) })
+      expect(value()).toBe('87px')
+      box.chatTop += 10
+      act(() => { observed() })
+      expect(value()).toBe('97px')
+    } finally {
+      cleanup()
+      Object.defineProperty(window, 'visualViewport', { value: originalVV, configurable: true })
+      globalThis.ResizeObserver = originalRO
+    }
+  })
+
   it('keeps the last value while the chat area has no layout box', () => {
     mount()
     box.visible = false

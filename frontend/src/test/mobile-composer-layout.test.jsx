@@ -202,6 +202,19 @@ describe('phone-width composer layout', () => {
     expect(Number(floor[1])).toBeLessThanOrEqual(3)
   })
 
+  it('publishes the chat top that the phone panel cap reads, and clears it', () => {
+    // jsdom has no layout, so give elements a box for this render.
+    const spy = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}])
+    try {
+      renderChat()
+      expect(document.documentElement.style.getPropertyValue('--atlas-chat-top')).toBe('0px')
+      cleanup()
+      expect(document.documentElement.style.getPropertyValue('--atlas-chat-top')).toBe('')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('keeps the transcript padding the sticky code-block toolbar offsets by', () => {
     // #1151 pulls the sticky code-block header up by the transcript's own
     // padding (p-2 under sm, p-4 from sm) so it sits flush with the top. The
