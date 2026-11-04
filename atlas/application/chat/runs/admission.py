@@ -162,7 +162,9 @@ async def renew_live_claims() -> None:
         [r.claim for r in live], {r.run_id: r.status.value for r in live}
     )
     for record in live:
-        if held.get(record.run_id) is False:
+        # A run that ended (and released) while the beat was in flight is
+        # refused by renewal too; that is not a lost claim.
+        if held.get(record.run_id) is False and record.claim is not None and not record.is_terminal:
             # Fencing lands with the lease work; for now say so loudly.
             logger.warning(
                 "Run %s lost its cluster-wide claim while still running on this replica",

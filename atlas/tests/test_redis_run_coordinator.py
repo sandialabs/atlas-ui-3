@@ -205,3 +205,16 @@ def test_key_parts_cannot_collide():
     assert key_part("a:b@x") != key_part("a")
     assert key_part("a:b@x") + ":" + key_part("c") != key_part("a") + ":" + key_part("b@x:c")
     assert key_part("100%") == "100%25"
+
+
+async def test_renew_after_a_lapse_does_not_retake_the_slot(server):
+    """A lease that lapsed is lost even if nothing took the conversation: its slot
+    may already count for another run, so re-taking it could exceed the cap."""
+    a = _coordinator(server, "a", lease_seconds=0.2)
+    lapsed = await _claim(a, "run-1", "conv-1", limit=1)
+    await asyncio.sleep(0.3)
+    fresh = await _claim(a, "run-2", "conv-2", limit=1)
+
+    assert await a.renew([lapsed], {}) == {"run-1": False}
+    assert await _user_slots(a) == 1
+    assert await a.renew([fresh], {}) == {"run-2": True}

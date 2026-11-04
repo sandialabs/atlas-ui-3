@@ -96,7 +96,7 @@ Rules every script follows:
   the same run holds.
 - **Release is final.** Renewal refuses a record in a terminal status, so a
   heartbeat that races the release cannot take the slot back.
-- **Renewal reports loss.** The owner renews every live claim every
+- **Renewal reports loss.** A lapsed lease is never re-taken (its slot may already count for another run). The owner renews every live claim every
   `RUN_LEASE_RENEW_INTERVAL_SECONDS` (10 s, `run_lease_heartbeat` in the app
   lifespan). It gets `False` for a claim it no longer holds, because the claim
   expired and another run took the conversation, or because it was released

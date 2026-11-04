@@ -118,8 +118,11 @@ local current = redis.call('HGET', KEYS[1], 'status')
 if current == 'completed' or current == 'failed' or current == 'cancelled' then
   return 0
 end
-local holder = redis.call('GET', KEYS[2])
-if holder and holder ~= ARGV[1] then return 0 end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+-- A lapsed lease is lost, not re-taken: its slot may already be counted for
+-- another run, and re-adding it here would put the user over the cap.
+local slot = redis.call('ZSCORE', KEYS[3], ARGV[1])
+if (not slot) or tonumber(slot) <= now then return 0 end
 local lease = tonumber(ARGV[5])
 local expires = now + lease
 redis.call('SET', KEYS[2], ARGV[1], 'PX', lease)
