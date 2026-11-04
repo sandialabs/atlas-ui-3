@@ -14,7 +14,8 @@
 #   staging.sh status                       pods, endpoints and recent events
 #   staging.sh validate                     validate_replicas.py against every API pod
 #   staging.sh failover-drill               delete a pod under a live socket, resume elsewhere
-#   staging.sh teardown [--purge]           delete everything (--purge also the PVCs)
+#   staging.sh stamp-head --yes             record a create_all-built schema as current (one-off pod)
+#   staging.sh teardown [--purge]           delete everything but the data volumes (--purge: those too)
 #
 # Environment:
 #   ATLAS_KUBE_CONTEXT  kube context to use (required for cluster commands)
@@ -136,7 +137,7 @@ cmd_render() {
 wait_rollout() {
     kc rollout status statefulset/atlas-postgres --timeout=300s
     kc rollout status deployment/atlas-redis --timeout=300s
-    kc rollout status deployment/atlas-minio --timeout=300s
+    kc rollout status statefulset/atlas-minio --timeout=300s
     kc rollout status deployment/atlas-api --timeout=900s
 }
 
@@ -237,16 +238,53 @@ cmd_failover_drill() {
     kc rollout status deployment/atlas-api --timeout=900s
 }
 
+# A database built by an Atlas startup (create_all) has no alembic_version, so
+# every pod's migrate init container refuses it and no API pod runs to exec
+# into. Stamp it from a one-off pod with the Deployment's own image and Secret.
+cmd_stamp_head() {
+    [ "${1:-}" = "--yes" ] || die "stamp-head records the CURRENT schema as the image's Alembic head without migrating it. Check the schema matches this release first, then run: staging.sh stamp-head --yes"
+    local image secret overrides
+    image="$(kc get deployment atlas-api -o jsonpath='{.spec.template.spec.initContainers[0].image}')"
+    secret="$(kc get deployment atlas-api \
+        -o jsonpath='{.spec.template.spec.initContainers[0].env[?(@.name=="CHAT_HISTORY_DB_URL")].valueFrom.secretKeyRef.name}')"
+    [ -n "$image" ] && [ -n "$secret" ] || die "could not read the image and Secret from deployment/atlas-api"
+    overrides="$("$PYTHON" - "$image" "$secret" <<'PY'
+import json, sys
+image, secret = sys.argv[1:3]
+print(json.dumps({"spec": {
+    "automountServiceAccountToken": False,
+    "securityContext": {"runAsNonRoot": True, "seccompProfile": {"type": "RuntimeDefault"}},
+    "containers": [{
+        "name": "atlas-stamp-head",
+        "image": image,
+        "command": ["alembic", "-c", "/app/alembic.ini", "stamp", "head"],
+        "env": [{"name": "CHAT_HISTORY_DB_URL",
+                 "valueFrom": {"secretKeyRef": {"name": secret, "key": "CHAT_HISTORY_DB_URL"}}}],
+        "resources": {"requests": {"cpu": "100m", "memory": "256Mi"},
+                      "limits": {"cpu": "1", "memory": "512Mi"}},
+        "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
+    }],
+}}))
+PY
+)"
+    kc run atlas-stamp-head --rm -i --restart=Never --image "$image" --overrides "$overrides"
+    echo "Stamped. Pods held in Init retry their migrate container and continue."
+}
+
 cmd_teardown() {
     local dir
     new_tmp dir; dir="$TMP"
     ATLAS_IMAGE="${ATLAS_IMAGE:-atlas-ui-3:teardown}" build_dir "$dir"
     [ -f "$SECRETS_FILE" ] || die "$SECRETS_FILE is missing (needed to render what to delete)"
     kc delete -k "$dir" --ignore-not-found --wait=true
+    # StatefulSet claims outlive `delete -k`; their names are fixed by the
+    # claim template, StatefulSet name and ordinal.
+    local claims=(data-atlas-postgres-0 data-atlas-minio-0)
     if [ "${1:-}" = "--purge" ]; then
-        kc delete pvc -l app.kubernetes.io/name=atlas-postgres --ignore-not-found
+        kc delete pvc "${claims[@]}" --ignore-not-found
     else
-        echo "PostgreSQL PVC kept; 'staging.sh teardown --purge' deletes it"
+        echo "Kept the PostgreSQL and MinIO volumes (${claims[*]}): chat history and"
+        echo "attachments survive a redeploy. 'staging.sh teardown --purge' deletes them."
     fi
 }
 
@@ -261,8 +299,9 @@ main() {
         status) cmd_status "$@" ;;
         validate) cmd_validate "$@" ;;
         failover-drill) cmd_failover_drill "$@" ;;
+        stamp-head) cmd_stamp_head "$@" ;;
         teardown) cmd_teardown "$@" ;;
-        *) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; [ -z "$command" ] || exit 2 ;;
+        *) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; [ -z "$command" ] || exit 2 ;;
     esac
 }
 

@@ -20,9 +20,9 @@ Everything lives under `deploy/kubernetes/`:
 | Path | Contents |
 |------|----------|
 | `base/` | The `atlas-api` Deployment, its Service (`sessionAffinity: None`) and PodDisruptionBudget, and the non-secret settings (`api.env`). It can't be deployed on its own. |
-| `overlays/staging/` | Three replicas, plus staging-only Redis (`atlas-redis`), PostgreSQL (`atlas-postgres`, StatefulSet with a 5Gi PVC) and MinIO (`atlas-minio`, 5Gi PVC), and the `atlas-secrets` Secret generated from `secrets.env` |
+| `overlays/staging/` | Three replicas, plus staging-only Redis (`atlas-redis`), PostgreSQL (`atlas-postgres`) and MinIO (`atlas-minio`), both StatefulSets with a 5Gi volume claim, and the `atlas-secrets` Secret generated from `secrets.env` |
 | `overlays/staging-openshift/` | The same overlay without fixed UIDs on the bundled services, for the restricted-v2 SCC |
-| `staging.sh` | The only supported entry point: secrets, apply, scale, restart, validate, failover drill, teardown |
+| `staging.sh` | The only supported entry point: secrets, apply, scale, restart, validate, failover drill, schema stamp, teardown |
 | `validate_replicas.py` | Checks each replica separately (see [Validation](#validation)) |
 | `podman_rehearsal.py` | Runs the rendered overlay with podman when no cluster is available |
 
@@ -42,16 +42,30 @@ in an overlay of your own.
   brings the chat-history database to the image's Alembic head while holding
   a PostgreSQL advisory lock, so when several pods start together one applies
   the pending migrations and the rest wait, then find nothing to do. The
-  database URL comes from the Secret. Two other cases:
+  database URL comes from the Secret.
+
+  Every wait is bounded, so a stuck migration fails the init container
+  (and the pod restarts it) instead of holding a rollout forever:
+
+  | Wait | Bound | Exit code when exceeded |
+  |------|-------|-------------------------|
+  | Database reachable | `ATLAS_MIGRATION_WAIT_SECONDS` (300), each connect attempt 10s | 1 |
+  | Another pod's migration holding the lock | `ATLAS_MIGRATION_LOCK_WAIT_SECONDS` (600), logged every 30s | 3 |
+  | A migration statement waiting on a table lock | PostgreSQL `lock_timeout`, `ATLAS_MIGRATION_DDL_LOCK_TIMEOUT_SECONDS` (60) | 1 |
+
+  Two other cases:
   - A database at a revision the image doesn't know, such as a rollback
     after a newer release migrated, is left unchanged with a warning.
     Migrations are additive and are never downgraded automatically.
   - A database whose tables were created by an Atlas startup has no
     `alembic_version` table. The init container refuses it and exits with
     status 2, so the pod stays in `Init` and a rollout stalls with the old
-    pods still serving. Check that the schema matches the current release,
-    then record it once with `alembic -c /app/alembic.ini stamp head`, for
-    example from `kubectl exec` into a running API pod.
+    pods still serving. On a fresh install no API pod is running at all,
+    so there is nothing to `kubectl exec` into. Check that the schema
+    matches the current release, then run `./staging.sh stamp-head --yes`.
+    It starts a one-off pod with the Deployment's image and Secret that
+    runs `alembic -c /app/alembic.ini stamp head`; the waiting pods then
+    find the schema at head and start.
 
   The init container is needed because the app's own `create_all` at startup
   can't run concurrently: when replicas start together against an empty
@@ -233,8 +247,8 @@ connection budgets, no committed credentials, and no fixed UIDs on OpenShift.
 ### Teardown
 
 ```bash
-./staging.sh teardown           # keeps the PostgreSQL PVC
-./staging.sh teardown --purge   # also deletes it
+./staging.sh teardown           # keeps the data volumes: data-atlas-postgres-0, data-atlas-minio-0
+./staging.sh teardown --purge   # also deletes them (chat history and attachments)
 ```
 
 ## Not shared between replicas (yet)

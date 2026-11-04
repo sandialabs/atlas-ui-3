@@ -10,11 +10,12 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
 
 from atlas.modules.chat_history import schema_migration
 from atlas.modules.chat_history.database import init_database, reset_engine
 from atlas.modules.chat_history.schema_migration import (
+    DatabaseUnreachable,
+    MigrationLockTimeout,
     MigrationRefused,
     current_revisions,
     default_alembic_ini,
@@ -96,7 +97,7 @@ def test_retries_an_unreachable_database_until_the_deadline(monkeypatch):
     clock = iter([0.0, 0.0, 1.0, 2.0, 3.0, 99.0])
     # Replace the module's clock only: the driver uses time.monotonic too.
     monkeypatch.setattr(schema_migration, "time", SimpleNamespace(monotonic=lambda: next(clock)))
-    with pytest.raises(OperationalError):
+    with pytest.raises(DatabaseUnreachable, match="unreachable after 10s"):
         upgrade_to_head(
             "postgresql+psycopg://atlas:x@127.0.0.1:1/atlas?connect_timeout=1",
             wait_seconds=10,
@@ -116,3 +117,66 @@ def test_main_exit_codes(monkeypatch, tmp_path):
         reset_engine()
     monkeypatch.setenv("CHAT_HISTORY_DB_URL", f"sqlite:///{legacy}")
     assert schema_migration.main(["--wait-seconds", "0"]) == 2
+
+
+class _FakeLockConnection:
+    """Answers pg_try_advisory_lock from a script; records statements."""
+
+    def __init__(self, answers, fail_on=None):
+        self.answers = list(answers)
+        self.statements = []
+        self.fail_on = fail_on
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        self.statements.append(sql)
+        if self.fail_on and self.fail_on in sql:
+            raise RuntimeError("connection is gone")
+        return SimpleNamespace(scalar=lambda: self.answers.pop(0))
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        if self.fail_on == "rollback":
+            raise RuntimeError("connection is gone")
+
+
+def test_lock_is_polled_until_the_other_migration_releases_it(monkeypatch):
+    clock = iter([0.0, 0.0, 1.0, 2.0])
+    monkeypatch.setattr(schema_migration, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    connection = _FakeLockConnection([False, False, True])
+    sleeps = []
+    schema_migration._acquire_lock(connection, 60, sleeps.append)
+    assert len(sleeps) == 2
+    assert all("pg_try_advisory_lock" in sql for sql in connection.statements)
+
+
+def test_lock_wait_is_bounded(monkeypatch):
+    clock = iter([0.0, 0.0, 5.0, 11.0])
+    monkeypatch.setattr(schema_migration, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    with pytest.raises(MigrationLockTimeout, match="over 10s"):
+        schema_migration._acquire_lock(_FakeLockConnection([False, False, False]), 10, lambda _: None)
+
+
+def test_releasing_the_lock_on_a_dead_connection_does_not_raise(caplog):
+    with caplog.at_level("WARNING", logger="atlas.schema_migration"):
+        schema_migration._release_lock(_FakeLockConnection([], fail_on="rollback"))
+    assert "closing the connection releases it" in caplog.text
+
+
+def test_connect_attempts_are_bounded_unless_the_url_says_otherwise():
+    _, args = schema_migration._engine_args("postgresql+psycopg://a:b@db/x")
+    assert args["connect_timeout"] == schema_migration.DEFAULT_CONNECT_TIMEOUT_SECONDS
+    _, args = schema_migration._engine_args("postgresql+psycopg://a:b@db/x?connect_timeout=3")
+    assert "connect_timeout" not in args
+    _, args = schema_migration._engine_args("sqlite:///x.db")
+    assert args == {}
+
+
+def test_main_reports_a_lock_timeout_with_its_own_exit_code(monkeypatch):
+    def timeout(**_):
+        raise MigrationLockTimeout("held too long")
+
+    monkeypatch.setattr(schema_migration, "upgrade_to_head", timeout)
+    assert schema_migration.main([]) == 3

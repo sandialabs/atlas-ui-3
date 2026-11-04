@@ -2,17 +2,19 @@
 # shared object storage: USE_MOCK_S3 is per-process and would hide a file
 # uploaded through one replica from the others. Atlas creates the bucket on
 # startup if it is missing.
+#
+# A StatefulSet, like PostgreSQL, so its volume has the same lifecycle:
+# `staging.sh teardown` keeps both claims and `teardown --purge` deletes both.
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: atlas-minio
   labels:
     app.kubernetes.io/name: atlas-minio
     app.kubernetes.io/component: object-storage
 spec:
+  serviceName: atlas-minio
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: atlas-minio
@@ -77,24 +79,17 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: atlas-minio-data
         - name: tmp
           emptyDir: {}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: atlas-minio-data
-  labels:
-    app.kubernetes.io/name: atlas-minio
-    app.kubernetes.io/component: object-storage
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 5Gi
+  volumeClaimTemplates:
+    # Creates the claim data-atlas-minio-0.
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
 ---
 apiVersion: v1
 kind: Service

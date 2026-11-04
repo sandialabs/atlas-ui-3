@@ -24,7 +24,7 @@ patches:
         path: /spec/template/spec/securityContext/runAsGroup
       - op: remove
         path: /spec/template/spec/securityContext/fsGroup
-  - target: {kind: Deployment, name: atlas-minio}
+  - target: {kind: StatefulSet, name: atlas-minio}
     patch: |-
       - op: remove
         path: /spec/template/spec/securityContext/runAsUser

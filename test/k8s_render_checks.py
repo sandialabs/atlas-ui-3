@@ -244,6 +244,18 @@ def _run(tree: Tree) -> None:
                                  text=True, capture_output=True).stdout.split()
         assert not [p for p in tracked if p.endswith("/secrets.env")], "secrets.env is tracked"
 
+    @check("data volumes outlive a plain teardown: StatefulSet claims only, named as staging.sh expects")
+    def _():
+        assert not [d for d in docs if d["kind"] == "PersistentVolumeClaim"], \
+            "a standalone PVC would be deleted by `delete -k` (plain teardown)"
+        claims = sorted(
+            f"{t['metadata']['name']}-{d['metadata']['name']}-0"
+            for d in docs if d["kind"] == "StatefulSet" for t in d["spec"].get("volumeClaimTemplates", [])
+        )
+        assert claims == ["data-atlas-minio-0", "data-atlas-postgres-0"], claims
+        script = (DEPLOY / "staging.sh").read_text()
+        assert "claims=(data-atlas-postgres-0 data-atlas-minio-0)" in script, "teardown --purge misses a claim"
+
     @check("OpenShift flavor pins no UID or fsGroup (restricted-v2 SCC assigns them)")
     def _():
         text = yaml.safe_dump_all(openshift)

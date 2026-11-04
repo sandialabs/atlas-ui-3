@@ -168,7 +168,7 @@ class Rehearsal:
         self.start_backend("StatefulSet", "atlas-postgres", "atlas-postgres",
                            ["--tmpfs", "/var/lib/postgresql/data", "--tmpfs", "/var/run/postgresql"])
         self.start_backend("Deployment", "atlas-redis", "atlas-redis", [])
-        self.start_backend("Deployment", "atlas-minio", "atlas-minio", ["--tmpfs", "/bitnami/minio/data"])
+        self.start_backend("StatefulSet", "atlas-minio", "atlas-minio", ["--tmpfs", "/bitnami/minio/data"])
 
     def migrate_concurrently(self) -> None:
         init = self.api["spec"]["template"]["spec"]["initContainers"][0]

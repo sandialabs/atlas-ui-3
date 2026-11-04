@@ -85,6 +85,7 @@ spec:
         - name: run
           emptyDir: {}
   volumeClaimTemplates:
+    # Creates the claim data-atlas-postgres-0.
     - metadata:
         name: data
       spec:

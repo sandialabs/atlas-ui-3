@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from sqlalchemy import create_engine, inspect, pool, text
+from sqlalchemy import create_engine, inspect, make_url, pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 
@@ -50,6 +50,20 @@ _SENTINEL_TABLES = ("conversations", "messages")
 
 class MigrationRefused(RuntimeError):
     """The database is in a state the runner will not change on its own."""
+
+
+class DatabaseUnreachable(RuntimeError):
+    """No connection could be opened before the wait ran out."""
+
+
+class MigrationLockTimeout(RuntimeError):
+    """Another migration held the advisory lock for longer than the wait."""
+
+
+# libpq-based drivers accept connect_timeout; without it one connect attempt to
+# a black-holed address can hang far past the retry deadline.
+_LIBPQ_DRIVERS = ("psycopg", "psycopg2")
+DEFAULT_CONNECT_TIMEOUT_SECONDS = 10
 
 
 def default_alembic_ini() -> Path:
@@ -118,10 +132,57 @@ def _connect_with_retry(engine, wait_seconds: float, sleep: Callable[[float], No
             return engine.connect()
         except OperationalError as exc:
             if time.monotonic() >= deadline:
-                raise
+                raise DatabaseUnreachable(f"Database unreachable after {wait_seconds:.0f}s: {_reason(exc)}") from exc
             logger.info("Database not reachable yet (%s); retrying in %.0fs", _reason(exc), delay)
             sleep(delay)
             delay = min(delay * 2, 10.0)
+
+
+def _acquire_lock(connection: Connection, wait_seconds: float, sleep: Callable[[float], None]) -> None:
+    """Take the advisory lock, polling so the wait is bounded and visible."""
+    deadline = time.monotonic() + wait_seconds
+    next_report = 0.0
+    while True:
+        acquired = connection.execute(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": ADVISORY_LOCK_KEY}
+        ).scalar()
+        connection.commit()
+        if acquired:
+            return
+        now = time.monotonic()
+        if now >= deadline:
+            raise MigrationLockTimeout(
+                f"Another migration held the schema migration lock for over {wait_seconds:.0f}s; "
+                "check the other pods' migrate init containers (or pg_locks) and re-run"
+            )
+        if now >= next_report:
+            logger.info("Another pod is migrating; waiting for the schema migration lock")
+            next_report = now + 30.0
+        sleep(min(2.0, max(0.0, deadline - now)))
+
+
+def _release_lock(connection: Connection) -> None:
+    """Best effort: closing the connection releases a session lock anyway."""
+    try:
+        connection.rollback()
+        connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": ADVISORY_LOCK_KEY})
+        connection.commit()
+    except Exception as exc:  # never hide the error that brought us here
+        logger.warning("Could not release the migration lock explicitly (%s); closing the connection releases it",
+                       type(exc).__name__)
+
+
+def _engine_args(db_url: str) -> tuple[str, dict]:
+    """URL and connect args for the migration engine (bounded connect attempts)."""
+    url, connect_args = pop_prepare_threshold_query(db_url)
+    parsed = make_url(url)
+    if (
+        parsed.get_backend_name() == "postgresql"
+        and parsed.get_driver_name() in _LIBPQ_DRIVERS
+        and "connect_timeout" not in parsed.query
+    ):
+        connect_args = {**connect_args, "connect_timeout": DEFAULT_CONNECT_TIMEOUT_SECONDS}
+    return url, connect_args
 
 
 def upgrade_to_head(
@@ -129,12 +190,19 @@ def upgrade_to_head(
     ini_path: Optional[Path] = None,
     wait_seconds: float = 300.0,
     sleep: Callable[[float], None] = time.sleep,
+    lock_wait_seconds: float = 600.0,
+    ddl_lock_timeout_seconds: int = 60,
 ) -> set[str]:
     """Upgrade the chat-history database to head; returns the revisions applied over.
 
     Holds the PostgreSQL advisory lock for the whole run so concurrent callers
     serialize. Other databases (SQLite in tests) are upgraded without a
     lock. Alembic has no DuckDB support; DuckDB deployments rely on create_all.
+
+    Every wait is bounded: connecting (``wait_seconds``, each attempt with a
+    connect timeout), the advisory lock (``lock_wait_seconds``) and each DDL
+    statement's table locks (``lock_timeout``), so a stuck migration fails the
+    init container instead of holding a rollout forever.
     """
     from alembic import command
 
@@ -145,15 +213,18 @@ def upgrade_to_head(
     config = _alembic_config(ini_path)
     heads = head_revisions(ini_path)
 
-    url, connect_args = pop_prepare_threshold_query(db_url)
+    url, connect_args = _engine_args(db_url)
     engine = create_engine(url, poolclass=pool.NullPool, connect_args=connect_args)
     is_postgres = engine.dialect.name == "postgresql"
     try:
         connection = _connect_with_retry(engine, wait_seconds, sleep)
         try:
             if is_postgres:
-                logger.info("Waiting for the schema migration lock")
-                connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": ADVISORY_LOCK_KEY})
+                _acquire_lock(connection, lock_wait_seconds, sleep)
+                # Session-wide: a migration that waits on a table lock (held
+                # by a long transaction of a running replica) fails instead
+                # of blocking that table for everyone behind it.
+                connection.execute(text(f"SET lock_timeout = '{int(ddl_lock_timeout_seconds)}s'"))
                 connection.commit()
             try:
                 before = current_revisions(connection)
@@ -186,11 +257,12 @@ def upgrade_to_head(
                 return before
             finally:
                 if is_postgres:
-                    connection.rollback()
-                    connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": ADVISORY_LOCK_KEY})
-                    connection.commit()
+                    _release_lock(connection)
         finally:
-            connection.close()
+            try:
+                connection.close()
+            except Exception:  # the original error, if any, matters more
+                logger.debug("Closing the migration connection failed", exc_info=True)
     finally:
         engine.dispose()
 
@@ -203,16 +275,38 @@ def main(argv: Optional[list[str]] = None) -> int:
         default=float(os.environ.get("ATLAS_MIGRATION_WAIT_SECONDS", "300")),
         help="How long to keep retrying while the database is unreachable (default 300)",
     )
+    parser.add_argument(
+        "--lock-wait-seconds",
+        type=float,
+        default=float(os.environ.get("ATLAS_MIGRATION_LOCK_WAIT_SECONDS", "600")),
+        help="How long to wait for another pod's migration to release the lock (default 600)",
+    )
+    parser.add_argument(
+        "--ddl-lock-timeout-seconds",
+        type=int,
+        default=int(os.environ.get("ATLAS_MIGRATION_DDL_LOCK_TIMEOUT_SECONDS", "60")),
+        help="PostgreSQL lock_timeout for the migration's statements (default 60)",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("alembic.runtime.plugins").setLevel(logging.WARNING)
     try:
-        upgrade_to_head(wait_seconds=args.wait_seconds)
+        upgrade_to_head(
+            wait_seconds=args.wait_seconds,
+            lock_wait_seconds=args.lock_wait_seconds,
+            ddl_lock_timeout_seconds=args.ddl_lock_timeout_seconds,
+        )
     except MigrationRefused as exc:
         logger.error("%s", exc)
         return 2
+    except DatabaseUnreachable as exc:
+        logger.error("%s", exc)
+        return 1
+    except MigrationLockTimeout as exc:
+        logger.error("%s", exc)
+        return 3
     except OperationalError as exc:
-        logger.error("Database unreachable after %.0fs: %s", args.wait_seconds, _reason(exc))
+        logger.error("Migration failed: %s", _reason(exc))
         return 1
     return 0
 
