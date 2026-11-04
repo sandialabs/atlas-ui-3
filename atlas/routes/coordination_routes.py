@@ -67,10 +67,13 @@ def _gauges(counts: Dict[str, int]) -> List[Tuple[str, Dict[str, Any], float]]:
 @coordination_router.get("")
 async def coordination_status(
     include_terminal: bool = Query(False, description="Also list retained terminal runs."),
+    refresh: bool = Query(
+        False, description="Probe the database now instead of reusing a result up to 2 s old."
+    ),
     admin_user: str = Depends(require_admin),  # noqa: ARG001 (enforces auth)
 ) -> Dict[str, Any]:
     metrics = coordination_metrics()
-    dependencies = await probe_all(app_factory, use_cache=False)
+    dependencies = await probe_all(app_factory, use_cache=not refresh)
     counts = get_run_registry().status_counts()
     states = metrics.dependencies()
     for name, state in states.items():

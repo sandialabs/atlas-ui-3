@@ -82,9 +82,15 @@ def test_graceful_stop_reports_run_interrupted(cluster):
     """
     user = cluster.new_user()
     key = f"term-{user.split('@')[0]}"
-    handle = cluster.launch_ok(cluster.a, user, directive(key, tool="side_effect", sleep=3, steps=3))
+    # The tool records its side effect, then sleeps: 8 s per step leaves a wide
+    # margin for the stop to land while step 1 is still running, so a second
+    # record could only come from a replay.
+    handle = cluster.launch_ok(cluster.a, user, directive(key, tool="side_effect", sleep=8, steps=3))
     run_id, conversation_id = handle["run_id"], handle["conversation_id"]
     cluster.wait_side_effects(key, 1)
+    status, body = cluster.run_status(cluster.a, run_id)
+    assert status == 200 and body["status"] == "running", (status, body)
+    assert len(cluster.side_effects(key)) == 1, "step 2 started before the stop; widen the sleep"
 
     cluster.a.stop()
 

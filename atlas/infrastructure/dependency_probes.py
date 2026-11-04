@@ -90,7 +90,10 @@ async def probe_chat_history_db(
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
         }
         metrics.dependency_ok(name)
-    _db_last, _db_last_at = dict(result), time.monotonic()
+    if use_cache:
+        # A forced probe (use_cache=False) answers its caller only; it does not
+        # replace what the cached path serves.
+        _db_last, _db_last_at = dict(result), time.monotonic()
     return result
 
 

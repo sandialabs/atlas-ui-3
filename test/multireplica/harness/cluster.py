@@ -185,7 +185,8 @@ class Cluster:
 
     def coordination(self, replica: Replica, *, include_terminal: bool = False) -> Dict[str, Any]:
         """``GET /admin/coordination`` on ``replica`` (issue #1129)."""
-        path = "/admin/coordination" + ("?include_terminal=true" if include_terminal else "")
+        # refresh: tests poll for state changes and must not read a cached probe.
+        path = "/admin/coordination?refresh=true" + ("&include_terminal=true" if include_terminal else "")
         status, body = self.call(replica, "GET", path, user=ADMIN_USER, timeout=10)
         assert status == 200 and isinstance(body, dict), (status, body)
         return body

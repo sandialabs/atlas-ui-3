@@ -84,7 +84,8 @@ JSON for this replica:
 ```
 
 `?include_terminal=true` also lists the terminal runs still retained (30
-minutes). Runs are listed by id only: no user, conversation or prompt.
+minutes). The database probe result is reused for up to 2 s, so frequent
+polling costs at most one `SELECT 1` per 2 s; `?refresh=true` forces a new one. Runs are listed by id only: no user, conversation or prompt.
 
 ### `GET /admin/coordination/metrics` (admin)
 

@@ -67,7 +67,7 @@ def test_coordination_status_includes_terminal_on_request(client):
     registry = get_run_registry()
     record = registry.start(conversation_id="conv-1", user_email="someone@example.com")
     registry.interrupt_active()
-    body = client.get("/admin/coordination?include_terminal=true", headers=_admin()).json()
+    body = client.get("/admin/coordination?include_terminal=true&refresh=true", headers=_admin()).json()
     [item] = body["runs"]["items"]
     assert item["outcome"] == "interrupted" and item["end_reason"] == "replica_shutdown"
     assert item["run_id"] == record.run_id
@@ -140,6 +140,24 @@ def test_database_probe_is_bounded_and_single_flight(monkeypatch, fake_engine):
     assert first["status"] == second["status"] == "unavailable"
     assert first["error"] == "Timeout"
     assert len(calls) == 1  # the hung probe was reused, not stacked
+    assert dependency_probes._db_last is None  # forced probes do not populate the cache
+
+
+def test_cached_probe_is_reused_within_the_window(monkeypatch, fake_engine):
+    calls = []
+    monkeypatch.setattr(app_factory, "conversation_repository", object())
+    monkeypatch.setattr(dependency_probes, "_select_one", lambda engine: calls.append(1))
+    monkeypatch.setattr(dependency_probes, "database_dependency_name", lambda engine: "postgres")
+
+    async def _probe():
+        a = await dependency_probes.probe_chat_history_db(app_factory)
+        b = await dependency_probes.probe_chat_history_db(app_factory)
+        c = await dependency_probes.probe_chat_history_db(app_factory, use_cache=False)
+        return a, b, c
+
+    a, b, c = asyncio.run(_probe())
+    assert a["status"] == b["status"] == c["status"] == "ok"
+    assert len(calls) == 2  # the second call was served from cache; the forced one probed
 
 
 def test_shutdown_interrupts_runs_and_waits_for_them():

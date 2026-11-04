@@ -153,8 +153,11 @@ snapshot() {
     done
 }
 
-# Stream [COORD] lines from every current Atlas pod into $OUT_DIR/coord-<pod>.log.
-# Pods created later (replacements) are picked up by follow_new_pods.
+# Stream every current Atlas pod's log into $OUT_DIR/pod-<pod>.log; the [COORD]
+# lines are filtered out of those files afterwards (summarize). Pods created
+# later (replacements) are picked up by follow_new_pods. The follower is a
+# single background process, not a pipeline, so stop_log_capture can kill it
+# without leaving children behind.
 start_log_capture() {
     [ "$DRY_RUN" = 1 ] && { printf 'DRY-RUN: stream [COORD] logs of pods matching %s\n' "$ATLAS_SELECTOR"; return 0; }
     local pod
@@ -167,8 +170,10 @@ _capture_pod() {
     local pod="$1"
     [ -e "$OUT_DIR/.capturing-$pod" ] && return 0
     touch "$OUT_DIR/.capturing-$pod"
-    ( kc logs -f --since=1s "$pod" ${ATLAS_CONTAINER:+-c "$ATLAS_CONTAINER"} 2>/dev/null \
-        | grep --line-buffered '\[COORD\]' > "$OUT_DIR/coord-$pod.log" ) &
+    # The binary itself, not the kc function: a backgrounded function runs in
+    # a subshell whose PID is not the follower's.
+    "$KUBECTL" ${NAMESPACE:+-n "$NAMESPACE"} logs -f --since=1s "$pod" ${ATLAS_CONTAINER:+-c "$ATLAS_CONTAINER"} \
+        > "$OUT_DIR/pod-$pod.log" 2>/dev/null &
     LOG_PIDS+=("$!")
 }
 
@@ -185,6 +190,10 @@ stop_log_capture() {
     for pid in "${LOG_PIDS[@]:-}"; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
     done
+    for pid in "${LOG_PIDS[@]:-}"; do
+        [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
+    done
+    LOG_PIDS=()
     if [ -n "${OUT_DIR:-}" ]; then
         rm -f "$OUT_DIR"/.capturing-* 2>/dev/null || true
     fi
@@ -220,6 +229,12 @@ collect_app_logs() {
 
 summarize() {
     [ "$DRY_RUN" = 1 ] && return 0
+    stop_log_capture
+    local f
+    for f in "$OUT_DIR"/pod-*.log; do
+        [ -e "$f" ] || continue
+        grep -h '\[COORD\]' "$f" > "$OUT_DIR/coord-$(basename "$f" .log | sed 's/^pod-//').log" || true
+    done
     collect_app_logs
     log "[COORD] events captured:"
     cat "$OUT_DIR"/coord-*.log "$OUT_DIR"/applog-*.jsonl 2>/dev/null \
