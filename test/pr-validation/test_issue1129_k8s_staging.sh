@@ -106,9 +106,11 @@ RC=$?
 tail -n 1 "$WORK/unit.log"
 print_result $RC "schema migration and container recipe unit tests"
 
-./test/run_tests.sh backend > "$WORK/backend.log" 2>&1
+# The pytest suite only: run_tests.sh also starts live-LLM E2E tests whenever
+# an API key is in the environment, which need a configured model.
+bash test/atlas_tests.sh > "$WORK/backend.log" 2>&1
 RC=$?
-tail -n 3 "$WORK/backend.log"
+grep -E "^=+ .*(passed|failed).* =+$" "$WORK/backend.log" | tail -n 1
 print_result $RC "backend test suite"
 
 echo
