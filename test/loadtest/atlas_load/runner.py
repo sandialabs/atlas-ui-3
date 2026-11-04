@@ -106,12 +106,17 @@ class Runner:
         async def converse(conn: Connection) -> None:
             for turn in range(turns):
                 if not conn.open:
-                    self.metrics.record("chat_turn", 0.0, "ConnectionLost")
+                    # Every planned turn is accounted for, so a dead socket
+                    # shows up in the error rate rather than as fewer turns.
+                    for _ in range(turn, turns):
+                        self.metrics.record("chat_turn", 0.0, "ConnectionLost")
                     return
                 self.in_flight["turns"] += 1
                 try:
                     await conn.chat_turn(directive(spec.get("directive", {}), f"t{turn}"), model, agent, timeout,
                                          new_conversation=bool(spec.get("new_conversation", False)))
+                except Exception:
+                    pass  # recorded by chat_turn; the next turn still runs if the socket is open
                 finally:
                     self.in_flight["turns"] -= 1
 

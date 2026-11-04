@@ -115,7 +115,6 @@ def main(argv=None) -> int:
         env = RemoteTarget(profile, args.target, args.service_key)
     else:
         env = LocalEnvironment(profile, workdir)
-    metrics = Metrics()
     print(f"[loadtest] profile {profile['name']} (fd limit {fd_limit}); work dir {workdir}", flush=True)
     try:
         started = time.monotonic()

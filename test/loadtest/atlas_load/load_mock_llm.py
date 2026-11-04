@@ -35,6 +35,7 @@ STATS: Counter = Counter()
 JWKS_URL = os.environ.get("MOCK_LLM_JWKS_URL", "")
 AUDIENCE = os.environ.get("MOCK_LLM_AUDIENCE", "mock-litellm")
 _jwks_client = None
+_POOL_WIDENED = False
 
 
 def _verify(header: str) -> bool:
@@ -54,8 +55,24 @@ def _verify(header: str) -> bool:
         return False
 
 
+def _widen_thread_pool() -> None:
+    # The harness mock streams from a synchronous generator (time.sleep per
+    # token), which Starlette runs on anyio's thread pool: 40 threads by
+    # default, which would cap the whole load test at 40 concurrent streams
+    # and measure the mock instead of Atlas. Done on the first request, inside
+    # the running event loop the limiter belongs to.
+    import anyio.to_thread
+
+    global _POOL_WIDENED
+    anyio.to_thread.current_default_thread_limiter().total_tokens = int(
+        os.environ.get("MOCK_LLM_THREADS", "1000"))
+    _POOL_WIDENED = True
+
+
 @app.middleware("http")
 async def account(request: Request, call_next):
+    if not _POOL_WIDENED:
+        _widen_thread_pool()
     if request.url.path != "/v1/chat/completions":
         return await call_next(request)
     STATS["completions"] += 1
@@ -71,18 +88,6 @@ async def account(request: Request, call_next):
 @app.get("/stats")
 async def stats():
     return dict(STATS)
-
-
-@app.on_event("startup")
-async def _widen_thread_pool() -> None:
-    # The harness mock streams from a synchronous generator (time.sleep per
-    # token), which Starlette runs on anyio's thread pool: 40 threads by
-    # default, which would cap the whole load test at 40 concurrent streams
-    # and measure the mock instead of Atlas.
-    import anyio.to_thread
-
-    anyio.to_thread.current_default_thread_limiter().total_tokens = int(
-        os.environ.get("MOCK_LLM_THREADS", "1000"))
 
 
 if __name__ == "__main__":
