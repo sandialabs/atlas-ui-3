@@ -77,8 +77,12 @@ def render(secret_values: Dict[str, str]) -> List[dict]:
     with tempfile.TemporaryDirectory() as tmp:
         tree = Path(tmp) / "kubernetes"
         shutil.copytree(HERE, tree, ignore=shutil.ignore_patterns("secrets.env", "__pycache__"))
-        (tree / "overlays" / "staging" / "secrets.env").write_text(
-            "".join(f"{k}={v}\n" for k, v in secret_values.items()))
+        # kustomize's secretGenerator reads a file. These are one-run values
+        # for throwaway containers, written owner-only inside a private
+        # temporary directory that is deleted right after rendering.
+        fd = os.open(tree / "overlays" / "staging" / "secrets.env", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.writelines(f"{k}={v}\n" for k, v in secret_values.items())
         out = run(["kubectl", "kustomize", str(tree / "overlays" / "staging")]).stdout
     return [doc for doc in yaml.safe_load_all(out) if doc]
 
