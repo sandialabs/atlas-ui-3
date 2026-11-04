@@ -72,7 +72,9 @@ async def health_check() -> Dict[str, Any]:
         - version: Service version
         - timestamp: Current UTC timestamp in ISO-8601 format
         - checks: Startup outcomes of optional features (issue #992), e.g.
-          ``{"chat_history": "ok" | "failed" | "disabled"}``
+          ``{"chat_history": "ok" | "failed" | "disabled"}``, plus
+          ``chat_history_db`` ("ok" | "unavailable"): a live probe of the
+          database when chat history started (issue #1129)
         - session_store: Only with a shared session store (issue #1091):
           its backend, reachability and latency.
 
@@ -100,6 +102,16 @@ async def health_check() -> Dict[str, Any]:
     report["checks"] = {"chat_history": outcomes.get("chat_history", "disabled")}
     if report["checks"]["chat_history"] == "failed":
         report["status"] = "degraded"
+    elif report["checks"]["chat_history"] == "ok":
+        # The startup outcome alone hid an outage that began after boot
+        # (issue #1129): probe the database now, bounded and single-flight.
+        from atlas.infrastructure.dependency_probes import probe_chat_history_db
+
+        db = await probe_chat_history_db(app_factory)
+        if db["status"] != "disabled":
+            report["checks"]["chat_history_db"] = db["status"]
+            if db["status"] != "ok":
+                report["status"] = "degraded"
 
     if getattr(app_factory, "redis", None) is not None:
         store = await app_factory.session_store_health()

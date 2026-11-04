@@ -1,6 +1,6 @@
 # Logging and Monitoring
 
-Last updated: 2026-10-27
+Last updated: 2026-11-04
 
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
@@ -83,6 +83,10 @@ Returns a richer JSON response containing the service status, name, version, git
 
 The response also carries a `checks` object with the startup outcome of optional features (issue #992), for example `"checks": {"chat_history": "ok"}`. Possible outcomes are `ok`, `failed` (the feature is enabled but could not start) and `disabled` (the feature flag is off). When an enabled feature failed, or a shared session store is unreachable, `status` becomes `"degraded"`. Degraded responses keep HTTP 200 on purpose: the replica still answers, and a readiness probe that pulled every replica during a database outage would turn a degraded feature into a full outage. Error detail stays in the server logs, since this endpoint is unauthenticated.
 
-You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks database connectivity or external dependencies beyond the startup outcomes and session-store reachability reported above.
+When chat history started, `checks` also carries `chat_history_db` (`ok` or `unavailable`), a live `SELECT 1` against the chat-history database (issue #1129). It is bounded (1.5 s), single-flight and cached for 2 s, so a black-holed database cannot hold the probe open and a burst of probes costs one query. Without it, a PostgreSQL outage that began after startup left every replica reporting `healthy`.
+
+You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks external dependencies beyond the startup outcomes, the chat-history database and session-store reachability reported above.
+
+For multi-replica deployments, per-replica run and dependency metrics (`/admin/coordination`, Prometheus text at `/admin/coordination/metrics`) and the `[COORD]` log lines are described in [Multi-Replica Observability and Failure Exercises](multi-replica-observability.md).
 
 For more detailed system status information that includes configuration and component health, admin users can access the `/admin/system-status` endpoint, which requires authentication and admin group membership.

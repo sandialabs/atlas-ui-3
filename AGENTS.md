@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-10-25
+Last updated: 2026-11-04
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -433,5 +433,7 @@ A PR that touches any of the following must run it and paste the pytest summary 
 - `atlas/application/chat/runs/` (run registry, launcher, execution state, external/API runs)
 - `atlas/infrastructure/redis/`, `atlas/infrastructure/sessions/`
 - run admission, cancel, steering or tool-approval paths (`atlas/application/chat/service.py`, `approval_manager.py`, `elicitation_manager.py`, `atlas/routes/agent_run_routes.py`, the run handling in `atlas/main.py`)
+
+Coordination code records its states through `atlas/core/coordination_metrics.py` (`coordination_metrics().record_event(CoordinationEvent.X, ...)`, terminal runs with an `EndReason`), not ad-hoc log lines, so operators see every replica's events in one `[COORD]` format and in `/admin/coordination/metrics` (issue #1129, `docs/admin/multi-replica-observability.md`). Names for leases, orphan detection, fencing and command routing are already reserved there.
 
 The run must end with no failures. Tests marked `xfail(strict=True)` describe #1128 acceptance criteria not met yet; a PR that meets one gets an XPASS, which fails the run, and removes that marker in the same PR (and lowers `EXPECTED_GAPS` in `test/pr-validation/test_pr1146_multireplica_harness.sh`). Infrastructure that fails to come up fails the run; it is never a skip.

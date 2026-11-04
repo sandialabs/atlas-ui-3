@@ -101,10 +101,15 @@ class RedisStats:
     last_error_at: Optional[float] = None
     extra: Dict[str, int] = field(default_factory=dict)
 
-    def record_error(self, exc: BaseException) -> None:
+    def record_error(self, exc: BaseException, op: str = "command") -> None:
         self.command_errors += 1
         self.last_error = type(exc).__name__
         self.last_error_at = time.time()
+        # Per-replica dependency state (issue #1129): logs the outage once
+        # and counts every failure, so it is visible beyond this counter.
+        from atlas.core.coordination_metrics import coordination_metrics
+
+        coordination_metrics().dependency_failed("redis", exc, op=op)
 
     def incr(self, name: str, amount: int = 1) -> None:
         self.extra[name] = self.extra.get(name, 0) + amount
@@ -163,7 +168,7 @@ class RedisClientManager:
         try:
             await self._client.ping()
         except Exception as exc:
-            self.stats.record_error(exc)
+            self.stats.record_error(exc, op="startup")
             raise RuntimeError(
                 f"Redis at {redact_redis_url(self.settings.url)} is unreachable "
                 f"({type(exc).__name__}). SESSION_REPOSITORY_TYPE=redis requires it; "
@@ -211,7 +216,7 @@ class RedisClientManager:
         try:
             await asyncio.wait_for(self._client.ping(), timeout)
         except Exception as exc:
-            self.stats.record_error(exc)
+            self.stats.record_error(exc, op="probe")
             report["command_errors"] = self.stats.command_errors
             report["last_error"] = self.stats.last_error
             report["status"] = "unavailable"
@@ -219,4 +224,7 @@ class RedisClientManager:
             return report
         report["status"] = "ok"
         report["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        from atlas.core.coordination_metrics import coordination_metrics
+
+        coordination_metrics().dependency_ok("redis")
         return report
