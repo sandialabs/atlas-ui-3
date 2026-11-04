@@ -326,7 +326,13 @@ class RedisRunCoordinator:
         return {run_id: held for run_id, held in results if held is not None}
 
     async def read(self, run_id: str) -> Optional[Dict[str, str]]:
-        """The shared run record, or ``None``. For diagnostics and tests."""
+        """The shared run record at ``RunCoordinationKeys.run(run_id)``, or ``None``.
+
+        Fields as strings, per the contract: ``run_id``, ``conversation_id``,
+        ``user_email``, ``owner``, ``generation``, ``status``,
+        ``lease_expires_at``, ``created_at``, ``updated_at``. Readable by any
+        replica (inspection, fencing checks).
+        """
         raw = await self._redis.client.hgetall(self.keys.run(run_id))
         if not raw:
             return None

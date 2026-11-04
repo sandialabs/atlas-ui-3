@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 from uuid import uuid4
 
 from atlas.application.chat.runs.coordination import (
@@ -165,6 +165,27 @@ async def stop_lease_heartbeat() -> None:
         logger.debug("Run lease heartbeat stopped")
 
 
+# Called with the ``RunRecord`` of a live local run whose cluster-wide claim
+# was lost (renewal refused it). The extension point for fencing: a listener
+# may stop the run or refuse its writes. Listeners must not raise or block.
+ClaimLostListener = Callable[[RunRecord], None]
+_claim_lost_listeners: List[ClaimLostListener] = []
+
+
+def add_claim_lost_listener(listener: ClaimLostListener) -> Callable[[], None]:
+    """Subscribe to lost claims; returns an unsubscribe callable."""
+    _claim_lost_listeners.append(listener)
+
+    def _unsubscribe() -> None:
+        try:
+            _claim_lost_listeners.remove(listener)
+        except ValueError:
+            # Already unsubscribed; a second call is a no-op.
+            logger.debug("Claim-lost listener was already removed")
+
+    return _unsubscribe
+
+
 async def renew_live_claims() -> None:
     """One heartbeat: extend the lease of every live run this replica owns."""
     registry = get_run_registry()
@@ -178,11 +199,16 @@ async def renew_live_claims() -> None:
         # A run that ended (and released) while the beat was in flight is
         # refused by renewal too; that is not a lost claim.
         if held.get(record.run_id) is False and record.claim is not None and not record.is_terminal:
-            # Fencing lands with the lease work; for now say so loudly.
             logger.warning(
                 "Run %s lost its cluster-wide claim while still running on this replica",
                 record.run_id,
             )
+            for listener in list(_claim_lost_listeners):
+                try:
+                    listener(record)
+                except Exception:
+                    # One bad listener must not stop the others or the beat.
+                    logger.warning("Claim-lost listener raised", exc_info=True)
 
 
 async def run_lease_heartbeat(interval: float = RUN_LEASE_RENEW_INTERVAL_SECONDS) -> None:

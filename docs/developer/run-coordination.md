@@ -112,6 +112,17 @@ Scripts touch several keys, so the contract assumes one logical Redis (a
 primary, optionally with replicas or Sentinel), which is what `REDIS_URL`
 supports today. Redis Cluster would need hash tags and is out of scope.
 
+## Extension points for fencing
+
+- `admission.add_claim_lost_listener(callback)`: `callback(record)` runs on
+  the owning replica when lease renewal refuses a live run's claim (it lapsed,
+  another owner or generation holds the run, or it was released elsewhere).
+  It returns an unsubscribe callable. Callbacks must not block, and an
+  exception is logged without stopping other listeners. Stopping the run or
+  refusing its writes belongs to the fencing work.
+- `RunCoordinator.read(run_id)`: the shared run record (fields above, as
+  strings), readable from any replica. `None` without Redis.
+
 ## Command IDs (reserved)
 
 Cross-replica commands will be appended to `<p>:run-cmd:<run_id>` with at

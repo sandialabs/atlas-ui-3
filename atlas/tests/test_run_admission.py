@@ -253,3 +253,41 @@ async def test_first_claim_starts_the_lease_heartbeat(coord):
 async def test_in_process_admission_starts_no_heartbeat():
     await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
     assert admission._heartbeat is None or admission._heartbeat.done()
+
+
+async def test_lost_claim_notifies_listeners(server, coord):
+    """The fencing hook: a live run whose claim renewal refuses reaches listeners."""
+    record = await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    # Another replica took over the run (newer generation, other owner).
+    await coord._redis.client.hset(coord.keys.run(record.run_id), mapping={"owner": "replica-b"})
+    seen = []
+
+    def bad(_record):
+        raise RuntimeError("listener bug")
+
+    unsubscribe_bad = admission.add_claim_lost_listener(bad)
+    unsubscribe = admission.add_claim_lost_listener(seen.append)
+    try:
+        await renew_live_claims()
+    finally:
+        unsubscribe()
+        unsubscribe_bad()
+        unsubscribe()  # idempotent
+    assert seen == [record]
+    shared = await coord.read(record.run_id)
+    assert shared["owner"] == "replica-b" and shared["run_id"] == record.run_id
+
+
+async def test_held_claim_does_not_notify_listeners(coord):
+    await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    seen = []
+    unsubscribe = admission.add_claim_lost_listener(seen.append)
+    try:
+        await renew_live_claims()
+    finally:
+        unsubscribe()
+    assert seen == []
+
+
+async def test_in_process_coordinator_has_no_shared_record():
+    assert await InProcessRunCoordinator().read("anything") is None

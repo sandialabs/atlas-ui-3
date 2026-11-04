@@ -143,6 +143,13 @@ def default_replica_id() -> str:
     return _process_replica_id[1]
 
 
+class RunRecordReader(Protocol):
+    """Optional: coordinators that keep a shared run record expose it."""
+
+    async def read(self, run_id: str) -> Optional[dict]:
+        """The shared run record (contract fields, as strings), or ``None``."""
+
+
 class InProcessRunCoordinator:
     """Admits everything; the registry's process-local checks decide.
 
@@ -163,6 +170,9 @@ class InProcessRunCoordinator:
 
     async def renew(self, claims: Iterable[RunClaim], statuses: dict) -> dict:
         return {claim.run_id: True for claim in claims}
+
+    async def read(self, run_id: str) -> Optional[dict]:
+        return None
 
 
 _coordinator: Optional[RunCoordinator] = None
