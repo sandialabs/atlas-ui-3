@@ -130,6 +130,23 @@ def _resolve_replica_id() -> str:
         return "unknown"
 
 
+def run_owner_id() -> Optional[str]:
+    """The #1128 run-owner id of this process (``<hostname>-<pid>-<random>``), if available.
+
+    Provided by ``default_replica_id`` in ``atlas.application.chat.runs.coordination``
+    once distributed run coordination is installed; None before that. Imported
+    lazily so this module keeps no hard dependency on the application layer.
+    """
+    try:
+        from atlas.application.chat.runs.coordination import default_replica_id  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    try:
+        return str(default_replica_id())
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
 def _fmt(value: Any) -> str:
     """One ``key=value`` token: no spaces, newlines or quotes to split on."""
     text = "" if value is None else str(value)
@@ -346,6 +363,7 @@ class CoordinationMetrics:
         return {
             "replica_id": self.replica_id,
             "instance_id": self.instance_id,
+            "owner_id": run_owner_id(),
             "pid": os.getpid(),
             "version": VERSION,
             "started_at": self.started_at,
@@ -385,7 +403,13 @@ class CoordinationMetrics:
 
         # "instance_id", not "instance": Prometheus sets its own ``instance``
         # target label and would rename ours to ``exported_instance``.
-        emit("atlas_replica_info", "gauge", {"instance_id": self.instance_id, "version": self.identity()["version"]}, 1)
+        info = {"instance_id": self.instance_id, "version": self.identity()["version"]}
+        owner = run_owner_id()
+        if owner:
+            # Lets operators join this pod's metrics to the #1128 owner id in
+            # run records and leases (one value per process: low cardinality).
+            info["owner_id"] = owner
+        emit("atlas_replica_info", "gauge", info, 1)
         emit("atlas_replica_start_time_seconds", "gauge", {}, self.started_at)
         for name, labels, value in gauges:
             emit(name, "gauge", labels, value)

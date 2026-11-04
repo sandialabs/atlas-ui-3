@@ -285,3 +285,12 @@ class TestReviewFollowUps:
         text = CoordinationMetrics(replica_id="r1").render_prometheus()
         info = next(line for line in text.splitlines() if line.startswith("atlas_replica_info{"))
         assert 'instance_id="' in info and 'instance="' not in info
+
+    def test_owner_id_is_an_info_label_when_coordination_provides_one(self, monkeypatch):
+        monkeypatch.setattr(cm, "run_owner_id", lambda: "atlas-7c9d-x2-41-1a2b3c4d")
+        metrics = CoordinationMetrics(replica_id="atlas-7c9d-x2")
+        info = next(line for line in metrics.render_prometheus().splitlines() if line.startswith("atlas_replica_info{"))
+        assert 'owner_id="atlas-7c9d-x2-41-1a2b3c4d"' in info
+        assert metrics.identity()["owner_id"].startswith(metrics.replica_id)
+        monkeypatch.setattr(cm, "run_owner_id", lambda: None)
+        assert "owner_id" not in metrics.render_prometheus()

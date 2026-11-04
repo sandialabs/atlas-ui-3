@@ -18,7 +18,16 @@ let your metrics backend sum or compare the pods.
 
 Each replica names itself with the first of `ATLAS_REPLICA_ID`, `POD_NAME`,
 `HOSTNAME` (the pod name on Kubernetes/OpenShift), or the host name, plus a
-random `instance` id that changes on every process start.
+random `instance_id` that changes on every process start. The `replica` metric
+label and the `replica=` log field are therefore **the pod (or host)**: one
+value per pod, low cardinality.
+
+#1128 run coordination identifies a run's owner per **process**, as
+`<hostname>-<pid>-<random>`. On Kubernetes the hostname is the pod name, so an
+owner id starts with the pod's `replica` value (unless `ATLAS_REPLICA_ID`
+overrides it). Once that coordination is installed, `atlas_replica_info` and
+`/admin/coordination` (`replica.owner_id`) also carry the exact `owner_id`, so
+metrics can be joined to run records and leases.
 
 ## Run states an operator can distinguish
 
@@ -119,7 +128,7 @@ The same numbers in Prometheus text format, every series labelled
 | `atlas_projection_failures_total` | counter | `op` |
 | `atlas_conversation_persist_failures_total` | counter | `error` |
 | `atlas_coordination_events_total` | counter | `event` |
-| `atlas_replica_info` | gauge | `instance_id`, `version` (`instance` is left to Prometheus's own target label) |
+| `atlas_replica_info` | gauge | `instance_id`, `version`, `owner_id` once #1128 coordination is present (`instance` is left to Prometheus's own target label) |
 | `atlas_replica_start_time_seconds` | gauge | |
 | `atlas_dependency_command_errors_total` | counter | `dependency`, `op`, `error` (`PoolExhausted` = this replica's Redis pool ran out) |
 
