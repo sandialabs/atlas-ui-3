@@ -23,21 +23,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Optional, Set
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from atlas.application.chat.runs.coordination import (
+from atlas.application.chat.runs.coordination import (  # noqa: F401 - re-exported
     RUN_LEASE_RENEW_INTERVAL_SECONDS,
     RunClaim,
+    drain_pending_releases,
     get_run_coordinator,
+    release_claim_soon,
 )
 from atlas.application.chat.runs.registry import RunRecord, get_run_registry
 
 logger = logging.getLogger(__name__)
-
-# Strong references to scheduled releases: asyncio keeps only weak ones.
-_pending_releases: Set["asyncio.Task"] = set()
-
 
 def apply_run_limit(app_settings: Any) -> int:
     """Copy ``MAX_CONCURRENT_RUNS_PER_USER`` onto the registry; return the cap.
@@ -163,30 +161,9 @@ async def stop_lease_heartbeat() -> None:
     task.cancel()
     try:
         await task
-    except BaseException:
-        pass
-
-
-def release_claim_soon(claim: RunClaim, status: str) -> None:
-    """Schedule the release of ``claim`` on the running loop.
-
-    Without a running loop (synchronous test code) there is nothing to
-    schedule on; the lease then frees the slot on its own.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        logger.debug("No running loop to release claim %s; its lease will expire", claim.run_id)
-        return
-    task = loop.create_task(get_run_coordinator().release(claim, status))
-    _pending_releases.add(task)
-    task.add_done_callback(_pending_releases.discard)
-
-
-async def drain_pending_releases() -> None:
-    """Wait for scheduled releases to land (shutdown, tests)."""
-    while _pending_releases:
-        await asyncio.gather(*list(_pending_releases), return_exceptions=True)
+    except asyncio.CancelledError:
+        # The cancellation we just requested.
+        logger.debug("Run lease heartbeat stopped")
 
 
 async def renew_live_claims() -> None:
@@ -219,3 +196,4 @@ async def run_lease_heartbeat(interval: float = RUN_LEASE_RENEW_INTERVAL_SECONDS
             raise
         except Exception:  # pragma: no cover - the heartbeat must never die
             logger.warning("Run lease heartbeat iteration failed", exc_info=True)
+

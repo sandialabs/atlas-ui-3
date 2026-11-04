@@ -28,14 +28,15 @@ of locking the user out until someone cleans Redis by hand.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import socket
 from dataclasses import dataclass
-from typing import Iterable, Optional, Protocol
+from typing import Iterable, Optional, Protocol, Set
 from uuid import uuid4
 
-from atlas.application.chat.runs.registry import RunRegistryError
+from atlas.application.chat.runs.admission_errors import RunRegistryError
 
 logger = logging.getLogger(__name__)
 
@@ -179,3 +180,29 @@ def set_run_coordinator(coordinator: Optional[RunCoordinator]) -> None:
     """Bind the coordinator (the app factory; tests). ``None`` resets it."""
     global _coordinator
     _coordinator = coordinator
+
+
+# Strong references to scheduled releases: asyncio keeps only weak ones.
+_pending_releases: Set["asyncio.Task"] = set()
+
+
+def release_claim_soon(claim: RunClaim, status: str) -> None:
+    """Schedule the release of ``claim`` on the running loop.
+
+    Without a running loop (synchronous test code) there is nothing to
+    schedule on; the lease then frees the slot on its own.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("No running loop to release claim %s; its lease will expire", claim.run_id)
+        return
+    task = loop.create_task(get_run_coordinator().release(claim, status))
+    _pending_releases.add(task)
+    task.add_done_callback(_pending_releases.discard)
+
+
+async def drain_pending_releases() -> None:
+    """Wait for scheduled releases to land (shutdown, tests)."""
+    while _pending_releases:
+        await asyncio.gather(*list(_pending_releases), return_exceptions=True)

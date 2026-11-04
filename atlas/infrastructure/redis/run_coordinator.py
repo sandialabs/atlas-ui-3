@@ -38,16 +38,16 @@ import asyncio
 import logging
 from typing import Any, Dict, Iterable, Optional
 
+from atlas.application.chat.runs.admission_errors import (
+    ConcurrencyLimitError,
+    ConversationBusyError,
+)
 from atlas.application.chat.runs.coordination import (
     RUN_LEASE_SECONDS,
     RUN_RECORD_RETENTION_SECONDS,
     RunClaim,
     RunCoordinationUnavailableError,
     default_replica_id,
-)
-from atlas.application.chat.runs.registry import (
-    ConcurrencyLimitError,
-    ConversationBusyError,
 )
 from atlas.core.user_identity import normalize_user_email
 
@@ -243,8 +243,9 @@ class RedisRunCoordinator:
             # this fails too and the lease frees the slot instead.
             try:
                 await self._run_release(run_id, conversation_id, owner_email, "", "failed")
-            except Exception:
-                pass
+            except Exception as cleanup_exc:
+                # Expected when Redis is really down; the lease frees the slot.
+                logger.debug("Claim cleanup after a lost reply failed: %s", type(cleanup_exc).__name__)
             raise self._unavailable(exc) from exc
 
         outcome = _text(result[0])

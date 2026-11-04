@@ -39,6 +39,14 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
+# The admission errors live in their own module so the coordinator can raise
+# them without importing the registry; re-exported here for existing callers.
+from atlas.application.chat.runs.admission_errors import (  # noqa: F401
+    ConcurrencyLimitError,
+    ConversationBusyError,
+    RunRegistryError,
+)
+from atlas.application.chat.runs.coordination import release_claim_soon
 from atlas.application.chat.runs.stream_replay import StreamReplay
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
@@ -93,30 +101,6 @@ class RunStatus(str, Enum):
 _TERMINAL_STATUSES = frozenset(
     {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 )
-
-
-class RunRegistryError(Exception):
-    """Base class for run admission failures."""
-
-
-class ConversationBusyError(RunRegistryError):
-    """A conversation already has a non-terminal run.
-
-    Raised only as a backstop: the normal path for a second message to a busy
-    conversation is steering (issue #824), decided before ``start`` is called.
-    """
-
-
-class ConcurrencyLimitError(RunRegistryError):
-    """The user already has the maximum number of non-terminal runs."""
-
-    def __init__(self, limit: int):
-        self.limit = limit
-        super().__init__(
-            f"You already have {limit} conversation runs in progress. "
-            "Stop or wait for one to finish before starting another. "
-            "Runs paused waiting for tool approval count toward this limit."
-        )
 
 
 @dataclass
@@ -526,8 +510,6 @@ class RunRegistry:
         claim, record.claim = record.claim, None
         if claim is None:
             return
-        from atlas.application.chat.runs.admission import release_claim_soon
-
         release_claim_soon(claim, record.status.value)
 
     def _publish_terminal(self, record: "RunRecord") -> None:
@@ -973,6 +955,7 @@ class RunRegistry:
 
 
 _registry: Optional[RunRegistry] = None
+
 
 
 def get_run_registry() -> RunRegistry:
