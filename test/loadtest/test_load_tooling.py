@@ -189,6 +189,8 @@ def test_mock_idp_code_flow_and_token_exchange(monkeypatch):
     bad = base64.b64encode(b"atlas-loadtest:nope").decode()
     assert client.post("/token", headers={"Authorization": f"Basic {bad}"},
                        data={"grant_type": "refresh_token"}).status_code == 401
+    assert client.post("/token", headers={"Authorization": "Basic %%%not-base64"},
+                       data={"grant_type": "refresh_token"}).status_code == 401
 
     exchanged = client.post("/token", data={
         "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange", "client_id": "atlas-loadtest",

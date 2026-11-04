@@ -54,14 +54,16 @@ def _fd_count(pid: int) -> int:
         return 0
 
 
-def group_pids(pgid: int) -> List[int]:
-    pids = []
+def pids_by_group(pgids) -> Dict[int, List[int]]:
+    """Members of each wanted process group, from one pass over /proc."""
+    wanted = set(pgids)
+    groups: Dict[int, List[int]] = {pgid: [] for pgid in wanted}
     for entry in os.listdir("/proc"):
         if entry.isdigit():
             stat = _read_stat(int(entry))
-            if stat is not None and stat[0] == pgid:
-                pids.append(int(entry))
-    return pids
+            if stat is not None and stat[0] in wanted:
+                groups[stat[0]].append(int(entry))
+    return groups
 
 
 def established_on_port(port: int) -> int:
@@ -87,8 +89,7 @@ class ProcessGroupSampler:
         self.pgid = pgid
         self._last: Optional[Tuple[float, int]] = None
 
-    def sample(self) -> Dict[str, Any]:
-        pids = group_pids(self.pgid)
+    def sample(self, pids: List[int]) -> Dict[str, Any]:
         ticks = threads = rss = fds = 0
         for pid in pids:
             stat = _read_stat(pid)
@@ -132,16 +133,21 @@ class ResourceSampler:
 
     def sample(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"replicas": {}}
+        live = {r.name: r.proc.pid for r in self.replicas if r.proc is not None and r.proc.poll() is None}
+        # One /proc pass per sample for every group, so sampling cost does not
+        # grow with the replica count.
+        members = pids_by_group(list(live.values()) + list(self._extra.values()))
         for replica in self.replicas:
-            if replica.proc is None or replica.proc.poll() is not None:
+            if replica.name not in live:
                 out["replicas"][replica.name] = {"up": 0, "server_conns": 0}
                 continue
-            stats = self._group(replica.name, replica.proc.pid).sample()
+            pgid = live[replica.name]
+            stats = self._group(replica.name, pgid).sample(members[pgid])
             stats["up"] = 1
             stats["server_conns"] = established_on_port(replica.port)
             out["replicas"][replica.name] = stats
         for name, pgid in self._extra.items():
-            out[name] = self._group(name, pgid).sample()
+            out[name] = self._group(name, pgid).sample(members[pgid])
         out["redis"] = self._redis_info()
         out["postgres"] = self._pg_backends()
         return out

@@ -48,7 +48,7 @@ run_profile() {  # run_profile <name> [extra args]: runs it, prints the summary,
 
 check_report() {  # check_report <name> <python expression over r (report) that must hold>...
     local name="$1"; shift
-    python - "$WORK/$name/report.json" "$@" <<'PY' || fail "report checks for $(basename "$(dirname "$1")" 2>/dev/null)"
+    python - "$WORK/$name/report.json" "$@" <<'PY' || fail "report checks for profile $name"
 import json, sys
 r = json.load(open(sys.argv[1]))
 ops, peaks, counters, mocks = r["operations"], r["peaks"], r["counters"], r["mock_stats"]

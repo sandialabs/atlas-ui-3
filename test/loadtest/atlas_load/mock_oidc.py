@@ -94,7 +94,10 @@ def _client_id(request: Request, form: dict) -> str:
     """Accept client_secret_basic, client_secret_post or a public client."""
     header = request.headers.get("authorization", "")
     if header.lower().startswith("basic "):
-        raw = base64.b64decode(header[6:]).decode()
+        try:
+            raw = base64.b64decode(header[6:], validate=True).decode()
+        except (ValueError, UnicodeDecodeError):
+            raise HTTPException(401, "invalid_client")
         client_id, _, secret = raw.partition(":")
         client_id, secret = unquote(client_id), unquote(secret)
     else:
