@@ -46,6 +46,10 @@ GIT_COMMIT = _resolve_git_commit()
 
 router = APIRouter(prefix="/api", tags=["health"])
 
+# Both dependency probes run concurrently within this budget, so a black-holed
+# dependency keeps /api/health under the default kubelet probe timeout (1 s).
+HEALTH_PROBE_BUDGET_SECONDS = 0.8
+
 
 @router.get("/heartbeat")
 async def heartbeat() -> Dict[str, str]:
@@ -114,8 +118,9 @@ async def health_check() -> Dict[str, Any]:
 
     has_redis = getattr(app_factory, "redis", None) is not None
     db, store = await asyncio.gather(
-        probe_chat_history_db(app_factory) if report["checks"]["chat_history"] == "ok" else _skip(),
-        app_factory.session_store_health() if has_redis else _skip(),
+        probe_chat_history_db(app_factory, timeout=HEALTH_PROBE_BUDGET_SECONDS)
+        if report["checks"]["chat_history"] == "ok" else _skip(),
+        app_factory.session_store_health(timeout=HEALTH_PROBE_BUDGET_SECONDS) if has_redis else _skip(),
     )
     if db is not None and db["status"] != "disabled":
         report["checks"]["chat_history_db"] = db["status"]

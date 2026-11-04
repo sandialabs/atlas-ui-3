@@ -1449,7 +1449,7 @@ async def lifespan(app: FastAPI):
     # Bounded, and never allowed to skip the cleanup below.
     try:
         await asyncio.wait_for(interrupt_runs_for_shutdown(), timeout=10)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         logger.warning("Shutdown: reporting interrupted runs failed", exc_info=True)
     # Stop auto-reconnect task
     await mcp_manager.stop_auto_reconnect()

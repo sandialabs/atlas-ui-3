@@ -92,8 +92,14 @@ start_log_capture
 RESTORED=0
 restore() {
     if act kc scale "$TARGET" --replicas="$ORIGINAL"; then
-        RESTORED=1
-        return 0
+        # Trust the API server's spec, not the command's exit code.
+        local now
+        now="$( [ "$DRY_RUN" = 1 ] && echo "$ORIGINAL" || kc get "$TARGET" -o jsonpath='{.spec.replicas}')"
+        if [ "$now" = "$ORIGINAL" ]; then
+            RESTORED=1
+            return 0
+        fi
+        log "scale reported success but $TARGET has spec.replicas=${now:-?}"
     fi
     log "RESTORE FAILED: run: $KUBECTL -n $NAMESPACE scale $TARGET --replicas=$ORIGINAL"
     return 1

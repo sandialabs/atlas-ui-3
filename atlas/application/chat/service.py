@@ -89,20 +89,23 @@ def _record_persist_failure(exc: BaseException) -> None:
     Constraint violations and other statement errors are counted but do not
     mark the database unavailable: they would raise false outage alerts.
     """
-    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+    try:
+        from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
-    from atlas.core.coordination_metrics import coordination_metrics
+        from atlas.core.coordination_metrics import coordination_metrics
 
-    metrics = coordination_metrics()
-    metrics.incr("atlas_conversation_persist_failures_total", error=type(exc).__name__)
-    connectivity = isinstance(exc, (OperationalError, InterfaceError)) or (
-        isinstance(exc, DBAPIError) and exc.connection_invalidated
-    )
-    if connectivity:
-        from atlas.infrastructure.dependency_probes import database_dependency_name
-        from atlas.modules.chat_history import get_engine
+        metrics = coordination_metrics()
+        metrics.incr("atlas_conversation_persist_failures_total", error=type(exc).__name__)
+        connectivity = isinstance(exc, (OperationalError, InterfaceError)) or (
+            isinstance(exc, DBAPIError) and exc.connection_invalidated
+        )
+        if connectivity:
+            from atlas.infrastructure.dependency_probes import database_dependency_name
+            from atlas.modules.chat_history import get_engine
 
-        metrics.dependency_failed(database_dependency_name(get_engine()), exc, op="conversation_save")
+            metrics.dependency_failed(database_dependency_name(get_engine()), exc, op="conversation_save")
+    except Exception:  # pragma: no cover - bookkeeping must never escape the save handler
+        logger.debug("recording a persistence failure failed", exc_info=True)
 
 
 def _has_save_floor(session: Session) -> bool:
