@@ -121,14 +121,25 @@ class RunCoordinator(Protocol):
         """
 
 
+_process_replica_id: Optional[tuple] = None
+
+
 def default_replica_id() -> str:
-    """A replica id unique to this process: host, pid and a random suffix.
+    """This process's replica id: host, pid and a random suffix, fixed per process.
 
     The host comes first because on Kubernetes it is the pod name, which is
     what an operator searches logs for. The suffix keeps a restarted process
-    on the same host (same pid after a container restart) distinct.
+    on the same host (same pid after a container restart) distinct. It is
+    minted once: a coordinator rebuilt later in the same process (a second
+    ``AppFactory``, say) must still own the claims the first one took, or
+    their renewals and releases would fail the owner check.
     """
-    return f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
+    global _process_replica_id
+    pid = os.getpid()
+    # Keyed by pid so a forked worker mints its own id instead of inheriting.
+    if _process_replica_id is None or _process_replica_id[0] != pid:
+        _process_replica_id = (pid, f"{socket.gethostname()}-{pid}-{uuid4().hex[:8]}")
+    return _process_replica_id[1]
 
 
 class InProcessRunCoordinator:

@@ -43,6 +43,10 @@ claim is released before the error propagates. A failed admission holds no
 slot. When a run reaches a terminal state, `RunRegistry.set_status` schedules
 the release.
 
+If the claim's reply is lost (a timeout after Redis applied it), the
+coordinator releases whatever this replica holds under that run id before
+reporting the failure.
+
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket
 `run_coordination_unavailable`). Admitting without the shared check would let a
@@ -64,7 +68,7 @@ rather than formatting keys by hand.
 | Key | Type | Contents | Lifetime |
 |-----|------|----------|----------|
 | `<p>:run:<run_id>` | hash | The run record (fields below) | Lease + 300 s while live; 300 s after release |
-| `<p>:run-conv:<user>:<conversation_id>` | string | `run_id` of the run holding the conversation | `PX` = lease, renewed |
+| `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed | Persistent |
 | `<p>:run-cmd:<run_id>` | stream | **Reserved** for command routing (stop, steer, approve) | (not written yet) |
@@ -77,7 +81,7 @@ Run record fields:
 | `run_id` | Stable run id (also the registry's id and the REST API's id) |
 | `conversation_id` | The conversation the run mutates |
 | `user_email` | Normalized owner |
-| `owner` | Replica id holding the run: `<hostname>-<pid>-<random>`, unique per process (on Kubernetes the hostname is the pod name) |
+| `owner` | Replica id holding the run: `<hostname>-<pid>-<random>`, minted once per process, so a coordinator rebuilt in the same process still owns its claims (on Kubernetes the hostname is the pod name) |
 | `generation` | Fencing token from `<p>:run-fence`. Later claims always carry a larger value |
 | `status` | `queued` at claim, then the registry status carried by each lease renewal (`running`, `waiting_for_input`), and the terminal status at release |
 | `lease_expires_at` | Epoch ms from the Redis clock; `0` once released |
@@ -97,8 +101,9 @@ Rules every script follows:
 - **Release is final.** Renewal refuses a record in a terminal status, so a
   heartbeat that races the release cannot take the slot back.
 - **Renewal reports loss.** A lapsed lease is never re-taken (its slot may already count for another run). The owner renews every live claim every
-  `RUN_LEASE_RENEW_INTERVAL_SECONDS` (10 s, `run_lease_heartbeat` in the app
-  lifespan). It gets `False` for a claim it no longer holds, because the claim
+  `RUN_LEASE_RENEW_INTERVAL_SECONDS` (10 s). The heartbeat starts with the
+  first claim on an event loop, so the API server and a headless
+  `AtlasClient` both renew. Renewals run concurrently (16 at a time). It gets `False` for a claim it no longer holds, because the claim
   expired and another run took the conversation, or because it was released
   elsewhere. Today it only logs a warning. Acting on it (stopping the run, or
   refusing its writes by generation) is the fencing work below.

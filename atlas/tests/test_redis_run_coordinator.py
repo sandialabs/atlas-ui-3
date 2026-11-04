@@ -78,7 +78,7 @@ async def test_user_cap_is_global(server):
     assert await a.read("run-3") is None
     assert await _user_slots(a) == 2
     # The refused conversation was not locked either.
-    assert await a._redis.client.get(a.keys.conversation(USER, "conv-3")) is None
+    assert await a._redis.client.get(a.keys.conversation("conv-3")) is None
 
 
 async def test_concurrent_claims_across_replicas_never_exceed_the_cap(server):
@@ -174,7 +174,7 @@ async def test_renew_after_release_does_not_resurrect_the_claim(server):
 
     assert await a.renew([claim], {"run-1": "running"}) == {"run-1": False}
     assert await _user_slots(a) == 0
-    assert await a._redis.client.get(a.keys.conversation(USER, "conv-1")) is None
+    assert await a._redis.client.get(a.keys.conversation("conv-1")) is None
 
 
 async def test_renew_reports_a_lost_lease(server):
@@ -218,3 +218,57 @@ async def test_renew_after_a_lapse_does_not_retake_the_slot(server):
     assert await a.renew([lapsed], {}) == {"run-1": False}
     assert await _user_slots(a) == 1
     assert await a.renew([fresh], {}) == {"run-2": True}
+
+
+async def test_conversation_lock_is_exclusive_across_users(server):
+    """Conversation ids are global in storage: another user may not run the same id."""
+    a, b = _coordinator(server, "a"), _coordinator(server, "b")
+    await _claim(a, "run-1", "conv-shared", user="one@example.com")
+    with pytest.raises(ConversationBusyError):
+        await _claim(b, "run-2", "conv-shared", user="two@example.com")
+    assert await _user_slots(b, user="two@example.com") == 0
+
+
+async def test_lost_reply_after_an_applied_claim_is_cleaned_up(server):
+    """The script ran but the reply never arrived: the refusal must hold no slot."""
+    a = _coordinator(server, "a")
+    real_claim = a._claim
+
+    async def applied_then_lost(**kwargs):
+        await real_claim(**kwargs)
+        raise TimeoutError("reply lost")
+
+    a._claim = applied_then_lost
+    with pytest.raises(RunCoordinationUnavailableError):
+        await _claim(a, "run-1", "conv-1", limit=1)
+    assert await _user_slots(a) == 0
+    assert await a._redis.client.get(a.keys.conversation("conv-1")) is None
+    a._claim = real_claim
+    assert await _claim(a, "run-2", "conv-1", limit=1)
+
+
+async def test_renewal_runs_concurrently(server):
+    a = _coordinator(server, "a")
+    claims = [await _claim(a, f"run-{i}", f"conv-{i}", limit=50) for i in range(40)]
+    real_renew, in_flight, peak = a._renew, 0, 0
+
+    async def slow(**kwargs):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return await real_renew(**kwargs)
+
+    a._renew = slow
+    held = await a.renew(claims, {})
+    assert all(held.values()) and len(held) == 40
+    assert 1 < peak <= 16
+
+
+def test_replica_id_is_stable_for_the_process():
+    from atlas.application.chat.runs.coordination import default_replica_id
+
+    assert default_replica_id() == default_replica_id()
+    m = RedisClientManager(RedisSettings(url="redis://fake/0"), client=fakeredis.FakeAsyncRedis())
+    assert RedisRunCoordinator(m).replica_id == RedisRunCoordinator(m).replica_id

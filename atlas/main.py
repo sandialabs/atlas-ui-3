@@ -59,7 +59,7 @@ from atlas.application.chat.runs.admission import (
     admit_run,
     apply_run_limit,
     drain_pending_releases,
-    run_lease_heartbeat,
+    stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
@@ -1440,14 +1440,12 @@ async def lifespan(app: FastAPI):
     # Issue #1128: the cap applies from the first request, whatever transport
     # it arrives on (admission re-applies it, so admin changes still land).
     apply_run_limit(config.app_settings)
-    # Cluster-wide run claims are leases; this keeps the live ones alive.
-    run_lease_task = asyncio.create_task(run_lease_heartbeat())
 
     yield
 
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
-    run_lease_task.cancel()
+    await stop_lease_heartbeat()
     # Releases scheduled by runs that just ended must reach Redis before the
     # pool closes, or their slots stay held until the lease expires.
     try:

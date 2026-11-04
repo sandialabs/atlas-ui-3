@@ -49,6 +49,12 @@ def _isolated():
     set_run_coordinator(None)
 
 
+@pytest.fixture(autouse=True)
+async def _no_heartbeat_left():
+    yield
+    await admission.stop_lease_heartbeat()
+
+
 @pytest.fixture
 def server():
     return fakeredis.FakeServer()
@@ -70,7 +76,7 @@ async def _slots(coord, user=USER):
 
 
 async def _conversation_holder(coord, conversation_id, user=USER):
-    return await coord._redis.client.get(coord.keys.conversation(user, conversation_id))
+    return await coord._redis.client.get(coord.keys.conversation(conversation_id))
 
 
 async def test_admitted_run_holds_a_claim_released_when_it_ends(coord):
@@ -232,3 +238,18 @@ async def test_heartbeat_renews_live_claims_only(coord):
 def test_release_without_a_loop_is_a_no_op(coord):
     claim = SimpleNamespace(run_id="r")
     admission.release_claim_soon(claim, "failed")  # must not raise
+
+
+async def test_first_claim_starts_the_lease_heartbeat(coord):
+    """Headless clients get renewal too: the heartbeat starts with the first claim."""
+    assert admission._heartbeat is None or admission._heartbeat.done()
+    await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    first = admission._heartbeat
+    assert first is not None and not first.done()
+    await admit_run(conversation_id="c2", user_email=USER, app_settings=_settings(5))
+    assert admission._heartbeat is first  # one loop per event loop
+
+
+async def test_in_process_admission_starts_no_heartbeat():
+    await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    assert admission._heartbeat is None or admission._heartbeat.done()

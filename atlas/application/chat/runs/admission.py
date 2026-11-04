@@ -127,7 +127,44 @@ async def admit_run(
             release_claim_soon(claim, "failed")
         raise
     record.claim = claim
+    if claim is not None:
+        ensure_lease_heartbeat()
     return record
+
+
+_heartbeat: Optional["asyncio.Task"] = None
+
+
+def ensure_lease_heartbeat() -> None:
+    """Start the renewal loop on this event loop if it is not running.
+
+    Started by the first claim rather than by the server lifespan, so a run
+    admitted anywhere a coordinator tracks claims -- the API server, or an
+    ``AtlasClient`` running headless -- keeps its lease alive.
+    """
+    global _heartbeat
+    loop = asyncio.get_running_loop()
+    if _heartbeat is not None and not _heartbeat.done() and _heartbeat.get_loop() is loop:
+        return
+    _heartbeat = loop.create_task(run_lease_heartbeat())
+
+
+async def stop_lease_heartbeat() -> None:
+    """Stop the renewal loop (shutdown, tests)."""
+    global _heartbeat
+    task, _heartbeat = _heartbeat, None
+    if task is None or task.done():
+        return
+    try:
+        if task.get_loop() is not asyncio.get_running_loop():
+            return
+    except RuntimeError:
+        return
+    task.cancel()
+    try:
+        await task
+    except BaseException:
+        pass
 
 
 def release_claim_soon(claim: RunClaim, status: str) -> None:

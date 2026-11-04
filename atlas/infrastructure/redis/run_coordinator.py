@@ -14,8 +14,10 @@ is documented in ``docs/developer/run-coordination.md``:
     ``owner`` (replica id), ``generation`` (fencing token), ``status``,
     ``lease_expires_at`` (epoch ms, 0 once released), ``created_at``,
     ``updated_at``. Kept for a retention window after release.
-``<p>:run-conv:<user>:<conversation_id>`` (string, PX lease)
-    The run id holding the conversation. One per conversation.
+``<p>:run-conv:<conversation_id>`` (string, PX lease)
+    The run id holding the conversation. One per conversation, across all
+    users: conversation ids are global in storage, so two users must not
+    both run (and then both try to save) the same unsaved id.
 ``<p>:run-user:<user>`` (sorted set)
     The user's claimed run ids, scored by lease expiry (epoch ms). Members
     whose lease has passed are pruned before every count, so a replica that
@@ -32,6 +34,7 @@ with skewed clocks still agree on whether a lease has expired.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Iterable, Optional
 
@@ -51,6 +54,8 @@ from atlas.core.user_identity import normalize_user_email
 logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
+# Lease renewals in flight at once, per replica.
+RENEW_CONCURRENCY = 16
 
 # Shared by the scripts: Redis server time in epoch milliseconds.
 _NOW = """
@@ -156,10 +161,8 @@ class RunCoordinationKeys:
     def run(self, run_id: str) -> str:
         return self._redis.key("run", key_part(run_id))
 
-    def conversation(self, user_email: str, conversation_id: str) -> str:
-        return self._redis.key(
-            "run-conv", key_part(normalize_user_email(user_email)), key_part(conversation_id)
-        )
+    def conversation(self, conversation_id: str) -> str:
+        return self._redis.key("run-conv", key_part(conversation_id))
 
     def user(self, user_email: str) -> str:
         return self._redis.key("run-user", key_part(normalize_user_email(user_email)))
@@ -217,7 +220,7 @@ class RedisRunCoordinator:
         try:
             result = await self._claim(
                 keys=[
-                    self.keys.conversation(owner_email, conversation_id),
+                    self.keys.conversation(conversation_id),
                     self.keys.user(owner_email),
                     self.keys.run(run_id),
                     self.keys.fence(),
@@ -234,6 +237,14 @@ class RedisRunCoordinator:
             )
         except Exception as exc:
             logger.warning("Run admission could not reach Redis: %s", type(exc).__name__)
+            # The script may have run and only its reply been lost (a timeout,
+            # a reset connection). Undo whatever this owner holds under this
+            # run id, so the refusal holds no slot; if Redis is really down
+            # this fails too and the lease frees the slot instead.
+            try:
+                await self._run_release(run_id, conversation_id, owner_email, "", "failed")
+            except Exception:
+                pass
             raise self._unavailable(exc) from exc
 
         outcome = _text(result[0])
@@ -256,7 +267,7 @@ class RedisRunCoordinator:
         freed = await self._release(
             keys=[
                 self.keys.run(run_id),
-                self.keys.conversation(user_email, conversation_id),
+                self.keys.conversation(conversation_id),
                 self.keys.user(user_email),
             ],
             args=[run_id, self.replica_id, generation, status, self._retention_ms],
@@ -279,31 +290,39 @@ class RedisRunCoordinator:
             return False
 
     async def renew(self, claims: Iterable[RunClaim], statuses: Dict[str, str]) -> Dict[str, bool]:
-        held: Dict[str, bool] = {}
-        for claim in claims:
-            try:
-                expires = await self._renew(
-                    keys=[
-                        self.keys.run(claim.run_id),
-                        self.keys.conversation(claim.user_email, claim.conversation_id),
-                        self.keys.user(claim.user_email),
-                    ],
-                    args=[
-                        claim.run_id,
-                        self.replica_id,
-                        str(claim.generation),
-                        statuses.get(claim.run_id, "running"),
-                        self._lease_ms,
-                        self._retention_ms,
-                    ],
-                )
-            except Exception as exc:
-                # Unknown, not lost: the next beat tries again well inside the lease.
-                self._unavailable(exc)
-                logger.warning("Could not renew run lease %s: %s", claim.run_id, type(exc).__name__)
-                continue
-            held[claim.run_id] = bool(int(expires))
-        return held
+        """Renew concurrently (bounded), so one beat stays well inside the lease
+        even with many live runs on a slow link."""
+        semaphore = asyncio.Semaphore(RENEW_CONCURRENCY)
+
+        async def _one(claim: RunClaim):
+            async with semaphore:
+                try:
+                    expires = await self._renew(
+                        keys=[
+                            self.keys.run(claim.run_id),
+                            self.keys.conversation(claim.conversation_id),
+                            self.keys.user(claim.user_email),
+                        ],
+                        args=[
+                            claim.run_id,
+                            self.replica_id,
+                            str(claim.generation),
+                            statuses.get(claim.run_id, "running"),
+                            self._lease_ms,
+                            self._retention_ms,
+                        ],
+                    )
+                except Exception as exc:
+                    # Unknown, not lost: the next beat tries again well inside the lease.
+                    self._unavailable(exc)
+                    logger.warning(
+                        "Could not renew run lease %s: %s", claim.run_id, type(exc).__name__
+                    )
+                    return claim.run_id, None
+                return claim.run_id, bool(int(expires))
+
+        results = await asyncio.gather(*(_one(c) for c in claims))
+        return {run_id: held for run_id, held in results if held is not None}
 
     async def read(self, run_id: str) -> Optional[Dict[str, str]]:
         """The shared run record, or ``None``. For diagnostics and tests."""
