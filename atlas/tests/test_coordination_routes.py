@@ -250,3 +250,24 @@ def test_probe_stops_starting_threads_when_all_are_parked(monkeypatch, fake_engi
     assert all(r["status"] == "unavailable" for r in results)
     assert len(calls) == dependency_probes.DB_PROBE_MAX_THREADS
     assert results[-1]["error"] == "ProbeSaturated"
+
+
+def test_budget_timeout_does_not_mark_a_slow_database_down(monkeypatch, fake_engine):
+    """A caller's short budget expiring is not an outage; the probe's own result decides."""
+    import time as _time
+
+    monkeypatch.setattr(app_factory, "conversation_repository", object())
+    monkeypatch.setattr(dependency_probes, "_select_one", lambda engine: _time.sleep(0.4))
+    monkeypatch.setattr(dependency_probes, "database_dependency_name", lambda engine: "postgres")
+
+    async def _scenario():
+        first = await dependency_probes.probe_chat_history_db(app_factory, timeout=0.1)
+        down_after_budget = coordination_metrics().dependencies().get("postgres", {}).get("status")
+        await asyncio.sleep(0.6)  # the probe finishes within its own bound
+        return first, down_after_budget
+
+    first, state_after_budget = asyncio.run(_scenario())
+    assert first["status"] == "unavailable"
+    assert state_after_budget != "unavailable"
+    assert coordination_metrics().dependencies()["postgres"]["status"] == "ok"
+    assert dependency_probes._db_state["last"] is None  # the budget miss was not cached

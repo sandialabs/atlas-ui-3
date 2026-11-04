@@ -50,6 +50,42 @@ def database_dependency_name(engine: Any) -> str:
     return "postgres" if dialect == "postgresql" else dialect
 
 
+# PostgreSQL SQLSTATE classes that mean the connection itself is gone:
+# 08 connection exception, 57P0x admin/crash shutdown, cannot connect now.
+_PG_CONNECTION_SQLSTATE_PREFIXES = ("08", "57P01", "57P02", "57P03")
+
+
+def is_db_connectivity_error(exc: BaseException) -> bool:
+    """Whether a database error means the server could not be reached.
+
+    Statement timeouts, deadlocks, serialization failures and constraint
+    violations come from a reachable server and are not an outage.
+    """
+    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    if isinstance(exc, InterfaceError):
+        return True
+    if isinstance(exc, OperationalError):
+        sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+        # No SQLSTATE: the client failed before the server answered.
+        return not sqlstate or str(sqlstate).startswith(_PG_CONNECTION_SQLSTATE_PREFIXES)
+    return False
+
+
+def _record_probe_outcome(name: str, future: "asyncio.Future") -> None:
+    """The probe's own result drives the dependency state, not a caller's budget."""
+    if future.cancelled():
+        return
+    metrics = coordination_metrics()
+    exc = future.exception()
+    if exc is None:
+        metrics.dependency_ok(name)
+    else:
+        metrics.dependency_failed(name, exc, op="probe")
+
+
 def _select_one(engine: Any) -> None:
     from sqlalchemy import text
 
@@ -105,22 +141,26 @@ async def probe_chat_history_db(
             return {"dependency": name, "status": "unavailable", "error": "ProbeSaturated"}
         inflight = state["inflight"] = loop.run_in_executor(_PROBE_EXECUTOR, _select_one, engine)
         state["inflight_at"] = now
+        inflight.add_done_callback(lambda fut, dep=name: _record_probe_outcome(dep, fut))
     started = time.perf_counter()
     try:
         await asyncio.wait_for(asyncio.shield(inflight), timeout)
     except asyncio.TimeoutError:
         result = {"dependency": name, "status": "unavailable", "error": "Timeout"}
+        if time.monotonic() - state["inflight_at"] < DB_PROBE_TIMEOUT_SECONDS:
+            # Only this caller's budget (e.g. /api/health's 0.8 s) ran out; the
+            # probe is still within its own bound and will record its result.
+            # Neither mark the database down nor cache the miss.
+            return result
         metrics.dependency_failed(name, "Timeout", op="probe")
     except Exception as exc:
         result = {"dependency": name, "status": "unavailable", "error": type(exc).__name__}
-        metrics.dependency_failed(name, exc, op="probe")
     else:
         result = {
             "dependency": name,
             "status": "ok",
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
         }
-        metrics.dependency_ok(name)
     if use_cache:
         # A forced probe (use_cache=False) answers its caller only; it does not
         # replace what the cached path serves.

@@ -383,7 +383,9 @@ class CoordinationMetrics:
             rendered = ",".join(f'{k}="{_label_value(v)}"' for k, v in sorted(merged.items()))
             lines.append(f"{name}{{{rendered}}} {_sample_value(value)}")
 
-        emit("atlas_replica_info", "gauge", {"instance": self.instance_id, "version": self.identity()["version"]}, 1)
+        # "instance_id", not "instance": Prometheus sets its own ``instance``
+        # target label and would rename ours to ``exported_instance``.
+        emit("atlas_replica_info", "gauge", {"instance_id": self.instance_id, "version": self.identity()["version"]}, 1)
         emit("atlas_replica_start_time_seconds", "gauge", {}, self.started_at)
         for name, labels, value in gauges:
             emit(name, "gauge", labels, value)

@@ -254,3 +254,34 @@ class TestReviewFollowUps:
         assert stats.command_errors == 1
         stats.record_error(RedisConnectionError("refused"), op="session_get")
         assert metrics.dependencies()["redis"]["status"] == "unavailable"
+
+    def test_statement_errors_from_a_reachable_database_are_not_an_outage(self):
+        from sqlalchemy.exc import OperationalError
+
+        from atlas.infrastructure.dependency_probes import is_db_connectivity_error
+
+        class _PgError(Exception):
+            def __init__(self, sqlstate):
+                super().__init__(sqlstate)
+                self.sqlstate = sqlstate
+
+        for sqlstate in ("57014", "40P01", "40001"):  # statement timeout, deadlock, serialization
+            assert not is_db_connectivity_error(OperationalError("SELECT", {}, _PgError(sqlstate)))
+        for sqlstate in ("08006", "57P01"):  # connection failure, admin shutdown
+            assert is_db_connectivity_error(OperationalError("SELECT", {}, _PgError(sqlstate)))
+        assert is_db_connectivity_error(OperationalError("SELECT", {}, Exception("connection refused")))
+
+    def test_redis_pool_exhaustion_is_not_an_outage(self):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        from atlas.infrastructure.redis.client import RedisStats
+
+        RedisStats().record_error(RedisConnectionError("No connection available."), op="session_get")
+        metrics = coordination_metrics()
+        assert "redis" not in metrics.dependencies()
+        assert metrics.counter("atlas_dependency_command_errors_total", error="PoolExhausted") == 1
+
+    def test_replica_info_uses_instance_id_label(self):
+        text = CoordinationMetrics(replica_id="r1").render_prometheus()
+        info = next(line for line in text.splitlines() if line.startswith("atlas_replica_info{"))
+        assert 'instance_id="' in info and 'instance="' not in info

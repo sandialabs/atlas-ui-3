@@ -97,7 +97,19 @@ def is_redis_connectivity_error(exc: BaseException) -> bool:
     from redis.exceptions import ConnectionError as RedisConnectionError
     from redis.exceptions import TimeoutError as RedisTimeoutError
 
+    if is_redis_pool_exhaustion(exc):
+        return False
     return isinstance(exc, (RedisConnectionError, RedisTimeoutError, TimeoutError, OSError, asyncio.TimeoutError))
+
+
+def is_redis_pool_exhaustion(exc: BaseException) -> bool:
+    """This replica's own pool ran out of connections; Redis itself may be fine."""
+    from redis import exceptions
+
+    max_connections = getattr(exceptions, "MaxConnectionsError", None)
+    if max_connections is not None and isinstance(exc, max_connections):
+        return True
+    return isinstance(exc, exceptions.ConnectionError) and "No connection available" in str(exc)
 
 
 @dataclass
@@ -116,13 +128,19 @@ class RedisStats:
         # Per-replica dependency state (issue #1129): a connectivity failure
         # marks Redis down (logged once per outage); a command error from a
         # reachable server (ResponseError, OOM) is counted but is not an outage.
-        from atlas.core.coordination_metrics import coordination_metrics
+        # Pool exhaustion is counted as "PoolExhausted". Bookkeeping must never
+        # replace the caller's own error handling.
+        try:
+            from atlas.core.coordination_metrics import coordination_metrics
 
-        metrics = coordination_metrics()
-        if is_redis_connectivity_error(exc):
-            metrics.dependency_failed("redis", exc, op=op)
-        else:
-            metrics.incr("atlas_dependency_command_errors_total", dependency="redis", op=op, error=type(exc).__name__)
+            metrics = coordination_metrics()
+            if is_redis_connectivity_error(exc):
+                metrics.dependency_failed("redis", exc, op=op)
+            else:
+                error = "PoolExhausted" if is_redis_pool_exhaustion(exc) else type(exc).__name__
+                metrics.incr("atlas_dependency_command_errors_total", dependency="redis", op=op, error=error)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("recording a Redis error failed", exc_info=True)
 
     def incr(self, name: str, amount: int = 1) -> None:
         self.extra[name] = self.extra.get(name, 0) + amount

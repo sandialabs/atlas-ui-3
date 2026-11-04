@@ -90,16 +90,12 @@ def _record_persist_failure(exc: BaseException) -> None:
     mark the database unavailable: they would raise false outage alerts.
     """
     try:
-        from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
-
         from atlas.core.coordination_metrics import coordination_metrics
+        from atlas.infrastructure.dependency_probes import is_db_connectivity_error
 
         metrics = coordination_metrics()
         metrics.incr("atlas_conversation_persist_failures_total", error=type(exc).__name__)
-        connectivity = isinstance(exc, (OperationalError, InterfaceError)) or (
-            isinstance(exc, DBAPIError) and exc.connection_invalidated
-        )
-        if connectivity:
+        if is_db_connectivity_error(exc):
             from atlas.infrastructure.dependency_probes import database_dependency_name
             from atlas.modules.chat_history import get_engine
 

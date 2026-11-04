@@ -61,8 +61,11 @@ does not pull every replica during a shared outage. Degraded when:
 Budgets: in `/api/health` both probes run concurrently within **0.8 s**, so the
 endpoint stays under the default kubelet probe timeout (1 s). The periodic
 sweep and `/admin/coordination` use the longer default bounds (Redis 1 s,
-database 1.5 s). Only connectivity errors mark a dependency down: a Redis
-`ResponseError` or a database constraint error is counted
+database 1.5 s). A caller whose budget runs out first gets `unavailable` for
+that request only; the probe's own result (within 1.5 s) drives the dependency
+state, so a slow but reachable database does not flap. Only connection loss
+marks a dependency down: a Redis `ResponseError`, local pool exhaustion, or a
+database statement timeout, deadlock or constraint error is counted
 (`atlas_dependency_command_errors_total`, `atlas_conversation_persist_failures_total`)
 but is not an outage.
 
@@ -116,7 +119,9 @@ The same numbers in Prometheus text format, every series labelled
 | `atlas_projection_failures_total` | counter | `op` |
 | `atlas_conversation_persist_failures_total` | counter | `error` |
 | `atlas_coordination_events_total` | counter | `event` |
-| `atlas_replica_info`, `atlas_replica_start_time_seconds` | gauge | `instance`, `version` |
+| `atlas_replica_info` | gauge | `instance_id`, `version` (`instance` is left to Prometheus's own target label) |
+| `atlas_replica_start_time_seconds` | gauge | |
+| `atlas_dependency_command_errors_total` | counter | `dependency`, `op`, `error` (`PoolExhausted` = this replica's Redis pool ran out) |
 
 The endpoint sits behind admin authorization like the rest of `/admin`. To
 scrape it, send the admin identity your proxy injects (the scraper must reach
