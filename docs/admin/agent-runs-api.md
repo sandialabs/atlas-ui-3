@@ -171,7 +171,10 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
   these endpoints. Messages are limited to 20,000 characters.
 - **Run state is per replica, status is shared.** Follow-up, cancel, listing and idempotency
   are served by the replica that accepted the launch, and only while the registry retains the run
-  (30 minutes after it ends). With `SESSION_REPOSITORY_TYPE=redis`, `GET /api/agent-runs/{run_id}`
+  (30 minutes after it ends). **Cancel** is the exception: with `SESSION_REPOSITORY_TYPE=redis`
+  any replica accepts it and stops the run on the replica executing it (see
+  [cross-replica run control](../developer/run-control.md)); a `504 command_timeout` means that
+  replica did not confirm in time, and repeating the cancel is safe. With `SESSION_REPOSITORY_TYPE=redis`, `GET /api/agent-runs/{run_id}`
   answers on every replica from the run's shared record, kept 5 minutes after the run ends
   ([run coordination](../developer/run-coordination.md));
   otherwise a status request that reaches another replica gets `404 run_not_found`. Behind

@@ -35,6 +35,7 @@ from atlas.application.chat.runs.external_runs import (
     list_api_runs,
 )
 from atlas.application.chat.runs.launcher import LaunchRefused
+from atlas.application.chat.runs.run_control import route_api_cancel
 from atlas.core.agent_runs_paths import AGENT_RUNS_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,12 @@ _STATUS_FOR_CODE = {
     "idempotency_conflict": 409,
     "idempotency_in_progress": 409,
     "concurrency_limit": 429,
+    # Run control routed to another replica (issue #1128).
+    "owner_unavailable": 503,
+    "command_expired": 503,
+    "command_in_progress": 409,
+    "command_timeout": 504,
+    "stale_generation": 503,
     "persistence_unavailable": 503,
     "unavailable": 503,
 }
@@ -390,10 +397,28 @@ async def follow_up_run(
     return _respond_handle(handle, response)
 
 
-@router.post("/{run_id}/cancel", response_model=RunStatusModel, responses=_ERRORS)
+@router.post(
+    "/{run_id}/cancel",
+    response_model=RunStatusModel,
+    responses={**_ERRORS, 504: {"model": ErrorResponse}},
+)
 async def cancel_run(run_id: str):
-    """Stop an API-started run and any sub-conversations it launched."""
+    """Stop an API-started run and any sub-conversations it launched.
+
+    Any replica accepts the request. A run another replica is executing is
+    stopped there (issue #1128) and the response is that replica's answer. A
+    504 means the owner did not confirm in time; repeating the cancel is safe.
+    """
     try:
         return cancel_api_run(run_id)
     except LaunchRefused as e:
-        raise _refused(e)
+        if getattr(e, "code", None) != "run_not_found":
+            raise _refused(e)
+        local_refusal = e
+    answer = await route_api_cancel(run_id)
+    if answer is None:
+        raise _refused(local_refusal)
+    if answer.get("ok"):
+        return (answer.get("payload") or {}).get("status")
+    code = answer.get("code") or "unavailable"
+    raise _error(_STATUS_FOR_CODE.get(code, 503), code, answer.get("message") or "Run control failed.")

@@ -106,7 +106,9 @@ rather than formatting keys by hand.
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
 | `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Removed on release; after a takeover, once the run's projection is closed |
-| `<p>:run-cmd:<run_id>` | stream | **Reserved** for command routing (stop, steer, approve) | (not written yet) |
+| `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Trimmed to ~1000 entries; 24 h |
+| `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | 120 s |
+| `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending 30 s, done 1 h |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
 Run record fields:
@@ -259,21 +261,31 @@ one to one and a half `RUN_LEASE_SECONDS`. A shorter lease detects failure
 sooner, at the cost of more Redis traffic and a higher chance that a long
 event-loop stall fences a healthy run.
 
-## Command IDs (reserved)
+## Run-control commands
 
-Cross-replica commands will be appended to `<p>:run-cmd:<run_id>` with at
-least: `command_id` (a UUID chosen by the sender, so a retried command is
-handled once), `type` (`stop`, `steer`, `approval`, ...), `issued_by` (replica
-id), `issued_at`, and the `generation` the sender saw. An owner whose own
-generation is newer ignores the command. Nothing produces or consumes the
-stream yet.
+A stop, steer or approval that reaches a replica which does not hold the run
+is sent to the owner named by the run record's `owner`, on that replica's
+inbox `<p>:ctl:<owner>` (one stream per replica rather than one per run, so
+an owner consumes a single stream). The envelope, JSON in field `c`:
+
+| Field | Meaning |
+|-------|---------|
+| `request_id` | Chosen by the caller (or derived, e.g. `approval:<invocation_id>`); a retry reuses it and the owner executes it once (`ctl-done` `SET NX`) |
+| `attempt` | Fresh per send; the reply carries it, so a retry never reads an earlier attempt's reply |
+| `command` | `stop`, `steer` or `approval` |
+| `run_id` | The run |
+| `generation` | The record's `generation` as the sender read it. The owner refuses with `stale_generation`, executing nothing, unless the record still names itself at that generation |
+| `actor` | `{"kind": "user", "email"}` or `{"kind": "service"}`; the owner re-checks it against its own registry |
+| `args` | Command arguments |
+| `deadline` | Epoch seconds; an owner that reads the command later answers `command_expired` without executing it |
+
+Details, reply codes and guarantees: [run control](run-control.md).
 
 ## Still open in #1128
 
-Tracked as a strict xfail in `test/multireplica/test_run_coordination_gaps.py`:
-routing stop/steer/approval to the owner. It should be built on the record and
-keys above rather than new ones. (Inspecting a run from a non-owner, reporting
-owner loss as `failed`, and fencing a paused owner are closed by the leases.)
+Nothing in `test/multireplica/test_run_coordination_gaps.py` is still a gap:
+admission, inspection from a non-owner, owner loss, fencing a paused owner and
+routing stop/steer/approval to the owner are all covered.
 
 ## Tests
 

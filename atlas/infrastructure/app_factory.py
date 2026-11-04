@@ -102,7 +102,6 @@ class AppFactory:
             )
 
             set_execution_store(RedisExecutionStore(self.redis))
-
             # Cluster-wide run admission (issue #1128): with a shared Redis
             # every replica claims runs there, so the per-conversation and
             # per-user caps hold across replicas. Without Redis the registry's
@@ -125,6 +124,16 @@ class AppFactory:
             self.run_lease_guard = RunLeaseGuard(
                 redis_coordinator, RedisRunLeases(redis_coordinator), get_run_registry()
             )
+
+            # Run control (issue #1128): stop, steer and approval reach the
+            # replica that owns a run. It reads the coordinator's run records
+            # and keys, and its inbox is named by the coordinator's replica id.
+            from atlas.application.chat.runs.control_bus import (
+                RedisRunControlBus,
+                set_run_control_bus,
+            )
+
+            set_run_control_bus(RedisRunControlBus(self.redis, redis_coordinator))
 
         # Outcomes of optional startup steps (issue #992): "ok", "failed" or
         # "disabled" per feature, reported by /api/health. A failure's detail
@@ -235,6 +244,11 @@ class AppFactory:
         """Release shared connection pools on shutdown."""
         await self.stop_run_lease_guard()
         if self.redis is not None:
+            from atlas.application.chat.runs.control_bus import get_run_control_bus
+
+            bus = get_run_control_bus()
+            if bus is not None:
+                await bus.stop()
             await self.redis.close()
 
     async def session_store_health(self) -> Dict[str, Any]:

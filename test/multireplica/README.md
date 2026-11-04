@@ -49,6 +49,7 @@ Scaling") lists the code paths whose PRs must run it.
 | Side-effect tool | `harness/side_effect_mcp.py`, `harness/side_effect_keys.py` | stdio MCP server; every execution is appended to a shared file so tests can count them across replicas. Writer and reader share one key-to-filename function; the reader skips torn or undecodable lines |
 | Replicas | `harness/replica.py` | `uvicorn atlas.main:app` per replica, own port, process group, log and `.env`; environment built from scratch, `ENVIRONMENT=development` (required by `DEBUG_MODE`) and `PYTHON_DOTENV_DISABLED=1` so litellm's import-time `load_dotenv()` cannot pull in a `.env` found above the venv |
 | Client helpers | `harness/cluster.py` | agent-runs REST API (`launch`, `run_status`, `cancel`, `wait_terminal`), conversations, side-effect counts |
+| Browser tab | `harness/ws_client.py` | chat WebSocket to one replica; `auto_approve` answers named tools the way the UI's auto-approve does |
 
 Replicas start once per session. The `cluster` fixture restarts or resumes any
 replica a test killed or paused, so tests can crash replicas freely
@@ -84,6 +85,11 @@ answer. A message without directives is answered `ECHO: <message>`.
   the fencing generation bumped, and a SIGSTOPped owner that resumes after
   being declared lost writes nothing more. Replicas run with
   `RUN_LEASE_SECONDS=6` (`LEASE_TTL` in `harness/cluster.py`).
+- `test_run_control_routing.py`: stop, steer and approval of a run on A
+  sent through B (WebSocket and REST), with duplicate and retried commands,
+  another user's commands, and a frozen owner. Tests that need a browser use
+  `harness/ws_client.py`; `approved_write` is the approval-gated twin of the
+  side-effect tool.
 - `test_known_bugs.py`: bugs the harness found that are outside #1128, in the
   same strict-xfail style. A fixed bug keeps its test as a regression test
   (the REST-only cap bug, fixed with #1128).

@@ -699,11 +699,7 @@ def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     happens to be in flight on this socket.
     """
     addressed_run_id = data.get("run_id")
-    record = run_registry.get_for_user(addressed_run_id, user_email)
-    if record is None:
-        record = run_registry.active_for_conversation(
-            data.get("conversation_id"), user_email
-        )
+    record = _find_addressed_run(run_registry, user_email, data)
     if record is None:
         # A frame naming a run id we cannot resolve still addressed a run (it
         # is terminal, reaped, or another user's). Treat it as addressed so the
@@ -711,6 +707,39 @@ def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
         return bool(addressed_run_id)
     logger.info("Cancelling run %s on user request", record.run_id)
     run_registry.cancel(record.run_id, user_email)
+    return True
+
+
+def _find_addressed_run(run_registry, user_email: str, data: dict):
+    """The user's run on this replica a frame names, by run id then conversation."""
+    record = run_registry.get_for_user(data.get("run_id"), user_email)
+    if record is None:
+        record = run_registry.active_for_conversation(
+            data.get("conversation_id"), user_email
+        )
+    return record
+
+
+async def _stop_remote_run(websocket, run_registry, user_email: str, data: dict) -> bool:
+    """Route a stop to the replica that owns the run (issue #1128).
+
+    Only for a frame this replica's registry cannot resolve. Returns whether
+    another replica owns the addressed run, in which case the frame is fully
+    handled here and must not fall back to cancelling a local untracked turn.
+    """
+    if _find_addressed_run(run_registry, user_email, data) is not None:
+        return False
+    if not data.get("run_id") and not data.get("conversation_id"):
+        return False
+    from atlas.application.chat.runs.remote_run_frames import stop_frame
+    from atlas.application.chat.runs.run_control import route_stop
+
+    answer = await route_stop(user_email, data.get("run_id"), data.get("conversation_id"))
+    if answer is None:
+        return False
+    frame = stop_frame(answer, data)
+    if frame is not None:
+        await websocket.send_json(frame)
     return True
 
 
@@ -1447,6 +1476,23 @@ async def lifespan(app: FastAPI):
     # it arrives on (admission re-applies it, so admin changes still land).
     apply_run_limit(config.app_settings)
 
+    # Issue #1128: execute stop, steer and approval commands other replicas
+    # route to the runs this one owns. A no-op without shared Redis.
+    from atlas.application.chat.runs.run_control import start_run_control
+
+    # One connectionless service answers every routed steer's classification
+    # check, built on first use rather than per command.
+    steering_checker = {}
+
+    async def _steering_refusal(session_id, compliance_level):
+        if "service" not in steering_checker:
+            steering_checker["service"] = app_factory.create_chat_service()
+        return await steering_checker["service"].steering_classification_refusal(
+            session_id, compliance_level
+        )
+
+    start_run_control(_steering_refusal)
+
     yield
 
     logger.info("Shutting down Chat UI Backend")
@@ -2155,6 +2201,46 @@ async def websocket_endpoint(websocket: WebSocket):
                         "conversation_id": tracked_run.conversation_id,
                     })
                     continue
+
+                # Issue #1128: the conversation's run may be executing on
+                # another replica. Steer it there; never start a second turn
+                # beside it.
+                if tracked_run is None and frame_conversation_id:
+                    from atlas.application.chat.runs.remote_run_frames import steer_frame
+                    from atlas.application.chat.runs.run_control import (
+                        remote_run_for_conversation,
+                        route_steer,
+                    )
+
+                    remote_run = await remote_run_for_conversation(frame_conversation_id)
+                    if remote_run is not None and remote_run.get("user_email") != normalize_user_email(
+                        user_email
+                    ):
+                        # The cross-replica form of the guard above.
+                        logger.warning(
+                            "WS refused a turn naming conversation=%s while another "
+                            "user's run is executing under it on another replica",
+                            sanitize_for_logging(frame_conversation_id),
+                        )
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Conversation not found",
+                            "error_type": "authorization",
+                            "conversation_id": frame_conversation_id,
+                        })
+                        continue
+                    if remote_run is not None:
+                        answer = await route_steer(
+                            remote_run,
+                            user_email,
+                            data.get("content", ""),
+                            data.get("compliance_level_filter"),
+                            request_id=data.get("request_id"),
+                        )
+                        frame = steer_frame(answer, remote_run)
+                        if frame is not None:
+                            await websocket.send_json(frame)
+                            continue
 
                 if should_steer(active_chat_task, data.get("conversation_id")):
                     refusal = await chat_service.steering_classification_refusal(
@@ -3122,9 +3208,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     _resume_waiting_run(run_registry, user_email, data)
                 elif kind == "recorded":
                     # Only a shared outcome was written; the executor lives on
-                    # another replica and observes it there. Nothing on this
-                    # replica was waiting on this request.
-                    pass
+                    # another replica. Nothing on this replica was waiting on
+                    # this request. Wake the executor rather than leave it to
+                    # its next poll (issue #1128); the outcome is already
+                    # settled, so a repeated nudge cannot settle it again.
+                    from atlas.application.chat.runs.remote_run_frames import nudge_approval_owner
+
+                    nudge_approval_owner(user_email, frame)
                 elif frame is not None:
                     # Duplicate: the settled outcome, not an error that ends
                     # the turn. Unknown: the error frame, which names the
@@ -3140,7 +3230,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # that run and nothing else -- stopping A must never stop B.
                 # A frame with neither falls back to the untracked slot, which
                 # is what an older client sends.
-                if not _cancel_addressed_run(run_registry, user_email, data):
+                if await _stop_remote_run(websocket, run_registry, user_email, data):
+                    pass
+                elif not _cancel_addressed_run(run_registry, user_email, data):
                     task = active_chat_task.get("task")
                     if task and not task.done():
                         logger.info("Cancelling active chat task (stop_streaming)")
@@ -3152,7 +3244,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the message is always handled here as a plain task cancel.
                 action = data.get("action")
                 if action == "stop":
-                    if not _cancel_addressed_run(run_registry, user_email, data):
+                    if await _stop_remote_run(websocket, run_registry, user_email, data):
+                        pass
+                    elif not _cancel_addressed_run(run_registry, user_email, data):
                         task = active_chat_task.get("task")
                         if task and not task.done():
                             logger.info("Cancelling active chat task (agent_control stop)")
