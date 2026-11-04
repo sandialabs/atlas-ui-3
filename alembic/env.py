@@ -32,7 +32,10 @@ if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
     config.attributes["connect_args"] = prepare_args
 
-if config.config_file_name is not None:
+# The schema migration runner configures logging itself; fileConfig would
+# disable its loggers mid-run (disable_existing_loggers), so only the CLI
+# loads the logging setup from alembic.ini.
+if config.config_file_name is not None and "connection" not in config.attributes:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
@@ -54,6 +57,16 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    # A caller that already holds a connection (the schema migration runner,
+    # which keeps a PostgreSQL advisory lock on it) passes it in, so the
+    # upgrade runs inside that lock instead of on a second connection.
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

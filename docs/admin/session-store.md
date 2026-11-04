@@ -1,6 +1,6 @@
 # Session Store Configuration
 
-Last updated: 2026-10-20
+Last updated: 2026-11-04
 
 ## Overview
 
@@ -189,6 +189,9 @@ Store errors and refused writes are also logged (ERROR and WARNING).
 - Size `REDIS_MAX_CONNECTIONS` from the budget formula above.
 - Rolling deploys: a replica that is stopping closes its sockets; clients
   reconnect to a remaining replica and resume.
+- A complete staging overlay (three replicas, probes, migrations, validation
+  of cross-replica resume) is in `deploy/kubernetes/`; see
+  [Multi-Replica Staging on Kubernetes/OpenShift](kubernetes-staging.md).
 
 ## Limits of the shared store
 

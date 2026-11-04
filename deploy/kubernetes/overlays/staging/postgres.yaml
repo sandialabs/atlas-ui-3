@@ -1,0 +1,109 @@
+# Staging PostgreSQL for durable state (chat history, workspaces). One
+# unreplicated instance on a PersistentVolumeClaim from the default storage
+# class; production uses a managed or replicated database with backups.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: atlas-postgres
+  labels:
+    app.kubernetes.io/name: atlas-postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: atlas-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-postgres
+        app.kubernetes.io/component: database
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        # The image's postgres user. The OpenShift overlay removes these so
+        # the restricted SCC can assign the namespace's UID range instead.
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+          args:
+            # Budget: replicas x (CHAT_HISTORY_DB_POOL_SIZE +
+            # CHAT_HISTORY_DB_MAX_OVERFLOW), plus one surge replica, one
+            # migration connection per starting pod and admin sessions.
+            # 3 x 10 + 10 + 4 + slack fits well inside 100.
+            - -c
+            - max_connections=100
+          env:
+            - name: POSTGRES_USER
+              value: atlas
+            - name: POSTGRES_DB
+              value: atlas_chat_history
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: POSTGRES_PASSWORD}
+            # A subdirectory: the volume root may hold lost+found.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "atlas", "-d", "atlas_chat_history", "-h", "127.0.0.1"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "atlas", "-d", "atlas_chat_history", "-h", "127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+      volumes:
+        - name: run
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-postgres
+  labels:
+    app.kubernetes.io/name: atlas-postgres
+    app.kubernetes.io/component: database
+spec:
+  selector:
+    app.kubernetes.io/name: atlas-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

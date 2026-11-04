@@ -37,7 +37,7 @@ RUN find /app/atlas -type d \( -name tests -o -name __pycache__ \) -prune -exec 
     find /app/atlas/mcp -type f -name 'test_*.py' -delete
 # Use the lock and a real package, never a stub or an editable installation.
 # The MCP extras are required by the bundled subprocess servers.
-RUN uv sync --frozen --no-dev --extra mcp-demos --no-editable
+RUN uv sync --frozen --no-dev --extra mcp-demos --extra migrations --no-editable
 RUN mkdir -p /app/config && \
     find /app/atlas/config -maxdepth 1 -type f \
       \( -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name '*.md' \) \
@@ -71,6 +71,10 @@ COPY --from=python-build /app/.venv /app/.venv
 # depending on an editable package's build-time source directory.
 COPY --from=python-build /app/atlas /app/atlas
 COPY --from=python-build /app/prompts /app/prompts
+# Schema migrations, run once per deployment from a Job before replicas start
+# (`alembic -c /app/alembic.ini upgrade head`; see docs/admin/kubernetes-staging.md).
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic/
 COPY --from=python-build --chown=atlas:atlas /app/config /app/config
 ARG GIT_HASH="unknown"
 ENV VIRTUAL_ENV=/app/.venv \

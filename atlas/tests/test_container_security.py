@@ -117,7 +117,7 @@ def test_published_runtime_is_multistage_nonroot():
     runtime_script = (ROOT / "test/pr-validation/test_pr1017_container_runtime.sh").read_text()
     assert 'for module in pip ensurepip' in runtime_script
     assert '-I -c "import ${module}"' in runtime_script
-    assert "uv sync --frozen --no-dev --extra mcp-demos --no-editable" in recipe
+    assert "uv sync --frozen --no-dev --extra mcp-demos --extra migrations --no-editable" in recipe
     assert "--ignore-requires-python" not in recipe
     assert "COPY --from=frontend-build /app/frontend/dist /app/atlas/static" in recipe
     for tree in ("docs", "test", "scripts", "mocks"):
