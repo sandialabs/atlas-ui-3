@@ -57,6 +57,7 @@ __all__ = [
     "cancel_api_run",
     "follow_up_api_run",
     "get_api_run",
+    "get_api_run_anywhere",
     "launch_api_run",
     "list_api_runs",
     "list_api_options",
@@ -495,6 +496,7 @@ def _status(record: Any) -> Dict[str, Any]:
             "previous_run_id": spec.get("previous_run_id"),
             "result": None,
             "result_status": "pending" if not record.is_terminal else "unavailable",
+            "interrupted": bool(record.fenced),
         }
     )
     if record.status is RunStatus.COMPLETED:
@@ -510,6 +512,67 @@ def _status(record: Any) -> Dict[str, Any]:
 def get_api_run(run_id: str) -> Dict[str, Any]:
     """``atlas_result``: status, timestamps, error and final reply of one run."""
     return _status(_api_record(run_id))
+
+
+def _status_from_shared(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """The status of a run another replica owns (or owned), from its
+    shared record (#1128). Same shape as :func:`_status`."""
+    payload = {
+        key: doc.get(key)
+        for key in (
+            "run_id", "conversation_id", "status", "waiting_on", "created_at",
+            "updated_at", "ended_at", "error", "title", "parent_run_id",
+            "parent_conversation_id", "workspace", "model", "compliance_level",
+            "previous_run_id",
+        )
+    }
+    payload.update({
+        "user": doc.get("user_email"),
+        "detached": bool(doc.get("detached")),
+        "depth": int(doc.get("depth") or 0),
+        "tools": list(doc.get("tools") or []),
+        "data_sources": list(doc.get("data_sources") or []),
+        "interrupted": bool(doc.get("interrupted")),
+        "result": None,
+        "result_status": (
+            "pending" if doc.get("status") not in ("completed", "failed", "cancelled")
+            else "unavailable"
+        ),
+    })
+    if doc.get("status") == "completed":
+        result = doc.get("result")
+        if result == "":
+            payload["result_status"] = "empty"
+        elif result is not None:
+            _set_result(payload, result)
+        else:
+            payload["result_error"] = "This run's reply could not be captured."
+    return payload
+
+
+async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
+    """:func:`get_api_run`, falling back to the shared run record.
+
+    The replica that owns a run answers from its registry. Any other
+    replica answers from the record the owner mirrors to Redis -- including
+    a run whose owner died, which the orphan sweep marked interrupted.
+    """
+    try:
+        return get_api_run(run_id)
+    except LaunchRefused:
+        from atlas.application.chat.runs.leases import get_lease_guard
+
+        guard = get_lease_guard()
+        if guard is None:
+            raise
+        try:
+            doc = await guard.read_record(run_id)
+        except Exception as exc:
+            logger.warning("shared run record unreadable: %s", type(exc).__name__)
+            doc = None
+        if doc is None or doc.get("source") != API_SOURCE:
+            raise
+        return _status_from_shared(doc)
 
 
 def list_api_runs(user_email: Optional[str] = None) -> List[Dict[str, Any]]:

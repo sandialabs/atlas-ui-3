@@ -1027,8 +1027,14 @@ async def publish_execution_event(event: dict) -> Optional[dict]:
     """Record one frame. A store error must not fail the tool call.
 
     Returns the projection after the write, or None when nothing was stored.
+    A replica that lost the run's ownership lease (#1128) writes nothing.
     """
     try:
+        from atlas.application.chat.runs.leases import may_publish_for_run
+
+        if not await may_publish_for_run(event.get("run_id") if isinstance(event, dict) else None):
+            logger.info("dropped a projection write from a run this replica no longer owns")
+            return None
         return await get_execution_store().apply_event(event)
     except Exception:
         logger.warning("execution projection update failed", exc_info=True)

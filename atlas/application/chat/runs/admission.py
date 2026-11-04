@@ -148,7 +148,11 @@ def ensure_lease_heartbeat() -> None:
     loop = asyncio.get_running_loop()
     if _heartbeat is not None and not _heartbeat.done() and _heartbeat.get_loop() is loop:
         return
-    _heartbeat = loop.create_task(run_lease_heartbeat())
+    # A third of the coordinator's lease, so a configured RUN_LEASE_SECONDS
+    # keeps one missed beat inside the lease.
+    lease = getattr(get_run_coordinator(), "lease_seconds", None)
+    interval = lease / 3 if lease else RUN_LEASE_RENEW_INTERVAL_SECONDS
+    _heartbeat = loop.create_task(run_lease_heartbeat(interval))
 
 
 async def stop_lease_heartbeat() -> None:

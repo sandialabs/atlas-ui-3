@@ -304,6 +304,9 @@ def replica_env(
         # (see test_configured_cap_applies_before_any_websocket) any other value
         # only takes effect once a browser connects to that replica.
         "MAX_CONCURRENT_RUNS_PER_USER": "5",
+        # Short ownership leases so owner-loss tests finish quickly; renewed
+        # every 2 s, a lost owner is declared interrupted within ~6-9 s.
+        "RUN_LEASE_SECONDS": "6",
         "USE_MOCK_S3": "true",
         "LLM_MAX_RETRIES": "0",
         # Side-effect tool bookkeeping (inherited by the MCP child process).

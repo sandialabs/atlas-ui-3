@@ -29,7 +29,7 @@ from atlas.application.chat.runs.external_runs import (
     agent_runs_api_enabled,
     cancel_api_run,
     follow_up_api_run,
-    get_api_run,
+    get_api_run_anywhere,
     launch_api_run,
     list_api_options,
     list_api_runs,
@@ -238,6 +238,13 @@ class RunStatusModel(BaseModel):
     )
     result_error: Optional[str] = None
     cancelled: Optional[bool] = None
+    interrupted: bool = Field(
+        False,
+        description=(
+            "True when the server running the run was lost and the run was "
+            "marked failed. Finished tool calls are kept; none is retried."
+        ),
+    )
 
 
 class RunList(BaseModel):
@@ -339,9 +346,15 @@ async def list_runs(
 
 @router.get("/{run_id}", response_model=RunStatusModel, responses=_ERRORS)
 async def get_run(run_id: str):
-    """Status, timestamps, error and final reply of an API-started run."""
+    """Status, timestamps, error and final reply of an API-started run.
+
+    With Redis-backed coordination (``SESSION_REPOSITORY_TYPE=redis``) any
+    replica answers: one that does not own the run reads the shared run
+    record. Otherwise only the replica that accepted the launch knows the
+    run. ``interrupted`` is true when the replica running it was lost.
+    """
     try:
-        return get_api_run(run_id)
+        return await get_api_run_anywhere(run_id)
     except LaunchRefused as e:
         raise _refused(e)
 

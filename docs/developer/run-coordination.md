@@ -103,7 +103,8 @@ rather than formatting keys by hand.
 | `<p>:run:<run_id>` | hash | The run record (fields below) | Lease + 300 s while live; 300 s after release |
 | `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
-| `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed, floored at Redis time (microseconds) | Persistent |
+| `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
+| `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Members removed on release and takeover |
 | `<p>:run-cmd:<run_id>` | stream | **Reserved** for command routing (stop, steer, approve) | (not written yet) |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
@@ -119,6 +120,10 @@ Run record fields:
 | `status` | `queued` at claim, then the registry status carried by each lease renewal (`running`, `waiting_for_input`), and the terminal status at release |
 | `lease_expires_at` | Epoch ms from the Redis clock; `0` once released |
 | `created_at`, `updated_at` | Epoch ms from the Redis clock |
+| `snapshot` | JSON of the run's public status (title, `source`, model, tools, timestamps, the completed `result` capped at 20,001 characters), written by the owner under its owner/generation, so any replica can answer `GET /api/agent-runs/{id}` |
+| `error` | The run's error, if any |
+| `interrupted` | `1` once an orphan sweep took the run over (see below) |
+| `interrupted_by` | Replica id that took it over |
 
 Rules every script follows:
 
@@ -135,16 +140,16 @@ Rules every script follows:
   heartbeat that races the release cannot take the slot back.
 - **Renewal reports loss.** A lapsed lease is never re-taken (its slot may
   already count for another run). The owner renews every live claim every
-  `RUN_LEASE_RENEW_INTERVAL_SECONDS` (10 s), on a fixed schedule so a slow
-  pass does not delay the next one. The heartbeat starts with the first claim
-  on an event loop, so the API server and a headless `AtlasClient` both
+  third of `RUN_LEASE_SECONDS` (10 s by default), on a fixed schedule so a
+  slow pass does not delay the next one. The heartbeat starts with the first
+  claim on an event loop, so the API server and a headless `AtlasClient` both
   renew. Renewals run concurrently (16 at a time). Renewal returns `False`
   for a claim the replica no longer holds: the lease lapsed, another owner or
   generation holds the run, or it was released elsewhere. The first `False`
   moves the claim from `RunRecord.claim` to `RunRecord.lost_claim`, logs one
   warning and notifies the claim-lost listeners once; the claim is not
-  renewed or reported again. The run itself keeps executing. Stopping it, or
-  refusing its writes by generation, is the fencing work below.
+  renewed or reported again. The lease guard's listener then fences the run
+  (next section).
 
 Scripts touch several keys, so the contract assumes one logical Redis (a
 primary, optionally with replicas or Sentinel), which is what `REDIS_URL`
@@ -162,6 +167,61 @@ supports today. Redis Cluster would need hash tags and is out of scope.
 - `RunCoordinator.read(run_id)`: the shared run record (fields above, as
   strings), readable from any replica. `None` without Redis.
 
+## Leases, orphan detection and fencing
+
+`atlas/application/chat/runs/leases.py` (`RunLeaseGuard`, one per process,
+started with the shared infrastructure) acts on the claims above through the
+extension points. Its two scripts (`INTERRUPT`, `MIRROR`) live in
+`atlas/infrastructure/redis/run_leases.py` and use `RunCoordinationKeys`. It
+adds no record of its own: everything it writes goes into `run:<run_id>`,
+under the claim's owner and generation. The only change to #1161's scripts is
+the `runs-live` index (claim adds, renew rescores, release removes).
+
+| Step | Who | What |
+|------|-----|------|
+| Mirror | owner | On every registry change, the `MIRROR` script writes the `snapshot` (and a non-terminal `status`) if `owner` and `generation` are still the writer's. A refusal fences the run. |
+| Orphan sweep | every replica | Every half lease (jittered), read `runs-live` members whose score has passed and run the `INTERRUPT` script on each. It acts only on a non-terminal record whose `lease_expires_at` is past by the Redis clock (which the owner can no longer renew). It then `INCR`s `run-fence`, sets `generation` to that value and `owner` to empty, marks the run `failed` with `interrupted=1`, `error` and `interrupted_by`, frees `run-conv` / `run-user` / `runs-live`, and closes the run in the execution projection. |
+| Fence | old owner | A lost claim (the `add_claim_lost_listener` callback, fired when the heartbeat's renewal is refused) or a refused mirror stops the run locally (`RunRegistry.mark_interrupted`): the task is cancelled, the local record reads failed/interrupted, its claim is dropped, and nothing more is published. If no replica has swept the run yet, the owner runs the takeover itself. |
+
+The `runs-live` score is only a hint for the sweep. The takeover re-checks the
+lease inside the script, so clock skew between replicas affects efficiency,
+never safety.
+
+**Checks in the run's own code.** A frozen owner's event loop notices
+nothing until it runs again, and then a pending tool call or projection write
+may run before its heartbeat does. `ensure_current_run_may_act()` (in
+`execute_single_tool`, right before the tool starts) and
+`may_publish_for_run()` (in `publish_execution_event`) trust the claim only
+for 80% of `RUN_LEASE_SECONDS` after the guard last proved the claim with a
+renewal of its own. The run's first check after admission always renews,
+and so does the first check once that window has passed. The window is
+measured on `CLOCK_BOOTTIME`, which keeps counting while the process is
+stopped. A refusal, or a Redis that
+cannot be reached, fences the run: it cannot prove it still holds the claim.
+A fenced tool call raises `CancelledError`, so the turn unwinds as a stopped
+turn.
+
+**What an interrupted run looks like.**
+- `GET /api/agent-runs/{id}` on any replica: `status: failed`,
+  `interrupted: true`, and an `error` saying the server running it stopped
+  responding.
+- In the execution projection, completed tool rows keep their status and
+  result; open rows become `interrupted`.
+- **No tool is retried.** A side effect that was in flight may or may not
+  have happened; its row says interrupted, never completed.
+- The old owner, if it comes back, reports the same outcome from its own
+  registry. It may still save its partial transcript to chat history through
+  the normal stopped-turn path. That is durable history, not coordination
+  state.
+- Live session snapshots (`session:<id>`) are not fenced.
+
+A graceful shutdown does not release claims, so runs still executing in a
+stopping replica are reported interrupted by the others once their lease
+lapses, the same as after a crash. Detection of a lost owner takes roughly
+one to one and a half `RUN_LEASE_SECONDS`. A shorter lease detects failure
+sooner, at the cost of more Redis traffic and a higher chance that a long
+event-loop stall fences a healthy run.
+
 ## Command IDs (reserved)
 
 Cross-replica commands will be appended to `<p>:run-cmd:<run_id>` with at
@@ -173,10 +233,10 @@ stream yet.
 
 ## Still open in #1128
 
-Tracked as strict xfails in `test/multireplica/test_run_coordination_gaps.py`:
-inspecting a run from a non-owner, routing stop/steer/approval to the owner,
-reporting owner loss as `failed`, and fencing a paused owner. Each should be
-built on the record and keys above rather than new ones.
+Tracked as a strict xfail in `test/multireplica/test_run_coordination_gaps.py`:
+routing stop/steer/approval to the owner. It should be built on the record and
+keys above rather than new ones. (Inspecting a run from a non-owner, reporting
+owner loss as `failed`, and fencing a paused owner are closed by the leases.)
 
 ## Tests
 
@@ -185,6 +245,12 @@ built on the record and keys above rather than new ones.
   different replica ids.
 - `atlas/tests/test_run_admission.py`: `admit_run`, including cleanup after
   every kind of failed admission.
-- `test/multireplica/test_cluster_admission.py` and
+- `atlas/tests/test_run_leases.py`: the lease guard on the same scripts with
+  two replicas: mirror, sweep, takeover generation, stale-owner refusal,
+  frozen owner, Redis outage after the lease lapsed, projection and tool
+  guards, non-owner reads.
+- `test/multireplica/test_cluster_admission.py`, `test_run_leases.py` and
   `test_run_coordination_gaps.py`: two real replicas with shared Redis and
-  PostgreSQL (`bash test/multireplica_tests.sh`).
+  PostgreSQL (`bash test/multireplica_tests.sh`), including SIGKILL and
+  SIGSTOP of the owner with the side-effect counter proving nothing was
+  replayed.

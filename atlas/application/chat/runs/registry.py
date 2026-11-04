@@ -176,6 +176,10 @@ class RunRecord:
     # (so it is neither renewed nor reported again). Kept for fencing: its
     # ``generation`` is the one this replica held.
     lost_claim: Optional[Any] = field(default=None, repr=False, compare=False)
+    # Set when this replica lost the run's ownership lease (issue #1128):
+    # another replica declared it interrupted, so nothing this process does
+    # for the run may reach shared state any more.
+    fenced: bool = False
 
     @property
     def is_terminal(self) -> bool:
@@ -219,6 +223,8 @@ class RunRegistry:
         self._children: Dict[str, List[str]] = {}
         self._conversation_children: Dict[str, List[str]] = {}
         self._listeners: Dict[str, List[Callable[[RunRecord], None]]] = {}
+        # Every-run observers, any owner (the lease coordinator, #1128).
+        self._observers: List[Callable[[RunRecord], None]] = []
 
     # ------------------------------------------------------------------
     # Configuration
@@ -520,9 +526,10 @@ class RunRegistry:
 
         The registry stays process-local. The shared projection is what
         another replica's run list would otherwise keep showing as active
-        until the document expired.
+        until the document expired. A fenced run's outcome was already
+        published by the replica that took it over.
         """
-        if not record.status.is_terminal:
+        if not record.status.is_terminal or record.fenced:
             return
         event = {
             "type": "run_status",
@@ -797,6 +804,36 @@ class RunRegistry:
             return True
         return False
 
+    def mark_interrupted(self, run_id: str, error: str) -> Optional[RunRecord]:
+        """This replica lost the run's lease (#1128): stop it, locally only.
+
+        Another replica has recorded the run as failed/interrupted, so the
+        local record says the same even if it had already ended here, and
+        the task is cancelled so no further tool runs. ``fenced`` keeps the
+        outcome out of shared state: the projection already has it.
+        """
+        record = self.get(run_id)
+        if record is None:
+            return None
+        task = record.task
+        record.fenced = True
+        record.status = RunStatus.FAILED
+        record.error = error
+        record.waiting_on = None
+        record.pending_requests.clear()
+        record.updated_at = time.time()
+        record.ended_at = record.ended_at or record.updated_at
+        record.steering = None
+        record.task = None
+        # The claim belongs to whoever took the run over; never renew or
+        # release it from here (the scripts would refuse anyway).
+        record.claim = None
+        record.stream.clear()
+        self._notify(record)
+        if task is not None and not task.done():
+            task.cancel()
+        return record
+
     def cancel_all_for_user(self, user_email: str) -> int:
         count = 0
         for record in list(self.active_for_user(user_email)):
@@ -948,7 +985,22 @@ class RunRegistry:
 
         return _unsubscribe
 
+    def add_observer(self, observer: Callable[[RunRecord], None]) -> Callable[[], None]:
+        """Observe every run's changes, whoever owns it. Returns an unsubscribe."""
+        self._observers.append(observer)
+
+        def _unsubscribe() -> None:
+            if observer in self._observers:
+                self._observers.remove(observer)
+
+        return _unsubscribe
+
     def _notify(self, record: RunRecord) -> None:
+        for observer in list(self._observers):
+            try:
+                observer(record)
+            except Exception:  # pragma: no cover - same rule as listeners
+                logger.debug("Run observer raised", exc_info=True)
         for listener in list(self._listeners.get(normalize_user_email(record.user_email), [])):
             try:
                 listener(record)
