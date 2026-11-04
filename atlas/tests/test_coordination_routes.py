@@ -2,8 +2,8 @@
 
 import asyncio
 
+import main
 import pytest
-from main import app
 from starlette.testclient import TestClient
 
 from atlas.application.chat.runs import registry as registry_module
@@ -30,7 +30,7 @@ def _fresh_state():
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(main.app)
 
 
 @pytest.fixture
@@ -202,8 +202,6 @@ def test_dependency_known_only_from_errors_does_not_pin_degraded(client, monkeyp
 
 def test_shutdown_failure_does_not_skip_cleanup(monkeypatch):
     """A failing interrupt step is logged; MCP cleanup and shared-infra teardown still run."""
-    import main
-
     calls = []
 
     async def _boom(*args, **kwargs):
@@ -218,6 +216,37 @@ def test_shutdown_failure_does_not_skip_cleanup(monkeypatch):
     monkeypatch.setattr(security_config, "validate_debug_configuration", lambda *a, **k: None)
     monkeypatch.setattr(main, "interrupt_runs_for_shutdown", _boom)
     monkeypatch.setattr(app_factory, "stop_shared_infrastructure", _stop)
-    with TestClient(app):
+    with TestClient(main.app):
         pass
     assert calls == ["stop_shared_infrastructure"]
+
+
+def test_probe_stops_starting_threads_when_all_are_parked(monkeypatch, fake_engine):
+    """A black-holed database parks at most DB_PROBE_MAX_THREADS probe threads."""
+    import threading
+
+    release = threading.Event()
+    calls = []
+
+    def _hang(engine):
+        calls.append(1)
+        release.wait(5)
+
+    monkeypatch.setattr(app_factory, "conversation_repository", object())
+    monkeypatch.setattr(dependency_probes, "_select_one", _hang)
+    monkeypatch.setattr(dependency_probes, "database_dependency_name", lambda engine: "postgres")
+    monkeypatch.setattr(dependency_probes, "DB_PROBE_STALE_SECONDS", 0.0)  # every probe counts as stale
+
+    async def _probe_many():
+        return [
+            await dependency_probes.probe_chat_history_db(app_factory, timeout=0.1, use_cache=False)
+            for _ in range(5)
+        ]
+
+    try:
+        results = asyncio.run(_probe_many())
+    finally:
+        release.set()
+    assert all(r["status"] == "unavailable" for r in results)
+    assert len(calls) == dependency_probes.DB_PROBE_MAX_THREADS
+    assert results[-1]["error"] == "ProbeSaturated"

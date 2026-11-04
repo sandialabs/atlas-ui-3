@@ -1048,14 +1048,16 @@ def _record_projection_failure(exc: BaseException, op: str) -> None:
     this a Redis outage that only hit the projection would show up as nothing
     more than a warning with a traceback.
     """
-    from redis.exceptions import RedisError
+    try:
+        from atlas.core.coordination_metrics import coordination_metrics
+        from atlas.infrastructure.redis.client import is_redis_connectivity_error
 
-    from atlas.core.coordination_metrics import coordination_metrics
-
-    metrics = coordination_metrics()
-    metrics.incr("atlas_projection_failures_total", op=op)
-    if isinstance(exc, RedisError):
-        metrics.dependency_failed("redis", exc, op=op)
+        metrics = coordination_metrics()
+        metrics.incr("atlas_projection_failures_total", op=op)
+        if is_redis_connectivity_error(exc):
+            metrics.dependency_failed("redis", exc, op=op)
+    except Exception:  # pragma: no cover - bookkeeping must never escape a best-effort path
+        logger.debug("recording a projection failure failed", exc_info=True)
 
 
 async def attach_execution(conversation: Optional[dict], user_email: Optional[str]) -> Optional[dict]:

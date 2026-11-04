@@ -239,3 +239,18 @@ class TestReviewFollowUps:
         assert metrics.counter("atlas_conversation_persist_failures_total", error="IntegrityError") == 1
         _record_persist_failure(OperationalError("SELECT", {}, Exception("server closed the connection")))
         assert metrics.dependencies()["postgres"]["status"] == "unavailable"
+
+    def test_redis_command_errors_are_not_an_outage(self):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import ResponseError
+
+        from atlas.infrastructure.redis.client import RedisStats
+
+        stats = RedisStats()
+        stats.record_error(ResponseError("OOM command not allowed"), op="session_update")
+        metrics = coordination_metrics()
+        assert "redis" not in metrics.dependencies()
+        assert metrics.counter("atlas_dependency_command_errors_total", error="ResponseError") == 1
+        assert stats.command_errors == 1
+        stats.record_error(RedisConnectionError("refused"), op="session_get")
+        assert metrics.dependencies()["redis"]["status"] == "unavailable"

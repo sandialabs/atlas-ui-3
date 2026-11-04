@@ -52,11 +52,19 @@ replica declaring a crashed or frozen owner lost); they also map to
 `status` is `healthy` or `degraded`; HTTP 200 either way, so a readiness probe
 does not pull every replica during a shared outage. Degraded when:
 
-- `session_store.status` is `unavailable` (Redis ping failed, 1 s bound), or
+- `session_store.status` is `unavailable` (Redis ping failed), or
 - `checks.chat_history` is `failed` (database failed at startup), or
-- `checks.chat_history_db` is `unavailable` -- a live `SELECT 1` (1.5 s bound,
-  single-flight, cached 2 s). Before #1129 a database outage after startup was
-  invisible here.
+- `checks.chat_history_db` is `unavailable` -- a live `SELECT 1` (single-flight,
+  cached 2 s, own two-thread pool, server-side `statement_timeout`). Before
+  #1129 a database outage after startup was invisible here.
+
+Budgets: in `/api/health` both probes run concurrently within **0.8 s**, so the
+endpoint stays under the default kubelet probe timeout (1 s). The periodic
+sweep and `/admin/coordination` use the longer default bounds (Redis 1 s,
+database 1.5 s). Only connectivity errors mark a dependency down: a Redis
+`ResponseError` or a database constraint error is counted
+(`atlas_dependency_command_errors_total`, `atlas_conversation_persist_failures_total`)
+but is not an outage.
 
 Only reachability is reported; error detail stays in the logs.
 

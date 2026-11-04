@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
 from atlas.core.coordination_metrics import coordination_metrics
@@ -31,10 +32,16 @@ DB_PROBE_CACHE_SECONDS = 2.0
 # is noticed within this bound. Costs at most one parked worker thread per
 # interval during such an outage.
 DB_PROBE_STALE_SECONDS = 15.0
+# Probes run on their own small pool, not the loop's default executor, so a
+# black-holed database parks at most this many threads (and pooled
+# connections) and never stalls other ``to_thread`` work. While every probe
+# thread is parked, no new probe starts: the database reports unavailable.
+DB_PROBE_MAX_THREADS = 2
+_PROBE_EXECUTOR = ThreadPoolExecutor(max_workers=DB_PROBE_MAX_THREADS, thread_name_prefix="atlas-db-probe")
 
 # Probe state for this process: the in-flight probe future, the last cached
 # result and when it was taken (monotonic). Mutated in place, never rebound.
-_db_state: Dict[str, Any] = {"inflight": None, "inflight_at": 0.0, "last": None, "last_at": 0.0}
+_db_state: Dict[str, Any] = {"inflight": None, "inflight_at": 0.0, "last": None, "last_at": 0.0, "parked": set()}
 
 
 def database_dependency_name(engine: Any) -> str:
@@ -81,16 +88,24 @@ async def probe_chat_history_db(
     # A probe started on another event loop (tests create one per client)
     # cannot be awaited here; start a fresh one.
     inflight = state["inflight"]
+    parked = state["parked"]
+    parked.difference_update({f for f in parked if f.done()})
+    metrics = coordination_metrics()
     if (
         inflight is None
         or inflight.done()
         or inflight.get_loop() is not loop
         or now - state["inflight_at"] > DB_PROBE_STALE_SECONDS
     ):
-        inflight = state["inflight"] = loop.run_in_executor(None, _select_one, engine)
+        if inflight is not None and not inflight.done():
+            parked.add(inflight)
+        if len(parked) >= DB_PROBE_MAX_THREADS:
+            # Every probe thread is still blocked on the database.
+            metrics.dependency_failed(name, "ProbeSaturated", op="probe")
+            return {"dependency": name, "status": "unavailable", "error": "ProbeSaturated"}
+        inflight = state["inflight"] = loop.run_in_executor(_PROBE_EXECUTOR, _select_one, engine)
         state["inflight_at"] = now
     started = time.perf_counter()
-    metrics = coordination_metrics()
     try:
         await asyncio.wait_for(asyncio.shield(inflight), timeout)
     except asyncio.TimeoutError:
@@ -136,4 +151,4 @@ async def probe_all(app_factory: Any, *, use_cache: bool = True) -> Dict[str, Di
 
 def reset_probe_cache() -> None:
     """Tests only."""
-    _db_state.update(inflight=None, inflight_at=0.0, last=None, last_at=0.0)
+    _db_state.update(inflight=None, inflight_at=0.0, last=None, last_at=0.0, parked=set())

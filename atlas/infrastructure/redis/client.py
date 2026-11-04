@@ -92,6 +92,14 @@ class RedisSettings:
         )
 
 
+def is_redis_connectivity_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means Redis could not be reached, not that a command failed."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    return isinstance(exc, (RedisConnectionError, RedisTimeoutError, TimeoutError, OSError, asyncio.TimeoutError))
+
+
 @dataclass
 class RedisStats:
     """Counters exposed through the health endpoint and logs."""
@@ -105,11 +113,16 @@ class RedisStats:
         self.command_errors += 1
         self.last_error = type(exc).__name__
         self.last_error_at = time.time()
-        # Per-replica dependency state (issue #1129): logs the outage once
-        # and counts every failure, so it is visible beyond this counter.
+        # Per-replica dependency state (issue #1129): a connectivity failure
+        # marks Redis down (logged once per outage); a command error from a
+        # reachable server (ResponseError, OOM) is counted but is not an outage.
         from atlas.core.coordination_metrics import coordination_metrics
 
-        coordination_metrics().dependency_failed("redis", exc, op=op)
+        metrics = coordination_metrics()
+        if is_redis_connectivity_error(exc):
+            metrics.dependency_failed("redis", exc, op=op)
+        else:
+            metrics.incr("atlas_dependency_command_errors_total", dependency="redis", op=op, error=type(exc).__name__)
 
     def incr(self, name: str, amount: int = 1) -> None:
         self.extra[name] = self.extra.get(name, 0) + amount
