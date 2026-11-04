@@ -1,0 +1,82 @@
+{
+  "description": "Fast end-to-end check of every load path: connects, chat turns, agent turns, REST agent runs, a client-side reconnect storm across replicas. Under a minute.",
+  "seed": 1129,
+  "replicas": 2,
+  "auth": "header",
+  "users": 10,
+  "sample_interval": 1.0,
+  "phases": [
+    {
+      "name": "connect",
+      "kind": "connect",
+      "connections": 20,
+      "ramp_seconds": 2,
+      "concurrency": 20
+    },
+    {
+      "name": "chat",
+      "kind": "chat",
+      "turns": 2,
+      "fraction": 0.5,
+      "directive": {}
+    },
+    {
+      "name": "agent-turns",
+      "kind": "chat",
+      "agent": true,
+      "turns": 1,
+      "fraction": 0.5,
+      "directive": {
+        "tool": "sleep",
+        "sleep": 1,
+        "steps": 2,
+        "words": 10,
+        "stream_ms": 5
+      }
+    },
+    {
+      "name": "api-runs",
+      "kind": "api_runs",
+      "runs": 6,
+      "users": 3,
+      "concurrency": 6,
+      "directive": {
+        "tool": "sleep",
+        "sleep": 1,
+        "steps": 1,
+        "words": 5,
+        "stream_ms": 5
+      }
+    },
+    {
+      "name": "storm",
+      "kind": "reconnect_storm",
+      "trigger": "client_drop",
+      "fraction": 1.0,
+      "to": "other"
+    },
+    {
+      "name": "hold",
+      "kind": "hold",
+      "seconds": 2
+    },
+    {
+      "name": "disconnect",
+      "kind": "disconnect"
+    }
+  ],
+  "slo": {
+    "max_error_rate": {
+      "*": 0
+    },
+    "min_count": {
+      "ws_connect": 20,
+      "ws_reconnect": 20,
+      "chat_turn": 20,
+      "api_run_total": 6
+    },
+    "p95_ms": {
+      "ws_connect": 2000
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "description": "300 sockets that have each chatted; replica A is SIGKILLed and every socket on it reconnects to B at once (session resume, no stickiness); A is restarted, then half of all sockets drop client-side and reconnect to the other replica with 2s jitter.",
+  "seed": 1129,
+  "replicas": 2,
+  "auth": "header",
+  "users": 100,
+  "phases": [
+    {"name": "connect", "kind": "connect", "connections": 300, "ramp_seconds": 10, "concurrency": 100},
+    {"name": "warm-chat", "kind": "chat", "turns": 1, "concurrency": 100, "directive": {"tool": "none", "words": 10, "stream_ms": 1}},
+    {"name": "kill-A", "kind": "reconnect_storm", "trigger": "replica_kill", "replica": "A", "concurrency": 300, "heal": true},
+    {"name": "chat-after-kill", "kind": "chat", "turns": 1, "concurrency": 100, "directive": {"tool": "none", "words": 10, "stream_ms": 1}},
+    {"name": "hold", "kind": "hold", "seconds": 5},
+    {"name": "jittered-drop", "kind": "reconnect_storm", "trigger": "client_drop", "fraction": 0.5, "to": "other", "jitter_ms": 2000, "concurrency": 150},
+    {"name": "chat-after-drop", "kind": "chat", "turns": 1, "concurrency": 100, "directive": {"tool": "none", "words": 10, "stream_ms": 1}},
+    {"name": "disconnect", "kind": "disconnect"}
+  ],
+  "slo": {
+    "max_error_rate": {"ws_connect": 0, "ws_reconnect": 0.01, "chat_turn": 0.01},
+    "min_count": {"ws_reconnect": 250},
+    "p95_ms": {"ws_reconnect": 5000}
+  }
+}
