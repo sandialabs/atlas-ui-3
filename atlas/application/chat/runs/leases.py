@@ -54,7 +54,6 @@ INTERRUPTED_ERROR = (
 # The API returns at most 20,000 characters (``launcher.MAX_RESULT_CHARS``).
 # One more is kept so a reader can still tell the reply was truncated.
 MAX_SNAPSHOT_RESULT_CHARS = 20_001
-_TERMINAL = ("completed", "failed", "cancelled")
 
 
 class RunFencedError(Exception):
