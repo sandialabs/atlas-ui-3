@@ -215,6 +215,23 @@ async def renew_live_claims() -> None:
                     logger.warning("Claim-lost listener raised", exc_info=True)
 
 
+def release_live_claims(status: str = "failed") -> int:
+    """Give back the claims of every live run (graceful shutdown).
+
+    The runs die with the process, so their conversation locks and user slots
+    are released now instead of staying held for up to one lease on every
+    replica during a rolling deploy. Scheduled like any other release; the
+    caller drains them before closing the Redis pool. Returns how many.
+    """
+    released = 0
+    for record in get_run_registry().active_for_user_all():
+        claim, record.claim = record.claim, None
+        if claim is not None:
+            release_claim_soon(claim, status)
+            released += 1
+    return released
+
+
 async def run_lease_heartbeat(interval: float = RUN_LEASE_RENEW_INTERVAL_SECONDS) -> None:
     """Renew claims forever (started with the first claim on a loop).
 

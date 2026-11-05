@@ -129,6 +129,19 @@ async def test_generations_increase(server):
     assert second.generation > first.generation
 
 
+async def test_generations_keep_increasing_across_a_redis_flush(server):
+    """A flushed or restarted Redis restarts the counter; the floor at Redis
+    time keeps later generations above every earlier one."""
+    a = _coordinator(server, "a")
+    first = await _claim(a, "run-1", "conv-1")
+    await a._redis.client.flushall()
+    await asyncio.sleep(0.002)
+    second = await _claim(a, "run-2", "conv-2")
+    assert second.generation > first.generation
+    third = await _claim(a, "run-3", "conv-3")
+    assert third.generation > second.generation
+
+
 async def test_release_by_another_owner_or_generation_is_refused(server):
     a, b = _coordinator(server, "a"), _coordinator(server, "b")
     claim = await _claim(a, "run-1", "conv-1")

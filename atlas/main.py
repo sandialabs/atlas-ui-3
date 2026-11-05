@@ -58,6 +58,7 @@ from atlas.application.chat.runs import (
 from atlas.application.chat.runs.admission import (
     admit_run,
     apply_run_limit,
+    release_live_claims,
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
@@ -1448,6 +1449,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
     await stop_lease_heartbeat()
+    # Runs still live die with this process: free their claims now rather
+    # than holding the conversation and the user's slot for a lease.
+    release_live_claims()
     # Releases scheduled by runs that just ended must reach Redis before the
     # pool closes, or their slots stay held until the lease expires.
     try:
@@ -2346,9 +2350,18 @@ async def websocket_endpoint(websocket: WebSocket):
                             "conversation_id": data.get("conversation_id"),
                         })
                         continue
-                    except RunRegistryError as e:  # pragma: no cover - defensive
-                        logger.warning("Run could not be started: %s", e)
-                        run_record = None
+                    except RunRegistryError as e:
+                        # Any other admission refusal (a future subclass)
+                        # refuses the turn too: running it untracked would
+                        # bypass the cluster-wide cap.
+                        logger.warning("Run could not be started: %s", type(e).__name__)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "error_type": "run_not_admitted",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
 
                 if run_record is None:
                     # Untracked turn: keep the single-slot behaviour, including
