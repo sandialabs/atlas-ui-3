@@ -131,15 +131,18 @@ async def test_generations_increase(server):
 
 async def test_generations_keep_increasing_across_a_redis_flush(server):
     """A flushed or restarted Redis restarts the counter; the floor at Redis
-    time keeps later generations above every earlier one."""
+    time keeps later generations above every earlier one, including a burst
+    of claims just before the flush."""
     a = _coordinator(server, "a")
-    first = await _claim(a, "run-1", "conv-1")
+    burst = await asyncio.gather(
+        *(_claim(a, f"run-{i}", f"conv-{i}", limit=100) for i in range(50))
+    )
+    highest = max(c.generation for c in burst)
+    assert len({c.generation for c in burst}) == 50
     await a._redis.client.flushall()
-    await asyncio.sleep(0.002)
-    second = await _claim(a, "run-2", "conv-2")
-    assert second.generation > first.generation
-    third = await _claim(a, "run-3", "conv-3")
-    assert third.generation > second.generation
+    after = await _claim(a, "run-after", "conv-after")
+    assert after.generation > highest
+    assert (await _claim(a, "run-next", "conv-next")).generation > after.generation
 
 
 async def test_release_by_another_owner_or_generation_is_refused(server):

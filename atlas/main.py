@@ -58,7 +58,7 @@ from atlas.application.chat.runs import (
 from atlas.application.chat.runs.admission import (
     admit_run,
     apply_run_limit,
-    release_live_claims,
+    shut_down_live_runs,
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
@@ -1448,10 +1448,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
+    # Runs still live would die with this process anyway: refuse new ones,
+    # stop these, and only then free their conversations and slots, so no
+    # other replica admits a run while one of ours is still executing. The
+    # heartbeat keeps renewing until then.
+    await shut_down_live_runs()
     await stop_lease_heartbeat()
-    # Runs still live die with this process: free their claims now rather
-    # than holding the conversation and the user's slot for a lease.
-    release_live_claims()
     # Releases scheduled by runs that just ended must reach Redis before the
     # pool closes, or their slots stay held until the lease expires.
     try:

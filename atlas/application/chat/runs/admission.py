@@ -29,10 +29,11 @@ from uuid import uuid4
 from atlas.application.chat.runs.coordination import (
     RUN_LEASE_RENEW_INTERVAL_SECONDS,
     RunClaim,
+    RunCoordinationUnavailableError,
     get_run_coordinator,
     release_claim_soon,
 )
-from atlas.application.chat.runs.registry import RunRecord, get_run_registry
+from atlas.application.chat.runs.registry import RunRecord, RunStatus, get_run_registry
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,10 @@ async def admit_run(
     ``precheck`` raises. ``start_kwargs`` are passed to ``RunRegistry.start``.
     """
     registry = get_run_registry()
+    if _admission_closed:
+        # This replica is shutting down; the client retries and lands on
+        # another one.
+        raise RunCoordinationUnavailableError("shutting down")
     limit = apply_run_limit(app_settings)
     # Cheap local refusal first: a busy conversation or a user at the cap on
     # this replica needs no Redis round trip (and gets no claim to undo).
@@ -215,20 +220,48 @@ async def renew_live_claims() -> None:
                     logger.warning("Claim-lost listener raised", exc_info=True)
 
 
-def release_live_claims(status: str = "failed") -> int:
-    """Give back the claims of every live run (graceful shutdown).
+# Set by graceful shutdown: no run is admitted once the replica has started
+# stopping the ones it owns.
+_admission_closed = False
 
-    The runs die with the process, so their conversation locks and user slots
-    are released now instead of staying held for up to one lease on every
-    replica during a rolling deploy. Scheduled like any other release; the
-    caller drains them before closing the Redis pool. Returns how many.
+
+async def shut_down_live_runs(timeout: float = 10.0) -> int:
+    """Graceful shutdown: refuse new runs, stop live ones, then free their claims.
+
+    The order matters. A claim released while its run's task still executes
+    would let another replica admit a second run on the same conversation, so
+    admission closes first, the tasks are cancelled and awaited (up to
+    ``timeout``, well inside one lease), and only then are the conversation
+    locks and user slots given back. A task that does not stop in time keeps
+    its claim; the lease frees it once the process is gone. Returns how many
+    claims were released (scheduled; the caller drains them).
     """
-    released = 0
-    for record in get_run_registry().active_for_user_all():
+    global _admission_closed
+    _admission_closed = True
+    registry = get_run_registry()
+    live = registry.active_for_user_all()
+    tasks = {r.run_id: r.task for r in live if r.task is not None and not r.task.done()}
+    held = []
+    for record in live:
+        # Taken out of the record so the run's own unwinding (its terminal
+        # set_status) cannot release before its task is gone.
         claim, record.claim = record.claim, None
         if claim is not None:
-            release_claim_soon(claim, status)
-            released += 1
+            held.append((record, claim))
+    for task in tasks.values():
+        task.cancel()
+    if tasks:
+        await asyncio.wait(list(tasks.values()), timeout=timeout)
+    released = 0
+    for record, claim in held:
+        task = tasks.get(record.run_id)
+        if task is not None and not task.done():
+            logger.warning("Run %s did not stop before shutdown; its lease will expire", record.run_id)
+            continue
+        if not record.is_terminal:
+            registry.set_status(record.run_id, RunStatus.FAILED, error="The server shut down")
+        release_claim_soon(claim, record.status.value)
+        released += 1
     return released
 
 
