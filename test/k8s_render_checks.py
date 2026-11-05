@@ -28,7 +28,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy" / "kubernetes"
 IMAGE = "registry.example.com/atlas/atlas-ui-3:v0.0.0-render-check"
-WORKLOAD_KINDS = ("Deployment", "StatefulSet")
+WORKLOAD_KINDS = ("Deployment", "StatefulSet", "Job")
 
 results: List[tuple] = []
 
@@ -118,7 +118,8 @@ def _run(tree: Tree) -> None:
     api = get(docs, "Deployment", "atlas-api")
     spec = pod_spec(api)
     app = spec["containers"][0]
-    config = get(docs, "ConfigMap", "atlas-api-env")["data"]
+    config_doc = get(docs, "ConfigMap", "atlas-api-env")
+    config, config_name = config_doc["data"], config_doc["metadata"]["name"]
 
     @check("staging.sh refuses an unpinned image, :latest, and a missing kube context")
     def _():
@@ -197,7 +198,10 @@ def _run(tree: Tree) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text()
         assert "COPY alembic.ini /app/alembic.ini" in dockerfile and "COPY alembic/ /app/alembic/" in dockerfile
         assert "--extra migrations" in dockerfile
-        assert not any(d["kind"] == "Job" for d in docs), "a separate migration Job would race the init containers"
+        for job in (d for d in docs if d["kind"] == "Job"):
+            commands = " ".join(" ".join(c.get("command", []) + c.get("args", [])) for c in all_containers(pod_spec(job)))
+            assert "schema_migration" not in commands and "alembic" not in commands, \
+                f"Job/{job['metadata']['name']} migrates; a separate migration Job would race the init containers"
 
     @check("shared state configured: Redis sessions, PostgreSQL history, real S3, production auth")
     def _():
@@ -243,6 +247,19 @@ def _run(tree: Tree) -> None:
         tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "deploy/kubernetes"],
                                  text=True, capture_output=True).stdout.split()
         assert not [p for p in tracked if p.endswith("/secrets.env")], "secrets.env is tracked"
+
+    @check("the S3 bucket is created by an idempotent Job (Atlas does not create it)")
+    def _():
+        job = get(docs, "Job", "atlas-minio-bucket")
+        container = pod_spec(job)["containers"][0]
+        script = " ".join(container["args"])
+        assert "mc mb --ignore-existing" in script and "$S3_BUCKET_NAME" in script, script
+        env = {e["name"]: e.get("valueFrom", {}) for e in container["env"]}
+        assert env["S3_BUCKET_NAME"]["configMapKeyRef"]["key"] == "S3_BUCKET_NAME"
+        assert env["S3_BUCKET_NAME"]["configMapKeyRef"]["name"] == config_name
+        script_sh = (DEPLOY / "staging.sh").read_text()
+        assert "kc delete job atlas-minio-bucket" in script_sh, "an immutable Job must be replaced on apply"
+        assert "condition=complete job/atlas-minio-bucket" in script_sh
 
     @check("data volumes outlive a plain teardown: StatefulSet claims only, named as staging.sh expects")
     def _():

@@ -20,7 +20,7 @@ Everything lives under `deploy/kubernetes/`:
 | Path | Contents |
 |------|----------|
 | `base/` | The `atlas-api` Deployment, its Service (`sessionAffinity: None`) and PodDisruptionBudget, and the non-secret settings (`api.env`). It can't be deployed on its own. |
-| `overlays/staging/` | Three replicas, plus staging-only Redis (`atlas-redis`), PostgreSQL (`atlas-postgres`) and MinIO (`atlas-minio`), both StatefulSets with a 5Gi volume claim, and the `atlas-secrets` Secret generated from `secrets.env` |
+| `overlays/staging/` | Three replicas, plus staging-only Redis (`atlas-redis`), PostgreSQL (`atlas-postgres`) and MinIO (`atlas-minio`), both StatefulSets with a 5Gi volume claim; the `atlas-minio-bucket` Job that creates the S3 bucket; and the `atlas-secrets` Secret generated from `secrets.env` |
 | `overlays/staging-openshift/` | The same overlay without fixed UIDs on the bundled services, for the restricted-v2 SCC |
 | `staging.sh` | The only supported entry point: secrets, apply, scale, restart, validate, failover drill, schema stamp, teardown |
 | `validate_replicas.py` | Checks each replica separately (see [Validation](#validation)) |
@@ -53,11 +53,17 @@ in an overlay of your own.
   | Another pod's migration holding the lock | `ATLAS_MIGRATION_LOCK_WAIT_SECONDS` (600), logged every 30s | 3 |
   | A migration statement waiting on a table lock | PostgreSQL `lock_timeout`, `ATLAS_MIGRATION_DDL_LOCK_TIMEOUT_SECONDS` (60) | 1 |
 
-  Credentials the server rejects fail at once with exit 4 and say so, rather
-  than being retried as an outage. The usual cause is a regenerated
-  `secrets.env` against a kept volume: PostgreSQL keeps the password it was
-  initialized with. Restore the old `secrets.env`, change the role's
-  password in PostgreSQL to match the new one, or `teardown --purge`.
+  A connection the server refuses for authentication fails at once with
+  exit 4 and says why, rather than being retried as an outage:
+  - A rejected password is usually a regenerated `secrets.env` against a
+    kept volume, because PostgreSQL keeps the password it was initialized
+    with. Restore the old `secrets.env`, change the role's password in
+    PostgreSQL to match the new one, or `teardown --purge`.
+  - An unknown role or a `pg_hba.conf` refusal needs the database's users
+    or access rules fixed.
+
+  Transient refusals such as "the database system is starting up" are
+  still retried within the wait.
 
   The advisory lock is a session lock, so the `migrate` container needs a
   direct or session-mode connection to PostgreSQL. Behind a
@@ -113,6 +119,15 @@ in an overlay of your own.
   volumes.
 - **Configuration.** Changes to `api.env`, `staging.env` or `secrets.env`
   change the generated ConfigMap or Secret name, which rolls the replicas.
+  After a successful rollout, `apply` deletes this instance's superseded
+  generations, since an old Secret still holds live credentials.
+  `teardown` deletes all of them.
+- **The S3 bucket.** Atlas does not create its bucket: the bucket check in
+  `atlas/modules/file_storage/s3_client.py` is never reached. The
+  `atlas-minio-bucket` Job does it with `mc mb --ignore-existing`, like
+  `minio-init` in `docker-compose.minio.yml`. A Job's spec is immutable, so
+  `apply` replaces it each time and waits for it to complete. Without the
+  bucket, every probe passes and every upload fails.
 
 ### Connection budgets
 
@@ -209,8 +224,8 @@ Proxy secret checks and header auth are documented in
 
 ## Validation
 
-`./staging.sh validate` first checks that every desired replica is ready,
-then port-forwards to **each API pod separately**
+`./staging.sh validate` first checks that every desired replica is ready
+(terminating pods don't count), then port-forwards to **each API pod separately**
 and runs `validate_replicas.py` against them. Requests go to the replica the
 check chooses, never through load balancing, so the cross-replica checks
 really cross replicas:
@@ -220,11 +235,14 @@ really cross replicas:
 | `health[pod]` | Each pod is `healthy`, chat history `ok`, Redis session store `ok` |
 | `auth[pod]` | Each pod rejects a missing or wrong proxy secret (HTTP 401 and WebSocket handshake) and serves a properly proxied user |
 | `durable-state` | A workspace created on pod 1 is listed on every other pod and deleted through the last one (shared PostgreSQL) |
+| `shared-files` | A file uploaded through pod 1 is read back through every other pod and deleted through the last one (shared S3) |
 | `session-reconnect` | A WebSocket session opened on pod 1 (New Chat) is resumed on pod 2, then pod 3, without sticky sessions (shared Redis); another user's resume is refused |
 
 The validator stands in for the proxy, so run it only from a trusted
-workstation. Expected output ends with `8 passed, 0 failed` for three
-replicas: 3 health, 3 auth, 2 cross-replica.
+workstation. Expected output ends with `9 passed, 0 failed` for three
+replicas: 3 health, 3 auth, 3 cross-replica. A WebSocket opened without the
+proxy secret counts as refused only when the handshake gets 401/403 or the
+socket closes with 1008; any other error fails the check.
 
 ### Failure, scaling and rollout drills
 

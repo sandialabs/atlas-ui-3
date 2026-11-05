@@ -14,6 +14,8 @@ Checks:
                with a wrong one, and accepts a correctly proxied user.
 3. durable     a workspace created on one replica is visible on every other
                replica and deleted through another (shared PostgreSQL).
+   files       a file uploaded through one replica is read back through
+               every other one and deleted through another (shared S3).
 4. reconnect   a WebSocket session opened on replica 1 is resumed on
                replica 2, then on replica 3, ... (shared Redis, no sticky
                sessions), and another user cannot resume it.
@@ -33,6 +35,7 @@ Needs httpx and websockets (both Atlas dependencies).
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -202,12 +205,17 @@ class Validator:
         require(status in (401, 403), f"wrong proxy secret: expected 401/403, got {status}")
         status, body = self.request(replica, "GET", "/api/config", user=user)
         require(status == 200, f"proxied user: expected 200, got {status}: {str(body)[:300]}")
+        # Only an authentication refusal counts: a handshake answered 401/403,
+        # or a policy-violation close (1008). A timeout or a broken connection
+        # proves nothing about the proxy secret.
         try:
             self.connection_session(replica, user, secret=None)
-        except InvalidStatus:
-            pass
-        except WebSocketException:
-            pass  # rejected during or right after the handshake
+        except InvalidStatus as exc:
+            code = exc.response.status_code
+            require(code in (401, 403), f"WebSocket without the proxy secret: handshake answered {code}, expected 401/403")
+        except ConnectionClosed as exc:
+            code = exc.rcvd.code if exc.rcvd else None
+            require(code == 1008, f"WebSocket without the proxy secret closed with {code}, expected 1008")
         else:
             raise CheckFailed("WebSocket without the proxy secret was accepted")
         return "rejects missing/wrong proxy secret (HTTP and WebSocket), accepts proxied user"
@@ -235,9 +243,32 @@ class Validator:
             status, body = self.request(last, "DELETE", f"/api/workspaces/{workspace_id}", user=user)
         require(status == 200, f"delete on {last.label}: {status} {body}")
         status, body = self.request(first, "GET", "/api/workspaces", user=user)
+        require(status == 200 and isinstance(body, dict), f"list on {first.label}: {status} {str(body)[:300]}")
         require(name not in [w.get("name") for w in body.get("workspaces", [])],
                 f"{first.label} still lists the workspace deleted on {last.label}")
         return f"created on {first.label}, seen on {', '.join(r.label for r in others)}, deleted on {last.label}"
+
+    def check_files(self, user: str) -> str:
+        """A file uploaded through one replica is readable through every other one (shared S3)."""
+        first, others, last = self.replicas[0], self.replicas[1:], self.replicas[-1]
+        payload = f"issue #1129 validation {uuid.uuid4().hex}".encode()
+        status, body = self.request(first, "POST", "/api/files", user=user, body={
+            "filename": "k8s-validate.txt", "content_type": "text/plain",
+            "content_base64": base64.b64encode(payload).decode(),
+        })
+        require(status == 200 and isinstance(body, dict) and body.get("key"),
+                f"upload on {first.label}: {status} {str(body)[:300]}")
+        key = body["key"]
+        try:
+            for replica in others:
+                status, body = self.request(replica, "GET", f"/api/files/{key}", user=user)
+                require(status == 200 and isinstance(body, dict), f"read on {replica.label}: {status} {str(body)[:300]}")
+                require(base64.b64decode(body.get("content_base64", "")) == payload,
+                        f"{replica.label} returned different content for the file uploaded on {first.label}")
+        finally:
+            status, body = self.request(last, "DELETE", f"/api/files/{key}", user=user)
+        require(status == 200, f"delete on {last.label}: {status} {str(body)[:300]}")
+        return f"uploaded on {first.label}, read on {', '.join(r.label for r in others)}, deleted on {last.label}"
 
     def check_reconnect(self, user: str) -> str:
         session_id = self.open_session(self.replicas[0], user)
@@ -261,6 +292,7 @@ class Validator:
             print("FAIL  cross-replica checks need at least two --replica URLs", flush=True)
             return False
         self.check("durable-state", lambda: self.check_durable(user))
+        self.check("shared-files", lambda: self.check_files(user))
         self.check("session-reconnect", lambda: self.check_reconnect(user))
         failed = [name for name, ok, _ in self.results if not ok]
         print(f"\n{len(self.results) - len(failed)} passed, {len(failed)} failed", flush=True)

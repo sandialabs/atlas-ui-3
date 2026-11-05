@@ -1,0 +1,74 @@
+# Creates the Atlas bucket in the staging MinIO, like `minio-init` in
+# docker-compose.minio.yml. Atlas does not create it: its startup bucket check
+# is never reached (atlas/modules/file_storage/s3_client.py), so without this
+# Job every upload fails with NoSuchBucket while all probes pass.
+#
+# Idempotent (`mc mb --ignore-existing`). It retries until MinIO answers.
+# A Job's pod template is immutable and embeds the generated Secret and
+# ConfigMap names, so staging.sh deletes the finished Job before every apply.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: atlas-minio-bucket
+  labels:
+    app.kubernetes.io/name: atlas-minio-bucket
+    app.kubernetes.io/component: object-storage
+spec:
+  backoffLimit: 20
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-minio-bucket
+        app.kubernetes.io/component: object-storage
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mc
+          # Same pinned client image as docker-compose.minio.yml.
+          image: docker.io/bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              mc alias set atlas "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY"
+              mc mb --ignore-existing "atlas/$S3_BUCKET_NAME"
+              mc anonymous set none "atlas/$S3_BUCKET_NAME"
+              echo "bucket $S3_BUCKET_NAME ready"
+          env:
+            - name: HOME
+              value: /tmp
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef: {name: atlas-api-env, key: S3_BUCKET_NAME}
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_ENDPOINT}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_ACCESS_KEY}
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_SECRET_KEY}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

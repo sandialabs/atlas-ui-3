@@ -100,10 +100,13 @@ def container_env(container: dict, configmap: dict, secret_values: Dict[str, str
         if "configMapRef" in source:
             env.update(configmap["data"])
     for item in container.get("env", []):
+        source = item.get("valueFrom", {})
         if "value" in item:
             env[item["name"]] = item["value"]
-        elif "secretKeyRef" in item.get("valueFrom", {}):
-            env[item["name"]] = secret_values[item["valueFrom"]["secretKeyRef"]["key"]]
+        elif "secretKeyRef" in source:
+            env[item["name"]] = secret_values[source["secretKeyRef"]["key"]]
+        elif "configMapKeyRef" in source:
+            env[item["name"]] = configmap["data"][source["configMapKeyRef"]["key"]]
     return env
 
 
@@ -169,6 +172,27 @@ class Rehearsal:
                            ["--tmpfs", "/var/lib/postgresql/data", "--tmpfs", "/var/run/postgresql"])
         self.start_backend("Deployment", "atlas-redis", "atlas-redis", [])
         self.start_backend("StatefulSet", "atlas-minio", "atlas-minio", ["--tmpfs", "/bitnami/minio/data"])
+        self.run_bucket_job()
+
+    def run_bucket_job(self) -> None:
+        """Run the rendered atlas-minio-bucket Job's container, retrying like its backoff."""
+        job = find(self.docs, "Job", "atlas-minio-bucket")
+        container = job["spec"]["template"]["spec"]["containers"][0]
+        env = container_env(container, self.configmap, self.secrets)
+        pod = job["spec"]["template"]["spec"]
+        empty_dirs = {v["name"] for v in pod.get("volumes", []) if "emptyDir" in v}
+        tmpfs = [arg for m in container.get("volumeMounts", []) if m["name"] in empty_dirs
+                 for arg in ("--tmpfs", m["mountPath"])]
+        cmd = ["podman", "run", "--rm", "--network", self.network] + tmpfs + self.host_args() + env_args(env)
+        cmd += ["--entrypoint", container["command"][0], container["image"]] + container["command"][1:]
+        cmd += k8s_args(container, env)
+        for _ in range(30):
+            result = run(cmd, check=False)
+            if result.returncode == 0:
+                print("PASS  bucket job: " + result.stdout.strip().splitlines()[-1])
+                return
+            time.sleep(2)
+        raise RuntimeError(f"bucket job failed:\n{result.stdout}{result.stderr}")
 
     def migrate_concurrently(self) -> None:
         init = self.api["spec"]["template"]["spec"]["initContainers"][0]

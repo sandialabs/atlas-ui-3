@@ -1,7 +1,7 @@
 # Staging S3 (MinIO) for attachments and tool artifacts. Files must live in
 # shared object storage: USE_MOCK_S3 is per-process and would hide a file
-# uploaded through one replica from the others. Atlas creates the bucket on
-# startup if it is missing.
+# uploaded through one replica from the others. The bucket is created by
+# the atlas-minio-bucket Job (minio-bucket-job.yaml), not by Atlas.
 #
 # A StatefulSet, like PostgreSQL, so its volume has the same lifecycle:
 # `staging.sh teardown` keeps both claims and `teardown --purge` deletes both.

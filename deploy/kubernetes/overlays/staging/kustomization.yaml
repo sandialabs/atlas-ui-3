@@ -20,6 +20,7 @@ resources:
   - redis.yaml
   - postgres.yaml
   - minio.yaml
+  - minio-bucket-job.yaml
 
 replicas:
   - name: atlas-api

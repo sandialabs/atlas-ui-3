@@ -141,7 +141,47 @@ wait_rollout() {
     kc rollout status statefulset/atlas-postgres --timeout=300s
     kc rollout status deployment/atlas-redis --timeout=300s
     kc rollout status statefulset/atlas-minio --timeout=300s
+    kc wait --for=condition=complete job/atlas-minio-bucket --timeout=600s
     kc rollout status deployment/atlas-api --timeout=900s
+}
+
+# Generated ConfigMaps and Secrets are hash-suffixed, so every change leaves
+# the previous one behind (a superseded Secret still holds live credentials).
+# Delete those of this instance that the current render no longer names.
+prune_generated() {
+    local dir="$1" keep kind name
+    keep="$("$KUBECTL" kustomize "$dir" | "$PYTHON" -c '
+import sys, yaml
+for doc in yaml.safe_load_all(sys.stdin):
+    if doc and doc["kind"] in ("ConfigMap", "Secret"):
+        print(doc["kind"].lower() + "/" + doc["metadata"]["name"])')"
+    while read -r kind name; do
+        [ -n "$name" ] || continue
+        if ! grep -qx "$kind/$name" <<<"$keep"; then
+            kc delete "$kind" "$name" --ignore-not-found >/dev/null && echo "pruned superseded $kind/$name"
+        fi
+    done < <(kc get configmap,secret -l app.kubernetes.io/instance=atlas-staging \
+        -o jsonpath='{range .items[*]}{.kind}{" "}{.metadata.name}{"\n"}{end}' | awk '{print tolower($1), $2}')
+}
+
+# Create the namespace only when the cluster says it does not exist: a user
+# limited to one namespace gets Forbidden on reading it, and that namespace
+# exists by definition.
+ensure_namespace() {
+    local out
+    if out="$("$KUBECTL" --context "$ATLAS_KUBE_CONTEXT" get namespace "$NAMESPACE" 2>&1)"; then
+        return 0
+    fi
+    if ! grep -q "NotFound" <<<"$out"; then
+        echo "staging.sh: cannot read namespace $NAMESPACE (${out%%$'\n'*}); assuming it exists" >&2
+        return 0
+    fi
+    if [ "$FLAVOR" = openshift ]; then
+        "$KUBECTL" --context "$ATLAS_KUBE_CONTEXT" new-project "$NAMESPACE" --skip-config-write >/dev/null \
+            || die "could not create project $NAMESPACE; ask an administrator to create it"
+    else
+        "$KUBECTL" --context "$ATLAS_KUBE_CONTEXT" create namespace "$NAMESPACE"
+    fi
 }
 
 cmd_apply() {
@@ -149,16 +189,13 @@ cmd_apply() {
     new_tmp dir; dir="$TMP"
     build_dir "$dir"
     [ -f "$SECRETS_FILE" ] || die "$SECRETS_FILE is missing; run: staging.sh init-secrets"
-    if ! kc get namespace "$NAMESPACE" >/dev/null 2>&1; then
-        if [ "$FLAVOR" = openshift ]; then
-            "$KUBECTL" --context "$ATLAS_KUBE_CONTEXT" new-project "$NAMESPACE" >/dev/null 2>&1 \
-                || die "namespace $NAMESPACE does not exist; create the project first (oc new-project $NAMESPACE)"
-        else
-            kc create namespace "$NAMESPACE"
-        fi
-    fi
+    ensure_namespace
+    # A Job's pod template is immutable and names the generated Secret and
+    # ConfigMap; the bucket Job is idempotent, so replace it on every apply.
+    kc delete job atlas-minio-bucket --ignore-not-found --wait=true >/dev/null
     kc apply -k "$dir"
     wait_rollout
+    prune_generated "$dir"
     cmd_status
 }
 
@@ -189,9 +226,16 @@ require_all_ready() {
     [ "$ready" -eq "$desired" ] || die "only $ready of $desired atlas-api pods are ready; see 'staging.sh status'"
 }
 
+# Ready API pods that are not terminating (a deleted pod can still report
+# ready during its grace period).
 ready_api_pods() {
-    kc get pods -l app.kubernetes.io/name=atlas-api \
-        -o jsonpath='{range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}'
+    kc get pods -l app.kubernetes.io/name=atlas-api -o json | "$PYTHON" -c '
+import json, sys
+for pod in json.load(sys.stdin)["items"]:
+    statuses = pod.get("status", {}).get("containerStatuses") or []
+    if pod["metadata"].get("deletionTimestamp") or not statuses or not all(c.get("ready") for c in statuses):
+        continue
+    print(pod["metadata"]["name"])'
 }
 
 # port_forward POD: tunnels a free local port to the pod and sets PF_URL once
@@ -290,6 +334,8 @@ cmd_teardown() {
     ATLAS_IMAGE="${ATLAS_IMAGE:-atlas-ui-3:teardown}" build_dir "$dir"
     [ -f "$SECRETS_FILE" ] || die "$SECRETS_FILE is missing (needed to render what to delete)"
     kc delete -k "$dir" --ignore-not-found --wait=true
+    # Earlier generations of the hash-suffixed ConfigMap and Secret too.
+    kc delete configmap,secret -l app.kubernetes.io/instance=atlas-staging --ignore-not-found
     # StatefulSet claims outlive `delete -k`; their names are fixed by the
     # claim template, StatefulSet name and ordinal.
     local claims=(data-atlas-postgres-0 data-atlas-minio-0)

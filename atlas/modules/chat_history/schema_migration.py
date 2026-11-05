@@ -63,17 +63,33 @@ class DatabaseAuthFailed(RuntimeError):
 # Invalid password / invalid authorization specification. libpq reports a
 # connect-time FATAL without a SQLSTATE through both psycopg drivers, so the
 # server's message text is matched as well.
-_AUTH_SQLSTATES = ("28P01", "28000")
-_AUTH_MESSAGES = ("password authentication failed", "no pg_hba.conf entry", "role \"")
+_PASSWORD_SQLSTATE = "28P01"
+_AUTHORIZATION_SQLSTATE = "28000"
+_PASSWORD_MESSAGES = ("password authentication failed",)
+_AUTHORIZATION_MESSAGES = ("no pg_hba.conf entry", "does not exist")
+
+
+def _auth_failure_kind(exc: OperationalError) -> Optional[str]:
+    """"password", "authorization" (pg_hba / unknown role), or None for anything else.
+
+    Transient FATALs ("the database system is starting up", "too many
+    clients") are not authentication failures and keep being retried.
+    """
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    message = str(orig or exc)
+    if code == _PASSWORD_SQLSTATE or ("FATAL" in message and any(m in message for m in _PASSWORD_MESSAGES)):
+        return "password"
+    if code == _AUTHORIZATION_SQLSTATE or (
+        "FATAL" in message
+        and ("no pg_hba.conf entry" in message or ('role "' in message and "does not exist" in message))
+    ):
+        return "authorization"
+    return None
 
 
 def _is_auth_failure(exc: OperationalError) -> bool:
-    orig = getattr(exc, "orig", None)
-    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
-    if code in _AUTH_SQLSTATES:
-        return True
-    message = str(orig or exc)
-    return any(marker in message for marker in _AUTH_MESSAGES) and "FATAL" in message
+    return _auth_failure_kind(exc) is not None
 
 
 class MigrationLockTimeout(RuntimeError):
@@ -151,11 +167,18 @@ def _connect_with_retry(engine, wait_seconds: float, sleep: Callable[[float], No
         try:
             return engine.connect()
         except OperationalError as exc:
-            if _is_auth_failure(exc):
+            kind = _auth_failure_kind(exc)
+            if kind == "password":
                 raise DatabaseAuthFailed(
-                    f"PostgreSQL rejected the credentials ({_reason(exc)}). If secrets.env was regenerated "
+                    f"PostgreSQL rejected the password ({_reason(exc)}). If secrets.env was regenerated "
                     "against a kept database volume, the volume still has the old password: restore the old "
                     "secrets.env, change the password in PostgreSQL (ALTER ROLE), or purge the volume."
+                ) from exc
+            if kind == "authorization":
+                raise DatabaseAuthFailed(
+                    f"PostgreSQL refused the connection ({_reason(exc)}): the role does not exist or "
+                    "pg_hba.conf does not admit this client. Fix the database user or its access rules; "
+                    "retrying will not help."
                 ) from exc
             if time.monotonic() >= deadline:
                 raise DatabaseUnreachable(f"Database unreachable after {wait_seconds:.0f}s: {_reason(exc)}") from exc

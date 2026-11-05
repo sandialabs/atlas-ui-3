@@ -206,8 +206,34 @@ def test_rejected_credentials_fail_fast_instead_of_retrying():
     assert sleeps == []
 
 
-def test_auth_failures_are_told_apart_from_outages():
-    assert schema_migration._is_auth_failure(_operational_error("anything", sqlstate="28P01"))
-    assert schema_migration._is_auth_failure(_operational_error('FATAL:  no pg_hba.conf entry for host "10.0.0.1"'))
-    assert not schema_migration._is_auth_failure(_operational_error("connection refused"))
-    assert not schema_migration._is_auth_failure(_operational_error("connection timeout expired"))
+@pytest.mark.parametrize("message, sqlstate, kind", [
+    ("anything", "28P01", "password"),
+    ('FATAL:  password authentication failed for user "atlas"', None, "password"),
+    ("anything", "28000", "authorization"),
+    ('FATAL:  no pg_hba.conf entry for host "10.0.0.1", user "atlas"', None, "authorization"),
+    ('FATAL:  role "atlas" does not exist', None, "authorization"),
+    # Transient: keep retrying.
+    ("FATAL:  the database system is starting up", None, None),
+    ("FATAL:  the database system is shutting down", None, None),
+    ("FATAL:  sorry, too many clients already", None, None),
+    ('FATAL:  database "atlas_chat_history" does not exist', None, None),
+    ("connection refused", None, None),
+    ("connection timeout expired", None, None),
+])
+def test_auth_failures_are_told_apart_from_outages(message, sqlstate, kind):
+    assert schema_migration._auth_failure_kind(_operational_error(message, sqlstate=sqlstate)) == kind
+
+
+def test_only_a_rejected_password_suggests_purging_the_volume():
+    class Engine:
+        def __init__(self, message):
+            self.error = _operational_error(message)
+
+        def connect(self):
+            raise self.error
+
+    with pytest.raises(DatabaseAuthFailed, match="purge the volume"):
+        schema_migration._connect_with_retry(Engine('FATAL:  password authentication failed'), 0, lambda _: None)
+    with pytest.raises(DatabaseAuthFailed) as refused:
+        schema_migration._connect_with_retry(Engine('FATAL:  no pg_hba.conf entry for host "x"'), 0, lambda _: None)
+    assert "purge" not in str(refused.value) and "pg_hba.conf" in str(refused.value)
