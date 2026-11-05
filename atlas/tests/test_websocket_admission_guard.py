@@ -209,7 +209,7 @@ def test_any_other_admission_refusal_refuses_the_turn(mock_app_factory, coordina
         pass
 
     async def refuse(**_kwargs):
-        raise _NewRefusal("not admitted")
+        raise _NewRefusal("internal detail: shard 7")
 
     monkeypatch.setattr(main, "admit_run", refuse)
     client = TestClient(main.app)
@@ -219,4 +219,5 @@ def test_any_other_admission_refusal_refuses_the_turn(mock_app_factory, coordina
             pass
     assert frame["type"] == "error"
     assert frame["error_type"] == "run_not_admitted"
+    assert "shard 7" not in frame["message"] and frame["message"]
     mock_app_factory.create_chat_service.return_value.handle_chat_message.assert_not_called()

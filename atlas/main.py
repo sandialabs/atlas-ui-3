@@ -2356,10 +2356,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         # Any other admission refusal (a future subclass)
                         # refuses the turn too: running it untracked would
                         # bypass the cluster-wide cap.
-                        logger.warning("Run could not be started: %s", type(e).__name__)
+                        # The details stay in the server log; the client gets
+                        # a fixed message that cannot leak internals.
+                        logger.warning(
+                            "Run could not be started: %s: %s",
+                            type(e).__name__,
+                            sanitize_for_logging(str(e)),
+                        )
                         await websocket.send_json({
                             "type": "error",
-                            "message": str(e),
+                            "message": "The run could not be started. Try again in a moment.",
                             "error_type": "run_not_admitted",
                             "conversation_id": data.get("conversation_id"),
                         })

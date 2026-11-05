@@ -402,7 +402,7 @@ async def test_shutdown_keeps_the_claim_of_a_run_that_will_not_stop(coord):
     # Still executing, so still holding: the lease frees it after the exit.
     assert await _conversation_holder(coord, "c1") == record.run_id.encode()
     release.set()
-    await task
+    assert await task is None
 
 
 async def test_in_process_coordinator_has_no_shared_record():
