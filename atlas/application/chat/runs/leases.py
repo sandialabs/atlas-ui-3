@@ -21,10 +21,11 @@ happens when the owner stops renewing, on top of that same record (see
 * **Checks in the run's own code.** A frozen owner may run a pending tool
   call or projection write before its heartbeat notices anything. Before
   either, :func:`ensure_current_run_may_act` / :func:`may_publish_for_run`
-  trust the claim only for 80% of ``RUN_LEASE_SECONDS`` after this guard last
-  proved it with a renewal (the run's first check always renews), measured
-  on a clock that keeps counting while the process is stopped; on refusal or
-  an unreachable Redis they fence the run.
+  trust the claim only for 80% of ``RUN_LEASE_SECONDS`` after it was last
+  proved by a renewal (the heartbeat's or their own), measured on a clock
+  that keeps counting while the process is stopped. Past that they renew: a
+  refusal fences the run at once; an unknown answer (Redis unreachable)
+  fences it only once a whole lease has passed without proof.
 * **Snapshot mirror.** The owner writes the run's public status (source,
   title, model, tools, result, ...) as the record's ``snapshot`` field, so any
   replica can answer ``GET /api/agent-runs/{id}``.
@@ -102,9 +103,16 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
         return None
     view: Dict[str, Any] = {}
     try:
-        view.update(json.loads(raw.get("snapshot") or "{}"))
+        snapshot = json.loads(raw.get("snapshot") or "{}")
+        if not isinstance(snapshot, dict):
+            raise ValueError("snapshot is not an object")
+        view.update(snapshot)
     except ValueError:
         logger.warning("unreadable run snapshot for %s", raw.get("run_id"))
+        view["snapshot_unreadable"] = True
+    # The launch source is a field of its own, written before the launch
+    # returned; ``None`` means it has not been written (yet).
+    view["source"] = raw.get("source") if "source" in raw else view.get("source")
     view.update({
         "run_id": raw.get("run_id"),
         "conversation_id": raw.get("conversation_id"),
@@ -127,7 +135,10 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
 @dataclass
 class _Lease:
     claim: Any
-    verified_at: float = float("-inf")  # never proven by this guard yet
+    # Guard clock when tracking began: the claim was granted no later, so an
+    # unknown renewal answer counts the lease from here at the latest.
+    tracked_at: float
+    verified_at: float = float("-inf")  # no renewal proven yet
     fenced: bool = False
     done: bool = False
     dirty: bool = True
@@ -161,13 +172,20 @@ class RunLeaseGuard:
     # -- lifecycle ----------------------------------------------------------
 
     def start(self) -> None:
-        if self._tasks:
+        loop = asyncio.get_running_loop()
+        if self._tasks and all(t.get_loop() is loop and not t.done() for t in self._tasks):
             return
-        from atlas.application.chat.runs.admission import add_claim_lost_listener
+        # First start, or a new event loop (``AtlasClient.chat_sync`` runs
+        # each call under its own ``asyncio.run``): drop the stale wiring.
+        for unsubscribe in self._unsubscribe:
+            unsubscribe()
+        self._tasks = []
+        from atlas.application.chat.runs.admission import add_claim_lost_listener, add_claims_renewed_listener
 
         self._unsubscribe = [
             self._registry.add_observer(self.observe),
             add_claim_lost_listener(self._claim_lost),
+            add_claims_renewed_listener(self._heartbeat_renewed),
         ]
         self._tasks = [asyncio.get_running_loop().create_task(self._sweep_loop())]
         logger.info("Run lease guard started (lease %.1fs)", self.lease_seconds)
@@ -209,6 +227,18 @@ class RunLeaseGuard:
         """``admission.add_claim_lost_listener`` callback (sync, must not block)."""
         self._spawn(self.lost(record))
 
+    def _track(self, record: RunRecord, claim: Any) -> _Lease:
+        lease = self._leases[record.run_id] = _Lease(claim=claim, tracked_at=self._clock())
+        return lease
+
+    def _heartbeat_renewed(self, run_ids: List[str], started_monotonic: float) -> None:
+        """``admission.add_claims_renewed_listener`` callback: the heartbeat
+        proved these claims, granted no earlier than ``started_monotonic``."""
+        elapsed = max(0.0, time.monotonic() - started_monotonic)
+        at = self._clock() - elapsed
+        for run_id in run_ids:
+            self._renewed(run_id, at)
+
     def _renewed(self, run_id: str, at: float) -> None:
         lease = self._leases.get(run_id)
         if lease is not None and not lease.fenced:
@@ -221,7 +251,7 @@ class RunLeaseGuard:
         # Admission moves the refused claim to ``lost_claim`` before calling us.
         claim = record.claim or record.lost_claim
         if lease is None and claim is not None:
-            lease = self._leases[record.run_id] = _Lease(claim=claim)
+            lease = self._track(record, claim)
         if lease is None or lease.fenced:
             return
         self._fence_local(lease, record.run_id, "lease renewal refused")
@@ -237,7 +267,7 @@ class RunLeaseGuard:
             # (admission sets ``record.claim`` right after inserting it).
             if record.claim is None or record.is_terminal or record.fenced:
                 return
-            lease = self._leases[record.run_id] = _Lease(claim=record.claim)
+            lease = self._track(record, record.claim)
         if lease.fenced or lease.done or record.fenced:
             return
         lease.dirty = True
@@ -254,12 +284,7 @@ class RunLeaseGuard:
                 if record is None:
                     lease.done = True
                     break
-                written = await self._scripts.mirror(
-                    lease.claim,
-                    record.status.value,
-                    json.dumps(run_snapshot(record), default=str),
-                    record.error or "",
-                )
+                written = await self._write_snapshot(lease, record)
                 if not written:
                     self._fence_local(lease, run_id, "snapshot write refused")
                 elif record.is_terminal:
@@ -267,10 +292,46 @@ class RunLeaseGuard:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            lease.dirty = True  # the next status change or check retries
+            lease.dirty = True  # the next status change or sweep retries
             logger.warning("run snapshot write for %s failed: %s", run_id, type(exc).__name__)
         finally:
             lease.syncing = False
+
+    async def _write_snapshot(self, lease: _Lease, record: RunRecord) -> bool:
+        return await self._scripts.mirror(
+            lease.claim,
+            record.status.value,
+            json.dumps(run_snapshot(record), default=str),
+            record.error or "",
+            (record.launch_spec or {}).get("source") or "",
+        )
+
+    async def publish_now(self, run_id: str) -> None:
+        """Write ``run_id``'s snapshot and ``source`` before returning, so
+        another replica can answer for the run as soon as its launch returns.
+        A failure is logged and left to the sweep's retry."""
+        record = self._registry.get(run_id)
+        if record is None:
+            return
+        lease = self._leases.get(run_id)
+        if lease is None:
+            if record.claim is None or record.is_terminal or record.fenced:
+                return
+            lease = self._track(record, record.claim)
+        if lease.fenced or lease.done:
+            return
+        try:
+            written = await self._write_snapshot(lease, record)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            lease.dirty = True
+            logger.warning("run snapshot write for %s failed: %s", run_id, type(exc).__name__)
+            return
+        if not written:
+            self._fence_local(lease, run_id, "snapshot write refused")
+        elif lease.syncing:
+            lease.dirty = True  # an older background write may land after ours
 
     # -- fencing checks ------------------------------------------------------------
 
@@ -290,9 +351,9 @@ class RunLeaseGuard:
         record = self._registry.get(run_id)
         if lease.done or record is None or record.is_terminal:
             return True  # our own finished run
-        if self._clock() - lease.verified_at < self.lease_seconds * 0.8:
-            return True
         started = self._clock()
+        if started - lease.verified_at < self.lease_seconds * 0.8:
+            return True
         try:
             held = await self._coordinator.renew([lease.claim], {run_id: record.status.value})
         except asyncio.CancelledError:
@@ -300,15 +361,31 @@ class RunLeaseGuard:
         except Exception as exc:  # renew() reports errors by omission; be safe anyway
             logger.warning("lease check for %s failed: %s", run_id, type(exc).__name__)
             held = {}
-        if held.get(run_id) is True:
+        answer = held.get(run_id)
+        if answer is True:
             self._renewed(run_id, started)
             return True
-        # Lapsed and unprovable (refused, or Redis unreachable): another
-        # replica may already have taken the run over.
-        self._fence_local(lease, run_id, "lease lapsed")
-        if held.get(run_id) is False:
+        # The run may have ended (and released its claim, which renewal then
+        # refuses) or been fenced while the renewal was in flight.
+        record = self._registry.get(run_id)
+        if lease.fenced:
+            return False
+        if lease.done or record is None or record.is_terminal:
+            return True
+        if answer is False:
+            # Refused: another owner or generation holds the run, or its lease
+            # passed; another replica may already have taken it over.
+            self._fence_local(lease, run_id, "lease renewal refused")
             with contextlib.suppress(Exception):
                 await self._take_over(run_id)
+            return False
+        # Unknown (Redis unreachable): nobody can have taken the run over
+        # before a whole lease has passed since the claim was last proved.
+        proved = max(lease.verified_at, lease.tracked_at)
+        if self._clock() - proved < self.lease_seconds:
+            logger.warning("lease check for %s got no answer; still inside the lease", run_id)
+            return True
+        self._fence_local(lease, run_id, "lease lapsed without proof")
         return False
 
     async def ensure_may_act(self, run_id: Optional[str]) -> None:
@@ -325,13 +402,22 @@ class RunLeaseGuard:
     # -- orphan sweep (any replica) -------------------------------------------------
 
     async def sweep_once(self) -> List[str]:
-        for run_id in [r for r, lease in self._leases.items() if lease.done or lease.fenced]:
+        for run_id, lease in list(self._leases.items()):
             if self._registry.get(run_id) is None:
-                self._leases.pop(run_id, None)
+                self._leases.pop(run_id, None)  # reaped here: nothing left to track
+            elif lease.dirty and not (lease.syncing or lease.fenced or lease.done):
+                # A failed snapshot write (a terminal one included) is retried.
+                lease.syncing = True
+                self._spawn(self._mirror(run_id, lease))
         interrupted = []
         for run_id in await self._scripts.lapsed_candidates():
-            if await self._take_over(run_id):
-                interrupted.append(run_id)
+            try:
+                if await self._take_over(run_id):
+                    interrupted.append(run_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # one bad candidate must not stop the rest
+                logger.warning("takeover of %s failed: %s", run_id, type(exc).__name__)
         return interrupted
 
     async def _take_over(self, run_id: str) -> bool:
@@ -404,6 +490,14 @@ async def ensure_current_run_may_act() -> None:
         await guard.ensure_may_act(run.run_id)
     except RunFencedError:
         raise asyncio.CancelledError(f"run {run.run_id} lost its claim")
+
+
+async def publish_run_now(run_id: str) -> None:
+    """Make a just-launched run visible to every replica before its launch
+    returns (no-op without Redis)."""
+    guard = _guard
+    if guard is not None:
+        await guard.publish_now(run_id)
 
 
 async def may_publish_for_run(run_id: Optional[str]) -> bool:

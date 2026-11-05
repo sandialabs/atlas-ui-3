@@ -47,6 +47,7 @@ from atlas.application.chat.runs.launcher import (
     resolve_model,
     resolve_workspace,
 )
+from atlas.application.chat.runs.leases import publish_run_now
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
@@ -407,6 +408,8 @@ async def launch_api_run(
         )
         handle = _handle(record, spec, admin_gated)
         _audit("launch", record, spec)
+        # Before the 202: a poll that lands on another replica must find it.
+        await publish_run_now(record.run_id)
         return handle
     finally:
         _release(slot, handle)
@@ -568,9 +571,27 @@ async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
         try:
             doc = await guard.read_record(run_id)
         except Exception as exc:
+            # Not "no such run": a client that relaunches on 404 would repeat
+            # a live run's side effects.
             logger.warning("shared run record unreadable: %s", type(exc).__name__)
-            doc = None
-        if doc is None or doc.get("source") != API_SOURCE:
+            raise LaunchRefused(
+                "The run's status could not be read right now. Try again.", code="unavailable"
+            ) from exc
+        if doc is None:
+            raise
+        if doc.get("snapshot_unreadable"):
+            raise LaunchRefused(
+                "The run's status could not be read right now. Try again.", code="unavailable"
+            )
+        source = doc.get("source")
+        if source is None and doc.get("status") not in ("completed", "failed", "cancelled"):
+            # A live run whose launch source its owner has not written yet
+            # (its launch had not returned, or the write failed and is being
+            # retried): it may well be an API run.
+            raise LaunchRefused(
+                "The run's status is not available yet. Try again.", code="unavailable"
+            )
+        if source != API_SOURCE:
             raise
         return _status_from_shared(doc)
 
@@ -695,6 +716,7 @@ async def follow_up_api_run(
         handle = _handle(record, new_spec, admin_gated)
         handle["previous_run_id"] = target.run_id
         _audit("follow_up", record, new_spec, previous_run=target.run_id)
+        await publish_run_now(record.run_id)
         return handle
     finally:
         _release(slot, handle)

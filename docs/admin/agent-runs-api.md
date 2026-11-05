@@ -91,6 +91,9 @@ seconds), `error`, and once completed `result` with `result_status` (`available`
 `available_truncated` past 20,000 characters, `empty`, `unavailable`). `interrupted` is `true` when
 the server running the run was lost (crashed, or unreachable past its lease) and the run was
 marked `failed`; tool calls it had finished are kept and none is retried.
+With several replicas, any one answers for any run; when the shared run state cannot be read
+at that moment it returns `503 unavailable` rather than `404`, so retry the poll instead of
+launching again.
 
 `POST /api/agent-runs/{run_id}/follow-up` with `{"message": "..."}` starts the next turn of that
 run's conversation, as the conversation's owner, on the workspace, model and compliance level it

@@ -113,6 +113,14 @@ local owner = redis.call('HGET', KEYS[1], 'owner')
 if generation then
   if owner ~= ARGV[2] then return 0 end
   if ARGV[3] ~= '' and generation ~= ARGV[3] then return 0 end
+  -- Like renew: once a live run's lease has passed it is no longer ours to
+  -- end, even before a sweep has recorded the takeover (run_leases.py).
+  local current = redis.call('HGET', KEYS[1], 'status')
+  if current ~= 'completed' and current ~= 'failed' and current ~= 'cancelled' then
+    if tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0') <= now then
+      return 0
+    end
+  end
 end
 local freed = 0
 if redis.call('GET', KEYS[2]) == ARGV[1] then

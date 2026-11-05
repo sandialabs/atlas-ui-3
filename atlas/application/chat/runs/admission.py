@@ -22,7 +22,9 @@ before the error propagates: a refused admission never holds a slot.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import time
 from typing import Any, Callable, List, Optional
 from uuid import uuid4
 
@@ -195,15 +197,42 @@ def add_claim_lost_listener(listener: ClaimLostListener) -> Callable[[], None]:
     return _unsubscribe
 
 
+# Called after a heartbeat with the run ids whose claims renewal confirmed,
+# and the ``time.monotonic()`` reading taken just before the renewal was sent
+# (the lease runs from no earlier than that). Lets fencing count a heartbeat
+# as proof that the claim was still held. Listeners must not raise or block.
+ClaimsRenewedListener = Callable[[List[str], float], None]
+_claims_renewed_listeners: List[ClaimsRenewedListener] = []
+
+
+def add_claims_renewed_listener(listener: ClaimsRenewedListener) -> Callable[[], None]:
+    """Subscribe to confirmed renewals; returns an unsubscribe callable."""
+    _claims_renewed_listeners.append(listener)
+
+    def _unsubscribe() -> None:
+        with contextlib.suppress(ValueError):
+            _claims_renewed_listeners.remove(listener)
+
+    return _unsubscribe
+
+
 async def renew_live_claims() -> None:
     """One heartbeat: extend the lease of every live run this replica owns."""
     registry = get_run_registry()
     live = [r for r in registry.active_for_user_all() if r.claim is not None]
     if not live:
         return
+    started = time.monotonic()
     held = await get_run_coordinator().renew(
         [r.claim for r in live], {r.run_id: r.status.value for r in live}
     )
+    renewed = [r.run_id for r in live if held.get(r.run_id) is True]
+    if renewed:
+        for renewed_listener in list(_claims_renewed_listeners):
+            try:
+                renewed_listener(renewed, started)
+            except Exception:
+                logger.warning("Claims-renewed listener raised", exc_info=True)
     for record in live:
         # A run that ended (and released) while the beat was in flight is
         # refused by renewal too; that is not a lost claim.

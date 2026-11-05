@@ -9,8 +9,9 @@ own. The contract is in ``docs/developer/run-coordination.md``.
   empty owner, ``status=failed`` with ``interrupted=1``, and its slots freed.
   Every write the old owner still attempts then fails the owner/generation
   check of the claim, renew and release scripts and of ``MIRROR``.
-* ``MIRROR`` writes the owner's public snapshot of the run into the record,
-  fenced by owner and generation.
+* ``MIRROR`` writes the owner's public snapshot of the run (and its launch
+  ``source``) into the record, fenced by owner, generation and, while the run
+  is live, an unexpired lease.
 """
 
 from __future__ import annotations
@@ -32,6 +33,13 @@ end
 local expires = tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0')
 if expires > now then return 0 end
 local generation = redis.call('INCR', KEYS[4])
+-- The same floor as the claim script: Redis time in microseconds, so a
+-- takeover after a flush still outranks every earlier generation.
+local now_us = tonumber(t[1]) * 1000000 + tonumber(t[2])
+if generation < now_us then
+  redis.call('SET', KEYS[4], string.format('%d', now_us))
+  generation = now_us
+end
 redis.call('HSET', KEYS[1], 'status', 'failed', 'interrupted', '1', 'error', ARGV[2],
   'owner', '', 'interrupted_by', ARGV[3], 'generation', generation,
   'lease_expires_at', 0, 'updated_at', now)
@@ -43,15 +51,20 @@ return generation
 """
 
 # KEYS: run
-# ARGV: owner, generation, status, snapshot_json, error
+# ARGV: owner, generation, status, snapshot_json, error, source
 MIRROR_SCRIPT = _NOW + """
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[2] then return 0 end
 if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[1] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'status')
 if current ~= 'completed' and current ~= 'failed' and current ~= 'cancelled' then
+  -- Like renew: a live run whose lease has passed is no longer ours, even
+  -- before a sweep has recorded the takeover.
+  local expires = tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0')
+  if expires <= now then return 0 end
   redis.call('HSET', KEYS[1], 'status', ARGV[3])
 end
-redis.call('HSET', KEYS[1], 'snapshot', ARGV[4], 'error', ARGV[5], 'updated_at', now)
+redis.call('HSET', KEYS[1], 'snapshot', ARGV[4], 'error', ARGV[5], 'source', ARGV[6],
+  'updated_at', now)
 return 1
 """
 
@@ -91,11 +104,14 @@ class RedisRunLeases:
         )
         return int(generation) or None
 
-    async def mirror(self, claim: RunClaim, status: str, snapshot: str, error: str = "") -> bool:
-        """Write the run's public snapshot if ``claim`` still owns the record."""
+    async def mirror(
+        self, claim: RunClaim, status: str, snapshot: str, error: str = "", source: str = ""
+    ) -> bool:
+        """Write the run's public snapshot, and its launch ``source`` as a
+        field of its own, if ``claim`` still owns the record and its lease."""
         written = await self._mirror(
             keys=[self.keys.run(claim.run_id)],
-            args=[claim.owner, str(claim.generation), status, snapshot, error or ""],
+            args=[claim.owner, str(claim.generation), status, snapshot, error or "", source or ""],
         )
         return bool(int(written))
 

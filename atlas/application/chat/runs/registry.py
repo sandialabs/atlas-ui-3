@@ -52,6 +52,13 @@ from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
+
+def _current_task() -> Optional[asyncio.Task]:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:  # no running loop
+        return None
+
 # Projection writes the registry has scheduled and not yet finished. Holding
 # them here keeps each task alive until its write lands.
 _PROJECTION_TASKS: "set[asyncio.Task]" = set()
@@ -830,7 +837,10 @@ class RunRegistry:
         record.claim = None
         record.stream.clear()
         self._notify(record)
-        if task is not None and not task.done():
+        if task is not None and not task.done() and task is not _current_task():
+            # A run that fences itself is already unwinding with the
+            # CancelledError its guard raised; a second, pending cancel would
+            # abort the stopped-turn commit that keeps its partial transcript.
             task.cancel()
         return record
 

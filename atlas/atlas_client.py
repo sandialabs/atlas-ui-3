@@ -134,6 +134,12 @@ class AtlasClient:
             ChatResult with assistant message, tool calls, files, etc.
         """
         await self.initialize()
+        # With Redis, runs hold cluster-wide claims: this process must be
+        # fenced like a server replica when another one takes a run over
+        # (#1128). Re-armed on each call, since chat_sync runs a new loop.
+        start_guard = getattr(self._factory, "start_run_lease_guard", None)
+        if start_guard is not None:
+            start_guard()
 
         if session_id is None:
             session_id = uuid4()
@@ -270,7 +276,10 @@ class AtlasClient:
         }
 
     async def cleanup(self) -> None:
-        """Cleanup MCP connections."""
+        """Cleanup MCP connections and stop the run lease guard."""
         if self._factory:
+            stop_guard = getattr(self._factory, "stop_run_lease_guard", None)
+            if stop_guard is not None:
+                await stop_guard()
             mcp = self._factory.get_mcp_manager()
             await mcp.cleanup()

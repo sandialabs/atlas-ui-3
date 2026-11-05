@@ -8,6 +8,7 @@ frozen owner by advancing its guard's injected clock.
 """
 
 import asyncio
+import contextlib
 from uuid import uuid4
 
 import fakeredis
@@ -393,6 +394,239 @@ async def test_non_owner_reads_the_shared_record_api_runs_only(server):
     assert status["error"] == INTERRUPTED_ERROR
     task.cancel()
     browser_task.cancel()
+
+
+async def test_unreadable_shared_record_is_unavailable_not_missing(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    set_lease_guard(b.guard)
+
+    async def blip(run_id):
+        raise ConnectionError("redis went away")
+
+    b.coordinator.read = blip
+    with pytest.raises(LaunchRefused) as refused:
+        await get_api_run_anywhere(record.run_id)
+    assert refused.value.code == "unavailable"  # 503, never a 404 that invites a relaunch
+
+    del b.coordinator.read
+    await a.client.hset(a.keys.run(record.run_id), "snapshot", "{not json")
+    with pytest.raises(LaunchRefused) as refused:
+        await get_api_run_anywhere(record.run_id)
+    assert refused.value.code == "unavailable"
+    task.cancel()
+
+
+async def test_launch_source_is_in_the_run_hash_before_the_launch_returns(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    set_lease_guard(b.guard)
+    run_id = str(uuid4())
+    claim = await a.coordinator.claim(
+        run_id=run_id, conversation_id="conv-9", user_email=EMAIL, max_runs_per_user=5
+    )
+    record = a.registry.start(
+        conversation_id="conv-9", user_email=EMAIL, title="task", run_id=run_id
+    )
+    record.claim = claim
+    record.launch_spec = {"source": API_SOURCE, "model": "m"}
+
+    # Claimed, but its owner has written nothing else yet: not a 404.
+    with pytest.raises(LaunchRefused) as refused:
+        await get_api_run_anywhere(run_id)
+    assert refused.value.code == "unavailable"
+
+    await a.guard.publish_now(run_id)  # what launch_api_run awaits before the 202
+    assert (await a.record(run_id))["source"] == API_SOURCE
+    assert (await get_api_run_anywhere(run_id))["status"] == "queued"
+
+    browser, browser_task = await a.start(source=None, conversation="conv-8")
+    assert (await a.record(browser.run_id))["source"] == ""
+    with pytest.raises(LaunchRefused) as refused:
+        await get_api_run_anywhere(browser.run_id)
+    assert refused.value.code != "unavailable"  # a known non-API run stays not found
+    browser_task.cancel()
+
+
+async def test_heartbeat_renewals_count_as_proof_for_the_fence_checks(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+    a.clock.now += LEASE * 0.9
+    import time as _time
+
+    a.guard._heartbeat_renewed([record.run_id], _time.monotonic())
+    calls = []
+
+    async def counting(claims, statuses):
+        calls.append(1)
+        return {}
+
+    a.coordinator.renew = counting
+    await a.guard.ensure_may_act(record.run_id)
+    assert calls == []  # the heartbeat just proved it: no round trip
+
+
+async def test_unknown_renewal_inside_the_lease_does_not_fence(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+    await a.guard.ensure_may_act(record.run_id)  # proved at clock 1000
+
+    async def timeout(claims, statuses):
+        raise TimeoutError("socket timeout")
+
+    a.coordinator.renew = timeout
+    a.clock.now += LEASE * 0.9  # past the trust window, inside the lease
+    await a.guard.ensure_may_act(record.run_id)
+    assert not a.guard.is_fenced(record.run_id)
+    assert not task.cancelled()
+
+    a.clock.now += LEASE * 0.2  # a whole lease without proof
+    with pytest.raises(RunFencedError):
+        await a.guard.ensure_may_act(record.run_id)
+    task.cancel()
+
+
+async def test_refusal_for_a_run_that_just_ended_is_not_a_fence(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+    a.clock.now += LEASE
+
+    async def ended_meanwhile(claims, statuses):
+        a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+        return {record.run_id: False}  # released, so renewal refuses
+
+    a.coordinator.renew = ended_meanwhile
+    assert await a.guard.may_publish(record.run_id) is True
+    assert not a.guard.is_fenced(record.run_id)
+    assert a.registry.get(record.run_id).status is RunStatus.COMPLETED
+    task.cancel()
+
+
+async def test_self_fenced_run_still_commits_its_stopped_turn(server):
+    from atlas.application.chat.runs.context import set_current_run
+
+    a = Replica(server, "A")
+    set_lease_guard(a.guard)
+    record, sleeper = await a.start()
+    sleeper.cancel()
+    committed = []
+
+    async def run():
+        set_current_run(record.run_id, record.conversation_id)
+        await ensure_current_run_may_act()
+        a.clock.now += LEASE * 3
+        await a.expire(record)
+        try:
+            await ensure_current_run_may_act()  # fences this very task
+        except asyncio.CancelledError:
+            # The stopped-turn commit (service._commit_turn) awaits storage.
+            for _ in range(3):
+                await asyncio.sleep(0)
+            committed.append("partial transcript")
+            raise
+
+    task = asyncio.get_running_loop().create_task(run())
+    a.registry.attach_task(record.run_id, task)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert committed == ["partial transcript"]
+    assert a.registry.get(record.run_id).fenced
+
+
+async def test_expired_owner_cannot_mirror_or_release_before_the_sweep(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    claim = record.claim
+    await a.expire(record)  # lapsed; nobody has swept yet
+
+    assert await a.scripts.mirror(claim, "completed", "{}", "", API_SOURCE) is False
+    assert await a.coordinator.release(claim, "completed") is False
+    assert (await a.record(record.run_id))["status"] == "running"
+
+    assert await b.guard.sweep_once() == [record.run_id]  # the takeover still wins
+    assert (await b.record(record.run_id))["interrupted"] == "1"
+    task.cancel()
+
+
+async def test_sweep_retries_a_failed_terminal_mirror_and_prunes(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+    original = a.scripts.mirror
+    fail = [True]
+
+    async def flaky(*args):
+        if fail[0]:
+            raise ConnectionError("redis blip")
+        return await original(*args)
+
+    a.scripts.mirror = flaky
+    record.result = "the answer"
+    a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    await a.settle()
+    assert a.guard._leases[record.run_id].dirty
+
+    fail[0] = False
+    await a.guard.sweep_once()
+    await a.settle()
+    view = await a.guard.read_record(record.run_id)
+    assert view["status"] == "completed" and view["result"] == "the answer"
+
+    a.registry.remove(record.run_id)
+    await a.guard.sweep_once()
+    assert record.run_id not in a.guard._leases
+    task.cancel()
+
+
+async def test_one_failing_takeover_does_not_stop_the_sweep(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    first, t1 = await a.start(conversation="conv-1")
+    second, t2 = await a.start(conversation="conv-2")
+    await a.expire(first)
+    await a.expire(second)
+    original = b.guard._take_over
+
+    async def flaky(run_id):
+        if run_id == first.run_id:
+            raise ConnectionError("redis blip")
+        return await original(run_id)
+
+    b.guard._take_over = flaky
+    assert await b.guard.sweep_once() == [second.run_id]
+    t1.cancel()
+    t2.cancel()
+
+
+async def test_guard_restarts_on_a_new_event_loop(server):
+    a = Replica(server, "A")
+    a.guard.start()
+    first = list(a.guard._tasks)
+    a.guard.start()  # idempotent on the same loop
+    assert a.guard._tasks == first
+    first[0].cancel()
+    await asyncio.sleep(0)
+    a.guard.start()  # a dead task (as after the loop it ran on closed) re-arms
+    assert a.guard._tasks != first and not a.guard._tasks[0].done()
+    from atlas.application.chat.runs import admission
+
+    assert len([cb for cb in admission._claim_lost_listeners if cb == a.guard._claim_lost]) == 1
+    await a.guard.stop()
+
+
+def test_atlas_client_installs_the_lease_guard():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from atlas.atlas_client import AtlasClient
+
+    client = AtlasClient()
+    factory = MagicMock()
+    factory.stop_run_lease_guard = AsyncMock()
+    factory.get_mcp_manager.return_value.cleanup = AsyncMock()
+    client._factory, client._initialized = factory, True
+    # The mocked chat service fails later; installation comes first.
+    with contextlib.suppress(Exception):
+        asyncio.run(client.chat("hi"))
+    factory.start_run_lease_guard.assert_called()
+    asyncio.run(client.cleanup())
+    factory.stop_run_lease_guard.assert_awaited()
 
 
 async def test_parallel_step_reraises_a_cancelled_tool(monkeypatch):

@@ -209,6 +209,12 @@ class AppFactory:
         """Verify shared services before the app takes traffic. Raises on failure."""
         if self.redis is not None:
             await self.redis.start()
+        self.start_run_lease_guard()
+
+    def start_run_lease_guard(self) -> None:
+        """Install and start the lease guard (fencing, orphan sweep) on the
+        running loop, wherever this factory's Redis coordinator holds claims:
+        the API server and a headless ``AtlasClient`` alike. Idempotent."""
         guard = getattr(self, "run_lease_guard", None)
         if guard is not None:
             from atlas.application.chat.runs.leases import set_lease_guard
@@ -216,8 +222,7 @@ class AppFactory:
             set_lease_guard(guard)
             guard.start()
 
-    async def stop_shared_infrastructure(self) -> None:
-        """Release shared connection pools on shutdown."""
+    async def stop_run_lease_guard(self) -> None:
         guard = getattr(self, "run_lease_guard", None)
         if guard is not None:
             from atlas.application.chat.runs.leases import get_lease_guard, set_lease_guard
@@ -225,6 +230,10 @@ class AppFactory:
             await guard.stop()
             if get_lease_guard() is guard:
                 set_lease_guard(None)
+
+    async def stop_shared_infrastructure(self) -> None:
+        """Release shared connection pools on shutdown."""
+        await self.stop_run_lease_guard()
         if self.redis is not None:
             await self.redis.close()
 
