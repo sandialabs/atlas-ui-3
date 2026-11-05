@@ -58,6 +58,7 @@ from atlas.application.chat.runs import (
 from atlas.application.chat.runs.admission import (
     admit_run,
     apply_run_limit,
+    shut_down_live_runs,
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
@@ -1447,6 +1448,11 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
+    # Runs still live would die with this process anyway: refuse new ones,
+    # stop these, and only then free their conversations and slots, so no
+    # other replica admits a run while one of ours is still executing. The
+    # heartbeat keeps renewing until then.
+    await shut_down_live_runs()
     await stop_lease_heartbeat()
     # Releases scheduled by runs that just ended must reach Redis before the
     # pool closes, or their slots stay held until the lease expires.
@@ -2346,9 +2352,24 @@ async def websocket_endpoint(websocket: WebSocket):
                             "conversation_id": data.get("conversation_id"),
                         })
                         continue
-                    except RunRegistryError as e:  # pragma: no cover - defensive
-                        logger.warning("Run could not be started: %s", e)
-                        run_record = None
+                    except RunRegistryError as e:
+                        # Any other admission refusal (a future subclass)
+                        # refuses the turn too: running it untracked would
+                        # bypass the cluster-wide cap.
+                        # The details stay in the server log; the client gets
+                        # a fixed message that cannot leak internals.
+                        logger.warning(
+                            "Run could not be started: %s: %s",
+                            type(e).__name__,
+                            sanitize_for_logging(str(e)),
+                        )
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "The run could not be started. Try again in a moment.",
+                            "error_type": "run_not_admitted",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
 
                 if run_record is None:
                     # Untracked turn: keep the single-slot behaviour, including

@@ -349,5 +349,61 @@ async def test_heartbeat_keeps_a_fixed_schedule(monkeypatch):
     assert len(beats) == 4, beats
 
 
+async def test_shutdown_stops_live_runs_before_releasing_their_claims(coord):
+    """A rolling deploy frees the conversation and slot at once, but never
+    while the old run's task could still be executing."""
+    registry = get_run_registry()
+    running = await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    queued = await admit_run(conversation_id="c2", user_email=USER, app_settings=_settings(5))
+    held_while_running = []
+
+    async def work():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # Still unwinding: the conversation must not be free yet.
+            held_while_running.append(await _conversation_holder(coord, "c1"))
+            registry.set_status(running.run_id, RunStatus.CANCELLED)
+            raise
+
+    registry.attach_task(running.run_id, asyncio.create_task(work()))
+    await asyncio.sleep(0)
+
+    assert await admission.shut_down_live_runs(timeout=2) == 2
+    await drain_pending_releases()
+
+    assert held_while_running == [running.run_id.encode()]
+    assert await _slots(coord) == 0
+    assert await _conversation_holder(coord, "c1") is None
+    assert await _conversation_holder(coord, "c2") is None
+    assert (await coord.read(running.run_id))["status"] == "cancelled"
+    assert (await coord.read(queued.run_id))["status"] == "failed"
+    # Admission is closed for the rest of the process.
+    with pytest.raises(RunCoordinationUnavailableError):
+        await admit_run(conversation_id="c3", user_email=USER, app_settings=_settings(5))
+
+
+async def test_shutdown_keeps_the_claim_of_a_run_that_will_not_stop(coord):
+    record = await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    release = asyncio.Event()
+
+    async def stubborn():
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue  # ignores cancellation
+
+    task = asyncio.create_task(stubborn())
+    get_run_registry().attach_task(record.run_id, task)
+    await asyncio.sleep(0)
+    assert await admission.shut_down_live_runs(timeout=0.05) == 0
+    await drain_pending_releases()
+    # Still executing, so still holding: the lease frees it after the exit.
+    assert await _conversation_holder(coord, "c1") == record.run_id.encode()
+    release.set()
+    assert await task is None
+
+
 async def test_in_process_coordinator_has_no_shared_record():
     assert await InProcessRunCoordinator().read("anything") is None
