@@ -298,7 +298,7 @@ describe('ChatArea scroll layout and navigation edge cases (#1166)', () => {
     expect(chat.transcript.scrollTop).toBe(550)
   })
 
-  it.each(['touch', 'wheel'])('ignores %s scrolling consumed by a nested panel', async gesture => {
+  it.each(['touch', 'wheel', 'keyboard'])('ignores %s scrolling consumed by a nested panel', async gesture => {
     const chat = setup()
     await settle()
     const panel = document.createElement('div')
@@ -313,7 +313,8 @@ describe('ChatArea scroll layout and navigation edge cases (#1166)', () => {
     if (gesture === 'touch') {
       fireEvent.touchStart(panel, { touches: [{ clientY: 200 }] })
       fireEvent.touchMove(panel, { touches: [{ clientY: 250 }] })
-    } else fireEvent.wheel(panel, { deltaY: -50 })
+    } else if (gesture === 'keyboard') fireEvent.keyDown(panel, { key: 'PageUp' })
+    else fireEvent.wheel(panel, { deltaY: -50 })
 
     height += 100
     await deliverResize(chat.transcript)
@@ -322,6 +323,7 @@ describe('ChatArea scroll layout and navigation edge cases (#1166)', () => {
     // Once the panel reaches its top, the same gesture can scroll the transcript.
     panel.scrollTop = 0
     if (gesture === 'touch') fireEvent.touchMove(panel, { touches: [{ clientY: 300 }] })
+    else if (gesture === 'keyboard') fireEvent.keyDown(panel, { key: 'PageUp' })
     else fireEvent.wheel(panel, { deltaY: -50 })
     chat.transcript.scrollTop -= 50
     fireEvent.scroll(chat.transcript)

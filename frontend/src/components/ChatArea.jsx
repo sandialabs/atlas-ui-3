@@ -320,8 +320,9 @@ const ChatArea = () => {
     }
     const handleKeyDown = (event) => {
       if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return
-      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) noteIntent('up')
-      if (['ArrowDown', 'PageDown', 'End'].includes(event.key) || (event.key === ' ' && !event.shiftKey)) noteIntent('down')
+      const up = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)
+      const down = ['ArrowDown', 'PageDown', 'End'].includes(event.key) || (event.key === ' ' && !event.shiftKey)
+      if ((up || down) && !nestedCanScroll(event.target, up ? -1 : 1)) noteIntent(up ? 'up' : 'down')
     }
     const handlePointerDown = (event) => {
       const rect = el.getBoundingClientRect()
