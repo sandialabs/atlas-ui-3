@@ -450,10 +450,9 @@ async def test_launch_source_is_in_the_run_hash_before_the_launch_returns(server
 async def test_heartbeat_renewals_count_as_proof_for_the_fence_checks(server):
     a = Replica(server, "A")
     record, task = await a.start()
-    a.clock.now += LEASE * 0.9
-    import time as _time
-
-    a.guard._heartbeat_renewed([record.run_id], _time.monotonic())
+    sent = a.clock.now + LEASE * 0.9  # the guard clock when the beat was sent
+    a.clock.now = sent
+    a.guard._heartbeat_renewed([record.run_id], sent)
     calls = []
 
     async def counting(claims, statuses):
@@ -526,8 +525,8 @@ async def test_self_fenced_run_still_commits_its_stopped_turn(server):
 
     task = asyncio.get_running_loop().create_task(run())
     a.registry.attach_task(record.run_id, task)
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    (outcome,) = await asyncio.gather(task, return_exceptions=True)
+    assert isinstance(outcome, asyncio.CancelledError)
     assert committed == ["partial transcript"]
     assert a.registry.get(record.run_id).fenced
 
@@ -627,6 +626,221 @@ def test_atlas_client_installs_the_lease_guard():
     factory.start_run_lease_guard.assert_called()
     asyncio.run(client.cleanup())
     factory.stop_run_lease_guard.assert_awaited()
+
+
+async def test_late_heartbeat_reply_is_not_proof(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+    sent = a.clock.now
+    a.clock.now += LEASE * 1.1
+    a.guard._heartbeat_renewed([record.run_id], sent)
+    assert a.guard._leases[record.run_id].verified_at == float("-inf")
+    task.cancel()
+
+
+async def test_renewal_success_delayed_past_the_lease_is_not_proof(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+
+    async def slow_success(claims, statuses):
+        a.clock.now += LEASE * 1.1  # the reply sat in a socket buffer
+        return {record.run_id: True}
+
+    a.coordinator.renew = slow_success
+    with pytest.raises(RunFencedError):
+        await a.guard.ensure_may_act(record.run_id)
+    task.cancel()
+
+
+async def test_tool_is_not_started_when_its_start_notification_finds_the_fence(
+    server, monkeypatch
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from atlas.application.chat.runs.context import set_current_run
+    from atlas.application.chat.utilities import event_notifier
+    from atlas.application.chat.utilities.tool_executor import execute_single_tool
+
+    a, b = Replica(server, "A"), Replica(server, "B")
+    set_lease_guard(a.guard)
+    record, sleeper = await a.start()
+
+    async def start_notification(*args, **kwargs):
+        # Blocked long enough for another replica to interrupt the run, and
+        # its projection write finds the fence (it only drops the event).
+        a.clock.now += LEASE * 3
+        await a.expire(record)
+        await b.guard.sweep_once()
+        assert await a.guard.may_publish(record.run_id) is False
+
+    monkeypatch.setattr(event_notifier, "notify_tool_start", start_notification)
+    tool_manager = MagicMock()
+    tool_manager.get_server_for_tool.return_value = "srv"
+    tool_manager.get_tools_schema.return_value = []
+    tool_manager.execute_tool = AsyncMock()
+    tool_call = SimpleNamespace(id="call-1", function=SimpleNamespace(name="srv_t", arguments="{}"))
+
+    async def step():
+        set_current_run(record.run_id, record.conversation_id)
+        await execute_single_tool(
+            tool_call, {"session_id": "s1", "user_email": EMAIL}, tool_manager,
+            update_callback=AsyncMock(), config_manager=None, skip_approval=True,
+        )
+
+    (outcome,) = await asyncio.gather(
+        asyncio.get_running_loop().create_task(step()), return_exceptions=True
+    )
+    assert isinstance(outcome, asyncio.CancelledError), outcome
+    tool_manager.execute_tool.assert_not_awaited()
+    sleeper.cancel()
+
+
+async def test_failed_projection_close_is_retried_by_a_later_sweep(server):
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    await store.apply_event({
+        "type": "tool_start", "run_id": record.run_id, "conversation_id": "conv-1",
+        "user_email": EMAIL, "step": 0, "tool_call_id": "call_0", "tool_name": "x",
+        "invocation_id": invocation_id(record.run_id, 0, "call_0"),
+    })
+    original = store.apply_event
+    failures = [1]
+
+    async def flaky(event):
+        if event.get("type") == "run_status" and failures:
+            failures.pop()
+            raise ConnectionError("store blip")
+        return await original(event)
+
+    store.apply_event = flaky
+    await a.expire(record)
+    assert await b.guard.sweep_once() == [record.run_id]  # taken over, close failed
+    assert await b.client.zscore(b.keys.live(), record.run_id) is not None
+
+    assert await b.guard.sweep_once() == []  # not a second takeover, but closed now
+    rows = public_projection(await store.get("conv-1", EMAIL))["invocations"]
+    assert rows[0]["status"] == "interrupted"
+    assert await b.client.zscore(b.keys.live(), record.run_id) is None
+
+    # Closed and forgotten: the resumed old owner's own takeover attempt
+    # writes nothing more to the projection.
+    revision = (await store.get("conv-1", EMAIL))["revision"]
+    assert not await a.guard._take_over(record.run_id)
+    assert (await store.get("conv-1", EMAIL))["revision"] == revision
+    task.cancel()
+
+
+async def test_completion_during_a_blocked_snapshot_write_is_still_mirrored(server):
+    a = Replica(server, "A")
+    record, task = await a.start()
+    gate = asyncio.Event()
+    original = a.scripts.mirror
+
+    async def blocked(*args):
+        await gate.wait()
+        return await original(*args)
+
+    claim = record.claim
+    a.scripts.mirror = blocked
+    a.registry.mark_detached(record.run_id)  # a non-terminal write, now in flight
+    await asyncio.sleep(0)
+    record.result = "the answer"
+    a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    gate.set()
+    await a.settle()
+    view = await a.guard.read_record(record.run_id)
+    assert view["status"] == "completed" and view["result"] == "the answer"
+    assert a.guard._leases[record.run_id].done
+
+    # A late, older snapshot (a delayed publish) cannot replace the final one.
+    assert await original(claim, "running", '{"result": null}', "", API_SOURCE) is True
+    view = await a.guard.read_record(record.run_id)
+    assert view["status"] == "completed" and view["result"] == "the answer"
+    task.cancel()
+
+
+async def test_terminal_projection_write_needs_the_claim(server):
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    a.guard._leases[record.run_id].verified_at = a.clock.now
+    # Frozen past its lease, then resumed: it finishes locally before any
+    # sweep and before its heartbeat or mirror notice.
+    await a.expire(record)
+    a.clock.now += LEASE * 3
+    record.status = RunStatus.COMPLETED  # set directly: no mirror spawned yet
+    assert await a.guard.may_publish(record.run_id) is False
+    assert a.registry.get(record.run_id).fenced
+
+    await b.guard.sweep_once()
+    assert (await b.record(record.run_id))["interrupted"] == "1"
+    task.cancel()
+
+
+async def test_interrupted_run_without_a_source_is_unavailable(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    set_lease_guard(b.guard)
+    run_id = str(uuid4())
+    claim = await a.coordinator.claim(
+        run_id=run_id, conversation_id="conv-7", user_email=EMAIL, max_runs_per_user=5
+    )
+    assert claim is not None  # claimed; its owner died before the first mirror
+    await a.client.hset(a.keys.run(run_id), "lease_expires_at", 1)
+    await a.client.zadd(a.keys.live(), {run_id: 1})
+    assert await b.guard.sweep_once() == [run_id]
+    with pytest.raises(LaunchRefused) as refused:
+        await get_api_run_anywhere(run_id)
+    assert refused.value.code == "unavailable"
+
+
+async def test_fenced_run_does_not_save_its_stale_turn(server):
+    from unittest.mock import MagicMock
+
+    from atlas.application.chat import service as service_module
+    from atlas.application.chat.runs import registry as registry_module
+    from atlas.application.chat.runs.context import set_current_run
+
+    a = Replica(server, "A")
+    record, task = await a.start()
+    registry_module._registry = a.registry
+    chat = service_module.ChatService(
+        llm=MagicMock(), tool_manager=MagicMock(), connection=MagicMock(),
+        config_manager=MagicMock(), session_repository=MagicMock(),
+        conversation_repository=MagicMock(),
+    )
+    chat._save_conversation = MagicMock(return_value=True)
+    session = MagicMock()
+    session.history.messages = []
+    session.context = {}
+
+    async def commit():
+        set_current_run(record.run_id, record.conversation_id)
+        await chat._commit_turn(
+            session, uuid4(), EMAIL, "m", None, is_incognito=False, save_floor=0
+        )
+
+    await asyncio.get_running_loop().create_task(commit())
+    assert chat._save_conversation.call_count == 1  # an owner in good standing saves
+
+    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, "taken over")
+    await asyncio.get_running_loop().create_task(commit())
+    assert chat._save_conversation.call_count == 1  # a fenced one does not
+    task.cancel()
+
+
+def test_guard_stops_cleanly_after_its_loop_closed(server):
+    a = Replica(server, "A")
+
+    async def first():
+        a.guard.start()
+
+    asyncio.run(first())  # chat_sync: this loop is closed afterwards
+    asyncio.run(a.guard.stop())  # cleanup() on a new loop must not raise
+    assert a.guard._tasks == []
 
 
 async def test_parallel_step_reraises_a_cancelled_tool(monkeypatch):

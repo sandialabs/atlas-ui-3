@@ -143,6 +143,7 @@ class _Lease:
     done: bool = False
     dirty: bool = True
     syncing: bool = False
+    sync_task: Optional[asyncio.Task] = None
 
 
 class RunLeaseGuard:
@@ -180,12 +181,13 @@ class RunLeaseGuard:
         for unsubscribe in self._unsubscribe:
             unsubscribe()
         self._tasks = []
+        self._pending = {t for t in self._pending if t.get_loop() is loop}
         from atlas.application.chat.runs.admission import add_claim_lost_listener, add_claims_renewed_listener
 
         self._unsubscribe = [
             self._registry.add_observer(self.observe),
             add_claim_lost_listener(self._claim_lost),
-            add_claims_renewed_listener(self._heartbeat_renewed),
+            add_claims_renewed_listener(self._heartbeat_renewed, clock=self._clock),
         ]
         self._tasks = [asyncio.get_running_loop().create_task(self._sweep_loop())]
         logger.info("Run lease guard started (lease %.1fs)", self.lease_seconds)
@@ -197,9 +199,14 @@ class RunLeaseGuard:
             unsubscribe()
         self._unsubscribe = []
         tasks, self._tasks = self._tasks, []
-        for task in tasks + list(self._pending):
+        loop = asyncio.get_running_loop()
+        # Tasks of an earlier loop (a finished ``asyncio.run``) are dead with
+        # it; cancelling them would touch a closed loop.
+        mine = [t for t in tasks + list(self._pending) if t.get_loop() is loop]
+        self._pending = set()
+        for task in mine:
             task.cancel()
-        await asyncio.gather(*tasks, *self._pending, return_exceptions=True)
+        await asyncio.gather(*mine, return_exceptions=True)
 
     async def _sweep_loop(self) -> None:
         while True:
@@ -213,15 +220,16 @@ class RunLeaseGuard:
 
     # -- claim bookkeeping ---------------------------------------------------------
 
-    def _spawn(self, coro: Any) -> None:
+    def _spawn(self, coro: Any) -> Optional[asyncio.Task]:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             coro.close()
-            return
+            return None
         task = loop.create_task(coro)
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
+        return task
 
     def _claim_lost(self, record: RunRecord) -> None:
         """``admission.add_claim_lost_listener`` callback (sync, must not block)."""
@@ -231,13 +239,14 @@ class RunLeaseGuard:
         lease = self._leases[record.run_id] = _Lease(claim=claim, tracked_at=self._clock())
         return lease
 
-    def _heartbeat_renewed(self, run_ids: List[str], started_monotonic: float) -> None:
+    def _heartbeat_renewed(self, run_ids: List[str], started: float) -> None:
         """``admission.add_claims_renewed_listener`` callback: the heartbeat
-        proved these claims, granted no earlier than ``started_monotonic``."""
-        elapsed = max(0.0, time.monotonic() - started_monotonic)
-        at = self._clock() - elapsed
+        proved these claims, granted no earlier than ``started`` (this guard's
+        clock, read just before the renewal was sent)."""
+        if self._clock() - started >= self.lease_seconds:
+            return  # a reply that late proves nothing about now
         for run_id in run_ids:
-            self._renewed(run_id, at)
+            self._renewed(run_id, started)
 
     def _renewed(self, run_id: str, at: float) -> None:
         lease = self._leases.get(run_id)
@@ -274,7 +283,7 @@ class RunLeaseGuard:
         if lease.syncing:
             return
         lease.syncing = True
-        self._spawn(self._mirror(record.run_id, lease))
+        lease.sync_task = self._spawn(self._mirror(record.run_id, lease))
 
     async def _mirror(self, run_id: str, lease: _Lease) -> None:
         try:
@@ -284,10 +293,13 @@ class RunLeaseGuard:
                 if record is None:
                     lease.done = True
                     break
+                # What this write carries, not what the record says once it
+                # lands: a run that ends mid-write is written again.
+                terminal = record.is_terminal
                 written = await self._write_snapshot(lease, record)
                 if not written:
                     self._fence_local(lease, run_id, "snapshot write refused")
-                elif record.is_terminal:
+                elif terminal:
                     lease.done = True
         except asyncio.CancelledError:
             raise
@@ -296,6 +308,18 @@ class RunLeaseGuard:
             logger.warning("run snapshot write for %s failed: %s", run_id, type(exc).__name__)
         finally:
             lease.syncing = False
+            lease.sync_task = None
+
+    async def _sync(self, run_id: str, lease: _Lease) -> None:
+        """Mirror the run's current state now, serialized with the background
+        writer (one writer per lease, so an older snapshot never lands last)."""
+        lease.dirty = True
+        task = lease.sync_task
+        if lease.syncing and task is not None and not task.done():
+            await asyncio.wait({task})  # it loops while dirty; never raises here
+        if lease.dirty and not (lease.syncing or lease.fenced or lease.done):
+            lease.syncing = True
+            await self._mirror(run_id, lease)
 
     async def _write_snapshot(self, lease: _Lease, record: RunRecord) -> bool:
         return await self._scripts.mirror(
@@ -320,18 +344,7 @@ class RunLeaseGuard:
             lease = self._track(record, record.claim)
         if lease.fenced or lease.done:
             return
-        try:
-            written = await self._write_snapshot(lease, record)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            lease.dirty = True
-            logger.warning("run snapshot write for %s failed: %s", run_id, type(exc).__name__)
-            return
-        if not written:
-            self._fence_local(lease, run_id, "snapshot write refused")
-        elif lease.syncing:
-            lease.dirty = True  # an older background write may land after ours
+        await self._sync(run_id, lease)  # a failure is logged; the sweep retries
 
     # -- fencing checks ------------------------------------------------------------
 
@@ -349,8 +362,17 @@ class RunLeaseGuard:
         if lease.fenced:  # before ``done``: a refused write can set both
             return False
         record = self._registry.get(run_id)
-        if lease.done or record is None or record.is_terminal:
-            return True  # our own finished run
+        if lease.done or record is None:
+            return True  # our own finished run, confirmed in shared state
+        if record.is_terminal:
+            # Ended here, not yet confirmed: the terminal mirror is the proof
+            # (refused if another replica took the run over first).
+            await self._sync(run_id, lease)
+            if lease.fenced:
+                return False
+            if lease.done:
+                return True
+            return self._unproven(lease, run_id)
         started = self._clock()
         if started - lease.verified_at < self.lease_seconds * 0.8:
             return True
@@ -362,14 +384,18 @@ class RunLeaseGuard:
             logger.warning("lease check for %s failed: %s", run_id, type(exc).__name__)
             held = {}
         answer = held.get(run_id)
+        if lease.fenced:  # fenced while the renewal was in flight
+            return False
         if answer is True:
             self._renewed(run_id, started)
-            return True
+            if self._clock() - started < self.lease_seconds:
+                return True
+            # A success that arrived over a lease after it was sent: the run
+            # may have been taken over since. Unproven (below).
+            return self._unproven(lease, run_id)
         # The run may have ended (and released its claim, which renewal then
-        # refuses) or been fenced while the renewal was in flight.
+        # refuses) while the renewal was in flight.
         record = self._registry.get(run_id)
-        if lease.fenced:
-            return False
         if lease.done or record is None or record.is_terminal:
             return True
         if answer is False:
@@ -379,8 +405,12 @@ class RunLeaseGuard:
             with contextlib.suppress(Exception):
                 await self._take_over(run_id)
             return False
-        # Unknown (Redis unreachable): nobody can have taken the run over
-        # before a whole lease has passed since the claim was last proved.
+        return self._unproven(lease, run_id)
+
+    def _unproven(self, lease: _Lease, run_id: str) -> bool:
+        """No usable answer (Redis unreachable, or too late): nobody can have
+        taken the run over before a whole lease has passed since the claim
+        was last proved."""
         proved = max(lease.verified_at, lease.tracked_at)
         if self._clock() - proved < self.lease_seconds:
             logger.warning("lease check for %s got no answer; still inside the lease", run_id)
@@ -408,7 +438,7 @@ class RunLeaseGuard:
             elif lease.dirty and not (lease.syncing or lease.fenced or lease.done):
                 # A failed snapshot write (a terminal one included) is retried.
                 lease.syncing = True
-                self._spawn(self._mirror(run_id, lease))
+                lease.sync_task = self._spawn(self._mirror(run_id, lease))
         interrupted = []
         for run_id in await self._scripts.lapsed_candidates():
             try:
@@ -427,21 +457,26 @@ class RunLeaseGuard:
         )
         if not generation:
             return False
-        logger.warning(
-            "Run %s lost its owner %s; marked interrupted at generation %s (no tool is replayed)",
-            run_id, raw.get("owner") or "?", generation,
-        )
-        lease = self._leases.get(run_id)
-        if lease is not None:
-            self._fence_local(lease, run_id, "interrupted by orphan sweep")
-        await _close_projection(run_id, raw)
-        return True
+        took_over = generation > 0  # else: taken over earlier, projection not closed yet
+        if took_over:
+            logger.warning(
+                "Run %s lost its owner %s; marked interrupted at generation %s (no tool is replayed)",
+                run_id, raw.get("owner") or "?", generation,
+            )
+            lease = self._leases.get(run_id)
+            if lease is not None:
+                self._fence_local(lease, run_id, "interrupted by orphan sweep")
+        # The run stays in ``runs-live`` until its projection is closed, so a
+        # failed close is retried by the next sweep on any replica.
+        if await _close_projection(run_id, raw):
+            await self._scripts.forget(run_id)
+        return took_over
 
     async def read_record(self, run_id: str) -> Optional[Dict[str, Any]]:
         return shared_view(await self._coordinator.read(run_id))
 
 
-async def _close_projection(run_id: str, raw: Dict[str, str]) -> None:
+async def _close_projection(run_id: str, raw: Dict[str, str]) -> bool:
     """Close the run in the execution projection: completed rows stay, open
     rows become interrupted. Written directly, not through the owner-side
     guard, because the sweeping replica is not the owner."""
@@ -458,6 +493,8 @@ async def _close_projection(run_id: str, raw: Dict[str, str]) -> None:
         })
     except Exception:
         logger.warning("could not close the projection of an interrupted run", exc_info=True)
+        return False
+    return True  # idempotent: an already-closed run is left as it is
 
 
 _guard: Optional[RunLeaseGuard] = None
@@ -498,6 +535,22 @@ async def publish_run_now(run_id: str) -> None:
     guard = _guard
     if guard is not None:
         await guard.publish_now(run_id)
+
+
+def current_run_is_fenced() -> bool:
+    """Whether the run executing this code lost its claim to another replica.
+
+    Its conversation may have moved on since (a newer turn saved after the
+    takeover), so a fenced run must not write its stale transcript over it.
+    """
+    from atlas.application.chat.runs.context import get_current_run
+    from atlas.application.chat.runs.registry import get_run_registry
+
+    run = get_current_run()
+    if run is None:
+        return False
+    record = get_run_registry().get(run.run_id)
+    return bool(record is not None and record.fenced)
 
 
 async def may_publish_for_run(run_id: Optional[str]) -> bool:

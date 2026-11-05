@@ -7,6 +7,8 @@ own. The contract is in ``docs/developer/run-coordination.md``.
 * ``INTERRUPT`` takes over a run whose lease expired by the Redis clock (its
   owner can no longer renew it): a new generation from ``<p>:run-fence``, an
   empty owner, ``status=failed`` with ``interrupted=1``, and its slots freed.
+  The run stays in ``runs-live`` until the sweeper closed its execution
+  projection (``forget``), so that close survives a failure or a dead sweeper.
   Every write the old owner still attempts then fails the owner/generation
   check of the claim, renew and release scripts and of ``MIRROR``.
 * ``MIRROR`` writes the owner's public snapshot of the run (and its launch
@@ -27,6 +29,13 @@ from atlas.infrastructure.redis.run_coordinator import _NOW, RunCoordinationKeys
 INTERRUPT_SCRIPT = _NOW + """
 local status = redis.call('HGET', KEYS[1], 'status')
 if (not status) or status == 'completed' or status == 'failed' or status == 'cancelled' then
+  -- Taken over earlier and still in runs-live, so its projection is not
+  -- closed yet: the caller closes it (idempotent) and then forgets the run.
+  -- Once forgotten, a late takeover attempt (the resumed old owner's) is 0.
+  if status and redis.call('HGET', KEYS[1], 'interrupted') == '1'
+      and redis.call('ZSCORE', KEYS[5], ARGV[1]) then
+    return -1
+  end
   redis.call('ZREM', KEYS[5], ARGV[1])
   return 0
 end
@@ -46,7 +55,9 @@ redis.call('HSET', KEYS[1], 'status', 'failed', 'interrupted', '1', 'error', ARG
 redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
 if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 redis.call('ZREM', KEYS[3], ARGV[1])
-redis.call('ZREM', KEYS[5], ARGV[1])
+-- Kept in runs-live (due now) until the caller closed the projection, so a
+-- failed close is retried by the next sweep on any replica.
+redis.call('ZADD', KEYS[5], 0, ARGV[1])
 return generation
 """
 
@@ -56,7 +67,12 @@ MIRROR_SCRIPT = _NOW + """
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[2] then return 0 end
 if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[1] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'status')
-if current ~= 'completed' and current ~= 'failed' and current ~= 'cancelled' then
+local ended = ARGV[3] == 'completed' or ARGV[3] == 'failed' or ARGV[3] == 'cancelled'
+if current == 'completed' or current == 'failed' or current == 'cancelled' then
+  -- Once the record is terminal, a snapshot of a still-live state is older
+  -- than the one that ended it: dropped, not an error.
+  if not ended then return 1 end
+else
   -- Like renew: a live run whose lease has passed is no longer ours, even
   -- before a sweep has recorded the takeover.
   local expires = tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0')
@@ -90,8 +106,9 @@ class RedisRunLeases:
     async def interrupt(
         self, run_id: str, conversation_id: str, user_email: str, error: str
     ) -> Optional[int]:
-        """Take over a run whose lease expired. Returns the new generation, or
-        ``None`` when the run was still leased, already ended, or unknown."""
+        """Take over a run whose lease expired. Returns the new generation;
+        ``-1`` for a run taken over earlier whose projection is still to be
+        closed; ``None`` when the run was still leased, ended, or unknown."""
         generation = await self._interrupt(
             keys=[
                 self.keys.run(run_id),
@@ -114,6 +131,10 @@ class RedisRunLeases:
             args=[claim.owner, str(claim.generation), status, snapshot, error or "", source or ""],
         )
         return bool(int(written))
+
+    async def forget(self, run_id: str) -> None:
+        """Drop an interrupted run from ``runs-live`` once its projection is closed."""
+        await self._redis.client.zrem(self.keys.live(), run_id)
 
     async def lapsed_candidates(self, limit: int = 200) -> List[str]:
         """Run ids whose lease deadline in ``runs-live`` has passed.

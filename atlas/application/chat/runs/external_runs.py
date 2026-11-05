@@ -584,10 +584,10 @@ async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
                 "The run's status could not be read right now. Try again.", code="unavailable"
             )
         source = doc.get("source")
-        if source is None and doc.get("status") not in ("completed", "failed", "cancelled"):
-            # A live run whose launch source its owner has not written yet
-            # (its launch had not returned, or the write failed and is being
-            # retried): it may well be an API run.
+        if source is None:
+            # No launch source written (the launch had not returned, or the
+            # write failed and the owner died or is retrying): it may well be
+            # an API run, interrupted or not, so never a 404.
             raise LaunchRefused(
                 "The run's status is not available yet. Try again.", code="unavailable"
             )

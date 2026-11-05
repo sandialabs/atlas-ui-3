@@ -787,6 +787,9 @@ async def execute_single_tool(
             await event_notifier.notify_tool_start(
                 tool_call, display_args, update_callback, tool_manager=tool_manager
             )
+            # Again right before the side effect: the start notification can
+            # block, or its own projection write can discover the fence.
+            await ensure_current_run_may_act()
 
             # Create tool call object and execute with filtered args only
             tool_call_obj = ToolCall(

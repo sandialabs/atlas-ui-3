@@ -25,7 +25,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 from uuid import uuid4
 
 from atlas.application.chat.runs.coordination import (
@@ -198,20 +198,23 @@ def add_claim_lost_listener(listener: ClaimLostListener) -> Callable[[], None]:
 
 
 # Called after a heartbeat with the run ids whose claims renewal confirmed,
-# and the ``time.monotonic()`` reading taken just before the renewal was sent
-# (the lease runs from no earlier than that). Lets fencing count a heartbeat
-# as proof that the claim was still held. Listeners must not raise or block.
+# and the listener's own ``clock`` read just before the renewal was sent (the
+# lease runs from no earlier than that). Lets fencing count a heartbeat as
+# proof that the claim was still held. Listeners must not raise or block.
 ClaimsRenewedListener = Callable[[List[str], float], None]
-_claims_renewed_listeners: List[ClaimsRenewedListener] = []
+_claims_renewed_listeners: List[Tuple[ClaimsRenewedListener, Callable[[], float]]] = []
 
 
-def add_claims_renewed_listener(listener: ClaimsRenewedListener) -> Callable[[], None]:
+def add_claims_renewed_listener(
+    listener: ClaimsRenewedListener, clock: Callable[[], float] = time.monotonic
+) -> Callable[[], None]:
     """Subscribe to confirmed renewals; returns an unsubscribe callable."""
-    _claims_renewed_listeners.append(listener)
+    entry = (listener, clock)
+    _claims_renewed_listeners.append(entry)
 
     def _unsubscribe() -> None:
         with contextlib.suppress(ValueError):
-            _claims_renewed_listeners.remove(listener)
+            _claims_renewed_listeners.remove(entry)
 
     return _unsubscribe
 
@@ -222,15 +225,15 @@ async def renew_live_claims() -> None:
     live = [r for r in registry.active_for_user_all() if r.claim is not None]
     if not live:
         return
-    started = time.monotonic()
+    started = [(listener, clock()) for listener, clock in list(_claims_renewed_listeners)]
     held = await get_run_coordinator().renew(
         [r.claim for r in live], {r.run_id: r.status.value for r in live}
     )
     renewed = [r.run_id for r in live if held.get(r.run_id) is True]
     if renewed:
-        for renewed_listener in list(_claims_renewed_listeners):
+        for renewed_listener, at in started:
             try:
-                renewed_listener(renewed, started)
+                renewed_listener(renewed, at)
             except Exception:
                 logger.warning("Claims-renewed listener raised", exc_info=True)
     for record in live:
