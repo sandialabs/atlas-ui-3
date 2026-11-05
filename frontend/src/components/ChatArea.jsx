@@ -297,20 +297,25 @@ const ChatArea = () => {
       if (intended) scrollIntentRef.current = null
       rememberScrollGeometry(el)
     }
-    const handleWheel = (event) => {
-      // A nested scrollable (for example, a code block) gets first use of the
-      // wheel; only treat it as conversation navigation at its scroll boundary.
-      for (let target = event.target; target && target !== el; target = target.parentElement) {
+    // Nested panels get first use of wheel/touch scrolling. Only navigation
+    // past their boundary can move the conversation and change its follow state.
+    const nestedCanScroll = (target, deltaY) => {
+      for (; target && target !== el; target = target.parentElement) {
         const overflow = window.getComputedStyle(target).overflowY
         if (/(auto|scroll)/.test(overflow) && target.scrollHeight > target.clientHeight &&
-            (event.deltaY < 0 ? target.scrollTop > 0 : target.scrollTop + target.clientHeight < target.scrollHeight - 1)) return
+            (deltaY < 0 ? target.scrollTop > 0 : target.scrollTop + target.clientHeight < target.scrollHeight - 1)) return true
       }
-      if (event.deltaY) noteIntent(event.deltaY < 0 ? 'up' : 'down')
+      return false
+    }
+    const handleWheel = (event) => {
+      if (event.deltaY && !nestedCanScroll(event.target, event.deltaY)) noteIntent(event.deltaY < 0 ? 'up' : 'down')
     }
     const handleTouchStart = (event) => { touchY = event.touches[0]?.clientY }
     const handleTouchMove = (event) => {
       const y = event.touches[0]?.clientY
-      if (y != null && touchY != null && y !== touchY) noteIntent(y > touchY ? 'up' : 'down')
+      if (y != null && touchY != null && y !== touchY && !nestedCanScroll(event.target, touchY - y)) {
+        noteIntent(y > touchY ? 'up' : 'down')
+      }
       touchY = y
     }
     const handleKeyDown = (event) => {

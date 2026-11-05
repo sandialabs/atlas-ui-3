@@ -298,6 +298,39 @@ describe('ChatArea scroll layout and navigation edge cases (#1166)', () => {
     expect(chat.transcript.scrollTop).toBe(550)
   })
 
+  it.each(['touch', 'wheel'])('ignores %s scrolling consumed by a nested panel', async gesture => {
+    const chat = setup()
+    await settle()
+    const panel = document.createElement('div')
+    panel.style.overflowY = 'auto'
+    Object.defineProperties(panel, {
+      scrollHeight: { value: 500 },
+      clientHeight: { value: 100 },
+    })
+    panel.scrollTop = 200
+    chat.transcript.appendChild(panel)
+    await mutations()
+    if (gesture === 'touch') {
+      fireEvent.touchStart(panel, { touches: [{ clientY: 200 }] })
+      fireEvent.touchMove(panel, { touches: [{ clientY: 250 }] })
+    } else fireEvent.wheel(panel, { deltaY: -50 })
+
+    height += 100
+    await deliverResize(chat.transcript)
+    expect(chat.transcript.scrollTop).toBe(bottom())
+
+    // Once the panel reaches its top, the same gesture can scroll the transcript.
+    panel.scrollTop = 0
+    if (gesture === 'touch') fireEvent.touchMove(panel, { touches: [{ clientY: 300 }] })
+    else fireEvent.wheel(panel, { deltaY: -50 })
+    chat.transcript.scrollTop -= 50
+    fireEvent.scroll(chat.transcript)
+    const readingPosition = chat.transcript.scrollTop
+    height += 100
+    await deliverResize(chat.transcript)
+    expect(chat.transcript.scrollTop).toBe(readingPosition)
+  })
+
   it('accepts direct user scrolling when geometry has not changed', async () => {
     const chat = setup()
     await settle()
