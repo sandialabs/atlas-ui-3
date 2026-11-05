@@ -1,6 +1,6 @@
 # Session Store Configuration
 
-Last updated: 2026-10-20
+Last updated: 2026-11-04
 
 ## Overview
 
@@ -158,7 +158,9 @@ page resume.
 | Situation | Behavior |
 |-----------|----------|
 | Redis down at startup | Startup fails. |
-| Redis down, session live on this replica | Turns continue from the local copy; each session write fails, is logged at ERROR and counted. The conversation is still saved to chat history. A session whose socket closes during the outage is dropped from memory. |
+| Redis down, session live on this replica | Turns already running continue from the local copy; each session write fails, is logged at ERROR and counted. The conversation is still saved to chat history. A session whose socket closes during the outage is dropped from memory. |
+| Redis down, new turn or run | **Refused (fail closed).** Run admission needs Redis to enforce `MAX_CONCURRENT_RUNS_PER_USER` and one run per conversation across replicas, so it is not attempted: WebSocket turns get an `error` frame with `error_type: run_coordination_unavailable`, the agent-runs API and `atlas_launch` get HTTP 503 `unavailable`. Retry once Redis is back. See [run coordination](../developer/run-coordination.md). |
+| Redis down longer than 30 s, run still executing | The run keeps going and finishes normally, but its cluster-wide claim lapses: it is logged once as lost and no longer counts toward the cap or holds the conversation lock, so another replica may admit a run for the same conversation once Redis returns. |
 | Redis down, session not on this replica | Reads raise `SessionStoreUnavailableError`; a reconnect starts a fresh session and the next turn rebuilds context from chat history. |
 | Redis restarted or flushed | Stored sessions are gone; live replicas re-store their sessions on the next write. Reconnects start fresh. |
 | Session idle past the TTL | Expired; a replica still holding it live re-stores it on the next write. |

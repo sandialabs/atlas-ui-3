@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-10-17
+Last updated: 2026-11-04
 
 Issue #884.
 
@@ -52,6 +52,15 @@ a paused run still holds a session, MCP clients, and conversation state.
 
 A turn that would exceed the cap is refused with an `error` frame of type
 `run_limit_exceeded` and a message naming the limit. It is not queued.
+
+With Redis configured (`SESSION_REPOSITORY_TYPE=redis`), the cap and the
+one-run-per-conversation rule hold **across all replicas**: every replica
+claims the run in Redis before starting it, atomically, so two replicas racing
+for a user's last slot cannot both win. The same cap applies to browser turns,
+`atlas_launch` and the agent-runs API alike. If Redis is unreachable, new runs
+are refused (`error_type: run_coordination_unavailable`) rather than admitted
+unchecked. A replica that dies holding runs frees their slots within 30
+seconds. See [Run coordination](../developer/run-coordination.md).
 
 ### Approvals and the timeout
 
@@ -417,7 +426,10 @@ These are known and deliberate, not oversights:
   issue #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
-  Use a single worker, or sticky sessions, until the run store is shared.
+  Admission is shared through Redis (the cap and conversation exclusivity
+  hold cluster-wide), but inspecting, stopping and steering a run still needs
+  the replica that owns it. Use a single worker, or sticky sessions, until
+  that routing lands (issue #1128).
 
 ## Troubleshooting
 

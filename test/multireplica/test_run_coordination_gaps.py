@@ -1,6 +1,8 @@
-"""#1128 acceptance criteria that main does not meet yet.
+"""#1128 acceptance criteria.
 
-Each test is ``xfail(strict=True, raises=GapNotClosed)``. Preconditions use a
+The ones main does not meet yet are ``xfail(strict=True, raises=GapNotClosed)``
+(``@gap``); the cross-replica admission criteria were closed by the Redis run
+coordinator and are plain tests now. Preconditions use a
 plain ``assert`` (a broken precondition is a real failure); only the final
 criterion uses ``expect(...)``, which raises ``GapNotClosed``. When a #1128 PR
 closes a gap the test XPASSes, strict mode fails the run, and that PR removes
@@ -42,7 +44,6 @@ def test_stop_sent_to_non_owner_reaches_the_owner(cluster):
         cluster.cancel_everywhere(handle["run_id"])
 
 
-@gap
 def test_per_user_cap_holds_across_replicas(cluster):
     """A user at the cap on A cannot start one more run on B."""
     user = cluster.new_user()
@@ -63,7 +64,6 @@ def test_per_user_cap_holds_across_replicas(cluster):
             cluster.cancel_everywhere(run_id)
 
 
-@gap
 def test_concurrent_admission_is_atomic_across_replicas(cluster):
     """Launches racing on A and B at once: no more than the cap are admitted."""
     from concurrent.futures import ThreadPoolExecutor

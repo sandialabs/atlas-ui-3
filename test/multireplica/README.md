@@ -1,6 +1,6 @@
 # Multi-replica harness
 
-Last updated: 2026-11-02
+Last updated: 2026-11-04
 
 Pytest suite that runs **two independent Atlas API processes** (replicas A and
 B) against one shared Redis and one shared PostgreSQL, the way a horizontally
@@ -68,14 +68,19 @@ answer. A message without directives is answered `ECHO: <message>`.
   Postgres, live sessions shared through Redis (fails if the replicas fall
   back to the in-memory session store), the side-effect counter, crash without
   replay, pause/resume.
-- `test_run_coordination_gaps.py`: the #1128 acceptance criteria, each marked
-  `xfail(strict=True, raises=GapNotClosed)`. Only the final criterion raises
+- `test_run_coordination_gaps.py`: the #1128 acceptance criteria. The ones not
+  met yet are marked `xfail(strict=True, raises=GapNotClosed)`; the per-user
+  cap and atomic-admission criteria pass since the Redis run coordinator. Only the final criterion raises
   `GapNotClosed` (via `expect(...)`); preconditions use plain `assert`, so a
   harness fault is a real failure, never a silent xfail. When a PR meets a
   criterion the test XPASSes, strict mode fails the run, and the PR removes the
   marker.
+- `test_cluster_admission.py`: cluster-wide admission (#1128). A conversation
+  running on A is refused on B (over WebSocket) and freed when the run ends,
+  and refused admissions leave no slot behind.
 - `test_known_bugs.py`: bugs the harness found that are outside #1128, in the
-  same strict-xfail style.
+  same strict-xfail style. A fixed bug keeps its test as a regression test
+  (the REST-only cap bug, fixed with #1128).
 
 ## Writing a test
 

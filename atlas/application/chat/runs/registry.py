@@ -39,6 +39,13 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID, uuid4
 
+# The admission errors live in their own module so the coordinator can raise
+# them without importing the registry.
+from atlas.application.chat.runs.admission_errors import (
+    ConcurrencyLimitError,
+    ConversationBusyError,
+)
+from atlas.application.chat.runs.coordination import release_claim_soon
 from atlas.application.chat.runs.stream_replay import StreamReplay
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
@@ -93,30 +100,6 @@ class RunStatus(str, Enum):
 _TERMINAL_STATUSES = frozenset(
     {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 )
-
-
-class RunRegistryError(Exception):
-    """Base class for run admission failures."""
-
-
-class ConversationBusyError(RunRegistryError):
-    """A conversation already has a non-terminal run.
-
-    Raised only as a backstop: the normal path for a second message to a busy
-    conversation is steering (issue #824), decided before ``start`` is called.
-    """
-
-
-class ConcurrencyLimitError(RunRegistryError):
-    """The user already has the maximum number of non-terminal runs."""
-
-    def __init__(self, limit: int):
-        self.limit = limit
-        super().__init__(
-            f"You already have {limit} conversation runs in progress. "
-            "Stop or wait for one to finish before starting another. "
-            "Runs paused waiting for tool approval count toward this limit."
-        )
 
 
 @dataclass
@@ -184,6 +167,15 @@ class RunRecord:
     # what a reopen replays so the reply starts at its beginning instead of
     # the token that happened to be current on arrival.
     stream: StreamReplay = field(default_factory=StreamReplay, repr=False, compare=False)
+    # The cluster-wide admission this run holds (issue #1128), a
+    # ``coordination.RunClaim`` when a shared coordinator granted one. Released
+    # when the run reaches a terminal state; renewed by the lease heartbeat
+    # while it is live. Server-side only.
+    claim: Optional[Any] = field(default=None, repr=False, compare=False)
+    # The claim lease renewal refused, moved out of ``claim`` the first time
+    # (so it is neither renewed nor reported again). Kept for fencing: its
+    # ``generation`` is the one this replica held.
+    lost_claim: Optional[Any] = field(default=None, repr=False, compare=False)
 
     @property
     def is_terminal(self) -> bool:
@@ -367,19 +359,8 @@ class RunRegistry:
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-    def start(
-        self,
-        *,
-        conversation_id: str,
-        user_email: str,
-        session_id: Optional[UUID] = None,
-        steering: Optional[Any] = None,
-        parent_run_id: Optional[str] = None,
-        parent_conversation_id: Optional[str] = None,
-        depth: int = 0,
-        title: Optional[str] = None,
-    ) -> RunRecord:
-        """Admit a new run, or raise if it would violate an invariant.
+    def check_admission(self, conversation_id: str, user_email: str) -> List[RunRecord]:
+        """Raise if this process would refuse the run; return the user's active runs.
 
         Reaping first matters: without it a user whose earlier runs all
         finished but are still inside the retention window would be refused
@@ -395,13 +376,34 @@ class RunRegistry:
         active = self.active_for_user(user_email)
         if len(active) >= self._max_concurrent:
             raise ConcurrencyLimitError(self._max_concurrent)
+        return active
+
+    def start(
+        self,
+        *,
+        conversation_id: str,
+        user_email: str,
+        session_id: Optional[UUID] = None,
+        steering: Optional[Any] = None,
+        parent_run_id: Optional[str] = None,
+        parent_conversation_id: Optional[str] = None,
+        depth: int = 0,
+        title: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ) -> RunRecord:
+        """Admit a new run, or raise if it would violate an invariant.
+
+        ``run_id`` is supplied when the id was chosen before admission -- the
+        cluster-wide claim (``admission.admit_run``) is keyed by it.
+        """
+        active = self.check_admission(conversation_id, user_email)
 
         if parent_conversation_id is None and parent_run_id:
             parent = self.get(parent_run_id)
             parent_conversation_id = None if parent is None else parent.conversation_id
 
         record = RunRecord(
-            run_id=str(uuid4()),
+            run_id=run_id or str(uuid4()),
             conversation_id=conversation_id,
             # Stored normalized so ownership comparisons (this registry's, the
             # transport guard's) read one owner for ``User@x`` and ``user@x``,
@@ -497,8 +499,21 @@ class RunRegistry:
             # would replay a finished answer over a reopen's fresh one.
             record.stream.clear()
             self._publish_terminal(record)
+            self._release_claim(record)
         self._notify(record)
         return record
+
+    @staticmethod
+    def _release_claim(record: "RunRecord") -> None:
+        """Give the run's cluster-wide slot back (issue #1128).
+
+        Scheduled, not awaited: status changes are synchronous. If the release
+        never lands (no loop, Redis down) the claim's lease expires instead.
+        """
+        claim, record.claim = record.claim, None
+        if claim is None:
+            return
+        release_claim_soon(claim, record.status.value)
 
     def _publish_terminal(self, record: "RunRecord") -> None:
         """Tell every replica this run finished.
@@ -943,6 +958,7 @@ class RunRegistry:
 
 
 _registry: Optional[RunRegistry] = None
+
 
 
 def get_run_registry() -> RunRegistry:

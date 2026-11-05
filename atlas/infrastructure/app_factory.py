@@ -102,6 +102,15 @@ class AppFactory:
 
             set_execution_store(RedisExecutionStore(self.redis))
 
+            # Cluster-wide run admission (issue #1128): with a shared Redis
+            # every replica claims runs there, so the per-conversation and
+            # per-user caps hold across replicas. Without Redis the registry's
+            # process-local checks are the whole story.
+            from atlas.application.chat.runs.coordination import set_run_coordinator
+            from atlas.infrastructure.redis.run_coordinator import RedisRunCoordinator
+
+            set_run_coordinator(RedisRunCoordinator(self.redis))
+
         # Outcomes of optional startup steps (issue #992): "ok", "failed" or
         # "disabled" per feature, reported by /api/health. A failure's detail
         # stays server-side, in ``startup_errors`` -- the health endpoint is
