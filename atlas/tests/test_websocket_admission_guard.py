@@ -199,3 +199,24 @@ def test_coordinator_outage_refuses_the_turn(mock_app_factory, coordinator, monk
     assert frame["error_type"] == "run_coordination_unavailable"
     assert get_run_registry().records_for_user(USER) == []
     mock_app_factory.create_chat_service.return_value.handle_chat_message.assert_not_called()
+
+
+def test_any_other_admission_refusal_refuses_the_turn(mock_app_factory, coordinator, monkeypatch):
+    """A future RunRegistryError subclass is refused, never run untracked."""
+    from atlas.application.chat.runs.admission_errors import RunRegistryError
+
+    class _NewRefusal(RunRegistryError):
+        pass
+
+    async def refuse(**_kwargs):
+        raise _NewRefusal("not admitted")
+
+    monkeypatch.setattr(main, "admit_run", refuse)
+    client = TestClient(main.app)
+    with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
+        ws.send_json(_chat_frame())
+        while (frame := ws.receive_json())["type"] == "run_status":
+            pass
+    assert frame["type"] == "error"
+    assert frame["error_type"] == "run_not_admitted"
+    mock_app_factory.create_chat_service.return_value.handle_chat_message.assert_not_called()

@@ -349,5 +349,17 @@ async def test_heartbeat_keeps_a_fixed_schedule(monkeypatch):
     assert len(beats) == 4, beats
 
 
+async def test_shutdown_releases_the_claims_of_live_runs(coord):
+    """A rolling deploy frees the conversation and slot at once, not after a lease."""
+    first = await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    await admit_run(conversation_id="c2", user_email=USER, app_settings=_settings(5))
+    assert admission.release_live_claims() == 2
+    await drain_pending_releases()
+    assert await _slots(coord) == 0
+    assert await _conversation_holder(coord, "c1") is None
+    assert (await coord.read(first.run_id))["status"] == "failed"
+    assert admission.release_live_claims() == 0  # nothing left to give back
+
+
 async def test_in_process_coordinator_has_no_shared_record():
     assert await InProcessRunCoordinator().read("anything") is None

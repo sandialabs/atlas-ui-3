@@ -23,7 +23,8 @@ is documented in ``docs/developer/run-coordination.md``:
     whose lease has passed are pruned before every count, so a replica that
     died holding slots frees them within one lease.
 ``<p>:run-fence`` (string counter)
-    Source of fencing generations. One counter, only ever incremented.
+    Source of fencing generations. One counter, only ever incremented, and
+    floored at the Redis clock in ms so it keeps increasing across a flush.
 ``<p>:run-cmd:<run_id>`` (stream) and ``<p>:replica:<replica_id>``
     Reserved for command routing and replica liveness (later #1128 work);
     nothing writes them yet.
@@ -77,6 +78,12 @@ if (not redis.call('ZSCORE', KEYS[2], ARGV[1])) and count >= tonumber(ARGV[5]) t
   return {'limit', tostring(count)}
 end
 local generation = redis.call('INCR', KEYS[4])
+if generation < now then
+  -- Floor at Redis time (ms) so a flushed or restarted Redis, whose counter
+  -- starts over, still issues generations above every earlier one.
+  redis.call('SET', KEYS[4], now)
+  generation = now
+end
 local expires = now + lease
 redis.call('SET', KEYS[1], ARGV[1], 'PX', lease)
 redis.call('ZADD', KEYS[2], expires, ARGV[1])

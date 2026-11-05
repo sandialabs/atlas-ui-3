@@ -41,7 +41,14 @@ agent-runs REST API), is admitted by `admit_run`
 If step 4 refuses, or the caller is cancelled while step 3 is in flight, the
 claim is released before the error propagates. A failed admission holds no
 slot. When a run reaches a terminal state, `RunRegistry.set_status` schedules
-the release.
+the release. On graceful shutdown the replica releases the claims of runs still
+live (`release_live_claims`, recorded as `failed`) and drains the releases
+before closing the Redis pool, so a rolling deploy does not hold their
+conversations and slots for a lease.
+
+Every admission refusal refuses the turn. On the WebSocket path an unexpected
+`RunRegistryError` subclass becomes an `error` frame (`run_not_admitted`)
+rather than an untracked turn, which would bypass the cap.
 
 If the claim's reply is lost (a timeout after Redis applied it), the
 coordinator releases whatever this replica holds under that run id before
@@ -85,7 +92,7 @@ rather than formatting keys by hand.
 | `<p>:run:<run_id>` | hash | The run record (fields below) | Lease + 300 s while live; 300 s after release |
 | `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
-| `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed | Persistent |
+| `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed, floored at Redis time (ms) | Persistent |
 | `<p>:run-cmd:<run_id>` | stream | **Reserved** for command routing (stop, steer, approve) | (not written yet) |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
@@ -97,7 +104,7 @@ Run record fields:
 | `conversation_id` | The conversation the run mutates |
 | `user_email` | Normalized owner |
 | `owner` | Replica id holding the run: `<hostname>-<pid>-<random>`, minted once per process, so a coordinator rebuilt in the same process still owns its claims (on Kubernetes the hostname is the pod name) |
-| `generation` | Fencing token from `<p>:run-fence`. Later claims always carry a larger value |
+| `generation` | Fencing token from `<p>:run-fence`. Later claims always carry a larger value: the counter is `INCR`ed and floored at the Redis clock in ms, so a flushed or restarted Redis (counter back at 0) still issues values above every earlier one. That holds unless the Redis clock steps backwards past the last generation |
 | `status` | `queued` at claim, then the registry status carried by each lease renewal (`running`, `waiting_for_input`), and the terminal status at release |
 | `lease_expires_at` | Epoch ms from the Redis clock; `0` once released |
 | `created_at`, `updated_at` | Epoch ms from the Redis clock |
