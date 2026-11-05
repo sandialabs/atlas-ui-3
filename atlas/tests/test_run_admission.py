@@ -228,9 +228,20 @@ async def test_heartbeat_renews_live_claims_only(coord):
     get_run_registry().set_status(ended.run_id, RunStatus.FAILED)
     await drain_pending_releases()
 
+    get_run_registry().set_status(live.run_id, RunStatus.RUNNING)
+    before = await coord.read(live.run_id)
+    assert before["status"] == "queued"
+    await asyncio.sleep(0.01)  # Redis time is in ms: let it move
+
     await renew_live_claims()
-    # The heartbeat carries the registry's status into the shared record.
-    assert (await coord.read(live.run_id))["status"] == live.status.value
+    after = await coord.read(live.run_id)
+    # A real renewal: the lease moved forward and the registry's status was
+    # carried into the shared record. A no-op renew fails both.
+    assert int(after["lease_expires_at"]) > int(before["lease_expires_at"])
+    assert after["status"] == "running"
+    member_score = await coord._redis.client.zscore(coord.keys.user(USER), live.run_id)
+    assert int(member_score) == int(after["lease_expires_at"])
+    # The ended run is not renewed back to life.
     assert (await coord.read(ended.run_id))["status"] == "failed"
     assert await _slots(coord) == 1
 
@@ -265,15 +276,32 @@ async def test_lost_claim_notifies_listeners(server, coord):
     def bad(_record):
         raise RuntimeError("listener bug")
 
+    claim = record.claim
     unsubscribe_bad = admission.add_claim_lost_listener(bad)
     unsubscribe = admission.add_claim_lost_listener(seen.append)
+    renewed = []
+    real_renew = coord.renew
+
+    async def counting_renew(claims, statuses):
+        claims = list(claims)
+        renewed.append([c.run_id for c in claims])
+        return await real_renew(claims, statuses)
+
+    coord.renew = counting_renew
     try:
+        await renew_live_claims()
+        # Lost once, reported once: later beats neither renew nor re-notify.
+        await renew_live_claims()
         await renew_live_claims()
     finally:
         unsubscribe()
         unsubscribe_bad()
         unsubscribe()  # idempotent
     assert seen == [record]
+    assert renewed == [[record.run_id]]
+    assert record.claim is None and record.lost_claim is claim
+    # The run is still live locally; only its claim is gone.
+    assert not record.is_terminal
     shared = await coord.read(record.run_id)
     assert shared["owner"] == "replica-b" and shared["run_id"] == record.run_id
 
@@ -287,6 +315,38 @@ async def test_held_claim_does_not_notify_listeners(coord):
     finally:
         unsubscribe()
     assert seen == []
+
+
+async def test_a_lost_claim_is_not_released_over_the_new_holder(coord):
+    """The run ending after its claim was lost releases nothing: the newer
+    holder's lock and slot stay put."""
+    record = await admit_run(conversation_id="c1", user_email=USER, app_settings=_settings(5))
+    await coord._redis.client.hset(coord.keys.run(record.run_id), mapping={"owner": "replica-b"})
+    await renew_live_claims()
+    get_run_registry().set_status(record.run_id, RunStatus.COMPLETED)
+    await drain_pending_releases()
+    assert await _conversation_holder(coord, "c1") == record.run_id.encode()
+    assert (await coord.read(record.run_id))["owner"] == "replica-b"
+
+
+async def test_heartbeat_keeps_a_fixed_schedule(monkeypatch):
+    """A slow pass shortens the next wait instead of delaying every later beat."""
+    loop = asyncio.get_running_loop()
+    start, beats = loop.time(), []
+
+    async def slow_pass():
+        beats.append(loop.time() - start)
+        await asyncio.sleep(0.06)
+
+    monkeypatch.setattr(admission, "renew_live_claims", slow_pass)
+    task = asyncio.create_task(admission.run_lease_heartbeat(interval=0.1))
+    await asyncio.sleep(0.45)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # On the grid (0.1, 0.2, 0.3, 0.4); sleeping a full interval after each
+    # 0.06 s pass would give only 0.1, 0.26, 0.42.
+    assert len(beats) == 4, beats
 
 
 async def test_in_process_coordinator_has_no_shared_record():

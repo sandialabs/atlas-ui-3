@@ -50,7 +50,22 @@ reporting the failure.
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket
 `run_coordination_unavailable`). Admitting without the shared check would let a
-user exceed the cap for exactly as long as the outage lasts.
+user exceed the cap for exactly as long as the outage lasts. There is no
+setting to fall back to local admission while Redis is configured. A
+single-replica deployment that does not want the dependency runs without
+Redis (below).
+
+Runs already executing when Redis goes away keep going. If the outage outlasts
+the lease (30 s), their claims lapse: each is reported lost once (see
+"Renewal reports loss") and, until those runs finish, the cluster-wide cap and
+conversation lock no longer count them. Nothing re-claims them automatically.
+
+The WebSocket handler also guards the window between a granted admission and
+the run's task being attached (seeding the run's session files, sending
+`run_started`). Any exit from it, a cancelled socket included, marks the run
+`failed`, which releases the claim. Without the guard a record with no task
+would be renewed indefinitely and hold the conversation and a slot on every
+replica.
 
 Without Redis (`SESSION_REPOSITORY_TYPE=memory`) the `InProcessRunCoordinator`
 admits everything and never suspends, so the registry's checks are the whole
@@ -100,13 +115,18 @@ Rules every script follows:
   the same run holds.
 - **Release is final.** Renewal refuses a record in a terminal status, so a
   heartbeat that races the release cannot take the slot back.
-- **Renewal reports loss.** A lapsed lease is never re-taken (its slot may already count for another run). The owner renews every live claim every
-  `RUN_LEASE_RENEW_INTERVAL_SECONDS` (10 s). The heartbeat starts with the
-  first claim on an event loop, so the API server and a headless
-  `AtlasClient` both renew. Renewals run concurrently (16 at a time). It gets `False` for a claim it no longer holds, because the claim
-  expired and another run took the conversation, or because it was released
-  elsewhere. Today it only logs a warning. Acting on it (stopping the run, or
-  refusing its writes by generation) is the fencing work below.
+- **Renewal reports loss.** A lapsed lease is never re-taken (its slot may
+  already count for another run). The owner renews every live claim every
+  `RUN_LEASE_RENEW_INTERVAL_SECONDS` (10 s), on a fixed schedule so a slow
+  pass does not delay the next one. The heartbeat starts with the first claim
+  on an event loop, so the API server and a headless `AtlasClient` both
+  renew. Renewals run concurrently (16 at a time). Renewal returns `False`
+  for a claim the replica no longer holds: the lease lapsed, another owner or
+  generation holds the run, or it was released elsewhere. The first `False`
+  moves the claim from `RunRecord.claim` to `RunRecord.lost_claim`, logs one
+  warning and notifies the claim-lost listeners once; the claim is not
+  renewed or reported again. The run itself keeps executing. Stopping it, or
+  refusing its writes by generation, is the fencing work below.
 
 Scripts touch several keys, so the contract assumes one logical Redis (a
 primary, optionally with replicas or Sentinel), which is what `REDIS_URL`
@@ -115,9 +135,10 @@ supports today. Redis Cluster would need hash tags and is out of scope.
 ## Extension points for fencing
 
 - `admission.add_claim_lost_listener(callback)`: `callback(record)` runs on
-  the owning replica when lease renewal refuses a live run's claim (it lapsed,
-  another owner or generation holds the run, or it was released elsewhere).
-  It returns an unsubscribe callable. Callbacks must not block, and an
+  the owning replica, once per claim, when lease renewal refuses a live run's
+  claim (it lapsed, another owner or generation holds the run, or it was
+  released elsewhere). `record.lost_claim` is the refused `RunClaim`, with
+  the generation this replica held. It returns an unsubscribe callable. Callbacks must not block, and an
   exception is logged without stopping other listeners. Stopping the run or
   refusing its writes belongs to the fencing work.
 - `RunCoordinator.read(run_id)`: the shared run record (fields above, as

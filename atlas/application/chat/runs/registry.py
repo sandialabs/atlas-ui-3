@@ -172,6 +172,10 @@ class RunRecord:
     # when the run reaches a terminal state; renewed by the lease heartbeat
     # while it is live. Server-side only.
     claim: Optional[Any] = field(default=None, repr=False, compare=False)
+    # The claim lease renewal refused, moved out of ``claim`` the first time
+    # (so it is neither renewed nor reported again). Kept for fencing: its
+    # ``generation`` is the one this replica held.
+    lost_claim: Optional[Any] = field(default=None, repr=False, compare=False)
 
     @property
     def is_terminal(self) -> bool:

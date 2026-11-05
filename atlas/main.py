@@ -2360,24 +2360,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     async def turn_update_callback(message):
                         await websocket_update_callback(websocket, message)
                 else:
-                    connection_run_ids.add(run_record.run_id)
                     # The run gets its own session id, so two conversations
                     # executing at once never share one Session/history object.
+                    # Its files are seeded below, inside the admission guard.
                     turn_session_id = run_record.session_id
-                    # Files attached via `attach_file` land on the *connection*
-                    # session's context, which the run's fresh session cannot
-                    # see -- the tool that needs them would report the file as
-                    # missing. Create the run session here (the same path
-                    # handle_chat_message would take lazily) and carry the file
-                    # map across. Copied, not shared, so the run and the
-                    # connection cannot mutate each other's state.
-                    await _seed_run_session_files(
-                        chat_service,
-                        session_id,
-                        turn_session_id,
-                        user_email,
-                        conversation_id=run_record.conversation_id,
-                    )
 
                     async def turn_update_callback(
                         message,
@@ -2678,13 +2664,41 @@ async def websocket_endpoint(websocket: WebSocket):
                             except asyncio.CancelledError:
                                 pass
 
-                # Announce the run before its task can emit anything. The
-                # task's first frames are tagged with the run's conversation
-                # id, and a client that has not yet adopted that id (a new
-                # chat has none) would file them as background activity and
-                # drop them from the transcript it is showing.
-                if run_record is not None:
+                if run_record is None:
+                    chat_task = asyncio.create_task(handle_chat_guarded())
+                    active_chat_task["task"] = chat_task
+                    active_chat_task["kind"] = "chat"
+                else:
+                    # From a granted admission until the task is attached the
+                    # run holds a cluster-wide claim (its conversation lock and
+                    # one of the user's slots) that nothing would ever release:
+                    # no task exists to finish the run, and the lease heartbeat
+                    # keeps renewing a live record. Any exit from this window,
+                    # including the socket being cancelled, marks the run
+                    # failed, which releases the claim (#1128).
+                    chat_task = None
                     try:
+                        # Files attached via `attach_file` land on the
+                        # *connection* session's context, which the run's fresh
+                        # session cannot see -- the tool that needs them would
+                        # report the file as missing. Create the run session
+                        # here (the same path handle_chat_message would take
+                        # lazily) and carry the file map across. Copied, not
+                        # shared, so the run and the connection cannot mutate
+                        # each other's state.
+                        await _seed_run_session_files(
+                            chat_service,
+                            session_id,
+                            turn_session_id,
+                            user_email,
+                            conversation_id=run_record.conversation_id,
+                        )
+                        # Announce the run before its task can emit anything.
+                        # The task's first frames are tagged with the run's
+                        # conversation id, and a client that has not yet
+                        # adopted that id (a new chat has none) would file them
+                        # as background activity and drop them from the
+                        # transcript it is showing.
                         await websocket.send_json({
                             "type": "run_started",
                             "run_id": run_record.run_id,
@@ -2698,27 +2712,21 @@ async def websocket_endpoint(websocket: WebSocket):
                             "parent_run_id": run_record.parent_run_id,
                             "parent_conversation_id": run_record.parent_conversation_id,
                         })
-                    except Exception:
-                        # The run was admitted but its task has not started:
-                        # nothing will ever execute it. Leaving the record
-                        # running would hold one of the user's concurrency
-                        # slots until the wall-clock sweeper reaps it, so
-                        # mark the failure now. Re-raise so the disconnect
-                        # path still tears the connection down normally; the
-                        # terminal record makes ``mark_detached`` a no-op.
+                        chat_task = asyncio.create_task(handle_chat_guarded())
+                        run_registry.attach_task(run_record.run_id, chat_task)
+                    except BaseException:
+                        # Re-raised so a disconnect still tears the connection
+                        # down normally; the terminal record makes
+                        # ``mark_detached`` a no-op.
+                        if chat_task is not None and not chat_task.done():
+                            chat_task.cancel()
                         run_registry.set_status(
                             run_record.run_id,
                             RunStatus.FAILED,
-                            error="Connection closed before the run started",
+                            error="The run could not be started",
                         )
                         raise
-                # Start chat handling in background
-                chat_task = asyncio.create_task(handle_chat_guarded())
-                if run_record is None:
-                    active_chat_task["task"] = chat_task
-                    active_chat_task["kind"] = "chat"
-                else:
-                    run_registry.attach_task(run_record.run_id, chat_task)
+                    connection_run_ids.add(run_record.run_id)
 
             elif message_type == "context_usage_request":
                 # Issue #877: the context meter's estimate for a conversation

@@ -27,7 +27,8 @@ fail() {
 
 echo "== unit: Redis run coordinator + admission cleanup"
 (cd atlas && PYTHONPATH="$PROJECT_ROOT" python -m pytest -q -p no:cacheprovider \
-    tests/test_redis_run_coordinator.py tests/test_run_admission.py) || fail "unit tests"
+    tests/test_redis_run_coordinator.py tests/test_run_admission.py \
+    tests/test_websocket_admission_guard.py) || fail "unit tests"
 
 echo "== multi-replica: admission scenarios"
 LOG="$(mktemp)"

@@ -199,6 +199,10 @@ async def renew_live_claims() -> None:
         # A run that ended (and released) while the beat was in flight is
         # refused by renewal too; that is not a lost claim.
         if held.get(record.run_id) is False and record.claim is not None and not record.is_terminal:
+            # Lost once, reported once: Redis already revoked it, so renewing
+            # it again is a wasted round trip and a repeated warning, and the
+            # terminal release has nothing of ours left to free.
+            record.lost_claim, record.claim = record.claim, None
             logger.warning(
                 "Run %s lost its cluster-wide claim while still running on this replica",
                 record.run_id,
@@ -212,13 +216,22 @@ async def renew_live_claims() -> None:
 
 
 async def run_lease_heartbeat(interval: float = RUN_LEASE_RENEW_INTERVAL_SECONDS) -> None:
-    """Renew claims forever (started from the app lifespan)."""
+    """Renew claims forever (started with the first claim on a loop).
+
+    Beats are scheduled on a fixed monotonic grid, not ``interval`` after the
+    previous pass finished, so a slow pass shortens the next wait instead of
+    pushing every later renewal toward the lease's end.
+    """
+    loop = asyncio.get_running_loop()
+    next_beat = loop.time() + interval
     while True:
         try:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(max(0.0, next_beat - loop.time()))
             await renew_live_claims()
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover - the heartbeat must never die
             logger.warning("Run lease heartbeat iteration failed", exc_info=True)
+        # A pass that overran a whole interval is followed by one right away.
+        next_beat = max(next_beat + interval, loop.time())
 
