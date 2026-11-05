@@ -23,6 +23,7 @@ from atlas.application.chat.runs import (
 from atlas.application.chat.runs.eligibility import (
     save_mode_is_server,
     turn_is_eligible_for_background_run,
+    turn_is_off_record,
 )
 
 
@@ -297,7 +298,31 @@ def test_save_mode_helper_matches_transport_derivation():
     assert save_mode_is_server("server") is True
     assert save_mode_is_server("server", incognito=True) is False
     assert save_mode_is_server("local") is False
-    assert save_mode_is_server(None) is True
+    # Fails closed: an explicit null is off the record, like the transport.
+    assert save_mode_is_server(None) is False
+    assert save_mode_is_server("server", incognito=1) is False
+
+
+@pytest.mark.parametrize(
+    "frame, off_record",
+    [
+        ({}, False),
+        ({"save_mode": "server"}, False),
+        ({"save_mode": None}, True),
+        ({"save_mode": "local"}, True),
+        ({"save_mode": "server", "incognito": 1}, True),
+    ],
+)
+def test_one_save_mode_rule_for_transport_and_runs(frame, off_record):
+    """#1128: an explicit null save mode used to read as off the record to
+    the transport but as ``server`` to run admission, which then mirrored the
+    turn's prompt-derived title to the shared store."""
+    assert turn_is_off_record(frame) is off_record
+    eligible = turn_is_eligible_for_background_run(
+        **{**BASE, "save_mode": frame.get("save_mode", "server"),
+           "incognito": frame.get("incognito", False)}
+    )
+    assert eligible is (not off_record)
 
 
 # ---------------------------------------------------------------------------

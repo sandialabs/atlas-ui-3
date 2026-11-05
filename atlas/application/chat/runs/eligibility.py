@@ -25,18 +25,26 @@ one completion and nothing more.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 
 def save_mode_is_server(save_mode: Optional[str], incognito: Any = False) -> bool:
     """Whether this turn's transcript is written to the server.
 
-    Mirrors the transport's own incognito derivation so the two cannot drift:
-    an older client that sends only ``incognito`` still resolves correctly.
+    Fails closed: only an explicit ``"server"`` is the server; ``None`` (an
+    explicit null) is off the record. A frame that omits ``save_mode`` is
+    resolved by :func:`turn_is_off_record`, which the transport uses too.
     """
-    if incognito is True:
+    if incognito:
         return False
-    return (save_mode or "server") == "server"
+    return save_mode == "server"
+
+
+def turn_is_off_record(data: Mapping[str, Any]) -> bool:
+    """The one rule for a chat frame: an omitted ``save_mode`` means
+    ``server``; any other value, explicit null included, or a truthy
+    ``incognito`` keeps the turn off the record."""
+    return not save_mode_is_server(data.get("save_mode", "server"), data.get("incognito", False))
 
 
 def turn_is_eligible_for_background_run(

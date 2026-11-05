@@ -366,14 +366,7 @@ class RunLeaseGuard:
         if lease.done or record is None:
             return True  # our own finished run, confirmed in shared state
         if record.is_terminal:
-            # Ended here, not yet confirmed: the terminal mirror is the proof
-            # (refused if another replica took the run over first).
-            await self._sync(run_id, lease)
-            if lease.fenced:
-                return False
-            if lease.done:
-                return True
-            return self._unproven(lease, run_id)
+            return await self._terminal_proof(lease, run_id)
         started = self._clock()
         if started - lease.verified_at < self.lease_seconds * 0.8:
             return True
@@ -397,8 +390,10 @@ class RunLeaseGuard:
         # The run may have ended (and released its claim, which renewal then
         # refuses) while the renewal was in flight.
         record = self._registry.get(run_id)
-        if lease.done or record is None or record.is_terminal:
+        if lease.done or record is None:
             return True
+        if record.is_terminal:  # ended while the renewal was in flight
+            return await self._terminal_proof(lease, run_id)
         if answer is False:
             # Refused: another owner or generation holds the run, or its lease
             # passed; another replica may already have taken it over.
@@ -406,6 +401,16 @@ class RunLeaseGuard:
             with contextlib.suppress(Exception):
                 await self._take_over(run_id)
             return False
+        return self._unproven(lease, run_id)
+
+    async def _terminal_proof(self, lease: _Lease, run_id: str) -> bool:
+        """A run that ended here but is not yet confirmed: its terminal mirror
+        is the proof (refused if another replica took the run over first)."""
+        await self._sync(run_id, lease)
+        if lease.fenced:
+            return False
+        if lease.done:
+            return True
         return self._unproven(lease, run_id)
 
     def _unproven(self, lease: _Lease, run_id: str) -> bool:

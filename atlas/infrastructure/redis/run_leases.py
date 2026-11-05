@@ -8,7 +8,8 @@ own. The contract is in ``docs/developer/run-coordination.md``.
   owner can no longer renew it): a new generation from ``<p>:run-fence``, an
   empty owner, ``status=failed`` with ``interrupted=1``, and its slots freed.
   The run stays in ``runs-live`` until the sweeper closed its execution
-  projection (``forget``), so that close survives a failure or a dead sweeper.
+  projection (``forget``), so that close survives a failure or a dead sweeper;
+  each retry is scheduled behind the runs due now and keeps the record alive.
   Every write the old owner still attempts then fails the owner/generation
   check of the claim, renew and release scripts and of ``MIRROR``.
 * ``MIRROR`` writes the owner's public snapshot of the run (and its launch
@@ -25,7 +26,7 @@ from atlas.application.chat.runs.coordination import RunClaim
 from atlas.infrastructure.redis.run_coordinator import _NOW, RunCoordinationKeys
 
 # KEYS: run, conv, user, fence, live
-# ARGV: run_id, error, interrupted_by, retention_ms
+# ARGV: run_id, error, interrupted_by, retention_ms, retry_ms
 INTERRUPT_SCRIPT = _NOW + """
 local status = redis.call('HGET', KEYS[1], 'status')
 if (not status) or status == 'completed' or status == 'failed' or status == 'cancelled' then
@@ -34,6 +35,11 @@ if (not status) or status == 'completed' or status == 'failed' or status == 'can
   -- Once forgotten, a late takeover attempt (the resumed old owner's) is 0.
   if status and redis.call('HGET', KEYS[1], 'interrupted') == '1'
       and redis.call('ZSCORE', KEYS[5], ARGV[1]) then
+    -- Each attempt moves the run behind the orphans due now (a close that
+    -- keeps failing cannot starve them) and keeps the record, so the
+    -- obligation to close cannot expire before the close is confirmed.
+    redis.call('ZADD', KEYS[5], now + tonumber(ARGV[5]), ARGV[1])
+    redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
     return -1
   end
   redis.call('ZREM', KEYS[5], ARGV[1])
@@ -55,9 +61,9 @@ redis.call('HSET', KEYS[1], 'status', 'failed', 'interrupted', '1', 'error', ARG
 redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
 if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 redis.call('ZREM', KEYS[3], ARGV[1])
--- Kept in runs-live (due now) until the caller closed the projection, so a
--- failed close is retried by the next sweep on any replica.
-redis.call('ZADD', KEYS[5], 0, ARGV[1])
+-- Kept in runs-live until the caller closed the projection, so a failed
+-- close is retried by a later sweep on any replica, after the runs due now.
+redis.call('ZADD', KEYS[5], now + tonumber(ARGV[5]), ARGV[1])
 return generation
 """
 
@@ -99,6 +105,8 @@ class RedisRunLeases:
         self.replica_id: str = coordinator.replica_id
         self.lease_seconds = float(getattr(coordinator, "lease_seconds", 30.0))
         self._retention_ms = int(getattr(coordinator, "_retention_ms", 300_000))
+        # A failed projection close is retried after this long.
+        self._retry_ms = max(1, int(self.lease_seconds * 1000 / 3))
         client = self._redis.client
         self._interrupt = client.register_script(INTERRUPT_SCRIPT)
         self._mirror = client.register_script(MIRROR_SCRIPT)
@@ -117,7 +125,7 @@ class RedisRunLeases:
                 self.keys.fence(),
                 self.keys.live(),
             ],
-            args=[run_id, error, self.replica_id, self._retention_ms],
+            args=[run_id, error, self.replica_id, self._retention_ms, self._retry_ms],
         )
         return int(generation) or None
 

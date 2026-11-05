@@ -720,6 +720,7 @@ async def test_failed_projection_close_is_retried_by_a_later_sweep(server):
     assert await b.guard.sweep_once() == [record.run_id]  # taken over, close failed
     assert await b.client.zscore(b.keys.live(), record.run_id) is not None
 
+    await b.client.zadd(b.keys.live(), {record.run_id: 1})  # its retry is due
     assert await b.guard.sweep_once() == []  # not a second takeover, but closed now
     rows = public_projection(await store.get("conv-1", EMAIL))["invocations"]
     assert rows[0]["status"] == "interrupted"
@@ -924,6 +925,7 @@ async def test_projection_close_counts_only_when_confirmed(server):
     await a.expire(record)
     assert await b.guard.sweep_once() == [record.run_id]
     assert await b.client.zscore(b.keys.live(), record.run_id) is not None  # not forgotten
+    await b.client.zadd(b.keys.live(), {record.run_id: 1})  # its retry is due
     await b.guard.sweep_once()
     rows = public_projection(await store.get("conv-1", EMAIL))["invocations"]
     assert rows[0]["status"] == "interrupted"
@@ -952,3 +954,99 @@ def test_snapshot_result_cap_keeps_truncation_detectable():
     from atlas.application.chat.runs.launcher import MAX_RESULT_CHARS
 
     assert leases_module.MAX_SNAPSHOT_RESULT_CHARS == MAX_RESULT_CHARS + 1
+
+
+async def test_run_that_ended_during_a_failed_renewal_still_needs_its_proof(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    a.clock.now += LEASE
+
+    async def taken_over_meanwhile(claims, statuses):
+        # The run ends here while another replica takes it over; the
+        # renewal itself gets no answer.
+        a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+        await a.expire(record)
+        await b.guard.sweep_once()
+        return {}
+
+    a.coordinator.renew = taken_over_meanwhile
+    a.clock.now += LEASE  # and no proof inside the lease either
+    assert await a.guard.may_publish(record.run_id) is False
+    assert a.guard.is_fenced(record.run_id)
+    assert (await b.record(record.run_id))["status"] == "failed"
+    task.cancel()
+
+
+async def test_failing_projection_close_neither_starves_others_nor_expires(server):
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    a, b = Replica(server, "A"), Replica(server, "B")
+    stuck, t1 = await a.start(conversation="conv-1")
+    original = store.apply_event
+
+    async def flaky(event):
+        if event.get("type") == "run_status" and event.get("run_id") == stuck.run_id:
+            raise ConnectionError("store down for this run")
+        return await original(event)
+
+    store.apply_event = flaky
+    await a.expire(stuck)
+    assert await b.guard.sweep_once() == [stuck.run_id]  # close failed
+    # Retried later, not first in line on every sweep.
+    assert stuck.run_id not in await b.scripts.lapsed_candidates()
+
+    fresh, t2 = await a.start(conversation="conv-2")
+    await a.expire(fresh)
+    await b.client.zadd(b.keys.live(), {stuck.run_id: 2})  # its retry is due
+    assert await b.scripts.lapsed_candidates(limit=1) == [fresh.run_id]
+
+    # Each retry keeps the record (and so the close obligation) alive.
+    await b.client.pexpire(b.keys.run(stuck.run_id), 50)
+    await b.guard.sweep_once()
+    assert await b.client.pttl(b.keys.run(stuck.run_id)) > 1000
+    assert await b.client.zscore(b.keys.live(), stuck.run_id) is not None
+    t1.cancel()
+    t2.cancel()
+
+
+async def test_lease_lapsing_while_the_client_connects_stops_the_request(server):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from atlas.application.chat.runs.context import set_current_run
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    a, b = Replica(server, "A"), Replica(server, "B")
+    set_lease_guard(a.guard)
+    record, sleeper = await a.start()
+    await a.guard.ensure_may_act(record.run_id)  # proven at the dispatch boundary
+
+    manager = MCPToolManager.__new__(MCPToolManager)
+    manager._server_task_support = {}
+    manager._tool_task_forbidden = set()
+    manager._task_timeout = 1
+    client = MagicMock()
+    client.call_tool = AsyncMock()
+
+    async def slow_connect():
+        a.clock.now += LEASE * 3
+        await a.expire(record)
+        await b.guard.sweep_once()
+        return client
+
+    client.__aenter__ = AsyncMock(side_effect=slow_connect)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    async def step():
+        set_current_run(record.run_id, record.conversation_id)
+        await manager._call_tool_once_impl("srv", "t", {})
+
+    settings = SimpleNamespace(app_settings=SimpleNamespace(mcp_call_timeout=5))
+    with patch.object(manager, "_client_for_operation", AsyncMock(return_value=client)), \
+            patch("atlas.modules.mcp_tools.client.config_manager", settings):
+        (outcome,) = await asyncio.gather(
+            asyncio.get_running_loop().create_task(step()), return_exceptions=True
+        )
+    assert isinstance(outcome, asyncio.CancelledError), outcome
+    client.call_tool.assert_not_awaited()
+    sleeper.cancel()

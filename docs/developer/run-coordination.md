@@ -187,7 +187,7 @@ claims: by the API server's shared-infrastructure startup and by every
 | Step | Who | What |
 |------|-----|------|
 | Mirror | owner | On every registry change, the `MIRROR` script writes the `snapshot`, `source` and a non-terminal `status` if `owner` and `generation` are still the writer's and, for a live run, its lease has not passed. Once the record is terminal, a snapshot of a live state is dropped (an older write landing late). There is one writer per run on the owner, so the newest state is the last written, and a run counts as mirrored only once a terminal snapshot was written. A refusal fences the run. A write that fails (Redis unreachable) is retried by the next sweep, a terminal one included. `launch_api_run` and `follow_up_api_run` await the first write before returning. |
-| Orphan sweep | every replica | Every half lease (jittered), read `runs-live` members whose score has passed and run the `INTERRUPT` script on each. It acts only on a non-terminal record whose `lease_expires_at` is past by the Redis clock (which the owner can no longer renew). It then `INCR`s `run-fence`, sets `generation` to that value and `owner` to empty, marks the run `failed` with `interrupted=1`, `error` and `interrupted_by`, frees `run-conv` / `run-user` / `runs-live`, and closes the run in the execution projection. The run stays in `runs-live` (due at once) until that close is confirmed by reading the projection back, so a failed close is retried by a later sweep on any replica (`INTERRUPT` then returns `-1`, and the sweeper closes the projection idempotently and drops the member). A candidate whose takeover fails is logged and retried next sweep without stopping the others; leases of runs gone from the local registry are dropped. |
+| Orphan sweep | every replica | Every half lease (jittered), read `runs-live` members whose score has passed and run the `INTERRUPT` script on each. It acts only on a non-terminal record whose `lease_expires_at` is past by the Redis clock (which the owner can no longer renew). It then `INCR`s `run-fence`, sets `generation` to that value and `owner` to empty, marks the run `failed` with `interrupted=1`, `error` and `interrupted_by`, frees `run-conv` / `run-user` / `runs-live`, and closes the run in the execution projection. The run stays in `runs-live` until that close is confirmed by reading the projection back, so a failed close is retried by a later sweep on any replica (`INTERRUPT` then returns `-1`, and the sweeper closes the projection idempotently and drops the member). Each attempt reschedules the member a third of a lease later, behind the runs due now, so closes that keep failing cannot starve later orphans, and refreshes the record's retention, so the obligation cannot expire before the close is confirmed. A candidate whose takeover fails is logged and retried next sweep without stopping the others; leases of runs gone from the local registry are dropped. |
 | Fence | old owner | A lost claim (the `add_claim_lost_listener` callback, fired when the heartbeat's renewal is refused) or a refused mirror stops the run locally (`RunRegistry.mark_interrupted`): the task is cancelled (unless it is the run fencing itself, which is already unwinding), the local record reads failed/interrupted, its claim is dropped, and nothing more is published. If no replica has swept the run yet, the owner runs the takeover itself. |
 
 The `runs-live` score is only a hint for the sweep. The takeover re-checks the
@@ -197,9 +197,10 @@ never safety.
 **Checks in the run's own code.** A frozen owner's event loop notices
 nothing until it runs again, and then a pending tool call or projection write
 may run before its heartbeat does. `ensure_current_run_may_act()` (in
-`execute_single_tool`, before the tool start notification and after it, and
-in `MCPToolManager.execute_tool` after authorization, right before the MCP
-call) and
+`execute_single_tool`, before the tool start notification and after it; in
+`MCPToolManager.execute_tool` after authorization; right before each request
+to the MCP server, after the client or session setup awaited, the retry after
+a 401 included; and in the launcher right before a child run is admitted) and
 `may_publish_for_run()` (in `publish_execution_event`) trust the claim only
 for 80% of `RUN_LEASE_SECONDS` after the claim was last proved by a renewal:
 the heartbeat's (`admission.add_claims_renewed_listener`, credited from the
@@ -211,7 +212,8 @@ while the process is stopped.
 - A success that arrives a whole lease or more after it was sent proves
   nothing about now: it counts as an unknown answer.
 - A run that has ended locally but whose terminal snapshot is not written
-  yet is checked by writing it (refused if the run was taken over), so a
+  yet is checked by writing it (refused if the run was taken over), also when
+  it ended while a renewal was in flight, so a
   resumed owner cannot publish `completed` over a takeover's interrupted
   projection.
 - An unknown answer (Redis unreachable, a timeout) fences it only once a whole
