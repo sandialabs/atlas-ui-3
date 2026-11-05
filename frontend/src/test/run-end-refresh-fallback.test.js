@@ -31,7 +31,7 @@ describe('applyRunEndRefresh', () => {
 
     expect(outcome).toBe('reloaded')
     expect(loadSavedConversation).toHaveBeenCalledTimes(1)
-    expect(loadSavedConversation).toHaveBeenCalledWith(record)
+    expect(loadSavedConversation).toHaveBeenCalledWith(record, { origin: 'refresh' })
   })
 
   it('does nothing when the fetch failed or returned an error record', () => {

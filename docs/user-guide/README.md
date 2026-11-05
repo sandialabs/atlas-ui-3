@@ -1,6 +1,6 @@
 # User Guide
 
-Last updated: 2026-10-31
+Last updated: 2026-11-04
 
 How to use specific end-user-facing features of Atlas UI 3. For installation and
 first-run setup, see [getting-started/](../getting-started/README.md).
@@ -12,6 +12,7 @@ first-run setup, see [getting-started/](../getting-started/README.md).
 - [Context Usage and Compaction](context-compaction/README.md) - See how full the model's context is, and compact long conversations manually or automatically
 - [Custom Prompt Library](custom-prompts/README.md) - Save, edit, and reuse your own prompts
 - [File Library](file-library/README.md) - Browse uploads and generated files by folder, and page through a long library
+- [Following a Response](following-responses.md) - Read earlier messages while a response is streaming
 - [Rewind / Edit a Previous Prompt](rewind-edit/README.md) - Edit one of your earlier messages and re-run from there
 - [Tools and Settings Panel](tools-and-settings/README.md) - One gear-and-wrench button for tools, prompts, settings, theme, and admin quick controls
 - [Workspaces](workspaces/README.md) - Save prompt, data source, and tool selections as named contexts and switch between them
