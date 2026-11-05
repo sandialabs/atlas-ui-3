@@ -141,20 +141,37 @@ wait_rollout() {
     kc rollout status statefulset/atlas-postgres --timeout=300s
     kc rollout status deployment/atlas-redis --timeout=300s
     kc rollout status statefulset/atlas-minio --timeout=300s
-    kc wait --for=condition=complete job/atlas-minio-bucket --timeout=600s
+    if ! kc wait --for=condition=complete job/atlas-minio-bucket --timeout=300s; then
+        kc logs job/atlas-minio-bucket --tail=20 >&2 || true
+        die "the S3 bucket Job did not complete (see its log above); uploads would fail"
+    fi
     kc rollout status deployment/atlas-api --timeout=900s
 }
 
 # Generated ConfigMaps and Secrets are hash-suffixed, so every change leaves
 # the previous one behind (a superseded Secret still holds live credentials).
-# Delete those of this instance that the current render no longer names.
+# Delete those of this instance that neither the current render nor a
+# retained ReplicaSet names: the generations a retained ReplicaSet uses are
+# kept, so `kubectl rollout undo` can still start its pods.
 prune_generated() {
     local dir="$1" keep kind name
     keep="$("$KUBECTL" kustomize "$dir" | "$PYTHON" -c '
 import sys, yaml
 for doc in yaml.safe_load_all(sys.stdin):
     if doc and doc["kind"] in ("ConfigMap", "Secret"):
-        print(doc["kind"].lower() + "/" + doc["metadata"]["name"])')"
+        print(doc["kind"].lower() + "/" + doc["metadata"]["name"])')
+$(kc get replicasets -o json | "$PYTHON" -c '
+import json, sys
+for rs in json.load(sys.stdin)["items"]:
+    spec = rs["spec"]["template"]["spec"]
+    for c in spec.get("initContainers", []) + spec.get("containers", []):
+        for src in c.get("envFrom", []):
+            if "configMapRef" in src: print("configmap/" + src["configMapRef"]["name"])
+            if "secretRef" in src: print("secret/" + src["secretRef"]["name"])
+        for env in c.get("env", []):
+            ref = env.get("valueFrom", {})
+            if "configMapKeyRef" in ref: print("configmap/" + ref["configMapKeyRef"]["name"])
+            if "secretKeyRef" in ref: print("secret/" + ref["secretKeyRef"]["name"])')"
     while read -r kind name; do
         [ -n "$name" ] || continue
         if ! grep -qx "$kind/$name" <<<"$keep"; then

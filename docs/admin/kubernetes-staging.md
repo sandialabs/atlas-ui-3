@@ -21,7 +21,7 @@ Everything lives under `deploy/kubernetes/`:
 |------|----------|
 | `base/` | The `atlas-api` Deployment, its Service (`sessionAffinity: None`) and PodDisruptionBudget, and the non-secret settings (`api.env`). It can't be deployed on its own. |
 | `overlays/staging/` | Three replicas, plus staging-only Redis (`atlas-redis`), PostgreSQL (`atlas-postgres`) and MinIO (`atlas-minio`), both StatefulSets with a 5Gi volume claim; the `atlas-minio-bucket` Job that creates the S3 bucket; and the `atlas-secrets` Secret generated from `secrets.env` |
-| `overlays/staging-openshift/` | The same overlay without fixed UIDs on the bundled services, for the restricted-v2 SCC |
+| `overlays/staging-openshift/` | The same overlay without fixed UIDs on the bundled services, for the restricted-v2 SCC. Redis, PostgreSQL (its entrypoint's nss_wrapper) and MinIO were checked to start as an arbitrary UID that has no `/etc/passwd` entry and GID 0. |
 | `staging.sh` | The only supported entry point: secrets, apply, scale, restart, validate, failover drill, schema stamp, teardown |
 | `validate_replicas.py` | Checks each replica separately (see [Validation](#validation)) |
 | `podman_rehearsal.py` | Runs the rendered overlay with podman when no cluster is available |
@@ -120,8 +120,17 @@ in an overlay of your own.
 - **Configuration.** Changes to `api.env`, `staging.env` or `secrets.env`
   change the generated ConfigMap or Secret name, which rolls the replicas.
   After a successful rollout, `apply` deletes this instance's superseded
-  generations, since an old Secret still holds live credentials.
+  generations, since an old Secret still holds live credentials. It keeps
+  any generation that a retained ReplicaSet still uses, so
+  `kubectl rollout undo deployment/atlas-api` keeps working.
   `teardown` deletes all of them.
+- **Regenerating secrets against kept volumes.** PostgreSQL and MinIO keep
+  the password and root credentials they were first started with. A new
+  `secrets.env` on top of `data-atlas-postgres-0` / `data-atlas-minio-0`
+  stops the API pods in `Init` with "PostgreSQL rejected the password".
+  The bucket Job fails with "MinIO rejected the S3 credentials", and
+  `apply` stops there and prints the Job's log. Restore the old
+  `secrets.env`, change the passwords in place, or `teardown --purge` first.
 - **The S3 bucket.** Atlas does not create its bucket: the bucket check in
   `atlas/modules/file_storage/s3_client.py` is never reached. The
   `atlas-minio-bucket` Job does it with `mc mb --ignore-existing`, like

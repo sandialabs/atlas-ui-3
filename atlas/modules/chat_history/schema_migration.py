@@ -66,7 +66,6 @@ class DatabaseAuthFailed(RuntimeError):
 _PASSWORD_SQLSTATE = "28P01"
 _AUTHORIZATION_SQLSTATE = "28000"
 _PASSWORD_MESSAGES = ("password authentication failed",)
-_AUTHORIZATION_MESSAGES = ("no pg_hba.conf entry", "does not exist")
 
 
 def _auth_failure_kind(exc: OperationalError) -> Optional[str]:
