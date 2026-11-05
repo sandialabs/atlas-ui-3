@@ -2677,6 +2677,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # including the socket being cancelled, marks the run
                     # failed, which releases the claim (#1128).
                     chat_task = None
+                    started = False
                     try:
                         # Files attached via `attach_file` land on the
                         # *connection* session's context, which the run's fresh
@@ -2714,18 +2715,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
                         chat_task = asyncio.create_task(handle_chat_guarded())
                         run_registry.attach_task(run_record.run_id, chat_task)
-                    except BaseException:
-                        # Re-raised so a disconnect still tears the connection
-                        # down normally; the terminal record makes
-                        # ``mark_detached`` a no-op.
-                        if chat_task is not None and not chat_task.done():
-                            chat_task.cancel()
-                        run_registry.set_status(
-                            run_record.run_id,
-                            RunStatus.FAILED,
-                            error="The run could not be started",
-                        )
-                        raise
+                        started = True
+                    finally:
+                        if not started:
+                            # Whatever ended the window (an error, a cancelled
+                            # socket) still propagates, so a disconnect tears
+                            # the connection down normally; the terminal record
+                            # makes ``mark_detached`` a no-op.
+                            if chat_task is not None and not chat_task.done():
+                                chat_task.cancel()
+                            run_registry.set_status(
+                                run_record.run_id,
+                                RunStatus.FAILED,
+                                error="The run could not be started",
+                            )
                     connection_run_ids.add(run_record.run_id)
 
             elif message_type == "context_usage_request":

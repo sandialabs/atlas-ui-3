@@ -18,7 +18,6 @@ import fakeredis
 import main
 import pytest
 from fastapi.testclient import TestClient
-from main import app
 
 from atlas.application.chat.runs import RunStatus, get_run_registry, reset_run_registry
 from atlas.application.chat.runs.coordination import set_run_coordinator
@@ -116,7 +115,7 @@ def _run_until_the_handler_fails(frame):
     The error ends the socket, and TestClient re-raises the server-side
     exception into the test thread, which is the failure we injected.
     """
-    client = TestClient(app)
+    client = TestClient(main.app)
     with pytest.raises(RuntimeError):
         with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
             ws.send_json(frame)
@@ -170,7 +169,7 @@ def test_run_started_send_failure_releases_the_claim(
 def test_successful_turn_holds_then_releases_the_claim(mock_app_factory, coordinator, server):
     """Control: with nothing failing, the claim is held while the run is live
     and released when it completes."""
-    client = TestClient(app)
+    client = TestClient(main.app)
     with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
         ws.send_json(_chat_frame())
         while (frame := ws.receive_json())["type"] != "run_started":
@@ -191,7 +190,7 @@ def test_coordinator_outage_refuses_the_turn(mock_app_factory, coordinator, monk
         raise RunCoordinationUnavailableError("ConnectionError")
 
     monkeypatch.setattr(coordinator, "claim", down)
-    client = TestClient(app)
+    client = TestClient(main.app)
     with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
         ws.send_json(_chat_frame())
         while (frame := ws.receive_json())["type"] == "run_status":

@@ -342,8 +342,8 @@ async def test_heartbeat_keeps_a_fixed_schedule(monkeypatch):
     task = asyncio.create_task(admission.run_lease_heartbeat(interval=0.1))
     await asyncio.sleep(0.45)
     task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    await asyncio.gather(task, return_exceptions=True)
+    assert task.cancelled()
     # On the grid (0.1, 0.2, 0.3, 0.4); sleeping a full interval after each
     # 0.06 s pass would give only 0.1, 0.26, 0.42.
     assert len(beats) == 4, beats
