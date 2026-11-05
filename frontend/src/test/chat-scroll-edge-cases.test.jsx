@@ -333,6 +333,27 @@ describe('ChatArea scroll layout and navigation edge cases (#1166)', () => {
     expect(chat.transcript.scrollTop).toBe(readingPosition)
   })
 
+  it.each(['wheel', 'touch', 'keyboard'])('resumes on downward %s intent at an already-clamped bottom', async gesture => {
+    const chat = setup()
+    await settle()
+    wheelScroll(chat.transcript, 550, -50)
+    height = 900
+    chat.transcript.scrollTop = bottom()
+    fireEvent.scroll(chat.transcript)
+    await deliverResize(chat.transcript)
+    if (gesture === 'wheel') fireEvent.wheel(chat.transcript, { deltaY: 50 })
+    else if (gesture === 'keyboard') fireEvent.keyDown(chat.transcript, { key: 'End' })
+    else {
+      fireEvent.touchStart(chat.transcript, { touches: [{ clientY: 200 }] })
+      fireEvent.touchMove(chat.transcript, { touches: [{ clientY: 150 }] })
+    }
+    // No scroll event: the reader is already at the maximum offset.
+    height += 100
+    chat.update({ messages: [question, stream('More')] })
+    await settle()
+    expect(chat.transcript.scrollTop).toBe(bottom())
+  })
+
   it('accepts direct user scrolling when geometry has not changed', async () => {
     const chat = setup()
     await settle()

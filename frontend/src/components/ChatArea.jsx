@@ -27,7 +27,7 @@ import { parseCompactCommand } from '../hooks/chat/useContextCompaction'
 import AgentRunStatus from './AgentRunStatus'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
-import { followAfterScroll } from '../utils/scrollDecision'
+import { followAfterScroll, NEAR_BOTTOM_PX } from '../utils/scrollDecision'
 import { currentTurnIsSleeping } from '../utils/executionState'
 
 const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
@@ -282,6 +282,10 @@ const ChatArea = () => {
     const noteIntent = (direction) => {
       scrollIntentRef.current = direction
       if (direction === 'up' && el.scrollTop > 0) followBottomRef.current = false
+      // At the bottom a downward gesture may produce no scroll event at all.
+      if (direction === 'down' && el.scrollHeight - el.clientHeight - el.scrollTop <= NEAR_BOTTOM_PX) {
+        followBottomRef.current = true
+      }
       clearTimeout(intentTimer)
       intentTimer = setTimeout(() => { scrollIntentRef.current = null }, 1000)
     }
