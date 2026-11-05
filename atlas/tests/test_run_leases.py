@@ -843,6 +843,94 @@ def test_guard_stops_cleanly_after_its_loop_closed(server):
     assert a.guard._tasks == []
 
 
+async def test_lease_lapsing_during_authorization_stops_the_dispatch(server):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from atlas.application.chat.runs.context import set_current_run
+    from atlas.domain.messages.models import ToolCall
+    from atlas.modules.mcp_tools.client import MCPToolManager
+
+    a, b = Replica(server, "A"), Replica(server, "B")
+    set_lease_guard(a.guard)
+    record, sleeper = await a.start()
+    await a.guard.ensure_may_act(record.run_id)  # proven before the step
+
+    manager = MCPToolManager.__new__(MCPToolManager)
+    manager.servers_config = {"srv": {"enabled": True, "groups": []}}
+    manager._elicitation_routing = {}
+    manager._server_task_support = {}
+    manager._tool_task_forbidden = set()
+    manager._tool_index = {"srv_t": {"server": "srv", "tool": SimpleNamespace(name="t")}}
+    original = manager._authorize_mcp_operation
+
+    async def slow_authorization(*args, **kwargs):
+        # The lease lapses and another replica interrupts the run meanwhile.
+        a.clock.now += LEASE * 3
+        await a.expire(record)
+        await b.guard.sweep_once()
+        return await original(*args, **kwargs)
+
+    async def step():
+        set_current_run(record.run_id, record.conversation_id)
+        await manager.execute_tool(
+            ToolCall(id="call-1", name="srv_t", arguments={}),
+            context={"user_email": EMAIL},
+        )
+
+    with patch.object(manager, "_authorize_mcp_operation", slow_authorization), \
+            patch.object(manager, "call_tool", new_callable=AsyncMock) as call_tool:
+        (outcome,) = await asyncio.gather(
+            asyncio.get_running_loop().create_task(step()), return_exceptions=True
+        )
+    assert isinstance(outcome, asyncio.CancelledError), outcome
+    call_tool.assert_not_awaited()
+    sleeper.cancel()
+
+
+async def test_claim_grants_no_grace_before_a_proven_renewal(server):
+    a = Replica(server, "A")
+    record, task = await a.start()  # tracked only after the claim reply
+
+    async def unreachable(claims, statuses):
+        return {}
+
+    a.coordinator.renew = unreachable
+    with pytest.raises(RunFencedError):
+        await a.guard.ensure_may_act(record.run_id)  # nothing ever proved it
+    task.cancel()
+
+
+async def test_projection_close_counts_only_when_confirmed(server):
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    await store.apply_event({
+        "type": "tool_start", "run_id": record.run_id, "conversation_id": "conv-1",
+        "user_email": EMAIL, "step": 0, "tool_call_id": "call_0", "tool_name": "x",
+        "invocation_id": invocation_id(record.run_id, 0, "call_0"),
+    })
+    original = store.apply_event
+    gave_up = [1]
+
+    async def exhausted(event):
+        if event.get("type") == "run_status" and gave_up:
+            gave_up.pop()
+            return None  # what a store returns after running out of revision retries
+        return await original(event)
+
+    store.apply_event = exhausted
+    await a.expire(record)
+    assert await b.guard.sweep_once() == [record.run_id]
+    assert await b.client.zscore(b.keys.live(), record.run_id) is not None  # not forgotten
+    await b.guard.sweep_once()
+    rows = public_projection(await store.get("conv-1", EMAIL))["invocations"]
+    assert rows[0]["status"] == "interrupted"
+    assert await b.client.zscore(b.keys.live(), record.run_id) is None
+    task.cancel()
+
+
 async def test_parallel_step_reraises_a_cancelled_tool(monkeypatch):
     from types import SimpleNamespace
 

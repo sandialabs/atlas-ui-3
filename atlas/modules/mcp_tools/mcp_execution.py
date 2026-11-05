@@ -1185,6 +1185,12 @@ class ExecutionMixin:
                 except Exception:
                     logger.debug("Progress handler forwarding failed", exc_info=True)
 
+            # Fencing (#1128), at the dispatch boundary: authorization above
+            # awaited, and the run's lease may have lapsed meanwhile. Raises
+            # CancelledError for a run this replica no longer owns.
+            from atlas.application.chat.runs.leases import ensure_current_run_may_act
+
+            await ensure_current_run_may_act()
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     async with self._use_elicitation_context(server_name, tool_call, update_cb, user_email or ""):

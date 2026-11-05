@@ -135,10 +135,11 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
 @dataclass
 class _Lease:
     claim: Any
-    # Guard clock when tracking began: the claim was granted no later, so an
-    # unknown renewal answer counts the lease from here at the latest.
-    tracked_at: float
-    verified_at: float = float("-inf")  # no renewal proven yet
+    # Last renewal proven, on the guard clock. Tracking begins after the
+    # claim reply arrived, which may itself have been late, so the claim
+    # grants no grace of its own: until a renewal is proven, an unknown
+    # answer fences.
+    verified_at: float = float("-inf")
     fenced: bool = False
     done: bool = False
     dirty: bool = True
@@ -236,7 +237,7 @@ class RunLeaseGuard:
         self._spawn(self.lost(record))
 
     def _track(self, record: RunRecord, claim: Any) -> _Lease:
-        lease = self._leases[record.run_id] = _Lease(claim=claim, tracked_at=self._clock())
+        lease = self._leases[record.run_id] = _Lease(claim=claim)
         return lease
 
     def _heartbeat_renewed(self, run_ids: List[str], started: float) -> None:
@@ -411,8 +412,7 @@ class RunLeaseGuard:
         """No usable answer (Redis unreachable, or too late): nobody can have
         taken the run over before a whole lease has passed since the claim
         was last proved."""
-        proved = max(lease.verified_at, lease.tracked_at)
-        if self._clock() - proved < self.lease_seconds:
+        if self._clock() - lease.verified_at < self.lease_seconds:
             logger.warning("lease check for %s got no answer; still inside the lease", run_id)
             return True
         self._fence_local(lease, run_id, "lease lapsed without proof")
@@ -482,19 +482,29 @@ async def _close_projection(run_id: str, raw: Dict[str, str]) -> bool:
     guard, because the sweeping replica is not the owner."""
     from atlas.application.chat.runs.execution_state import get_execution_store
 
+    conversation_id, user_email = raw.get("conversation_id"), raw.get("user_email")
     try:
-        await get_execution_store().apply_event({
+        store = get_execution_store()
+        await store.apply_event({
             "type": "run_status",
             "status": "failed",
             "run_id": run_id,
-            "conversation_id": raw.get("conversation_id"),
-            "user_email": raw.get("user_email"),
+            "conversation_id": conversation_id,
+            "user_email": user_email,
             "error": INTERRUPTED_ERROR,
         })
+        # Confirmed only by reading it back: ``apply_event`` also returns
+        # nothing when it gave up after its revision retries.
+        doc = await store.get(conversation_id, user_email) if conversation_id and user_email else None
     except Exception:
         logger.warning("could not close the projection of an interrupted run", exc_info=True)
         return False
-    return True  # idempotent: an already-closed run is left as it is
+    if doc is None or doc.get("run_id") != run_id:
+        return True  # nothing of this run left open (expired, or a newer run's)
+    closed = doc.get("status") in ("completed", "failed", "cancelled")
+    if not closed:
+        logger.warning("projection of interrupted run %s not closed yet; retrying next sweep", run_id)
+    return closed
 
 
 _guard: Optional[RunLeaseGuard] = None
