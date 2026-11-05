@@ -225,6 +225,9 @@ export const ChatProvider = ({ children }) => {
 	// changes). The history list uses it to drop a conversation open that New
 	// Chat superseded (#1014).
 	const [newChatCount, setNewChatCount] = useState(0)
+	// Navigation is distinct from receiving the first saved id or refreshing a
+	// transcript, neither of which should change the reader's scroll position.
+	const [conversationNavigationVersion, setConversationNavigationVersion] = useState(0)
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
@@ -1334,6 +1337,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		cleanupStreamState()
 		streamEnd()
 		resetMessages()
+		setConversationNavigationVersion(n => n + 1)
 		setIsThinking(false)
 		setIsSynthesizing(false)
 		// The visible turn's flags belong to the conversation being left. A
@@ -1405,6 +1409,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// `runs_snapshot` already carries. It only replaces the transcript and
 		// re-arms the joined view.
 		const reconnecting = origin === 'reconnect'
+		const refreshFallback = origin === 'refresh'
 
 		// Whatever was on offer refers to a chat that is no longer on screen.
 		if (!reconnecting) invalidateUndoOffer()
@@ -1608,6 +1613,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			}
 			restoreWorkspace(meta.workspace_id)
 		}
+		if (!reconnecting && !refreshFallback) setConversationNavigationVersion(n => n + 1)
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
 		// new token frame rebuilds, so the objects themselves would tear this
 		// callback down -- and re-subscribe everything that depends on it -- on
@@ -2422,6 +2428,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		sendCaptureCorrection,
 		clearChat,
 		newChatCount,
+		conversationNavigationVersion,
 		stopAgent,
 		stopStreaming,
 		isStreaming,
