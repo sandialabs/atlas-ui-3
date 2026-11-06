@@ -78,6 +78,12 @@ answer. A message without directives is answered `ECHO: <message>`.
 - `test_cluster_admission.py`: cluster-wide admission (#1128). A conversation
   running on A is refused on B (over WebSocket) and freed when the run ends,
   and refused admissions leave no slot behind.
+- `test_run_leases.py`: ownership leases and fencing (#1128) checked in the
+  shared Redis itself: a run longer than its lease survives on heartbeats, a
+  SIGKILLed owner's run is interrupted with its completed tool rows kept and
+  the fencing generation bumped, and a SIGSTOPped owner that resumes after
+  being declared lost writes nothing more. Replicas run with
+  `RUN_LEASE_SECONDS=6` (`LEASE_TTL` in `harness/cluster.py`).
 - `test_known_bugs.py`: bugs the harness found that are outside #1128, in the
   same strict-xfail style. A fixed bug keeps its test as a regression test
   (the REST-only cap bug, fixed with #1128).

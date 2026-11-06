@@ -23,9 +23,12 @@ is documented in ``docs/developer/run-coordination.md``:
     whose lease has passed are pruned before every count, so a replica that
     died holding slots frees them within one lease.
 ``<p>:run-fence`` (string counter)
-    Source of fencing generations. One counter, only ever incremented, and
-    floored at the Redis clock in microseconds so it keeps increasing across
-    a flush.
+    Source of fencing generations. One counter, only ever incremented (by
+    claims and by takeovers of a lost run, ``run_leases.py``), and floored at
+    the Redis clock in microseconds so it keeps increasing across a flush.
+``<p>:runs-live`` (sorted set)
+    Every claimed, unreleased run id, scored by lease expiry (epoch ms), so
+    the orphan sweep reads only runs whose lease may have lapsed.
 ``<p>:run-cmd:<run_id>`` (stream) and ``<p>:replica:<replica_id>``
     Reserved for command routing and replica liveness (later #1128 work);
     nothing writes them yet.
@@ -65,7 +68,7 @@ local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 """
 
-# KEYS: conv, user, run, fence
+# KEYS: conv, user, run, fence, live
 # ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms
 CLAIM_SCRIPT = _NOW + """
 local lease = tonumber(ARGV[6])
@@ -97,10 +100,11 @@ redis.call('HSET', KEYS[3],
   'owner', ARGV[4], 'generation', generation, 'status', 'queued',
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now)
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
+redis.call('ZADD', KEYS[5], expires, ARGV[1])
 return {'ok', generation, expires}
 """
 
-# KEYS: run, conv, user
+# KEYS: run, conv, user, live
 # ARGV: run_id, owner, generation ('' = any generation this owner holds),
 #       status, retention_ms
 RELEASE_SCRIPT = _NOW + """
@@ -109,6 +113,14 @@ local owner = redis.call('HGET', KEYS[1], 'owner')
 if generation then
   if owner ~= ARGV[2] then return 0 end
   if ARGV[3] ~= '' and generation ~= ARGV[3] then return 0 end
+  -- Like renew: once a live run's lease has passed it is no longer ours to
+  -- end, even before a sweep has recorded the takeover (run_leases.py).
+  local current = redis.call('HGET', KEYS[1], 'status')
+  if current ~= 'completed' and current ~= 'failed' and current ~= 'cancelled' then
+    if tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0') <= now then
+      return 0
+    end
+  end
 end
 local freed = 0
 if redis.call('GET', KEYS[2]) == ARGV[1] then
@@ -118,6 +130,7 @@ end
 if redis.call('ZREM', KEYS[3], ARGV[1]) == 1 then
   freed = 1
 end
+redis.call('ZREM', KEYS[4], ARGV[1])
 if generation then
   redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', 0, 'updated_at', now)
   redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[5]))
@@ -125,7 +138,7 @@ end
 return freed
 """
 
-# KEYS: run, conv, user
+# KEYS: run, conv, user, live
 # ARGV: run_id, owner, generation, status, lease_ms, retention_ms
 RENEW_SCRIPT = _NOW + """
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[3] then return 0 end
@@ -146,6 +159,7 @@ redis.call('ZADD', KEYS[3], expires, ARGV[1])
 redis.call('PEXPIRE', KEYS[3], lease * 2)
 redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', expires, 'updated_at', now)
 redis.call('PEXPIRE', KEYS[1], lease + tonumber(ARGV[6]))
+redis.call('ZADD', KEYS[4], expires, ARGV[1])
 return expires
 """
 
@@ -181,6 +195,10 @@ class RunCoordinationKeys:
     def fence(self) -> str:
         return self._redis.key("run-fence")
 
+    def live(self) -> str:
+        """Unreleased runs scored by lease expiry, for the orphan sweep."""
+        return self._redis.key("runs-live")
+
     def commands(self, run_id: str) -> str:
         """Reserved: per-run command stream for cross-replica routing."""
         return self._redis.key("run-cmd", key_part(run_id))
@@ -206,6 +224,7 @@ class RedisRunCoordinator:
         self._redis = redis_manager
         self.keys = RunCoordinationKeys(redis_manager)
         self.replica_id = replica_id or default_replica_id()
+        self.lease_seconds = float(lease_seconds)
         self._lease_ms = int(lease_seconds * 1000)
         self._retention_ms = int(retention_seconds * 1000)
         client = redis_manager.client
@@ -235,6 +254,7 @@ class RedisRunCoordinator:
                     self.keys.user(owner_email),
                     self.keys.run(run_id),
                     self.keys.fence(),
+                    self.keys.live(),
                 ],
                 args=[
                     run_id,
@@ -281,6 +301,7 @@ class RedisRunCoordinator:
                 self.keys.run(run_id),
                 self.keys.conversation(conversation_id),
                 self.keys.user(user_email),
+                self.keys.live(),
             ],
             args=[run_id, self.replica_id, generation, status, self._retention_ms],
         )
@@ -314,6 +335,7 @@ class RedisRunCoordinator:
                             self.keys.run(claim.run_id),
                             self.keys.conversation(claim.conversation_id),
                             self.keys.user(claim.user_email),
+                            self.keys.live(),
                         ],
                         args=[
                             claim.run_id,

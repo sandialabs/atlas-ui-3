@@ -1,9 +1,9 @@
 """#1128 acceptance criteria.
 
 The ones main does not meet yet are ``xfail(strict=True, raises=GapNotClosed)``
-(``@gap``); the cross-replica admission criteria were closed by the Redis run
-coordinator and are plain tests now. Preconditions use a
-plain ``assert`` (a broken precondition is a real failure); only the final
+(``@gap``). The cross-replica admission criteria were closed by the Redis run
+coordinator, and inspection, owner loss and fencing by the run leases; those
+are plain tests now. Preconditions use a plain ``assert`` (a broken precondition is a real failure); only the final
 criterion uses ``expect(...)``, which raises ``GapNotClosed``. When a #1128 PR
 closes a gap the test XPASSes, strict mode fails the run, and that PR removes
 the marker -- the test then guards the behavior from then on.
@@ -17,7 +17,6 @@ from harness.cluster import RUN_CAP, GapNotClosed, directive, expect
 gap = pytest.mark.xfail(strict=True, raises=GapNotClosed, reason="#1128 distributed run coordination")
 
 
-@gap
 def test_non_owner_can_inspect_an_active_run(cluster):
     user = cluster.new_user()
     handle = cluster.launch_ok(cluster.a, user, directive("inspect", sleep=6))
@@ -89,7 +88,6 @@ def test_concurrent_admission_is_atomic_across_replicas(cluster):
             cluster.cancel_everywhere(run_id)
 
 
-@gap
 def test_owner_loss_is_reported_as_interrupted(cluster):
     """Kill the owner mid-run: another replica reports the run interrupted, keeping completed work."""
     user = cluster.new_user()
@@ -110,7 +108,6 @@ def test_owner_loss_is_reported_as_interrupted(cluster):
     assert len(cluster.side_effects(key)) == 1, "side effect replayed"
 
 
-@gap
 def test_paused_owner_cannot_write_after_being_declared_lost(cluster):
     """Fencing: an owner frozen past its lease must not finish the run once another replica failed it."""
     user = cluster.new_user()

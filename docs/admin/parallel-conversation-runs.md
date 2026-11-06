@@ -43,6 +43,7 @@ of one completion and nothing more.
 | `MAX_CONCURRENT_RUNS_PER_USER` | `5` | Maximum simultaneous runs for one user. |
 | `MAX_RUN_WALL_CLOCK_SECONDS` | `3600` | Hard limit on a single run's execution time. A run that exceeds it is stopped and recorded as **failed**. `0` disables it. |
 | `TOOL_APPROVAL_TIMEOUT_SECONDS` | `300` | How long a run waits for a tool approval or elicitation response. `0` waits indefinitely. |
+| `RUN_LEASE_SECONDS` | `30` | With `SESSION_REPOSITORY_TYPE=redis`: how long a run's ownership lease lasts without a heartbeat. When it lapses another replica marks the run **failed** (interrupted) without retrying any tool. See [run coordination](../developer/run-coordination.md). |
 
 ### The concurrency cap
 
@@ -427,9 +428,12 @@ These are known and deliberate, not oversights:
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
   Admission is shared through Redis (the cap and conversation exclusivity
-  hold cluster-wide), but inspecting, stopping and steering a run still needs
-  the replica that owns it. Use a single worker, or sticky sessions, until
-  that routing lands (issue #1128).
+  hold cluster-wide), and every replica can read a run's status. A run whose
+  replica is lost is reported failed (interrupted) by the others, with its
+  finished tool rows kept and nothing retried (see
+  [run coordination](../developer/run-coordination.md)). Stopping and
+  steering a run still needs the replica that owns it; use a single worker,
+  or sticky sessions, until that routing lands (issue #1128).
 
 ## Troubleshooting
 

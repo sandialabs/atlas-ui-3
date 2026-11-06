@@ -33,7 +33,7 @@ import logging
 import os
 import socket
 from dataclasses import dataclass
-from typing import Iterable, Optional, Protocol, Set
+from typing import Awaitable, Callable, Iterable, Optional, Protocol, Set
 from uuid import uuid4
 
 from atlas.application.chat.runs.admission_errors import RunRegistryError
@@ -207,9 +207,39 @@ def release_claim_soon(claim: RunClaim, status: str) -> None:
     except RuntimeError:
         logger.debug("No running loop to release claim %s; its lease will expire", claim.run_id)
         return
-    task = loop.create_task(get_run_coordinator().release(claim, status))
+    task = loop.create_task(_release(claim, status))
     _pending_releases.add(task)
     task.add_done_callback(_pending_releases.discard)
+
+
+# Consulted before a release (#1128): the lease guard first writes the run's
+# terminal snapshot, so another replica never sees the run end without its
+# final state. ``False`` means the gate keeps the release and does it itself
+# once that snapshot is written; until then the run's lease is still held.
+ReleaseGate = Callable[[RunClaim, str], Awaitable[bool]]
+_release_gate: Optional[ReleaseGate] = None
+
+
+def set_release_gate(gate: Optional[ReleaseGate]) -> None:
+    global _release_gate
+    _release_gate = gate
+
+
+def get_release_gate() -> Optional[ReleaseGate]:
+    return _release_gate
+
+
+async def _release(claim: RunClaim, status: str) -> None:
+    gate = _release_gate
+    if gate is not None:
+        try:
+            if not await gate(claim, status):
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # the release must not be lost to the gate
+            logger.warning("release gate for %s failed: %s", claim.run_id, type(exc).__name__)
+    await get_run_coordinator().release(claim, status)
 
 
 async def drain_pending_releases() -> None:

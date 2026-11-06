@@ -18,6 +18,7 @@ from .side_effect_keys import log_name, read_records
 TERMINAL = ("completed", "failed", "cancelled")
 WORKSPACE = "Multireplica harness"
 RUN_CAP = 5  # MAX_CONCURRENT_RUNS_PER_USER on every replica (replica_env)
+LEASE_TTL = 6.0  # RUN_LEASE_SECONDS on every replica (replica_env)
 
 
 class GapNotClosed(AssertionError):
@@ -182,6 +183,42 @@ class Cluster:
         status, body = self.call(replica, "GET", "/api/conversations", user=user)
         assert status == 200, (status, body)
         return [c["id"] for c in body["conversations"]]
+
+    # -- shared coordination state (read-only) -----------------------------------
+
+    def redis_json(self, *parts: str) -> Optional[Dict[str, Any]]:
+        """A JSON document the replicas keep in the shared Redis, or None."""
+        import redis
+
+        client = redis.Redis.from_url(self.infra.redis_url)
+        try:
+            raw = client.get(":".join((self.infra.redis_key_prefix, *parts)))
+        finally:
+            client.close()
+        return json.loads(raw) if raw else None
+
+    def run_record(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """The shared run record (``<prefix>:run:<id>``, a hash; see
+        docs/developer/run-coordination.md), decoded: ``generation`` as an
+        int, ``interrupted`` as a bool, an empty ``owner`` as None."""
+        import redis
+
+        client = redis.Redis.from_url(self.infra.redis_url)
+        try:
+            raw = client.hgetall(":".join((self.infra.redis_key_prefix, "run", run_id)))
+        finally:
+            client.close()
+        if not raw:
+            return None
+        record = {k.decode(): v.decode() for k, v in raw.items()}
+        record["generation"] = int(record.get("generation") or 0)
+        record["interrupted"] = record.get("interrupted") == "1"
+        record["owner"] = record.get("owner") or None
+        return record
+
+    def execution_doc(self, user: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """The conversation's execution projection (issue #1122)."""
+        return self.redis_json("exec", user, conversation_id)
 
     # -- side-effect accounting -------------------------------------------------
 

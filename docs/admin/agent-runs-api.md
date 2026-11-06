@@ -88,7 +88,12 @@ and `data_sources`, and `tools_needing_approval`. The run keeps going after the 
 `GET /api/agent-runs/{run_id}` returns `status` (`queued`, `running`, `waiting_for_input`,
 `completed`, `failed`, `cancelled`), `waiting_on`, `created_at` / `updated_at` / `ended_at` (Unix
 seconds), `error`, and once completed `result` with `result_status` (`available`,
-`available_truncated` past 20,000 characters, `empty`, `unavailable`).
+`available_truncated` past 20,000 characters, `empty`, `unavailable`). `interrupted` is `true` when
+the server running the run was lost (crashed, or unreachable past its lease) and the run was
+marked `failed`; tool calls it had finished are kept and none is retried.
+With several replicas, any one answers for any run; when the shared run state cannot be read
+at that moment it returns `503 unavailable` rather than `404`, so retry the poll instead of
+launching again.
 
 `POST /api/agent-runs/{run_id}/follow-up` with `{"message": "..."}` starts the next turn of that
 run's conversation, as the conversation's owner, on the workspace, model and compliance level it
@@ -164,13 +169,17 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
   other. With Redis the cap counts the user's runs on every replica, browser runs included; the `atlas_launch` depth and fan-out caps do not apply to the API run itself (it is a
   root, depth 0) but do apply to anything it launches. The global HTTP rate limiter applies to
   these endpoints. Messages are limited to 20,000 characters.
-- **Run state is in memory.** Status, follow-up, cancel and idempotency are served by the
-  replica that accepted the launch, and only while the registry retains the run (30 minutes
-  after it ends). Behind several replicas, route `/api/agent-runs` to one replica or use sticky
-  routing; a status request that reaches another replica gets `404 run_not_found`. A restart
-  loses run state: a run that was executing is stopped, and its ids return 404. Saved transcripts
-  are unaffected -- every completed turn is in the user's conversation history, where the user
-  can read and continue it.
+- **Run state is per replica, status is shared.** Follow-up, cancel, listing and idempotency
+  are served by the replica that accepted the launch, and only while the registry retains the run
+  (30 minutes after it ends). With `SESSION_REPOSITORY_TYPE=redis`, `GET /api/agent-runs/{run_id}`
+  answers on every replica from the run's shared record, kept 5 minutes after the run ends
+  ([run coordination](../developer/run-coordination.md));
+  otherwise a status request that reaches another replica gets `404 run_not_found`. Behind
+  several replicas, route the other endpoints to one replica or use sticky routing. When the
+  replica running a run is lost, the others report the run `failed` with `interrupted: true`
+  within about `RUN_LEASE_SECONDS` (default 30) to one and a half times that; nothing is
+  retried. Saved transcripts are unaffected -- every completed turn is in the user's
+  conversation history, where the user can read and continue it.
 - The API can see and act only on runs it started. A run the user started in the browser, or one
   started by `atlas_launch`, answers `404 run_not_found` here even by its correct id.
 

@@ -35,6 +35,7 @@ from ..runs.execution_state import (
     publish_execution_event,
     wait_for_shared_approval,
 )
+from ..runs.leases import ensure_current_run_may_act
 from .event_notifier import _sanitize_filename_value  # reuse same filename sanitizer for UI args
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,11 @@ async def execute_multiple_tools(
         for tool_call, is_duplicate in zip(tool_calls, duplicate)
     ]
     results = await asyncio.gather(*coros, return_exceptions=True)
+    # A cancelled call (the run was stopped, or lost its lease -- #1128) is
+    # not a tool failure to report back to the model: stop the step.
+    for res in results:
+        if isinstance(res, asyncio.CancelledError):
+            raise res
 
     # Convert exceptions to error ToolResults so callers always get a list
     final: List[ToolResult] = []
@@ -771,10 +777,19 @@ async def execute_single_tool(
                         # No actual changes, but response included arguments - keep original filtered_args
                         logger.debug(f"Arguments returned unchanged for tool {tool_call.function.name}")
 
+            # Fencing (#1128): a replica that lost the run's lease -- frozen
+            # past it, or cut off from Redis -- must not start a side effect
+            # another replica has already declared interrupted. Raises
+            # CancelledError, so the run unwinds like a stopped turn.
+            await ensure_current_run_may_act()
+
             # Send tool start notification with sanitized args
             await event_notifier.notify_tool_start(
                 tool_call, display_args, update_callback, tool_manager=tool_manager
             )
+            # Again right before the side effect: the start notification can
+            # block, or its own projection write can discover the fence.
+            await ensure_current_run_may_act()
 
             # Create tool call object and execute with filtered args only
             tool_call_obj = ToolCall(

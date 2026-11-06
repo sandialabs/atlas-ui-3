@@ -66,7 +66,10 @@ from atlas.application.chat.runs.coordination import (
     RunCoordinationUnavailableError,
     drain_pending_releases,
 )
-from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
+from atlas.application.chat.runs.eligibility import (
+    turn_is_eligible_for_background_run,
+    turn_is_off_record,
+)
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.auth_mode import validate_auth_modes
@@ -2283,7 +2286,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 run_record = None
                 if turn_is_eligible_for_background_run(
                     chat_history_enabled=config_manager.app_settings.feature_chat_history_enabled,
-                    save_mode=data.get("save_mode"),
+                    save_mode=data.get("save_mode", "server"),
                     incognito=data.get("incognito", False),
                     agent_mode=is_agent_turn,
                     selected_tools=data.get("selected_tools"),
@@ -2455,7 +2458,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             custom_system_prompt=custom_system_prompt,
                             update_callback=turn_update_callback,
                             files=data.get("files"),
-                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
+                            incognito=turn_is_off_record(data),
                             conversation_id=data.get("conversation_id"),
                             rewind_to_user_index=data.get("rewind_to_user_index"),
                             capture_correction=data.get("capture_correction"),
@@ -2839,7 +2842,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             auto_compact=data.get("auto_compact"),
                             compliance_level=data.get("compliance_level_filter"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
-                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
+                            incognito=turn_is_off_record(data),
                             conversation_id=conversation_id,
                         )
                     except asyncio.CancelledError:

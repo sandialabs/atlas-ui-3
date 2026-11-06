@@ -45,6 +45,7 @@ from atlas.application.chat.runs.admission_errors import (
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.leases import ensure_current_run_may_act
 from atlas.application.chat.runs.registry import (
     RunStatus,
     get_run_registry,
@@ -891,6 +892,9 @@ async def _start_child_run(
         if not top_level:
             _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
 
+    # Fencing (#1128): resolving tools, sources and admission above awaited;
+    # a parent run this replica no longer owns must not admit a child.
+    await ensure_current_run_may_act()
     try:
         record = await admit_run(
             conversation_id=conversation_id,
