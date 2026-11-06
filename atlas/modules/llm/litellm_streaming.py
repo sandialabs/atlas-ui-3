@@ -24,7 +24,7 @@ from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
     tool_call_function_field,
 )
-from .usage_tracking import record_response_usage
+from .usage_tracking import record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -169,9 +169,13 @@ class LiteLLMStreamingMixin:
                             **model_kwargs,
                         )
 
+                        # Provider metadata may be cumulative or repeated across
+                        # chunks. Record the final snapshot once per LLM call.
+                        last_usage = None
                         async for chunk in response:
                             total_chunks_seen += 1
-                            record_response_usage(chunk)
+                            if getattr(chunk, "usage", None) is not None:
+                                last_usage = chunk.usage
                             delta = chunk.choices[0].delta if chunk.choices else None
                             if total_chunks_seen <= 3:
                                 logger.debug(
@@ -190,6 +194,7 @@ class LiteLLMStreamingMixin:
                                     await asyncio.sleep(0)
 
                         _check_empty_stream(chunk_count, model_name, attempt_start_ns)
+                        record_usage(last_usage)
                         log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
                         set_attrs(span, {
                             "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
@@ -441,9 +446,12 @@ class LiteLLMStreamingMixin:
                             **model_kwargs,
                         )
 
+                        # Only the final provider usage snapshot represents
+                        # this complete call; intermediate chunks may repeat it.
+                        last_usage = None
                         async for chunk in response:
-                            # Some providers report usage on the final chunk.
-                            record_response_usage(chunk)
+                            if getattr(chunk, "usage", None) is not None:
+                                last_usage = chunk.usage
                             choice = chunk.choices[0] if chunk.choices else None
                             if choice is not None:
                                 # Providers send the reason on the final chunk; keep the
@@ -487,6 +495,7 @@ class LiteLLMStreamingMixin:
                             chunk_count, model_name, attempt_start_ns,
                             has_tool_calls=bool(accumulated_tool_calls),
                         )
+                        record_usage(last_usage)
                         break
 
                     except Exception as exc:
