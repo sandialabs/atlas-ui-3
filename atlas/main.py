@@ -2098,10 +2098,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     frame_conversation_id, user_email
                 )
                 if tracked_run is not None:
-                    # A follow-up frame carries the switch as it is now, so
-                    # turning it off (or on) applies to the next tool call
-                    # even when this message cannot be steered yet.
-                    tracked_run.note_auto_approve(data)
+                    # A chat or steer frame must not rewrite the switch on a
+                    # run that is already going. A second tab, or a steer the
+                    # server then refuses, can carry a stale true and turn
+                    # auto-approve back on. Admission records the bit, and
+                    # the auto_approve_tools message is what changes it later.
                     steering = tracked_run.steering
                     if steering is not None and steering.active:
                         refusal = await chat_service.steering_classification_refusal(
@@ -2622,6 +2623,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     run_session_id=(run_record.session_id if run_record else None),
                     turn_failure=turn_failure,
                     handle_chat=handle_chat,
+                    untracked_session_id=turn_session_id,
                 ):
                     """Run handle_chat so a dead socket cannot orphan the task.
 
@@ -2656,6 +2658,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         error_message = str(e)
                         raise
                     finally:
+                        if run_id is None:
+                            # The untracked turn is over, so its live switch
+                            # entry can go. A tool still inside this task has
+                            # already read the bit.
+                            from atlas.application.chat.auto_approve_state import (
+                                clear_session_auto_approve,
+                            )
+                            clear_session_auto_approve(untracked_session_id)
                         # A tracked run reaches a terminal state here, and it
                         # has to be in a ``finally``: a run left non-terminal
                         # because its task died in an unexpected way would hold

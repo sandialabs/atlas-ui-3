@@ -238,7 +238,7 @@ def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) ->
     if run is not None:
         record = get_run_registry().get(run.run_id)
         if record is not None:
-            if record.parent_run_id:
+            if not record.follows_user_auto_approve():
                 return False
             return record.auto_approve_user_tools is True
     if not session_context:

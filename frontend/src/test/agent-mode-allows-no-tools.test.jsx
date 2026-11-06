@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 
 const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
@@ -23,12 +23,16 @@ const h = vi.hoisted(() => ({
   selectedTools: new Set(),
   ragEnabled: false,
   setAgentPendingQuestion: vi.fn(),
+  connected: true,
+  settingsLoaded: false,
+  autoApprove: false,
+  updateSettings: vi.fn((patch) => patch),
 }))
 
 vi.mock('../contexts/WSContext', () => ({
   useWS: () => ({
     sendMessage: h.sendMessage,
-    isConnected: true,
+    isConnected: h.connected,
     addMessageHandler: () => () => {},
   }),
 }))
@@ -98,7 +102,11 @@ vi.mock('../hooks/chat/useFiles', () => ({
 }))
 
 vi.mock('../hooks/useSettings', () => ({
-  useSettings: () => ({ settings: {}, updateSettings: vi.fn() }),
+  useSettings: () => ({
+    settings: { autoApproveTools: h.autoApprove },
+    updateSettings: h.updateSettings,
+    isLoaded: h.settingsLoaded,
+  }),
 }))
 
 vi.mock('../hooks/chat/usePersistentState', () => ({
@@ -115,6 +123,9 @@ beforeEach(() => {
   h.sendMessage.mockImplementation(() => true)
   h.selectedTools = new Set()
   h.ragEnabled = false
+  h.connected = true
+  h.settingsLoaded = false
+  h.autoApprove = false
 })
 
 describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
@@ -158,6 +169,33 @@ describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_mode).toBe(true)
     expect(payload.selected_tools).toEqual(['server_tool1'])
+  })
+})
+
+describe('auto-approve is announced when the socket connects', () => {
+  it('sends the saved switch after settings load, and retries a failed send', async () => {
+    h.connected = false
+    h.settingsLoaded = true
+    h.autoApprove = false
+    let attempts = 0
+    h.sendMessage.mockImplementation(() => {
+      attempts += 1
+      return attempts > 1
+    })
+    const { rerender } = renderChat()
+    expect(h.sendMessage).not.toHaveBeenCalled()
+
+    h.connected = true
+    rerender()
+
+    await waitFor(() => {
+      const announces = h.sendMessage.mock.calls.filter(
+        (call) => call[0]?.type === 'auto_approve_tools',
+      )
+      expect(announces.length).toBeGreaterThan(1)
+      expect(announces[0][0]).toEqual({ type: 'auto_approve_tools', enabled: false })
+    })
+    expect(attempts).toBeGreaterThan(1)
   })
 })
 

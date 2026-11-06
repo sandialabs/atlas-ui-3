@@ -198,15 +198,32 @@ class RunRecord:
     def is_terminal(self) -> bool:
         return self.status.is_terminal
 
+    def follows_user_auto_approve(self) -> bool:
+        """Whether the user's switch applies to this run.
+
+        A launched child does not follow it. A child started from an untracked
+        turn has no ``parent_run_id``, but its depth is greater than zero and
+        it carries a launch spec. An agent-runs API run also carries a launch
+        spec: the browser switch does not approve its tools.
+        """
+        if self.parent_run_id:
+            return False
+        if (self.depth or 0) > 0:
+            return False
+        if self.launch_spec:
+            return False
+        return True
+
     def note_auto_approve(self, frame: Any) -> None:
-        """Record an explicit ``auto_approve_tools`` bit from a client frame.
+        """Record an explicit ``auto_approve_tools`` bit from an admission frame.
 
         Absent means the client did not say, so the run keeps what it had.
         Only a real boolean ``True`` opts in. A launched child is left alone:
         its tools run on model-chosen arguments, and the launch approval is
-        what covers them.
+        what covers them. Call this when the run is admitted, not when a later
+        chat or steer frame arrives: that frame can be a stale tab.
         """
-        if self.parent_run_id or self.is_terminal:
+        if not self.follows_user_auto_approve() or self.is_terminal:
             return
         if not isinstance(frame, dict) or "auto_approve_tools" not in frame:
             return
@@ -364,7 +381,11 @@ class RunRegistry:
         opted_in = enabled is True
         changed = 0
         for record in self._runs.values():
-            if record.user_email != owner or record.is_terminal or record.parent_run_id:
+            if (
+                record.user_email != owner
+                or record.is_terminal
+                or not record.follows_user_auto_approve()
+            ):
                 continue
             if record.auto_approve_user_tools is opted_in:
                 continue

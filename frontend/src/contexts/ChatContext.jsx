@@ -138,7 +138,7 @@ export const ChatProvider = ({ children }) => {
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
 	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders, refreshAppend } = useMessages()
-	const { settings, updateSettings } = useSettings()
+	const { settings, updateSettings, isLoaded: settingsLoaded } = useSettings()
 
 	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
 	// run whose frames go to another socket, and a live append would have
@@ -708,8 +708,12 @@ export const ChatProvider = ({ children }) => {
 	sendMessageRef.current = sendMessage
 	// A toggle that could not be sent (socket down) is retried on reconnect.
 	// The UI already shows the new value; dropping the frame would leave a
-	// run on this replica approving tools the user just turned off.
+	// run on this replica approving tools the user just turned off. The
+	// pending ref does not survive a reload, so a fresh connection also
+	// sends the value saved in settings. That update reaches only the runs
+	// this connection's server process owns.
 	const pendingAutoApproveRef = useRef(null)
+	const autoApproveNeedsAnnounceRef = useRef(true)
 
 	// The run a joined conversation was opened under has ended. Its save
 	// normally arrives first (see onConversationSaved); this is the fallback
@@ -2312,14 +2316,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// Tell the server when the switch changes, so a run already in flight
 	// picks it up before the user navigates away. The chat frame carries the
 	// same bit at admission; this covers the toggle with no new message.
-	// A send that fails because the socket is down stays pending and goes
-	// out on the next connect, so the UI and the owning replica agree again.
+	// A failed send stays pending. A reload drops that ref, so each new
+	// connection also sends the saved setting and retries until the socket
+	// accepts it. Either way the frame only updates runs on this process.
 	const publishAutoApprove = useCallback((enabled) => {
 		const sent = sendMessageRef.current?.({
 			type: 'auto_approve_tools',
 			enabled: enabled === true,
 		}) === true
 		pendingAutoApproveRef.current = sent ? null : enabled === true
+		return sent
 	}, [])
 	const updateSettingsAndPublish = useCallback((patch) => {
 		const next = updateSettings(patch)
@@ -2329,9 +2335,30 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		return next
 	}, [updateSettings, publishAutoApprove])
 	useEffect(() => {
-		if (!isConnected || pendingAutoApproveRef.current === null) return
-		publishAutoApprove(pendingAutoApproveRef.current)
-	}, [isConnected, publishAutoApprove])
+		if (!isConnected) {
+			autoApproveNeedsAnnounceRef.current = true
+			return undefined
+		}
+		// Wait for the saved setting. Sending the default first would turn
+		// the switch off on the server for a user who had it on.
+		if (!settingsLoaded || !autoApproveNeedsAnnounceRef.current) return undefined
+		let cancelled = false
+		let timer = null
+		const attempt = () => {
+			if (cancelled) return
+			const enabled = settingsRef.current?.autoApproveTools === true
+			if (publishAutoApprove(enabled)) {
+				autoApproveNeedsAnnounceRef.current = false
+				return
+			}
+			timer = window.setTimeout(attempt, 250)
+		}
+		attempt()
+		return () => {
+			cancelled = true
+			if (timer != null) window.clearTimeout(timer)
+		}
+	}, [isConnected, settingsLoaded, publishAutoApprove])
 
 	const value = {
 		// Context meter and compaction controls (issue #877).

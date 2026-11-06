@@ -117,7 +117,9 @@ confirmation before they run.
   you are not currently viewing, and after you close the browser. The server
   applies the switch, so a run does not stop to wait for a page that is gone.
   Turning it off during a turn asks again before the next tool, including a
-  turn that is not saved to the server.
+  turn that is not saved to the server. That change reaches the runs your
+  open page is connected to. A run being handled by another server process
+  keeps the choice it started with until your page connects to that process.
 - **Auto-approve never answers admin-marked tools.** When an administrator
   marks a tool as requiring approval (per-tool `require_approval` or
   `FORCE_TOOL_APPROVAL_GLOBALLY`), auto-approve leaves its calls for you to

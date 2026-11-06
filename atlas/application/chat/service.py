@@ -627,10 +627,14 @@ class ChatService:
         # keep the flag on the run record, which is what the gate reads after
         # the socket that admitted them has closed.
         session.context["auto_approve_tools"] = auto_approve_tools
-        # Untracked turns never get a run record. The gate reads this on the
-        # next tool call, including after a mid-turn toggle overwrites it.
+        # Only an untracked turn reads this map. A tracked run, including a
+        # launched child, already has a record by the time this runs, and
+        # writing the map for every turn would keep one entry per session
+        # for the life of the process. Compaction is not a tool-running turn.
         from atlas.application.chat.auto_approve_state import set_session_auto_approve
-        set_session_auto_approve(session_id, auto_approve_tools)
+        from atlas.application.chat.runs.context import get_current_run
+        if get_current_run() is None and not kwargs.get("compact_only"):
+            set_session_auto_approve(session_id, auto_approve_tools)
 
         # Rewind / edit-and-resubmit is the one turn that legitimately ends with
         # fewer messages than are stored: it drops the edited prompt and

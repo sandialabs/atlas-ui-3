@@ -292,6 +292,46 @@ def test_preference_frame_is_strict_and_does_not_cross_users(registry):
     assert child.auto_approve_user_tools is True
 
 
+@pytest.mark.asyncio
+async def test_child_without_a_parent_record_is_not_auto_approved(
+    registry, approval_manager, monkeypatch
+):
+    """An untracked turn launches a child with no parent_run_id.
+
+    Depth and the launch spec are what mark it. The user switch must not
+    approve its tools, even if something wrote the bit onto the record.
+    """
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    child = registry.start(conversation_id="conv-orphan-child", user_email=USER, depth=1)
+    child.launch_spec = {"source": "atlas_launch", "model": "m"}
+    child.note_auto_approve({"auto_approve_tools": True})
+    assert child.auto_approve_user_tools is False
+    assert registry.set_auto_approve_user_tools(USER, True) == 0
+    assert child.auto_approve_user_tools is False
+
+    child.auto_approve_user_tools = True
+    set_session_auto_approve(child.session_id, True)
+    set_current_run(child.run_id, child.conversation_id)
+    frames = []
+    result = await _run(
+        "call_orphan_child",
+        {
+            "user_email": USER,
+            "session_id": child.session_id,
+            "auto_approve_tools": True,
+        },
+        frames,
+    )
+    assert result.success is False
+    assert result.error == "Approval timeout"
+
+    api_run = registry.start(conversation_id="conv-api", user_email=USER)
+    api_run.launch_spec = {"source": "agent_runs_api", "model": "m"}
+    api_run.note_auto_approve({"auto_approve_tools": True})
+    assert api_run.auto_approve_user_tools is False
+    assert registry.set_auto_approve_user_tools(USER, True) == 0
+
+
 def test_session_bit_is_strict_and_does_not_cross_sessions():
     set_session_auto_approve("session-a", True)
     set_session_auto_approve("session-b", False)

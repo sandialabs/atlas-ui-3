@@ -195,7 +195,7 @@ Client to server:
 | `list_runs` | Ask for every run the user can still see. Sent on connect. |
 | `stop_streaming` / `agent_control` (`action: "stop"`) | Now accept `run_id` and/or `conversation_id`. A frame with neither falls back to the connection's untracked turn, which is what older clients send. |
 | `tool_approval_response` / `elicitation_response` | May carry `run_id` so the right run is resumed when several are paused. |
-| `auto_approve_tools` | `{enabled: true|false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering. |
+| `auto_approve_tools` | `{enabled: true}` or `{enabled: false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering. |
 
 Server to client:
 
@@ -342,10 +342,12 @@ The poll is deliberately cheap to run and cheap to stop:
 ### Auto-approve covers background runs
 
 Auto-approve is the user's switch. The browser sends it on the chat frame
-(`auto_approve_tools: true`) and again, as `auto_approve_tools`, when the
-switch changes. The server stores it on the run and, for a tool that is not
-admin-mandated, approves the call itself. No browser has to be connected, and
-navigating away does not park the run on the approval gate.
+that admits the run (`auto_approve_tools: true`) and again, as
+`auto_approve_tools`, when the switch changes or the page connects. A later
+chat or steer frame does not change a run that is already going: that frame
+can come from a stale tab. The server stores the bit on the run and, for a
+tool that is not admin-mandated, approves the call itself. No browser has to
+be connected, and navigating away does not park the run on the approval gate.
 
 The preference lives on the run record in the replica that owns the run --
 the process that executes the tools. A later change updates runs that process
