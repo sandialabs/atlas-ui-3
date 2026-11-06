@@ -71,7 +71,7 @@ function canvasFrameText(data) {
     ? data.content
     : (data.arguments && typeof data.arguments === 'object' ? data.arguments.content : undefined)
   if (typeof raw === 'string') return raw
-  if (raw == null || raw === '') return ''
+  if (raw == null) return ''
   try { return JSON.stringify(raw) } catch { return String(raw) }
 }
 
