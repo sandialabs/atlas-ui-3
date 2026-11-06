@@ -81,6 +81,38 @@ describe('replay seed - reducer keeps later text in chronological position', () 
     expect(rows.some(m => m._seed)).toBe(false)
   })
 
+  it('a tool row that settles after the seed keeps the seed below it', () => {
+    // [user, seed] then the tool row arrives and completes: the marker is the
+    // only progress left, and it must sit under the row, not above it.
+    const { result } = renderHook(() => useMessages())
+    act(() => { result.current.bulkAdd([userRow]) })
+    act(() => { result.current.streamToken('', true) })
+    act(() => { result.current.addMessage(sleepRow('completed')) })
+
+    const rows = result.current.messages
+    expect(rows.map(m => m.type || m.role)).toEqual(['user', 'tool_call', 'assistant'])
+    expect(rows[2]._seed).toBe(true)
+  })
+
+  it('a snapshot reconcile that appends rows keeps the seed last', () => {
+    const { result } = renderHook(() => useMessages())
+    act(() => { result.current.bulkAdd([userRow]) })
+    act(() => { result.current.streamToken('', true) })
+    act(() => { result.current.mapMessages(prev => [...prev, sleepRow('completed')]) })
+
+    expect(result.current.messages.map(m => m.type || m.role)).toEqual(['user', 'tool_call', 'assistant'])
+    expect(result.current.messages[2]._seed).toBe(true)
+  })
+
+  it('never moves the seed past a real user message', () => {
+    const { result } = renderHook(() => useMessages())
+    act(() => { result.current.bulkAdd([userRow]) })
+    act(() => { result.current.streamToken('', true) })
+    act(() => { result.current.addMessage({ role: 'user', content: 'next question' }) })
+
+    expect(result.current.messages.map(m => m.role)).toEqual(['user', 'assistant', 'user'])
+  })
+
   it('a replay that continues an existing text placeholder still updates it in place', () => {
     const { result } = renderHook(() => useMessages())
     act(() => { result.current.bulkAdd([userRow]) })
@@ -112,6 +144,11 @@ describe('currentTurnHasActiveRow', () => {
     expect(currentTurnHasActiveRow([userRow, { ...card, auto_approved: true }, seedRow])).toBe(false)
     // An admin-required card is never auto-approved, so it is still visible.
     expect(currentTurnHasActiveRow([userRow, { ...card, admin_required: true }, seedRow], { autoApproveTools: true })).toBe(true)
+  })
+
+  it('scans past an agent-loop answer, which belongs to the running turn', () => {
+    const answer = { role: 'user', content: 'use the second file', _agentInput: true }
+    expect(currentTurnHasActiveRow([userRow, sleepRow('sleeping'), answer, seedRow])).toBe(true)
   })
 
   it('is false once the tool settles, and ignores rows from earlier turns', () => {
@@ -216,6 +253,14 @@ describe('replay seed - rendering', () => {
     expect(seed.querySelector('.bg-gray-800')).toBeNull()
     expect(seed.querySelector('.rounded-lg')).toBeNull()
     expect(await screen.findByTestId('stream-replay-in-progress')).toBeInTheDocument()
+  })
+
+  it('once the tool row settles, the marker shows below it', async () => {
+    renderChat([userRow, sleepRow('completed'), seedRow])
+
+    const sleep = screen.getAllByText(/atlas_sleep/)[0]
+    const marker = await screen.findByTestId('stream-replay-in-progress')
+    expect(sleep.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('a standalone seed Message renders no bubble chrome', () => {

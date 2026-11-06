@@ -287,8 +287,9 @@ approval) has no partial text, so the client keeps an empty marker-only seed
 for reconciliation. It never renders as its own assistant bubble: while a tool
 row or approval card of the current turn is still open, that row is the
 progress indicator and the seed is not drawn at all; otherwise it shows only
-the marker line. The next segment's text replaces the seed at the end of the
-transcript, below any tool rows that arrived in between.
+the marker line, kept below any tool rows that arrive after it. The next
+segment's text replaces the seed at the end of the transcript, below those
+rows.
 
 ### Reconnecting resynchronizes the open conversation
 

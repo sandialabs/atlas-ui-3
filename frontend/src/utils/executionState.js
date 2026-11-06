@@ -62,8 +62,9 @@ export function currentTurnIsSleeping(messages) {
 // still running (or sleeping) or an approval card still waiting. The
 // marker-only replay seed is redundant then -- a second status indicator
 // beside the row that already says the run is alive. Only rows after the last
-// user message count, for the same reason as currentTurnIsSleeping. An
-// auto-approved card is mounted but hidden (Message.jsx, #762), so it shows
+// user message count, for the same reason as currentTurnIsSleeping; an
+// agent-loop answer (`_agentInput`) is part of the running turn, not a new
+// one, so the scan goes past it. An auto-approved card is mounted but hidden (Message.jsx, #762), so it shows
 // nothing and does not count; `settings` feeds the same predicate.
 const ACTIVE_TOOL_STATUS = new Set(['calling', 'in_progress', 'sleeping'])
 
@@ -72,7 +73,7 @@ export function currentTurnHasActiveRow(messages, settings) {
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const message = list[i]
     if (!message) continue
-    if (message.role === 'user') return false
+    if (message.role === 'user' && !message._agentInput) return false
     if (message.type === 'tool_call' && ACTIVE_TOOL_STATUS.has(message.status)) return true
     if (
       message.type === 'tool_approval_request'
