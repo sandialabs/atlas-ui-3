@@ -50,6 +50,7 @@ const h = vi.hoisted(() => ({
   workspacesEnabled: true,
   saveLocalConv: vi.fn(() => Promise.resolve()),
   setCanvasContent: vi.fn(),
+  canvasContent: null,
   saveMode: 'none',
   // Every websocket frame handler ChatContext registered; tests dispatch
   // frames through them the way the socket would.
@@ -142,12 +143,12 @@ vi.mock('../hooks/chat/useFiles', () => ({
   useFiles: () => ({
     getTaggedFilesContent: () => ({}),
     setCanvasContent: h.setCanvasContent,
+    canvasContent: h.canvasContent,
     setCanvasFiles: vi.fn(),
     setCurrentCanvasFileIndex: vi.fn(),
     setCustomUIContent: vi.fn(),
     setSessionFiles: vi.fn(),
     getFileType: vi.fn(),
-    canvasContent: null,
     sessionFiles: { files: [], total_files: 0, categories: {} },
   }),
 }))
@@ -1365,6 +1366,108 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(h.setCanvasContent).toHaveBeenCalledWith(script)
   })
 
+  it('does not replace a live panel from an in-flight joined poll', async () => {
+    const previous = h.canvasContent
+    h.canvasContent = 'newer live document'
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, {
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+        metadata: {},
+      })
+      h.setCanvasContent.mockClear()
+      act(() => {
+        result.current.refreshJoinedConversation({
+          id: 'conv-1',
+          metadata: {},
+          in_flight: true,
+          messages: [
+            storedChat('user', 'Original'),
+            {
+              role: 'system',
+              content: 'Canvas artifact',
+              message_type: 'canvas_artifact',
+              metadata: { canvas_content: 'older saved document', artifact_id: 'c1' },
+            },
+          ],
+        }, { live: true })
+      })
+      expect(h.setCanvasContent).not.toHaveBeenCalled()
+    } finally {
+      h.canvasContent = previous
+    }
+  })
+
+  it('fills an empty panel from an in-flight joined poll', async () => {
+    const script = 'first flushed document'
+    const previous = h.canvasContent
+    h.canvasContent = ''
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, {
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+        metadata: {},
+      })
+      h.setCanvasContent.mockClear()
+      act(() => {
+        result.current.refreshJoinedConversation({
+          id: 'conv-1',
+          metadata: {},
+          in_flight: true,
+          messages: [
+            storedChat('user', 'Original'),
+            {
+              role: 'system',
+              content: 'Canvas artifact',
+              message_type: 'canvas_artifact',
+              metadata: { canvas_content: script, artifact_id: 'c1' },
+            },
+          ],
+        }, { live: true })
+      })
+      expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    } finally {
+      h.canvasContent = previous
+    }
+  })
+
+  it('does not rewrite the panel when the stored canvas is unchanged', async () => {
+    const script = 'same document'
+    const previous = h.canvasContent
+    h.canvasContent = script
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, {
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+        metadata: {},
+      })
+      h.setCanvasContent.mockClear()
+      let ok
+      act(() => {
+        ok = result.current.refreshJoinedConversation({
+          id: 'conv-1',
+          metadata: {},
+          messages: [
+            storedChat('user', 'Original'),
+            {
+              role: 'system',
+              content: 'Canvas artifact',
+              message_type: 'canvas_artifact',
+              metadata: { canvas_content: script, artifact_id: 'c1' },
+            },
+          ],
+        })
+      })
+      expect(ok).toBe(true)
+      expect(h.setCanvasContent).not.toHaveBeenCalled()
+    } finally {
+      h.canvasContent = previous
+    }
+  })
+
   it('keeps a live canvas through a local save and a reopen', async () => {
     const script = "print('local')\n"
     const previousMode = h.saveMode
@@ -1404,12 +1507,16 @@ describe('refreshJoinedConversation (issue #959)', () => {
       expect(artifact.metadata.canvas_content).toBe(script)
       expect(result.current.messages.some(m => m.type === 'tool_call' && m.tool_name === 'atlas_canvas')).toBe(false)
       h.setCanvasContent.mockClear()
+      h.sendMessage.mockClear()
       await loadConversation(result, {
         id: saved.id,
         messages: saved.messages,
         metadata: saved.metadata || {},
       })
       expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+      const restore = restoreCalls().find(call => call.conversation_id === saved.id)
+      const restored = restore.messages.find(m => m.message_type === 'canvas_artifact')
+      expect(restored.metadata.canvas_content).toBe(script)
     } finally {
       h.saveMode = previousMode
       vi.useRealTimers()

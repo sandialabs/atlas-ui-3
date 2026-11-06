@@ -1815,8 +1815,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// This stays after the execution-revision check: a delayed snapshot
 		// from an older replica must not replace a newer document, and
 		// reconcileExecution does not undo a panel write.
+		// An in-flight poll must not replace a document already on screen.
+		// That write closes the files panel, and the stored row can be older
+		// than what this tab is showing. An empty panel still takes the
+		// stored document. An unchanged document is left alone.
 		const restoredCanvas = latestCanvasArtifactContent(conversationData.messages)
-		if (restoredCanvas) setCanvasContentRef.current(restoredCanvas)
+		const panelNow = canvasContentRef.current || ''
+		if (restoredCanvas && restoredCanvas !== panelNow && !(stillInFlight && panelNow)) {
+			setCanvasContentRef.current(restoredCanvas)
+		}
 		const current = viewMessages.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 
 		// Walk both lists together; everything must line up one-to-one or the

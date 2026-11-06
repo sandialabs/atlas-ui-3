@@ -454,8 +454,10 @@ with the turns they belong to; the newest canvas stays in the request
 because the panel still shows it. The panel restores the exact newest text
 from the stored row, including after compaction.
 
-The same flush that records other tools writes the canvas row, before the
-closing assistant message, in both tools-mode chat and agent-mode runs. A
+If the user edits the canvas text before the tool runs, the stored document
+is that edited text. The same flush that records other tools writes the
+canvas row, before the closing assistant message, in both tools-mode chat
+and agent-mode runs. A
 turn that is stopped before that flush has not saved the in-progress canvas
 yet, matching other tools. When several writes finish in a different order
 from the order they started, the saved order follows the order the panel

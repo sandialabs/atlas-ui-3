@@ -266,6 +266,79 @@ class TestRecorderKeepsCanvasText:
         assert artifact.metadata["canvas_content"] == "doc"
         assert artifact.metadata["step"] == 1
 
+    def test_approval_edit_is_what_later_turns_read(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas.application.chat.utilities import tool_executor as te
+        from atlas.application.chat.utilities.tool_executor import execute_single_tool
+        from atlas.domain.messages.models import ToolResult
+
+        tool_call = MagicMock()
+        tool_call.id = "c1"
+        tool_call.function.name = "atlas_canvas"
+        tool_call.function.arguments = '{"content": "draft from the model"}'
+
+        tool_manager = MagicMock()
+        tool_manager.get_tools_schema.return_value = [{
+            "function": {
+                "name": "atlas_canvas",
+                "parameters": {"properties": {"content": {}}},
+            }
+        }]
+        tool_manager.get_server_for_tool.return_value = "atlas"
+        tool_manager.execute_tool = AsyncMock(return_value=ToolResult(
+            tool_call_id="c1",
+            content="Canvas content displayed: edited",
+            success=True,
+        ))
+
+        approval_manager = MagicMock()
+        approval_request = MagicMock()
+        approval_request.wait_for_response = AsyncMock(return_value={
+            "approved": True,
+            "arguments": {"content": "edited by the user"},
+        })
+        approval_manager.create_approval_request.return_value = approval_request
+        approval_manager.cleanup_request = MagicMock()
+
+        captured = []
+
+        async def _capture(payload):
+            captured.append(payload)
+
+        original_get = te.get_approval_manager
+        original_requires = te.requires_approval
+        te.get_approval_manager = lambda: approval_manager
+        te.requires_approval = lambda name, cfg: (True, True, False)
+        try:
+            _run(execute_single_tool(
+                tool_call=tool_call,
+                session_context={"user_email": "u@x.com"},
+                tool_manager=tool_manager,
+                update_callback=_capture,
+                config_manager=MagicMock(),
+            ))
+        finally:
+            te.get_approval_manager = original_get
+            te.requires_approval = original_requires
+
+        shown = [item for item in captured if item.get("type") == "canvas_content"]
+        assert shown[0]["content"] == "edited by the user"
+        started = [item for item in captured if item.get("type") == "tool_start"]
+        assert started[0]["arguments"]["content"] == "edited by the user"
+
+        recorder = ToolCallRecorder(None)
+        _play(recorder, captured)
+        assert recorder.messages() == []
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="write it"))
+        recorder.flush(history)
+        history.add_message(Message(role=MessageRole.ASSISTANT, content="Done."))
+        assert _artifacts(history)[0].metadata["canvas_content"] == "edited by the user"
+        llm = history.get_messages_for_llm()
+        assert "edited by the user" in llm[-1]["content"]
+        assert "draft from the model" not in llm[-1]["content"]
+
     def test_displayed_frame_overwrites_the_start_arguments(self):
         recorder = ToolCallRecorder(None)
         _play(recorder, [

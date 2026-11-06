@@ -900,8 +900,11 @@ async def execute_single_tool(
                     # If content is not a string, convert and prepend
                     result.content = edit_note + str(result.content)
 
-            # Send tool complete notification
-            await event_notifier.notify_tool_complete(tool_call, result, parsed_args, update_callback)
+            # Send tool complete notification. Canvas reads these arguments
+            # for the document it stores. ``parsed_args`` is the model's
+            # original request; an approval edit or a hook rewrite lives in
+            # ``filtered_args``, which is what just ran.
+            await event_notifier.notify_tool_complete(tool_call, result, filtered_args, update_callback)
 
             set_attrs(span, {"args_edited": bool(arguments_were_edited)})
             return _finalize_span(result, telemetry_content=raw_output_for_telemetry)
