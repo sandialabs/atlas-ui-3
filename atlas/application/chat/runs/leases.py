@@ -55,6 +55,21 @@ INTERRUPTED_ERROR = (
 # The API returns at most 20,000 characters (``launcher.MAX_RESULT_CHARS``).
 # One more is kept so a reader can still tell the reply was truncated.
 MAX_SNAPSHOT_RESULT_CHARS = 20_001
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _install_release_gate(gate: Callable[[Any, str], Any]) -> Callable[[], None]:
+    """Make ``gate`` the release gate; the returned callable removes it
+    again unless another guard installed its own since."""
+    from atlas.application.chat.runs.coordination import get_release_gate, set_release_gate
+
+    set_release_gate(gate)
+
+    def remove() -> None:
+        if get_release_gate() == gate:
+            set_release_gate(None)
+
+    return remove
 
 
 class RunFencedError(Exception):
@@ -145,6 +160,8 @@ class _Lease:
     dirty: bool = True
     syncing: bool = False
     sync_task: Optional[asyncio.Task] = None
+    # A terminal release kept back until the terminal snapshot is written.
+    held_release: Optional[str] = None
 
 
 class RunLeaseGuard:
@@ -189,6 +206,7 @@ class RunLeaseGuard:
             self._registry.add_observer(self.observe),
             add_claim_lost_listener(self._claim_lost),
             add_claims_renewed_listener(self._heartbeat_renewed, clock=self._clock),
+            _install_release_gate(self.gate_release),
         ]
         self._tasks = [asyncio.get_running_loop().create_task(self._sweep_loop())]
         logger.info("Run lease guard started (lease %.1fs)", self.lease_seconds)
@@ -302,6 +320,7 @@ class RunLeaseGuard:
                     self._fence_local(lease, run_id, "snapshot write refused")
                 elif terminal:
                     lease.done = True
+                    await self._release_held(run_id, lease)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -310,6 +329,32 @@ class RunLeaseGuard:
         finally:
             lease.syncing = False
             lease.sync_task = None
+
+    async def gate_release(self, claim: Any, status: str) -> bool:
+        """Release gate: a run's terminal snapshot is written before its claim
+        is released, so no replica sees it end without its final state (the
+        terminal ``MIRROR`` sets the status and the snapshot in one write).
+        ``False`` keeps the release here until a retried mirror lands; if the
+        owner dies meanwhile, its lease lapses and the run reads interrupted."""
+        lease = self._leases.get(claim.run_id)
+        if lease is None or status not in TERMINAL_STATUSES:
+            return True
+        await self._sync(claim.run_id, lease)
+        if lease.done or lease.fenced:
+            return True
+        lease.held_release = status
+        return False
+
+    async def _release_held(self, run_id: str, lease: _Lease) -> None:
+        status, lease.held_release = lease.held_release, None
+        if status is None:
+            return
+        try:
+            await self._coordinator.release(lease.claim, status)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # its lease expires instead
+            logger.warning("held release of %s failed: %s", run_id, type(exc).__name__)
 
     async def _sync(self, run_id: str, lease: _Lease) -> None:
         """Mirror the run's current state now, serialized with the background

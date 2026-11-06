@@ -142,6 +142,14 @@ Rules every script follows:
   sweep took the run over.
 - **Release is final.** Renewal refuses a record in a terminal status, so a
   heartbeat that races the release cannot take the slot back.
+- **The final snapshot comes first.** With the lease guard running, a
+  terminal release waits behind the release gate (`set_release_gate`) for the
+  run's terminal `MIRROR`, which writes the terminal status and the final
+  snapshot (the reply included) in one script. No replica therefore sees the
+  run end without its result. If that write cannot be confirmed, the guard
+  keeps the release and does it once a sweep's retried mirror lands. If the
+  owner dies meanwhile, the lease lapses and the run reads `interrupted`,
+  never `completed` without its reply.
 - **Renewal reports loss.** A lapsed lease is never re-taken (its slot may
   already count for another run). The owner renews every live claim every
   third of `RUN_LEASE_SECONDS` (10 s by default), on a fixed schedule so a

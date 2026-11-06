@@ -15,7 +15,11 @@ import fakeredis
 import pytest
 
 from atlas.application.chat.runs import leases as leases_module
-from atlas.application.chat.runs.coordination import set_run_coordinator
+from atlas.application.chat.runs.coordination import (
+    drain_pending_releases,
+    set_release_gate,
+    set_run_coordinator,
+)
 from atlas.application.chat.runs.execution_state import (
     MemoryExecutionStore,
     invocation_id,
@@ -103,9 +107,11 @@ def _isolation():
     reset_run_registry()
     set_lease_guard(None)
     set_run_coordinator(None)
+    set_release_gate(None)
     yield
     set_lease_guard(None)
     set_run_coordinator(None)
+    set_release_gate(None)
     reset_execution_store()
     reset_run_registry()
 
@@ -1050,3 +1056,90 @@ async def test_lease_lapsing_while_the_client_connects_stops_the_request(server)
     assert isinstance(outcome, asyncio.CancelledError), outcome
     client.call_tool.assert_not_awaited()
     sleeper.cancel()
+
+
+async def _owner_with_release_gate(server):
+    a, b = Replica(server, "A"), Replica(server, "B")
+    set_run_coordinator(a.coordinator)  # the registry's release goes here
+    set_release_gate(a.guard.gate_release)  # as the started guard installs it
+    record, task = await a.start()
+    return a, b, record, task
+
+
+async def test_release_waits_for_the_terminal_snapshot(server):
+    a, b, record, task = await _owner_with_release_gate(server)
+    original, gate = a.scripts.mirror, asyncio.Event()
+
+    async def slow_mirror(*args, **kwargs):
+        await gate.wait()
+        return await original(*args, **kwargs)
+
+    a.scripts.mirror = slow_mirror
+    record.result = "the answer"
+    a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    for _ in range(10):
+        await asyncio.sleep(0)
+    # The release has not overtaken the snapshot: nobody sees it ended yet.
+    assert (await b.guard.read_record(record.run_id))["status"] == "running"
+    assert await a.client.zscore(a.keys.live(), record.run_id) is not None
+
+    gate.set()
+    await drain_pending_releases()
+    view = await b.guard.read_record(record.run_id)
+    assert (view["status"], view["result"]) == ("completed", "the answer")
+    assert await a.client.zscore(a.keys.live(), record.run_id) is None
+    task.cancel()
+
+
+async def test_owner_lost_before_its_terminal_snapshot_reads_interrupted(server):
+    a, b, record, task = await _owner_with_release_gate(server)
+
+    async def unreachable(*args, **kwargs):
+        raise ConnectionError("redis gone")
+
+    a.scripts.mirror = unreachable  # and then the process is gone
+    record.result = "the answer"
+    a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    await drain_pending_releases()
+    assert (await b.guard.read_record(record.run_id))["status"] == "running"  # not released
+
+    await a.expire(record)
+    assert await b.guard.sweep_once() == [record.run_id]
+    view = await b.guard.read_record(record.run_id)
+    assert view["status"] == "failed" and view["interrupted"] is True
+    task.cancel()
+
+
+async def test_held_release_lands_after_the_retried_snapshot(server):
+    a, b, record, task = await _owner_with_release_gate(server)
+    # The observer's write and the gate's own retry both fail.
+    original, failures = a.scripts.mirror, [1, 1]
+
+    async def blip(*args, **kwargs):
+        if failures:
+            failures.pop()
+            raise ConnectionError("blip")
+        return await original(*args, **kwargs)
+
+    a.scripts.mirror = blip
+    record.result = "the answer"
+    a.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    await drain_pending_releases()
+    assert await a.client.zscore(a.keys.live(), record.run_id) is not None  # held
+
+    await a.guard.sweep_once()  # retries the snapshot, then releases
+    await a.settle()
+    view = await b.guard.read_record(record.run_id)
+    assert (view["status"], view["result"]) == ("completed", "the answer")
+    assert await a.client.zscore(a.keys.live(), record.run_id) is None
+    task.cancel()
+
+
+async def test_started_guard_gates_releases_until_stopped(server):
+    from atlas.application.chat.runs.coordination import get_release_gate
+
+    a = Replica(server, "A")
+    a.guard.start()
+    assert get_release_gate() == a.guard.gate_release
+    await a.guard.stop()
+    assert get_release_gate() is None
