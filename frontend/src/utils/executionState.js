@@ -6,6 +6,8 @@
 // An older revision is refused: the run owns the counter, and a replica that
 // answers with a stale document must not replace a newer view.
 
+import { resolveAutoApproved } from './toolApproval'
+
 const SLEEP_TOOLS = new Set(['atlas_sleep', 'atlas_agent_sleep'])
 const TERMINAL_TOOL_STATUS = new Set(['completed', 'failed', 'interrupted', 'expired', 'rejected'])
 const TERMINAL_RUN_STATUS = new Set(['completed', 'failed', 'cancelled'])
@@ -60,17 +62,23 @@ export function currentTurnIsSleeping(messages) {
 // still running (or sleeping) or an approval card still waiting. The
 // marker-only replay seed is redundant then -- a second status indicator
 // beside the row that already says the run is alive. Only rows after the last
-// user message count, for the same reason as currentTurnIsSleeping.
+// user message count, for the same reason as currentTurnIsSleeping. An
+// auto-approved card is mounted but hidden (Message.jsx, #762), so it shows
+// nothing and does not count; `settings` feeds the same predicate.
 const ACTIVE_TOOL_STATUS = new Set(['calling', 'in_progress', 'sleeping'])
 
-export function currentTurnHasActiveRow(messages) {
+export function currentTurnHasActiveRow(messages, settings) {
   const list = Array.isArray(messages) ? messages : []
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const message = list[i]
     if (!message) continue
     if (message.role === 'user') return false
     if (message.type === 'tool_call' && ACTIVE_TOOL_STATUS.has(message.status)) return true
-    if (message.type === 'tool_approval_request' && message.status === 'pending') return true
+    if (
+      message.type === 'tool_approval_request'
+      && message.status === 'pending'
+      && !resolveAutoApproved(message, settings)
+    ) return true
   }
   return false
 }

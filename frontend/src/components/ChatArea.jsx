@@ -149,7 +149,7 @@ const ChatArea = () => {
   // reconciliation state. While a tool row or approval card of the current
   // turn already shows the run is alive, drawing it as well would stack a
   // second status indicator under that row, so it is not rendered.
-  const hideReplaySeed = useMemo(() => currentTurnHasActiveRow(messages), [messages])
+  const hideReplaySeed = useMemo(() => currentTurnHasActiveRow(messages, settings), [messages, settings])
 
   // Fine-tune capture "correct this turn" (issue #622). Only fetch consent and
   // wire the affordance when the feature flag is on; the per-message control is

@@ -106,6 +106,14 @@ describe('currentTurnHasActiveRow', () => {
     expect(currentTurnHasActiveRow([userRow, card, seedRow])).toBe(true)
   })
 
+  it('ignores an auto-approved card: it is mounted but hidden, so it shows nothing', () => {
+    const card = { role: 'system', type: 'tool_approval_request', status: 'pending' }
+    expect(currentTurnHasActiveRow([userRow, card, seedRow], { autoApproveTools: true })).toBe(false)
+    expect(currentTurnHasActiveRow([userRow, { ...card, auto_approved: true }, seedRow])).toBe(false)
+    // An admin-required card is never auto-approved, so it is still visible.
+    expect(currentTurnHasActiveRow([userRow, { ...card, admin_required: true }, seedRow], { autoApproveTools: true })).toBe(true)
+  })
+
   it('is false once the tool settles, and ignores rows from earlier turns', () => {
     expect(currentTurnHasActiveRow([userRow, sleepRow('completed'), seedRow])).toBe(false)
     expect(currentTurnHasActiveRow([sleepRow('sleeping'), userRow, seedRow])).toBe(false)
@@ -115,7 +123,7 @@ describe('currentTurnHasActiveRow', () => {
 })
 
 describe('replay seed - rendering', () => {
-  const chatContext = (messages) => ({
+  const chatContext = (messages, settings = {}) => ({
     messages,
     isWelcomeVisible: false,
     isThinking: false,
@@ -142,7 +150,7 @@ describe('replay seed - rendering', () => {
     setFollowUpSuggestions: vi.fn(),
     downloadFile: vi.fn(),
     appName: 'ATLAS',
-    settings: {},
+    settings,
   })
 
   beforeEach(() => {
@@ -150,8 +158,8 @@ describe('replay seed - rendering', () => {
     useWS.mockReturnValue({ isConnected: true, connectionStatus: 'Connected', sendMessage: vi.fn() })
   })
 
-  const renderChat = (messages) => {
-    useChat.mockReturnValue(chatContext(messages))
+  const renderChat = (messages, settings) => {
+    useChat.mockReturnValue(chatContext(messages, settings))
     return render(
       <BrowserRouter>
         <ChatArea />
@@ -172,6 +180,23 @@ describe('replay seed - rendering', () => {
     renderChat([userRow, seedRow, sleepRow('sleeping')])
 
     expect(screen.queryByTestId('stream-replay-seed')).not.toBeInTheDocument()
+  })
+
+  it('keeps the seed marker when the only pending card is auto-approved (hidden)', async () => {
+    const card = {
+      role: 'system',
+      type: 'tool_approval_request',
+      tool_call_id: 'call_x',
+      tool_name: 'atlas_sleep',
+      arguments: {},
+      status: 'pending',
+      content: 'Tool Approval Required: atlas_sleep',
+      timestamp: '2026-11-05T00:00:01Z',
+    }
+    renderChat([userRow, card, seedRow], { autoApproveTools: true })
+
+    expect(screen.getByTestId('stream-replay-seed')).toBeInTheDocument()
+    expect(await screen.findByTestId('stream-replay-in-progress')).toBeInTheDocument()
   })
 
   it('renders text streamed after the sleep below the sleep row', () => {
