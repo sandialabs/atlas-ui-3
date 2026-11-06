@@ -24,7 +24,7 @@ from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
     tool_call_function_field,
 )
-from .usage_tracking import record_usage
+from .usage_tracking import StreamUsageAccumulator
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +91,22 @@ class LiteLLMStreamingMixin:
     """
 
     def _stream_usage_kwargs(self, model_name: str, model_kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        """Request usage only when this static model explicitly opts in.
+        """Request usage only when the selected model explicitly opts in.
 
-        The provider must support OpenAI-compatible stream_options; leave
-        non-opted and dynamically discovered gateway models unchanged.
+        Static and gateway-discovered models share the same resolved
+        ModelConfig; gateway defaults and allowlist overrides are honored.
+        The provider must support OpenAI-compatible stream_options.
         """
-        models = getattr(getattr(self, "llm_config", None), "models", {})
-        config = models.get(model_name) if isinstance(models, dict) else None
+        # The caller already resolves/authorizes the model. Avoid making this
+        # optional request flag a second required registry lookup: standalone
+        # callers and test doubles may supply resolved call kwargs directly.
+        registry = getattr(self, "llm_config", None)
+        get_model = getattr(registry, "get_model", None)
+        if callable(get_model):
+            config = get_model(model_name)
+        else:
+            models = getattr(registry, "models", {})
+            config = models.get(model_name) if isinstance(models, dict) else None
         if not getattr(config, "request_stream_usage", False):
             return model_kwargs
         return {**model_kwargs, "stream_options": {"include_usage": True}}
@@ -161,6 +170,7 @@ class LiteLLMStreamingMixin:
                     response = None
                     total_chunks_seen = 0
                     attempt_start_ns = time.monotonic_ns()
+                    usage = StreamUsageAccumulator()
                     try:
                         response = await acompletion(
                             model=litellm_model,
@@ -169,13 +179,9 @@ class LiteLLMStreamingMixin:
                             **model_kwargs,
                         )
 
-                        # Provider metadata may be cumulative or repeated across
-                        # chunks. Record the final snapshot once per LLM call.
-                        last_usage = None
                         async for chunk in response:
                             total_chunks_seen += 1
-                            if getattr(chunk, "usage", None) is not None:
-                                last_usage = chunk.usage
+                            usage.observe(getattr(chunk, "usage", None))
                             delta = chunk.choices[0].delta if chunk.choices else None
                             if total_chunks_seen <= 3:
                                 logger.debug(
@@ -194,7 +200,6 @@ class LiteLLMStreamingMixin:
                                     await asyncio.sleep(0)
 
                         _check_empty_stream(chunk_count, model_name, attempt_start_ns)
-                        record_usage(last_usage)
                         log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
                         set_attrs(span, {
                             "latency_ms": (time.monotonic_ns() - start_ns) // 1_000_000,
@@ -235,6 +240,10 @@ class LiteLLMStreamingMixin:
                         attempt += 1
                         waited += delay
                         await asyncio.sleep(delay)
+                    finally:
+                        # Includes empty responses, stream failures, retries,
+                        # and async-generator cancellation/close.
+                        usage.record()
 
             except Exception as exc:
                 set_attrs(span, {
@@ -436,6 +445,7 @@ class LiteLLMStreamingMixin:
                 while True:
                     response = None
                     attempt_start_ns = time.monotonic_ns()
+                    usage = StreamUsageAccumulator()
                     try:
                         response = await acompletion(
                             model=litellm_model,
@@ -446,12 +456,8 @@ class LiteLLMStreamingMixin:
                             **model_kwargs,
                         )
 
-                        # Only the final provider usage snapshot represents
-                        # this complete call; intermediate chunks may repeat it.
-                        last_usage = None
                         async for chunk in response:
-                            if getattr(chunk, "usage", None) is not None:
-                                last_usage = chunk.usage
+                            usage.observe(getattr(chunk, "usage", None))
                             choice = chunk.choices[0] if chunk.choices else None
                             if choice is not None:
                                 # Providers send the reason on the final chunk; keep the
@@ -495,7 +501,6 @@ class LiteLLMStreamingMixin:
                             chunk_count, model_name, attempt_start_ns,
                             has_tool_calls=bool(accumulated_tool_calls),
                         )
-                        record_usage(last_usage)
                         break
 
                     except Exception as exc:
@@ -530,6 +535,8 @@ class LiteLLMStreamingMixin:
                         attempt += 1
                         waited += delay
                         await asyncio.sleep(delay)
+                    finally:
+                        usage.record()
 
                 # Build final tool_calls list using litellm's own response type
                 # rather than SimpleNamespace. The objects are appended verbatim

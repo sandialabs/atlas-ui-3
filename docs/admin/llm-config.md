@@ -85,13 +85,17 @@ models:
 
 The default is `false`. When enabled, Atlas asks LiteLLM to send
 `stream_options: {include_usage: true}` in both plain and tool-enabled
-streaming calls. This does not affect non-streaming requests or models
-discovered dynamically from an enterprise LiteLLM gateway.
+streaming calls. This does not affect non-streaming requests. Enterprise
+LiteLLM gateway models can also opt in through `model_defaults` or an
+allowlist model entry; an entry overrides the gateway default.
 
 Some compatible servers return a final usage-only chunk; others may repeat
-*cumulative* counts in more than one chunk. Atlas records the **last**
-non-null usage report **once per completed streaming LLM call**, avoiding
-double counting. If the endpoint does not return usage metadata, the usage
+*cumulative* counts in more than one chunk, or split prompt and completion
+counts across chunks. Atlas retains the **maximum observed prompt and
+completion counts independently** and records them **once per provider
+attempt**, avoiding double counting and preserving available counts for
+empty, failed, retried, or interrupted streams. These are best-effort
+provider-reported observations, not confirmed billing totals. If the endpoint does not return usage metadata, the usage
 counter cannot supply accurate token counts. The request may also fail if
 the endpoint rejects `stream_options`, so verify compatibility with each
 provider before enabling this flag.
