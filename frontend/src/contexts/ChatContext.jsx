@@ -30,6 +30,7 @@ import { resolveTurnDataSources } from '../utils/ragSources'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 import { isKnownUser } from '../utils/userStorage'
 import { normalizeSaveMode } from '../utils/saveModeConfig'
+import { clientMayAutoApprove } from '../utils/toolApproval'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -138,7 +139,7 @@ export const ChatProvider = ({ children }) => {
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
 	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders, refreshAppend } = useMessages()
-	const { settings, updateSettings, isLoaded: settingsLoaded } = useSettings()
+	const { settings, updateSettings, isLoaded: settingsLoaded, readLatestSettings } = useSettings()
 
 	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
 	// run whose frames go to another socket, and a live append would have
@@ -664,11 +665,14 @@ export const ChatProvider = ({ children }) => {
 					// model launched (atlas_launch) runs on model-chosen
 					// arguments, and an on/off toggle must not silently broaden
 					// to approving those unattended.
+					// The server also marks a request it kept on the gate on
+					// purpose (`auto_approvable: false`): a hook escalation, or
+					// a launched child that has no parent_run_id because its
+					// parent turn was not a tracked run.
 					const frame = data.frame
 					const childRun = runs.getRun(frame.conversation_id)?.parent_run_id
 					if (
-						settingsRef.current?.autoApproveTools &&
-						!frame.admin_required &&
+						clientMayAutoApprove(frame, settingsRef.current) &&
 						!childRun &&
 						sendMessageRef.current
 					) {
@@ -713,6 +717,8 @@ export const ChatProvider = ({ children }) => {
 	// sends the value saved in settings. That update reaches only the runs
 	// this connection's server process owns.
 	const pendingAutoApproveRef = useRef(null)
+	const readLatestSettingsRef = useRef(readLatestSettings)
+	readLatestSettingsRef.current = readLatestSettings
 	const autoApproveNeedsAnnounceRef = useRef(true)
 
 	// The run a joined conversation was opened under has ended. Its save
@@ -2346,7 +2352,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		let timer = null
 		const attempt = () => {
 			if (cancelled) return
-			const enabled = settingsRef.current?.autoApproveTools === true
+			// The latest persisted choice, not this tab's state: another tab
+			// may have turned the switch off since this one last rendered,
+			// and announcing the older value would turn it back on.
+			const latest = readLatestSettingsRef.current?.() || settingsRef.current
+			const enabled = latest?.autoApproveTools === true
 			if (publishAutoApprove(enabled)) {
 				autoApproveNeedsAnnounceRef.current = false
 				return

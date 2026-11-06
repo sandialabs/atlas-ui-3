@@ -14,7 +14,9 @@ import pytest
 
 from atlas.application.chat.approval_manager import get_approval_manager
 from atlas.application.chat.auto_approve_state import (
+    begin_untracked_turn,
     clear_session_auto_approve,
+    end_untracked_turn,
     session_auto_approve,
     set_session_auto_approve,
 )
@@ -310,7 +312,7 @@ async def test_child_without_a_parent_record_is_not_auto_approved(
     assert child.auto_approve_user_tools is False
 
     child.auto_approve_user_tools = True
-    set_session_auto_approve(child.session_id, True)
+    begin_untracked_turn(child.session_id, True)
     set_current_run(child.run_id, child.conversation_id)
     frames = []
     result = await _run(
@@ -333,14 +335,47 @@ async def test_child_without_a_parent_record_is_not_auto_approved(
 
 
 def test_session_bit_is_strict_and_does_not_cross_sessions():
-    set_session_auto_approve("session-a", True)
-    set_session_auto_approve("session-b", False)
+    begin_untracked_turn("session-a", True)
+    begin_untracked_turn("session-b", False)
     assert session_auto_approve("session-a") is True
     assert session_auto_approve("session-b") is False
-    set_session_auto_approve("session-a", "true")  # type: ignore[arg-type]
+    assert set_session_auto_approve("session-a", "true") is True  # type: ignore[arg-type]
     assert session_auto_approve("session-a") is False
-    set_session_auto_approve(None, True)
+    begin_untracked_turn(None, True)
     assert session_auto_approve(None) is None
+
+
+def test_toggle_without_a_running_turn_leaves_no_entry():
+    """A toggle with no untracked turn running has nothing to update."""
+    assert set_session_auto_approve("idle", True) is False
+    assert session_auto_approve("idle") is None
+
+
+def test_off_toggle_during_admission_is_not_overwritten():
+    """The entry opens before the task, so a toggle in the startup window sticks.
+
+    Nothing writes the admission value again once the turn has begun; the
+    service no longer touches the map after its awaits.
+    """
+    begin_untracked_turn("s-startup", True)
+    # The user turns the switch off before the turn reaches its first tool.
+    assert set_session_auto_approve("s-startup", False) is True
+    assert session_auto_approve("s-startup") is False
+
+
+def test_overlapping_turns_keep_the_latest_toggle_until_the_last_finishes():
+    """One turn finishing must not drop the off-toggle another turn relies on."""
+    begin_untracked_turn("s-overlap", True)  # turn being torn down
+    begin_untracked_turn("s-overlap", True)  # the next turn
+    set_session_auto_approve("s-overlap", False)
+
+    end_untracked_turn("s-overlap")
+    assert session_auto_approve("s-overlap") is False
+
+    end_untracked_turn("s-overlap")
+    assert session_auto_approve("s-overlap") is None
+    end_untracked_turn("s-overlap")  # an extra release is harmless
+    assert session_auto_approve("s-overlap") is None
 
 
 @pytest.mark.asyncio
@@ -350,7 +385,7 @@ async def test_untracked_turn_stops_auto_approving_when_the_switch_goes_off(
     """No run record: the admission snapshot stays true, the live bit moves."""
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     clear_current_run()
-    set_session_auto_approve("s-live", True)
+    begin_untracked_turn("s-live", True)
     frames = []
 
     first = await _run(
@@ -380,7 +415,7 @@ async def test_untracked_turn_still_approves_when_the_client_is_gone(
     """Closing the browser does not clear a switch that is still on."""
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     clear_current_run()
-    set_session_auto_approve("s-closed", True)
+    begin_untracked_turn("s-closed", True)
 
     result = await execute_single_tool(
         _tool_call("call_closed_untracked"),
@@ -402,7 +437,7 @@ async def test_tracked_run_keeps_its_own_bit_when_the_session_disagrees(
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     record = registry.start(conversation_id="conv-authority", user_email=USER)
     record.note_auto_approve({"auto_approve_tools": True})
-    set_session_auto_approve(record.session_id, False)
+    begin_untracked_turn(record.session_id, False)
     set_current_run(record.run_id, record.conversation_id)
 
     approved = await execute_single_tool(
@@ -433,3 +468,78 @@ async def test_tracked_run_keeps_its_own_bit_when_the_session_disagrees(
     assert refused.success is False
     assert refused.error == "Approval timeout"
     assert any(frame.get("type") == "tool_approval_request" for frame in frames)
+
+
+class _EscalatingHooks:
+    """A PermissionRequest policy hook that escalates every call to "ask"."""
+
+    def has_hooks(self, event):
+        from atlas.hooks import HookEvent
+
+        return event == HookEvent.PERMISSION_REQUEST
+
+    async def run_event(self, event, payload, **kwargs):
+        return SimpleNamespace(
+            verdict="require_approval", reason="policy", modified=False, payload={}
+        )
+
+
+@pytest.mark.asyncio
+async def test_hook_escalation_still_waits_when_the_switch_is_on(
+    registry, approval_manager, monkeypatch
+):
+    """A policy hook asked for a person; the user switch does not answer it."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.get_hook_manager",
+        lambda: _EscalatingHooks(),
+    )
+    record = registry.start(conversation_id="conv-hook", user_email=USER)
+    record.note_auto_approve({"auto_approve_tools": True})
+    set_current_run(record.run_id, record.conversation_id)
+    frames = []
+
+    result = await _run(
+        "call_hook_escalated",
+        {"user_email": USER, "session_id": record.session_id, "auto_approve_tools": True},
+        frames,
+    )
+
+    assert result.success is False
+    assert result.error == "Approval timeout"
+    request = next(f for f in frames if f.get("type") == "tool_approval_request")
+    assert request["admin_required"] is False
+    assert request["auto_approvable"] is False
+
+
+@pytest.mark.asyncio
+async def test_approval_frame_tells_the_browser_whether_it_may_auto_answer(
+    registry, approval_manager, monkeypatch
+):
+    """The browser responders honour this field, so it must match the gate."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+
+    # Switch off, user-started turn: the browser may answer once it is on.
+    clear_current_run()
+    frames = []
+    await _run("call_frame_plain", {"user_email": USER, "session_id": "s-frame"}, frames)
+    request = next(f for f in frames if f.get("type") == "tool_approval_request")
+    assert request["auto_approvable"] is True
+
+    # A launched child of an untracked turn: no parent_run_id, still excluded.
+    child = registry.start(conversation_id="conv-frame-child", user_email=USER, depth=1)
+    child.launch_spec = {"source": "atlas_launch", "model": "m"}
+    set_current_run(child.run_id, child.conversation_id)
+    assert child.parent_run_id is None
+    frames = []
+    await _run("call_frame_child", {"user_email": USER, "session_id": child.session_id}, frames)
+    request = next(f for f in frames if f.get("type") == "tool_approval_request")
+    assert request["auto_approvable"] is False
+
+    # Admin-required: never the user's switch to answer.
+    clear_current_run()
+    _patch_gate(monkeypatch, admin_required=True, timeout=0.2)
+    frames = []
+    await _run("call_frame_admin", {"user_email": USER, "session_id": "s-frame"}, frames)
+    request = next(f for f in frames if f.get("type") == "tool_approval_request")
+    assert request["auto_approvable"] is False

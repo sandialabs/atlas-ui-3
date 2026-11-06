@@ -134,6 +134,7 @@ function approvalRow(request) {
     arguments: request.arguments || {},
     allow_edit: request.allow_edit !== false,
     admin_required: !!request.admin_required,
+    auto_approvable: request.auto_approvable !== false,
     status: 'pending',
     timestamp: new Date().toISOString(),
   }

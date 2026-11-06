@@ -386,4 +386,43 @@ describe('useSettings', () => {
       expect(result.current.getSetting('maxIterations')).toBe(result.current.settings.maxIterations)
     })
   })
+  describe('cross-tab sync', () => {
+    it('adopts another tab\'s newer write, even for a key this tab changed', () => {
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({ autoApproveTools: true }))
+      const { result } = renderHook(() => useSettings())
+      act(() => {
+        result.current.updateSettings({ autoApproveTools: true })
+      })
+      expect(result.current.settings.autoApproveTools).toBe(true)
+
+      // Another tab turns the switch off.
+      const written = JSON.stringify({ ...DEFAULTS, autoApproveTools: false })
+      localStorageMock.getItem.mockReturnValue(written)
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key: 'chatui-settings', newValue: written }))
+      })
+
+      expect(result.current.settings.autoApproveTools).toBe(false)
+      expect(result.current.readLatestSettings().autoApproveTools).toBe(false)
+    })
+
+    it('ignores unrelated keys and unparseable values', () => {
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({ autoApproveTools: true }))
+      const { result } = renderHook(() => useSettings())
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key: 'other', newValue: '{"autoApproveTools":false}' }))
+        window.dispatchEvent(new StorageEvent('storage', { key: 'chatui-settings', newValue: 'not json' }))
+      })
+      expect(result.current.settings.autoApproveTools).toBe(true)
+    })
+
+    it('readLatestSettings reads the persisted value, not render state', () => {
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({ autoApproveTools: true }))
+      const { result } = renderHook(() => useSettings())
+      // Storage changed without an event reaching this tab yet.
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({ autoApproveTools: false }))
+      expect(result.current.settings.autoApproveTools).toBe(true)
+      expect(result.current.readLatestSettings().autoApproveTools).toBe(false)
+    })
+  })
 })

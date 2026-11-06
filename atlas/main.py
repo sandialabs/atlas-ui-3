@@ -2623,7 +2623,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     run_session_id=(run_record.session_id if run_record else None),
                     turn_failure=turn_failure,
                     handle_chat=handle_chat,
-                    untracked_session_id=turn_session_id,
                 ):
                     """Run handle_chat so a dead socket cannot orphan the task.
 
@@ -2658,14 +2657,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         error_message = str(e)
                         raise
                     finally:
-                        if run_id is None:
-                            # The untracked turn is over, so its live switch
-                            # entry can go. A tool still inside this task has
-                            # already read the bit.
-                            from atlas.application.chat.auto_approve_state import (
-                                clear_session_auto_approve,
-                            )
-                            clear_session_auto_approve(untracked_session_id)
                         # A tracked run reaches a terminal state here, and it
                         # has to be in a ``finally``: a run left non-terminal
                         # because its task died in an unexpected way would hold
@@ -2710,7 +2701,28 @@ async def websocket_endpoint(websocket: WebSocket):
                                 pass
 
                 if run_record is None:
+                    # Open the live switch entry before the task exists. The
+                    # service only reaches the tool loop after several awaits;
+                    # an off-toggle received in that window must update this
+                    # entry, not be overwritten by the admission value later.
+                    from atlas.application.chat.auto_approve_state import (
+                        begin_untracked_turn,
+                    )
+                    begin_untracked_turn(
+                        turn_session_id, data.get("auto_approve_tools") is True
+                    )
                     chat_task = asyncio.create_task(handle_chat_guarded())
+                    # Release the hold when the task is done, however it ends.
+                    # A done callback also runs for a task cancelled before
+                    # its first step, where a ``finally`` inside it would not.
+                    # An overlapping turn on the same session keeps the entry,
+                    # and the latest toggle, until it finishes too.
+                    from atlas.application.chat.auto_approve_state import (
+                        end_untracked_turn,
+                    )
+                    chat_task.add_done_callback(
+                        lambda _task, _sid=turn_session_id: end_untracked_turn(_sid)
+                    )
                     active_chat_task["task"] = chat_task
                     active_chat_task["kind"] = "chat"
                 else:

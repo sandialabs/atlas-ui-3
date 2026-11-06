@@ -128,8 +128,10 @@ confirmation before they run.
 Some calls never reach the switch at all, admin-marked ones included. A policy
 hook can approve a call on its own, and approving an agent launch covers the
 tool calls made inside that sub-conversation, so neither prompts. A hook that
-*escalates* a call to "ask" is treated like any other unmarked call: with
-auto-approve on, it is approved automatically.
+*escalates* a call to "ask" wants a person to look at it, so auto-approve does
+not answer it; neither does it answer a call inside a conversation an agent
+launched that the launch approval did not cover. Those rows say auto-approve
+is on but the call needs your answer.
 
 The same switch sits on the **Active Tools** bar above the message box
 (**Auto-approve: Off / On**) whenever tools are selected, and each approval

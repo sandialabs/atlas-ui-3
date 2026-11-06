@@ -363,9 +363,22 @@ last value is kept if the socket drops while a tool is still in flight, so
 auto-approve stays on when that is how the user left it. A toggle that could
 not be sent because the socket was down is sent again when the page reconnects.
 
-The client still answers a request the server did emit (the switch is off, or
-an administrator marked the tool). Those requests are replayed when the
-conversation is opened again, as described below.
+Some requests stay on the gate with the switch on: an admin-mandated tool, a
+call a policy hook escalated to "ask", and a tool call inside a launched child
+conversation (judged by launch lineage -- depth or launch spec -- since a child
+of an untracked turn has no `parent_run_id`). Each `tool_approval_request`
+carries `auto_approvable`; it is `false` for those, and the browser does not
+answer a request marked that way, in the open conversation or in the
+background. The user approves or rejects it by hand. Pending requests are
+replayed when the conversation is opened again, as described below.
+
+The live switch entry for an untracked turn is opened before the turn's task
+is scheduled, so an off-toggle that arrives while the turn is still starting
+is kept. Each untracked turn holds the entry until it finishes; a turn being
+torn down while the next starts on the same session does not drop the latest
+toggle. A page that reconnects announces the latest saved setting (tabs share
+it), not the value it last rendered, so a stale second tab does not turn
+auto-approve back on.
 
 ### Pending approvals are replayed, not lost
 

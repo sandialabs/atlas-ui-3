@@ -8,8 +8,19 @@
 export const resolveAutoApproved = (message, settings) => {
   if (typeof message?.auto_approved === 'boolean') return message.auto_approved
   if (message?.status !== 'pending') return false
-  return Boolean(settings?.autoApproveTools && !message?.admin_required)
+  return clientMayAutoApprove(message, settings)
 }
+
+// Whether the auto-approve switch may answer this request in the browser.
+// The server sends `auto_approvable: false` for a request it deliberately
+// left on the gate even with the switch on: a policy hook escalated it to
+// "ask", or it belongs to a model-launched child conversation. Answering it
+// here would undo that. Admin-required tools are never the switch's to answer.
+export const clientMayAutoApprove = (message, settings) => Boolean(
+  settings?.autoApproveTools &&
+  !message?.admin_required &&
+  message?.auto_approvable !== false
+)
 
 // One wording for what Auto-Approve Tool Calls does, shared by the settings
 // toggle, the Active Tools strip and the approval row, so the three never
@@ -18,10 +29,10 @@ export const resolveAutoApproved = (message, settings) => {
 // The server applies the same switch without a connected browser. This copy
 // still describes the boundary the switch does not cross: it never answers a
 // tool an administrator marked (per-tool require_approval, or
-// FORCE_TOOL_APPROVAL_GLOBALLY). A policy hook or an agent launch can still
-// skip the prompt on its own, and a hook that escalates a call to "ask" sends
-// admin_required: false, so auto-approve answers it like any other non-admin
-// call. The copy makes no "always" promise.
+// FORCE_TOOL_APPROVAL_GLOBALLY), a call a policy hook escalated to "ask", or a
+// tool call in a conversation an agent launched. A policy hook or an agent
+// launch can still skip the prompt on its own. The copy makes no "always"
+// promise.
 export const AUTO_APPROVE_OFF_TEXT =
   'Tool calls ask for your approval before they run, unless your deployment\'s policy or an agent launch you approved already covers them. This is the default.'
 export const AUTO_APPROVE_ON_TEXT =
@@ -35,6 +46,9 @@ export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APP
 export const approvalReason = (message, settings) => {
   if (message?.admin_required) {
     return 'An administrator has marked this tool as requiring approval, so auto-approve does not answer it.'
+  }
+  if (message?.auto_approvable === false && settings?.autoApproveTools) {
+    return 'Auto-approve is on, but this call needs your answer: a policy check asked for review, or it runs in a conversation an agent launched.'
   }
   if (message?.auto_approved === false && settings?.autoApproveTools) {
     return 'Auto-approve is on, but this call could not be approved automatically. Approve or reject it here.'

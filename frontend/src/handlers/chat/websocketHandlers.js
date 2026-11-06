@@ -959,6 +959,11 @@ export function createWebSocketHandler(deps) {
               arguments: data.arguments || {},
               allow_edit: data.allow_edit !== false,
               admin_required: data.admin_required || false,
+              // False when the server kept this call on the gate on purpose
+              // (a policy hook escalation or a launched child): the
+              // auto-approve switch must not answer it. Absent from older
+              // servers, which means the old behaviour.
+              auto_approvable: data.auto_approvable !== false,
               status: 'pending',
               timestamp: new Date().toISOString()
             }, data),
