@@ -21,7 +21,7 @@ import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
-import { isCanvasArtifactMessage, latestCanvasArtifactContent, messagesForRestore } from '../utils/canvasArtifacts'
+import { canvasSeen, createSeenCanvas, isCanvasArtifactMessage, latestCanvasArtifactContent, messagesForRestore, noteCanvasSeen } from '../utils/canvasArtifacts'
 import { isTerminalRun, liveInvocationCount, reconcileExecution } from '../utils/executionState'
 import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
@@ -263,6 +263,13 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	// Canvas documents this tab has shown for the open conversation. A
+	// reconnect or joined poll compares the stored artifact with this, not
+	// with the panel text, which a file view clears (issue #1157).
+	const seenCanvasRef = useRef(createSeenCanvas())
+	useEffect(() => {
+		if (files.canvasContent) noteCanvasSeen(seenCanvasRef.current, activeConversationIdRef.current, files.canvasContent)
+	}, [files.canvasContent])
 	const reconnectResyncGenerationRef = useRef(0)
 	const localSaveTimerRef = useRef(null)
 	// Which account a local conversation belongs to (issue #1050): a
@@ -1364,6 +1371,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		setActiveConversationClassification(null)
 		conversationLoadedRef.current = false
 		files.setCanvasContent('')
+		seenCanvasRef.current = createSeenCanvas()
 		files.setCustomUIContent(null)
 		files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
 
@@ -1494,7 +1502,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (!reconnecting) {
 			// The panel is React state. A saved canvas_artifact is the only
 			// copy of the document after a reload (issue #1157).
-			files.setCanvasContent(latestCanvasArtifactContent(conversationData.messages))
+			const restored = latestCanvasArtifactContent(conversationData.messages)
+			seenCanvasRef.current = createSeenCanvas(conversationData.id, restored)
+			files.setCanvasContent(restored)
 			files.setCustomUIContent(null)
 			files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
 		} else if (conversationData.in_flight !== true) {
@@ -1503,9 +1513,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// disconnected. An in-flight run is ahead of the flushed snapshot:
 			// the panel may already show a newer canvas that has not been
 			// written to history yet, and this reload must not put the older
-			// one back.
+			// one back. A document this tab already showed is not news either:
+			// the user may have moved on to a file view since.
 			const restored = latestCanvasArtifactContent(conversationData.messages)
-			if (restored) files.setCanvasContent(restored)
+			if (restored && !canvasSeen(seenCanvasRef.current, conversationData.id, restored)) {
+				noteCanvasSeen(seenCanvasRef.current, conversationData.id, restored)
+				files.setCanvasContent(restored)
+			}
 		}
 
 		// Track the loaded conversation. The ref is set synchronously too: the
@@ -1677,14 +1691,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// A canvas artifact is not a transcript row (isLiveOnlyRow is true for
 		// it). Counting it here would make every reconnect after a canvas
 		// write look like a longer transcript and resync forever. A document
-		// the panel does not already show is still a real change: the frame
-		// that filled the panel may have been missed while the socket was down.
+		// this tab has not shown is still a real change: the frame that filled
+		// the panel may have been missed while the socket was down. Compare
+		// with what was shown, not the panel text, which a file view clears.
 		const rawStored = Array.isArray(data.messages) ? data.messages : []
 		const storedCanvas = latestCanvasArtifactContent(rawStored)
 		// An active run's panel can be newer than the flushed artifact. Only
 		// an idle conversation treats a different stored canvas as a change.
 		const runActive = isRunActive(runsByConversationRef.current[id]) || data.in_flight === true
-		if (!runActive && storedCanvas && storedCanvas !== (canvasContentRef.current || '')) return true
+		if (!runActive && storedCanvas && storedCanvas !== (canvasContentRef.current || '') && !canvasSeen(seenCanvasRef.current, id, storedCanvas)) return true
 		const stored = rawStored.filter(msg => !isCanvasArtifactMessage(msg))
 		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 		if (stored.length !== current.length) return true
@@ -1818,10 +1833,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// An in-flight poll must not replace a document already on screen.
 		// That write closes the files panel, and the stored row can be older
 		// than what this tab is showing. An empty panel still takes the
-		// stored document. An unchanged document is left alone.
+		// stored document. A document this tab already showed is left alone,
+		// so a file view that cleared the panel is not replaced by it.
 		const restoredCanvas = latestCanvasArtifactContent(conversationData.messages)
 		const panelNow = canvasContentRef.current || ''
-		if (restoredCanvas && restoredCanvas !== panelNow && !(stillInFlight && panelNow)) {
+		if (restoredCanvas && restoredCanvas !== panelNow && !canvasSeen(seenCanvasRef.current, conversationData.id, restoredCanvas) && !(stillInFlight && panelNow)) {
+			noteCanvasSeen(seenCanvasRef.current, conversationData.id, restoredCanvas)
 			setCanvasContentRef.current(restoredCanvas)
 		}
 		const current = viewMessages.filter(m => !isLiveOnlyRow(m) && !m._streaming)
@@ -2148,7 +2165,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					text += `${m.role.toUpperCase()}:\n${m.content}\n\n`
 				}
 			})
-			if (files.canvasContent) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${files.canvasContent}\n`
+			// A file view clears the panel; the saved artifact still holds the document.
+			const exportCanvas = files.canvasContent || latestCanvasArtifactContent(messages)
+			if (exportCanvas) text += `${'='.repeat(50)}\nCANVAS CONTENT:\n${exportCanvas}\n`
 			const blob = new Blob([text], { type: 'text/plain' })
 			const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)
 			openBlobInNewTab(blob, `chat-export-${ts}.txt`)
@@ -2169,7 +2188,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					exportVersion: '1.3'
 				},
 				conversation: exportConversation,
-				canvasContent: files.canvasContent || null
+				canvasContent: files.canvasContent || latestCanvasArtifactContent(messages) || null
 			}
 			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
 			const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)

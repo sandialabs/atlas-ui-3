@@ -30,17 +30,13 @@ def canvas_text(value: Any) -> str:
         return str(value)
 
 
-def canvas_text_from_arguments(arguments: Any) -> str:
-    """Canvas body from a canvas tool's ``content`` argument."""
-    if not isinstance(arguments, dict):
-        return ""
-    return canvas_text(arguments.get("content"))
-
-
 def canvas_artifact_message(entry: Dict[str, Any]) -> Optional[Message]:
     """A display-only row for one canvas write, or None when it has no text."""
     content = entry.get("canvas_content")
     if not isinstance(content, str) or content == "":
+        return None
+    # A failed write never reached the panel as the document.
+    if entry.get("status") == "failed":
         return None
     artifact_id = entry.get("artifact_id") or entry.get("invocation_id") or entry.get("tool_call_id")
     metadata: Dict[str, Any] = {

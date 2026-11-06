@@ -669,9 +669,10 @@ export function createWebSocketHandler(deps) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
           if (isCanvasTool(data.tool_name)) {
-            // No transcript bubble. The hidden artifact is what a local save
-            // reloads; the server records the same row on flush.
-            noteCanvasArtifact(mapMessages, data, canvasFrameText(data), 'calling')
+            // No transcript bubble and no artifact yet. The arguments are a
+            // draft: an approval can edit them and a denied or blocked call
+            // never reaches the panel. The canvas_content frame creates the
+            // hidden artifact with the text that was actually shown.
             break
           }
           appendOnce(
@@ -741,6 +742,7 @@ export function createWebSocketHandler(deps) {
             break
           }
           if (isCanvasTool(data.tool_name)) {
+            noteCanvasArtifact(mapMessages, data, '', 'failed')
             addMessage({
               role: 'system',
               content: `Canvas render failed: ${data.error || 'Unknown error'}`,
@@ -776,10 +778,12 @@ export function createWebSocketHandler(deps) {
           if (data.content) {
             setCanvasContent(typeof data.content === 'string' ? data.content : String(data.content))
           }
-          // Progress frames from other tools omit the id and stay panel-only.
-          // An identified canvas-tool frame updates the hidden artifact so a
-          // local save keeps the text the panel showed, in display order.
-          if (data.tool_call_id || data.invocation_id) {
+          // Progress frames from other tools stay panel-only. A tracked tool
+          // stamps its own id and name on them, so the canvas tool name is
+          // what marks a document write. That frame updates the hidden
+          // artifact so a local save keeps the text the panel showed, in
+          // display order.
+          if ((data.tool_call_id || data.invocation_id) && isCanvasTool(data.tool_name)) {
             const text = canvasFrameText(data)
             if (text) noteCanvasArtifact(mapMessages, data, text)
           }

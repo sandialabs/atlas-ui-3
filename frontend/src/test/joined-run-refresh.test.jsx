@@ -1433,6 +1433,42 @@ describe('refreshJoinedConversation (issue #959)', () => {
     }
   })
 
+  it('does not put a shown canvas back over a later file view', async () => {
+    const script = 'shown document'
+    const previous = h.canvasContent
+    h.canvasContent = ''
+    const artifact = {
+      role: 'system',
+      content: 'Canvas artifact',
+      message_type: 'canvas_artifact',
+      metadata: { canvas_content: script, artifact_id: 'c1' },
+    }
+    try {
+      const { result } = renderChat()
+      // The open put this document on screen. The panel then switched to a
+      // file view, which leaves the canvas text empty.
+      await loadConversation(result, {
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original'), artifact],
+        metadata: {},
+      })
+      h.setCanvasContent.mockClear()
+      for (const inFlight of [false, true]) {
+        act(() => {
+          result.current.refreshJoinedConversation({
+            id: 'conv-1',
+            metadata: {},
+            in_flight: inFlight,
+            messages: [storedChat('user', 'Original'), artifact],
+          }, { live: inFlight })
+        })
+      }
+      expect(h.setCanvasContent).not.toHaveBeenCalled()
+    } finally {
+      h.canvasContent = previous
+    }
+  })
+
   it('does not rewrite the panel when the stored canvas is unchanged', async () => {
     const script = 'same document'
     const previous = h.canvasContent

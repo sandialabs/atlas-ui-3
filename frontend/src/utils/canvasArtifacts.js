@@ -18,6 +18,9 @@ export function isCanvasArtifactMessage(message) {
 // Exact text the panel should show. A string is kept character for character.
 export function canvasArtifactBody(message) {
   if (!isCanvasArtifactMessage(message)) return ''
+  // A failed write never reached the panel as the document.
+  const status = message.status ?? message.metadata?.status
+  if (status === 'failed') return ''
   const raw = message.canvas_content ?? message.metadata?.canvas_content
   if (typeof raw === 'string') return raw
   if (raw == null) return ''
@@ -64,6 +67,7 @@ export function messagesForRestore(messages) {
   for (const msg of messages) {
     if (!msg || typeof msg !== 'object') continue
     if (isCanvasArtifactMessage(msg)) {
+      if (!canvasArtifactBody(msg)) continue
       const metadata = msg.metadata && typeof msg.metadata === 'object' ? { ...msg.metadata } : {}
       if (!metadata.message_type) metadata.message_type = CANVAS_ARTIFACT_TYPE
       if (metadata.canvas_content == null && typeof msg.canvas_content === 'string') {
@@ -83,4 +87,47 @@ export function messagesForRestore(messages) {
     out.push({ role: msg.role, content: msg.content || '' })
   }
   return out
+}
+
+// Canvas documents this tab has already put on screen, per conversation.
+// The panel text alone cannot answer "is the stored document news?": a file
+// or tool view clears it, and a reconnect or joined poll would then put an
+// older document back over the newer view. A stored document is applied only
+// when this tab has not shown it yet (one saved while the socket was down,
+// or one a joined tab never received as a frame).
+const MAX_SEEN_CANVAS = 20
+
+export function createSeenCanvas(id = null, text = '') {
+  const record = { id: id ?? null, texts: [] }
+  if (text) record.texts.push(text)
+  return record
+}
+
+// A new chat gets its id only after the first save, so texts shown while the
+// id was still null belong to the conversation that id names.
+function adoptConversation(record, id) {
+  if (record.id === (id ?? null)) return true
+  if (record.id == null && id != null) {
+    record.id = id
+    return true
+  }
+  return false
+}
+
+export function canvasSeen(record, id, text) {
+  if (!record || !text) return false
+  if (record.id !== (id ?? null) && !(record.id == null && id != null)) return false
+  return record.texts.includes(text)
+}
+
+export function noteCanvasSeen(record, id, text) {
+  if (!record || !text) return
+  if (!adoptConversation(record, id)) {
+    record.id = id ?? null
+    record.texts = []
+  }
+  const at = record.texts.indexOf(text)
+  if (at !== -1) record.texts.splice(at, 1)
+  record.texts.push(text)
+  if (record.texts.length > MAX_SEEN_CANVAS) record.texts.shift()
 }

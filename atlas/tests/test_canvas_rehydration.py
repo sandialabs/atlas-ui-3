@@ -63,6 +63,7 @@ def _canvas_events(tool_name, content, tool_call_id="c1", result="Canvas content
         {
             "type": "canvas_content",
             "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
             "content": content,
         },
         {
@@ -131,8 +132,8 @@ class TestRecorderKeepsCanvasText:
                 "type": "tool_start", "tool_call_id": "b",
                 "tool_name": "atlas_canvas", "arguments": {"content": "B"},
             },
-            {"type": "canvas_content", "tool_call_id": "b", "content": "B-shown"},
-            {"type": "canvas_content", "tool_call_id": "a", "content": "A-shown"},
+            {"type": "canvas_content", "tool_call_id": "b", "tool_name": "atlas_canvas", "content": "B-shown"},
+            {"type": "canvas_content", "tool_call_id": "a", "tool_name": "atlas_canvas", "content": "A-shown"},
             {
                 "type": "tool_complete", "tool_call_id": "b",
                 "tool_name": "atlas_canvas", "success": True, "result": "ok",
@@ -266,6 +267,32 @@ class TestRecorderKeepsCanvasText:
         assert artifact.metadata["canvas_content"] == "doc"
         assert artifact.metadata["step"] == 1
 
+    @pytest.mark.parametrize("success", [True, False])
+    def test_only_a_successful_write_is_shown(self, success):
+        from unittest.mock import MagicMock
+
+        from atlas.application.chat.utilities.event_notifier import notify_tool_complete
+        from atlas.domain.messages.models import ToolResult
+
+        tool_call = MagicMock()
+        tool_call.id = "c1"
+        tool_call.function.name = "atlas_canvas"
+        captured = []
+
+        async def _capture(payload):
+            captured.append(payload)
+
+        result = ToolResult(tool_call_id="c1", content="ok" if success else "blocked", success=success)
+        _run(notify_tool_complete(tool_call, result, {"content": "doc"}, _capture))
+        shown = [item for item in captured if item.get("type") == "canvas_content"]
+        if success:
+            assert shown == [{
+                "type": "canvas_content", "content": "doc",
+                "tool_call_id": "c1", "tool_name": "atlas_canvas",
+            }]
+        else:
+            assert shown == []
+
     def test_approval_edit_is_what_later_turns_read(self):
         from unittest.mock import AsyncMock, MagicMock
 
@@ -346,7 +373,7 @@ class TestRecorderKeepsCanvasText:
                 "type": "tool_start", "tool_call_id": "c1",
                 "tool_name": "atlas_canvas", "arguments": {"content": "draft"},
             },
-            {"type": "canvas_content", "tool_call_id": "c1", "content": SCRIPT},
+            {"type": "canvas_content", "tool_call_id": "c1", "tool_name": "atlas_canvas", "content": SCRIPT},
             {
                 "type": "tool_complete", "tool_call_id": "c1",
                 "tool_name": "atlas_canvas", "success": True, "result": "short",
@@ -384,6 +411,10 @@ class TestRecorderKeepsCanvasText:
                 "tool_name": "atlas_canvas", "arguments": {"content": {"k": "v"}},
             },
             {
+                "type": "canvas_content", "tool_call_id": "c1",
+                "tool_name": "atlas_canvas", "content": {"k": "v"},
+            },
+            {
                 "type": "tool_complete", "tool_call_id": "c1",
                 "tool_name": "atlas_canvas", "success": True, "result": "ok",
             },
@@ -392,17 +423,20 @@ class TestRecorderKeepsCanvasText:
         recorder.flush(history)
         assert _artifacts(history)[0].metadata["canvas_content"] == '{"k": "v"}'
 
-    def test_stop_keeps_the_text_and_does_not_announce_a_row(self):
+    def test_stop_keeps_the_shown_text_and_does_not_announce_a_row(self):
         seen = []
 
         async def inner(payload):
             seen.append(payload)
 
         recorder = ToolCallRecorder(inner)
-        _play(recorder, [{
-            "type": "tool_start", "tool_call_id": "c1",
-            "tool_name": "atlas_canvas", "arguments": {"content": SCRIPT},
-        }])
+        _play(recorder, [
+            {
+                "type": "tool_start", "tool_call_id": "c1",
+                "tool_name": "atlas_canvas", "arguments": {"content": SCRIPT},
+            },
+            {"type": "canvas_content", "tool_call_id": "c1", "tool_name": "atlas_canvas", "content": SCRIPT},
+        ])
         history = ConversationHistory()
         recorder.flush(history, mark_incomplete=True)
         _run(recorder.notify_incomplete())
@@ -410,6 +444,69 @@ class TestRecorderKeepsCanvasText:
         assert artifact.metadata["canvas_content"] == SCRIPT
         assert artifact.metadata["status"] == "interrupted"
         assert not any(p.get("type") == "tool_interrupted" for p in seen)
+
+    def test_stop_before_display_stores_no_draft(self):
+        recorder = ToolCallRecorder(None)
+        _play(recorder, [{
+            "type": "tool_start", "tool_call_id": "c1",
+            "tool_name": "atlas_canvas", "arguments": {"content": "draft awaiting approval"},
+        }])
+        history = ConversationHistory()
+        recorder.flush(history, mark_incomplete=True)
+        assert _artifacts(history) == []
+
+    @pytest.mark.parametrize("settle", [
+        {"type": "tool_error", "error": "Tool blocked by policy hook: no"},
+        {"type": "tool_complete", "success": False, "result": "blocked"},
+    ])
+    def test_denied_write_after_a_shown_one_keeps_the_shown_document(self, settle):
+        recorder = ToolCallRecorder(None)
+        _play(recorder, [
+            *_canvas_events("atlas_canvas", "the real document", tool_call_id="c1"),
+            {
+                "type": "tool_start", "tool_call_id": "c2",
+                "tool_name": "atlas_canvas", "arguments": {"content": "denied draft"},
+            },
+            {"tool_call_id": "c2", "tool_name": "atlas_canvas", **settle},
+        ])
+        history = ConversationHistory()
+        recorder.flush(history)
+        bodies = [item.metadata["canvas_content"] for item in _artifacts(history)]
+        assert bodies == ["the real document"]
+        assert "denied draft" not in latest_canvas_supplement(history.messages, set())
+
+    def test_another_tools_stamped_frame_is_not_a_document(self):
+        from atlas.application.chat.runs.context import clear_current_run, set_current_run
+
+        set_current_run("run-1", "conv-1")
+        try:
+            recorder = ToolCallRecorder(None)
+        finally:
+            clear_current_run()
+        canvas_identity = {
+            "invocation_id": "run-1:0:call_0", "run_id": "run-1", "step": 0,
+            "tool_call_id": "call_0", "tool_name": "atlas_canvas",
+        }
+        # A later step's MCP tool reuses call_0 and emits a canvas update
+        # through its tracked callback, which stamps its own identity.
+        other_identity = {
+            "invocation_id": "run-1:1:call_0", "run_id": "run-1", "step": 1,
+            "tool_call_id": "call_0", "tool_name": "demo_render",
+        }
+        _play(recorder, [
+            {"type": "tool_start", "arguments": {"content": "doc"}, **canvas_identity},
+            {"type": "canvas_content", "content": "doc", **canvas_identity},
+            {"type": "tool_complete", "success": True, "result": "ok", **canvas_identity},
+            {"type": "canvas_content", "content": "progress view", **other_identity},
+            # The same tool name with a different invocation still must not
+            # land on the earlier write.
+            {"type": "canvas_content", "content": "stray", **{**canvas_identity, "invocation_id": "run-1:2:call_0"}},
+        ])
+        history = ConversationHistory()
+        recorder.flush(history)
+        artifacts = _artifacts(history)
+        assert [item.metadata["canvas_content"] for item in artifacts] == ["doc"]
+        assert artifacts[0].metadata["artifact_id"] == "run-1:0:call_0"
 
 
 class TestLaterTurnsCanReadTheCanvas:

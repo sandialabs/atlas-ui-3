@@ -464,6 +464,13 @@ from the order they started, the saved order follows the order the panel
 showed them. A tracked run stamps each write with its invocation id, so a
 provider tool-call id reused on a later step stays a separate document.
 
+Only text that reached the panel is stored. A canvas call that is denied,
+blocked by a hook, or fails leaves no row, so it cannot replace the
+document the user saw. Canvas updates that other tools send while they run
+are shown in the panel but are not saved as canvas documents. A reconnect
+or a joined tab puts a stored document back only when this tab has not
+already shown it, so a file view the user switched to stays on screen.
+
 A browser-local save does not write the conversation on the server. The live
 canvas frames also append a hidden `canvas_artifact` message, and that
 message is what IndexedDB reloads into the panel.

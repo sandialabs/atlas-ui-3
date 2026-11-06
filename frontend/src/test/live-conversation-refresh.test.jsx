@@ -1068,4 +1068,64 @@ describe('canvas rehydration (issue #1157)', () => {
     expect(h.setCanvasContent).not.toHaveBeenCalled()
     unmount()
   })
+
+  it('does not put a shown canvas back over a later file view on an idle reconnect', async () => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+      })
+    })
+    // A live canvas write reaches the panel, then a tool's file output
+    // replaces it with a file view, which clears the canvas text.
+    await act(async () => { h.canvasContent = 'live document'; rerender() })
+    await act(async () => { h.canvasContent = ''; rerender() })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: false,
+        metadata: {},
+        messages: [
+          storedChat('user', 'Original'),
+          storedCanvas('live document'),
+          storedChat('assistant', 'Missed answer'),
+        ],
+      }),
+    })
+    h.setCanvasContent.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(result.current.messages.some(m => m.content === 'Missed answer')).toBe(true)
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('does not resync an idle reconnect only because a file view cleared the panel', async () => {
+    const { result, rerender, unmount } = renderChat()
+    const stored = [
+      storedChat('user', 'Original'),
+      storedCanvas(script),
+      storedChat('assistant', 'Done'),
+    ]
+    await act(async () => {
+      await result.current.loadSavedConversation({ id: 'conv-1', messages: stored })
+    })
+    await act(async () => { h.canvasContent = ''; rerender() })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'conv-1', in_flight: false, metadata: {}, messages: stored }),
+    })
+    h.setCanvasContent.mockClear()
+    h.sendMessage.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+    const restores = h.sendMessage.mock.calls.map(c => c[0]).filter(c => c?.type === 'restore_conversation')
+    expect(restores).toHaveLength(0)
+    unmount()
+  })
 })

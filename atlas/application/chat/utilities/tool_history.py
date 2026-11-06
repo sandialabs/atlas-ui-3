@@ -40,7 +40,6 @@ from atlas.application.chat.runs.context import get_current_run
 from atlas.application.chat.utilities.canvas_history import (
     canvas_artifact_messages,
     canvas_text,
-    canvas_text_from_arguments,
 )
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
 from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, SLEEP_TOOL_NAME, normalize_tool_name
@@ -215,13 +214,16 @@ class ToolCallRecorder:
         return entry
 
     def _record_canvas(self, payload: Dict[str, Any]) -> None:
-        """Remember one canvas-tool event. The result text is not the document."""
+        """Remember one canvas-tool event. The result text is not the document.
+
+        The text itself comes only from the ``canvas_content`` frame. The
+        tool_start arguments are a draft: an approval may edit them, and a
+        denied or hook-blocked call never reaches the panel, so storing them
+        would put an undisplayed draft over the document the user saw.
+        """
         entry = self._canvas_entry(payload)
         event_type = payload.get("type")
         if event_type == "tool_start":
-            text = canvas_text_from_arguments(payload.get("arguments"))
-            if text:
-                entry["canvas_content"] = text
             entry.setdefault("status", "calling")
         elif event_type == "tool_complete":
             # ``result`` is the short "Canvas content displayed: ..." echo.
@@ -231,18 +233,29 @@ class ToolCallRecorder:
             entry["status"] = "failed"
 
     def _note_displayed_canvas(self, payload: Dict[str, Any]) -> None:
-        """Overwrite a known write with the shown text and move it to the end."""
+        """Store the shown text on its canvas write and move it to the end.
+
+        Only a frame named for the canvas tool counts. A tracked tool's
+        callback stamps its own id and name on the canvas updates it emits,
+        and those must not become documents or overwrite an earlier write
+        that reused the same provider id.
+        """
         tool_call_id = payload.get("tool_call_id")
         if not tool_call_id:
+            return
+        if normalize_tool_name(payload.get("tool_name")) != CANVAS_TOOL_NAME:
             return
         text = canvas_text(payload.get("content"))
         if not text:
             return
-        key = payload.get("invocation_id") or tool_call_id
+        invocation = payload.get("invocation_id")
+        key = invocation or tool_call_id
         entry = self._canvas.get(key)
-        if entry is None:
+        if entry is None and not invocation:
+            # An untracked frame matches the open write with this id. A
+            # tracked frame never falls back across invocation ids.
             for candidate_key, candidate in self._canvas.items():
-                if candidate.get("tool_call_id") == tool_call_id:
+                if candidate.get("tool_call_id") == tool_call_id and not candidate.get("invocation_id"):
                     key = candidate_key
                     entry = candidate
                     break

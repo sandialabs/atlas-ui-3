@@ -200,6 +200,10 @@ class TestToolCallRecorder:
                 "arguments": {"content": "x"},
             })
             await recorder({
+                "type": "canvas_content", "tool_call_id": "c1",
+                "tool_name": "canvas_canvas", "content": "x",
+            })
+            await recorder({
                 "type": "tool_complete", "tool_call_id": "c1",
                 "tool_name": "canvas_canvas", "success": True, "result": "ok",
             })

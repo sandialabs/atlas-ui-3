@@ -91,3 +91,27 @@ describe('canvas artifacts (issue #1157)', () => {
     })
   })
 })
+
+describe('seen canvas record', () => {
+  it('remembers shown documents per conversation', async () => {
+    const { canvasSeen, createSeenCanvas, noteCanvasSeen } = await import('../utils/canvasArtifacts')
+    const record = createSeenCanvas('conv-1', 'a')
+    expect(canvasSeen(record, 'conv-1', 'a')).toBe(true)
+    expect(canvasSeen(record, 'conv-2', 'a')).toBe(false)
+    noteCanvasSeen(record, 'conv-1', 'b')
+    expect(canvasSeen(record, 'conv-1', 'a')).toBe(true)
+    noteCanvasSeen(record, 'conv-2', 'c')
+    expect(canvasSeen(record, 'conv-1', 'a')).toBe(false)
+    expect(canvasSeen(record, 'conv-2', 'c')).toBe(true)
+  })
+
+  it('carries a new chat\'s shown documents over to its first saved id', async () => {
+    const { canvasSeen, createSeenCanvas, noteCanvasSeen } = await import('../utils/canvasArtifacts')
+    const record = createSeenCanvas()
+    noteCanvasSeen(record, null, 'draft doc')
+    expect(canvasSeen(record, 'conv-9', 'draft doc')).toBe(true)
+    noteCanvasSeen(record, 'conv-9', 'next')
+    expect(record.id).toBe('conv-9')
+    expect(canvasSeen(record, 'conv-9', 'draft doc')).toBe(true)
+  })
+})
