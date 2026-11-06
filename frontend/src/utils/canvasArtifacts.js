@@ -97,9 +97,13 @@ export function messagesForRestore(messages) {
 // or one a joined tab never received as a frame).
 const MAX_SEEN_CANVAS = 20
 
+// `texts` are transient panel values, capped. `applied` are stored documents
+// this tab put on screen from a restore; they are few (one per open,
+// reconnect or joined refill) and are never evicted, so a long run of panel
+// previews cannot make an already-applied document look new again.
 export function createSeenCanvas(id = null, text = '') {
-  const record = { id: id ?? null, texts: [] }
-  if (text) record.texts.push(text)
+  const record = { id: id ?? null, texts: [], applied: [] }
+  if (text) record.applied.push(text)
   return record
 }
 
@@ -117,14 +121,19 @@ function adoptConversation(record, id) {
 export function canvasSeen(record, id, text) {
   if (!record || !text) return false
   if (record.id !== (id ?? null) && !(record.id == null && id != null)) return false
-  return record.texts.includes(text)
+  return record.applied.includes(text) || record.texts.includes(text)
 }
 
-export function noteCanvasSeen(record, id, text) {
+export function noteCanvasSeen(record, id, text, { applied = false } = {}) {
   if (!record || !text) return
   if (!adoptConversation(record, id)) {
     record.id = id ?? null
     record.texts = []
+    record.applied = []
+  }
+  if (applied) {
+    if (!record.applied.includes(text)) record.applied.push(text)
+    return
   }
   const at = record.texts.indexOf(text)
   if (at !== -1) record.texts.splice(at, 1)

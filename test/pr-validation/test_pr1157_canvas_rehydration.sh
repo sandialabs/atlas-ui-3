@@ -56,6 +56,7 @@ async def play(recorder):
     await recorder({
         "type": "canvas_content",
         "tool_call_id": "c1",
+        "tool_name": "atlas_canvas",
         "content": script,
     })
     await recorder({

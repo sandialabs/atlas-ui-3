@@ -1517,7 +1517,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// the user may have moved on to a file view since.
 			const restored = latestCanvasArtifactContent(conversationData.messages)
 			if (restored && !canvasSeen(seenCanvasRef.current, conversationData.id, restored)) {
-				noteCanvasSeen(seenCanvasRef.current, conversationData.id, restored)
+				noteCanvasSeen(seenCanvasRef.current, conversationData.id, restored, { applied: true })
 				files.setCanvasContent(restored)
 			}
 		}
@@ -1838,7 +1838,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const restoredCanvas = latestCanvasArtifactContent(conversationData.messages)
 		const panelNow = canvasContentRef.current || ''
 		if (restoredCanvas && restoredCanvas !== panelNow && !canvasSeen(seenCanvasRef.current, conversationData.id, restoredCanvas) && !(stillInFlight && panelNow)) {
-			noteCanvasSeen(seenCanvasRef.current, conversationData.id, restoredCanvas)
+			noteCanvasSeen(seenCanvasRef.current, conversationData.id, restoredCanvas, { applied: true })
 			setCanvasContentRef.current(restoredCanvas)
 		}
 		const current = viewMessages.filter(m => !isLiveOnlyRow(m) && !m._streaming)

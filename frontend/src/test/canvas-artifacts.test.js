@@ -115,3 +115,16 @@ describe('seen canvas record', () => {
     expect(canvasSeen(record, 'conv-9', 'draft doc')).toBe(true)
   })
 })
+
+describe('seen canvas eviction', () => {
+  it('keeps an applied document after many panel previews', async () => {
+    const { canvasSeen, createSeenCanvas, noteCanvasSeen } = await import('../utils/canvasArtifacts')
+    const record = createSeenCanvas('conv-1', 'restored doc')
+    noteCanvasSeen(record, 'conv-1', 'joined refill', { applied: true })
+    for (let i = 0; i < 50; i += 1) noteCanvasSeen(record, 'conv-1', `preview ${i}`)
+    expect(canvasSeen(record, 'conv-1', 'restored doc')).toBe(true)
+    expect(canvasSeen(record, 'conv-1', 'joined refill')).toBe(true)
+    expect(canvasSeen(record, 'conv-1', 'preview 0')).toBe(false)
+    expect(canvasSeen(record, 'conv-1', 'preview 49')).toBe(true)
+  })
+})
