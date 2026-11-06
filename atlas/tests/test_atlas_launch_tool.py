@@ -2388,7 +2388,7 @@ async def test_a_fenced_parent_cannot_admit_a_child():
         async def ensure_may_act(self, run_id):
             raise RunFencedError(run_id)
 
-    factory = _Factory(lambda c: _ChatService(c))
+    factory = _Factory(_ChatService)
     registry = _install_registry()
     parent = registry.start(conversation_id="conv-parent", user_email="user@example.com")
     registry.set_status(parent.run_id, RunStatus.RUNNING)
