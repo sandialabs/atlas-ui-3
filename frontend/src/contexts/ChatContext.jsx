@@ -1724,12 +1724,6 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// context: without the guard a second caller could splice one
 		// conversation's rows into another's view.
 		if (conversationData.id !== activeConversationIdRef.current) return false
-		// The joined tab never received the owning socket's canvas frames.
-		// Refill the panel from the stored artifact even when the transcript
-		// alignment below refuses, and only when there is text to show so an
-		// idle poll does not clear a document the user is looking at.
-		const restoredCanvas = latestCanvasArtifactContent(conversationData.messages)
-		if (restoredCanvas) setCanvasContentRef.current(restoredCanvas)
 		// The fetched record is itself mid-run: another run is writing into this
 		// conversation (a second turn started here while the first was settling),
 		// so what came back is a snapshot, not the final transcript. Appending it
@@ -1748,8 +1742,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// `content` or `type` in it must not decide how an appended row renders.
 		// Canvas artifacts are not transcript rows. Leaving them in this list
 		// makes alignment fail against a view that correctly hides them, and
-		// the next poll would full-reload. The panel was filled above from
-		// the unfiltered record.
+		// the next poll would full-reload. The panel is filled from the
+		// unfiltered record after the freshness check below.
 		const stored = conversationData.messages
 			.filter(msg => !isCanvasArtifactMessage(msg))
 			.map(msg => ({
@@ -1814,6 +1808,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				run_id: execution.run_id || null,
 			}
 		}
+		// The joined tab never received the owning socket's canvas frames.
+		// Refill the panel from the stored artifact even when the transcript
+		// alignment below refuses, and only when there is text to show so an
+		// idle poll does not clear a document the user is looking at.
+		// This stays after the execution-revision check: a delayed snapshot
+		// from an older replica must not replace a newer document, and
+		// reconcileExecution does not undo a panel write.
+		const restoredCanvas = latestCanvasArtifactContent(conversationData.messages)
+		if (restoredCanvas) setCanvasContentRef.current(restoredCanvas)
 		const current = viewMessages.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 
 		// Walk both lists together; everything must line up one-to-one or the
@@ -2247,6 +2250,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		})
 	}, [sessionId, sendMessage, config.user])
 
+	// Local autosave keys off message count. An in-place canvas update does
+	// not change that count, so the display sequence is part of the
+	// dependency list and a local save still picks up the shown document.
+	const localCanvasSaveKey = (messages || []).reduce((key, m) => (
+		m && m.type === 'canvas_artifact' ? `${key}|${m.canvas_seq || 0}:${m.status || ''}` : key
+	), '')
+
 	// Auto-save to browser IndexedDB when saveMode is 'local'
 	useEffect(() => {
 		if (saveMode !== 'local') return
@@ -2304,7 +2314,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [messages?.length, saveMode, activeConversationId, currentModel, config.user])
+	}, [messages?.length, localCanvasSaveKey, saveMode, activeConversationId, currentModel, config.user])
 
 	// addSystemEvent: adds a system event message to the chat timeline
 	const addSystemEvent = useCallback((subtype, text, meta = {}) => {

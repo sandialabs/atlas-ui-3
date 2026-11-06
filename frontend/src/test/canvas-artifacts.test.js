@@ -52,6 +52,11 @@ describe('canvas artifacts (issue #1157)', () => {
       storedCanvas('second', { artifact_id: 'c2', tool_call_id: 'c2' }),
     ]
     expect(latestCanvasArtifactContent(messages)).toBe('second')
+    // A later display can sit earlier in the array. canvas_seq is that order.
+    expect(latestCanvasArtifactContent([
+      { type: 'canvas_artifact', canvas_content: 'shown last', canvas_seq: 2 },
+      { type: 'canvas_artifact', canvas_content: 'shown first', canvas_seq: 1 },
+    ])).toBe('shown last')
     expect(latestCanvasArtifactContent([
       { message_type: 'canvas_artifact', metadata: { canvas_content: '' } },
       { message_type: 'chat', content: 'nope' },
@@ -71,6 +76,7 @@ describe('canvas artifacts (issue #1157)', () => {
       canvas_content: SCRIPT,
       status: 'completed',
       invocation_id: 'inv-1',
+      canvas_seq: 2,
     })
     expect(out.message_type).toBe('canvas_artifact')
     expect(out.metadata).toEqual({
@@ -81,6 +87,7 @@ describe('canvas artifacts (issue #1157)', () => {
       canvas_content: SCRIPT,
       status: 'completed',
       invocation_id: 'inv-1',
+      canvas_seq: 2,
     })
   })
 })

@@ -1288,4 +1288,131 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(ok).toBe(false)
     expect(h.setCanvasContent).toHaveBeenCalledWith(script)
   })
+
+  it('does not apply a canvas from a stale joined snapshot', async () => {
+    const script = 'older document'
+    const execution = {
+      revision: 4,
+      run_id: 'run-1',
+      status: 'running',
+      invocations: [],
+      pending_requests: [],
+    }
+    const { result } = renderChat()
+    await loadConversation(result, {
+      id: 'conv-1',
+      messages: [storedChat('user', 'Original')],
+      metadata: {},
+      execution,
+    })
+    h.setCanvasContent.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        metadata: {},
+        execution: { ...execution, revision: 2 },
+        messages: [
+          storedChat('user', 'Original'),
+          {
+            role: 'system',
+            content: 'Canvas artifact',
+            message_type: 'canvas_artifact',
+            metadata: { canvas_content: script, artifact_id: 'c1' },
+          },
+        ],
+      })
+    })
+    expect(ok).toBe(true)
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+  })
+
+  it('still refills the canvas when a current snapshot cannot be aligned', async () => {
+    const script = 'current document'
+    const execution = {
+      revision: 4,
+      run_id: 'run-1',
+      status: 'running',
+      invocations: [],
+      pending_requests: [],
+    }
+    const { result } = renderChat()
+    await loadConversation(result, {
+      id: 'conv-1',
+      messages: [storedChat('user', 'Original')],
+      metadata: {},
+      execution,
+    })
+    h.setCanvasContent.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        metadata: {},
+        execution: { ...execution, revision: 5 },
+        messages: [
+          storedChat('user', 'Different'),
+          {
+            role: 'system',
+            content: 'Canvas artifact',
+            message_type: 'canvas_artifact',
+            metadata: { canvas_content: script, artifact_id: 'c1' },
+          },
+        ],
+      })
+    })
+    expect(ok).toBe(false)
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+  })
+
+  it('keeps a live canvas through a local save and a reopen', async () => {
+    const script = "print('local')\n"
+    const previousMode = h.saveMode
+    h.saveMode = 'local'
+    h.saveLocalConv.mockClear()
+    vi.useFakeTimers()
+    try {
+      const { result } = renderChat()
+      await loadConversation(result, {
+        id: 'conv-local',
+        messages: [storedChat('user', 'write it')],
+        metadata: {},
+      })
+      dispatchFrame({
+        type: 'tool_start',
+        tool_call_id: 'call_0',
+        tool_name: 'atlas_canvas',
+        arguments: { content: 'draft' },
+      })
+      dispatchFrame({
+        type: 'canvas_content',
+        tool_call_id: 'call_0',
+        tool_name: 'atlas_canvas',
+        content: script,
+      })
+      dispatchFrame({
+        type: 'tool_complete',
+        tool_call_id: 'call_0',
+        tool_name: 'atlas_canvas',
+        success: true,
+        result: 'ok',
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
+      expect(h.saveLocalConv).toHaveBeenCalled()
+      const saved = h.saveLocalConv.mock.calls.at(-1)[0]
+      const artifact = saved.messages.find(m => m.message_type === 'canvas_artifact')
+      expect(artifact.metadata.canvas_content).toBe(script)
+      expect(result.current.messages.some(m => m.type === 'tool_call' && m.tool_name === 'atlas_canvas')).toBe(false)
+      h.setCanvasContent.mockClear()
+      await loadConversation(result, {
+        id: saved.id,
+        messages: saved.messages,
+        metadata: saved.metadata || {},
+      })
+      expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    } finally {
+      h.saveMode = previousMode
+      vi.useRealTimers()
+    }
+  })
 })

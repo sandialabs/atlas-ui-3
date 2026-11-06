@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-11-05
+Last updated: 2026-11-06
 
 ## Overview
 
@@ -457,7 +457,14 @@ from the stored row, including after compaction.
 The same flush that records other tools writes the canvas row, before the
 closing assistant message, in both tools-mode chat and agent-mode runs. A
 turn that is stopped before that flush has not saved the in-progress canvas
-yet, matching other tools.
+yet, matching other tools. When several writes finish in a different order
+from the order they started, the saved order follows the order the panel
+showed them. A tracked run stamps each write with its invocation id, so a
+provider tool-call id reused on a later step stays a separate document.
+
+A browser-local save does not write the conversation on the server. The live
+canvas frames also append a hidden `canvas_artifact` message, and that
+message is what IndexedDB reloads into the panel.
 
 ## User Isolation
 

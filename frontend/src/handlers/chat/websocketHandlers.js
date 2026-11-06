@@ -64,6 +64,75 @@ function sameToolStart(row, data) {
   return isOpenLegacyRow(row) && !!data.tool_call_id && row.tool_call_id === data.tool_call_id
 }
 
+// The document a canvas frame is carrying. A string is kept as written.
+// Structured content is JSON, matching the stored artifact.
+function canvasFrameText(data) {
+  const raw = data.type === 'canvas_content'
+    ? data.content
+    : (data.arguments && typeof data.arguments === 'object' ? data.arguments.content : undefined)
+  if (typeof raw === 'string') return raw
+  if (raw == null || raw === '') return ''
+  try { return JSON.stringify(raw) } catch { return String(raw) }
+}
+
+// An identified canvas write. A tracked run matches on invocation id, so a
+// reused call_0 is a new document. A bare id matches only the open write:
+// a finished call_0 belongs to an earlier one.
+function sameCanvasArtifact(row, data) {
+  if (!row || row.type !== 'canvas_artifact') return false
+  if (data.invocation_id && row.invocation_id) return row.invocation_id === data.invocation_id
+  if (data.invocation_id || row.invocation_id) return false
+  if (!data.tool_call_id || row.tool_call_id !== data.tool_call_id) return false
+  return row.status === 'calling' || row.status === 'in_progress'
+}
+
+function nextCanvasSeq(list) {
+  let max = 0
+  for (const msg of list) {
+    if (msg && typeof msg.canvas_seq === 'number' && msg.canvas_seq > max) max = msg.canvas_seq
+  }
+  return max + 1
+}
+
+// Hidden transcript row for a local save. The panel state is not serialized;
+// IndexedDB writes messages, and this row is what a reopen restores.
+function upsertCanvasArtifact(prev, data, text, status) {
+  const list = Array.isArray(prev) ? prev : []
+  const index = list.findIndex(msg => sameCanvasArtifact(msg, data))
+  if (index === -1) {
+    if (!text) return list
+    return list.concat(withIdentity({
+      role: 'system',
+      content: 'Canvas artifact',
+      type: 'canvas_artifact',
+      artifact_id: data.invocation_id || data.tool_call_id,
+      tool_call_id: data.tool_call_id,
+      tool_name: data.tool_name || 'atlas_canvas',
+      canvas_content: text,
+      status: status || 'calling',
+      canvas_seq: nextCanvasSeq(list),
+      timestamp: new Date().toISOString(),
+    }, data))
+  }
+  return list.map((msg, i) => {
+    if (i !== index) return msg
+    const next = { ...msg }
+    if (text) {
+      next.canvas_content = text
+      next.canvas_seq = nextCanvasSeq(list)
+    }
+    if (status) next.status = status
+    if (data.tool_name && !next.tool_name) next.tool_name = data.tool_name
+    return next
+  })
+}
+
+function noteCanvasArtifact(mapMessages, data, text, status) {
+  if (typeof mapMessages !== 'function') return
+  if (!data.tool_call_id && !data.invocation_id) return
+  mapMessages(prev => upsertCanvasArtifact(prev, data, text, status))
+}
+
 // Existence check and append are one reducer update. A flag set inside
 // mapMessages is still false when React defers the updater, so a following
 // addMessage would insert a second card.
@@ -599,7 +668,12 @@ export function createWebSocketHandler(deps) {
   switch (data.type) {
         // Direct tool lifecycle events (new simplified callback path)
         case 'tool_start': {
-          if (isCanvasTool(data.tool_name)) break; // Suppress any chat message for canvas
+          if (isCanvasTool(data.tool_name)) {
+            // No transcript bubble. The hidden artifact is what a local save
+            // reloads; the server records the same row on flush.
+            noteCanvasArtifact(mapMessages, data, canvasFrameText(data), 'calling')
+            break
+          }
           appendOnce(
             mapMessages,
             addMessage,
@@ -633,7 +707,7 @@ export function createWebSocketHandler(deps) {
         }
         case 'tool_complete': {
           if (isCanvasTool(data.tool_name)) {
-            // No update needed; canvas_content event handles display
+            noteCanvasArtifact(mapMessages, data, '', data.success ? 'completed' : 'failed')
             break
           }
           mapMessages(prev => mapToolRows(prev, data, {
@@ -701,6 +775,13 @@ export function createWebSocketHandler(deps) {
         case 'canvas_content': {
           if (data.content) {
             setCanvasContent(typeof data.content === 'string' ? data.content : String(data.content))
+          }
+          // Progress frames from other tools omit the id and stay panel-only.
+          // An identified canvas-tool frame updates the hidden artifact so a
+          // local save keeps the text the panel showed, in display order.
+          if (data.tool_call_id || data.invocation_id) {
+            const text = canvasFrameText(data)
+            if (text) noteCanvasArtifact(mapMessages, data, text)
           }
           break
         }

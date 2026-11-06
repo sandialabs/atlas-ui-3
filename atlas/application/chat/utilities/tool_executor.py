@@ -33,6 +33,7 @@ from ..runs.execution_state import (
     get_execution_store,
     observe_tool_callback,
     publish_execution_event,
+    stamp_callback_identity,
     wait_for_shared_approval,
 )
 from ..runs.leases import ensure_current_run_may_act
@@ -521,8 +522,12 @@ async def execute_single_tool(
             )
             # Canvas renders into the canvas panel and is never flushed to
             # history as a tool row. Projecting it would leave a phantom
-            # "Tool call: canvas" row on reload and in joined tabs.
-            if normalize_tool_name(tool_call.function.name) != CANVAS_TOOL_NAME:
+            # "Tool call: canvas" row on reload and in joined tabs. The frames
+            # still carry invocation identity, so a reused provider id does not
+            # merge two documents (issue #1157).
+            if normalize_tool_name(tool_call.function.name) == CANVAS_TOOL_NAME:
+                update_callback = stamp_callback_identity(update_callback, identity)
+            else:
                 update_callback = observe_tool_callback(update_callback, identity)
                 await publish_execution_event({
                     **identity,

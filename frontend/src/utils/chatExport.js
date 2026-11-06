@@ -89,6 +89,9 @@ const CANVAS_ARTIFACT_PERSISTED_FIELDS = [
   'invocation_id',
   'run_id',
   'step',
+  // Display order. Several writes can finish opposite the order they started,
+  // and a local reopen has only these rows to decide which document is newest.
+  'canvas_seq',
 ]
 
 const TOOL_APPROVAL_PERSISTED_FIELDS = [

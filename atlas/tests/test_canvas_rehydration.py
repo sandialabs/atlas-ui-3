@@ -14,7 +14,11 @@ from atlas.application.chat.context.compaction_controller import ContextCompacto
 from atlas.application.chat.utilities.canvas_history import canvas_artifact_message
 from atlas.application.chat.utilities.conversation_loader import load_messages_into_history
 from atlas.application.chat.utilities.tool_history import ToolCallRecorder
-from atlas.domain.messages.canvas_context import CANVAS_ARTIFACT_MESSAGE_TYPE, format_canvas_block
+from atlas.domain.messages.canvas_context import (
+    CANVAS_ARTIFACT_MESSAGE_TYPE,
+    format_canvas_block,
+    latest_canvas_supplement,
+)
 from atlas.domain.messages.models import (
     CONTEXT_CHECKPOINT_KEY,
     CONTEXT_CHECKPOINT_MESSAGE_TYPE,
@@ -115,6 +119,152 @@ class TestRecorderKeepsCanvasText:
         assert stored == markup
         assert "truncated" not in stored
         assert "&lt;" not in stored
+
+    def test_display_order_not_start_order_is_the_latest(self):
+        recorder = ToolCallRecorder(None)
+        _play(recorder, [
+            {
+                "type": "tool_start", "tool_call_id": "a",
+                "tool_name": "atlas_canvas", "arguments": {"content": "A"},
+            },
+            {
+                "type": "tool_start", "tool_call_id": "b",
+                "tool_name": "atlas_canvas", "arguments": {"content": "B"},
+            },
+            {"type": "canvas_content", "tool_call_id": "b", "content": "B-shown"},
+            {"type": "canvas_content", "tool_call_id": "a", "content": "A-shown"},
+            {
+                "type": "tool_complete", "tool_call_id": "b",
+                "tool_name": "atlas_canvas", "success": True, "result": "ok",
+            },
+            {
+                "type": "tool_complete", "tool_call_id": "a",
+                "tool_name": "atlas_canvas", "success": True, "result": "ok",
+            },
+        ])
+        history = ConversationHistory()
+        recorder.flush(history)
+        bodies = [item.metadata["canvas_content"] for item in _artifacts(history)]
+        assert bodies == ["B-shown", "A-shown"]
+        supplement = latest_canvas_supplement(history.messages, set())
+        assert "A-shown" in supplement
+        assert "B-shown" not in supplement
+
+    def test_reused_call_id_stays_two_documents(self):
+        from atlas.application.chat.runs.context import clear_current_run, set_current_run
+
+        # The recorder keeps only events for the run it was built inside.
+        set_current_run("run-1", "conv-1")
+        try:
+            recorder = ToolCallRecorder(None)
+        finally:
+            clear_current_run()
+
+        def events(step, content):
+            identity = {
+                "invocation_id": f"run-1:{step}:call_0",
+                "run_id": "run-1",
+                "step": step,
+                "tool_call_id": "call_0",
+                "tool_name": "atlas_canvas",
+            }
+            return [
+                {"type": "tool_start", "arguments": {"content": content}, **identity},
+                {"type": "canvas_content", "content": content, **identity},
+                {"type": "tool_complete", "success": True, "result": "ok", **identity},
+            ]
+
+        _play(recorder, events(0, "first document") + events(1, "second document"))
+        assert recorder.messages() == []
+        history = ConversationHistory()
+        recorder.flush(history)
+        artifacts = _artifacts(history)
+        assert [item.metadata["canvas_content"] for item in artifacts] == [
+            "first document", "second document",
+        ]
+        assert artifacts[0].metadata["artifact_id"] == "run-1:0:call_0"
+        assert artifacts[1].metadata["artifact_id"] == "run-1:1:call_0"
+        assert artifacts[0].metadata["run_id"] == "run-1"
+        assert artifacts[1].metadata["step"] == 1
+
+    def test_canvas_frames_are_stamped_without_a_projection_row(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from atlas.application.chat.utilities import tool_executor as te
+        from atlas.application.chat.utilities.tool_executor import execute_single_tool
+        from atlas.domain.messages.models import ToolResult
+
+        tool_call = MagicMock()
+        tool_call.id = "call_0"
+        tool_call.function.name = "atlas_canvas"
+        tool_call.function.arguments = '{"content": "doc"}'
+
+        tool_manager = MagicMock()
+        tool_manager.get_tools_schema.return_value = [{
+            "function": {
+                "name": "atlas_canvas",
+                "parameters": {"properties": {"content": {}}},
+            }
+        }]
+        tool_manager.get_server_for_tool.return_value = "atlas"
+        tool_manager.execute_tool = AsyncMock(return_value=ToolResult(
+            tool_call_id="call_0",
+            content="Canvas content displayed: doc",
+            success=True,
+        ))
+
+        published = []
+
+        async def _publish(event):
+            published.append(event)
+            return None
+
+        captured = []
+
+        async def _capture(payload):
+            captured.append(payload)
+
+        original = te.publish_execution_event
+        te.publish_execution_event = _publish
+        try:
+            _run(execute_single_tool(
+                tool_call=tool_call,
+                session_context={
+                    "user_email": "u@x.com",
+                    "run_id": "run-1",
+                    "conversation_id": "conv-1",
+                    "agent_step": 1,
+                },
+                tool_manager=tool_manager,
+                update_callback=_capture,
+                skip_approval=True,
+            ))
+        finally:
+            te.publish_execution_event = original
+
+        assert published == []
+        starts = [item for item in captured if item.get("type") == "tool_start"]
+        assert starts[0]["invocation_id"] == "run-1:1:call_0"
+        assert starts[0]["run_id"] == "run-1"
+        assert starts[0]["step"] == 1
+        shown = [item for item in captured if item.get("type") == "canvas_content"]
+        assert shown[0]["invocation_id"] == "run-1:1:call_0"
+        assert shown[0]["content"] == "doc"
+        from atlas.application.chat.runs.context import clear_current_run, set_current_run
+
+        set_current_run("run-1", "conv-1")
+        try:
+            recorder = ToolCallRecorder(None)
+        finally:
+            clear_current_run()
+        _play(recorder, captured)
+        assert recorder.messages() == []
+        history = ConversationHistory()
+        recorder.flush(history)
+        artifact = _artifacts(history)[0]
+        assert artifact.metadata["artifact_id"] == "run-1:1:call_0"
+        assert artifact.metadata["canvas_content"] == "doc"
+        assert artifact.metadata["step"] == 1
 
     def test_displayed_frame_overwrites_the_start_arguments(self):
         recorder = ToolCallRecorder(None)

@@ -28,14 +28,32 @@ export function canvasArtifactBody(message) {
   }
 }
 
+function canvasSeq(message) {
+  const raw = message.canvas_seq ?? message.metadata?.canvas_seq
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+}
+
 // The document on screen is the newest canvas write that actually has text.
+// A live local save stamps canvas_seq in display order, which can differ from
+// array order. Stored server rows have no sequence; the last one is newest.
 export function latestCanvasArtifactContent(messages) {
   if (!Array.isArray(messages)) return ''
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
+  let best = ''
+  let bestSeq = null
+  for (let i = 0; i < messages.length; i += 1) {
     const body = canvasArtifactBody(messages[i])
-    if (body) return body
+    if (!body) continue
+    const seq = canvasSeq(messages[i])
+    if (seq == null) {
+      if (bestSeq == null) best = body
+      continue
+    }
+    if (bestSeq == null || seq >= bestSeq) {
+      bestSeq = seq
+      best = body
+    }
   }
-  return ''
+  return best
 }
 
 // Restore payload: keep canvas rows (with the text), drop every other

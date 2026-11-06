@@ -231,22 +231,28 @@ class ToolCallRecorder:
             entry["status"] = "failed"
 
     def _note_displayed_canvas(self, payload: Dict[str, Any]) -> None:
-        """Overwrite a known canvas write with the text the panel showed."""
+        """Overwrite a known write with the shown text and move it to the end."""
         tool_call_id = payload.get("tool_call_id")
         if not tool_call_id:
             return
         text = canvas_text(payload.get("content"))
         if not text:
             return
-        entry = self._canvas.get(payload.get("invocation_id") or tool_call_id)
+        key = payload.get("invocation_id") or tool_call_id
+        entry = self._canvas.get(key)
         if entry is None:
-            for candidate in self._canvas.values():
+            for candidate_key, candidate in self._canvas.items():
                 if candidate.get("tool_call_id") == tool_call_id:
+                    key = candidate_key
                     entry = candidate
                     break
         if entry is None:
             return
         entry["canvas_content"] = text
+        for field in ("invocation_id", "run_id", "step", "conversation_id"):
+            if payload.get(field) is not None and entry.get(field) is None:
+                entry[field] = payload[field]
+        self._canvas.move_to_end(key)
 
     def messages(self) -> List[Message]:
         """Build display-only ``tool_call`` messages from recorded events."""
