@@ -691,7 +691,9 @@ function Start-Backend {
         }
     }
     $uvicornExe = "$PROJECT_ROOT/.venv/Scripts/uvicorn.exe"
-    $arguments = "main:app --host $HostName --port $Port"
+    # --no-use-colors: see start_backend in agent_start.sh (litellm log
+    # redaction breaks uvicorn's colorized startup banner).
+    $arguments = "main:app --host $HostName --port $Port --no-use-colors"
 
     $script:UVICORN_PID = Start-Process -FilePath $uvicornExe -ArgumentList $arguments -PassThru -NoNewWindow
 
