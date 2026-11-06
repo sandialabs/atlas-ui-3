@@ -49,6 +49,7 @@ const h = vi.hoisted(() => ({
   configReady: true,
   workspacesEnabled: true,
   saveLocalConv: vi.fn(() => Promise.resolve()),
+  setCanvasContent: vi.fn(),
   saveMode: 'none',
   // Every websocket frame handler ChatContext registered; tests dispatch
   // frames through them the way the socket would.
@@ -140,7 +141,7 @@ vi.mock('../hooks/chat/useAgentMode', () => ({
 vi.mock('../hooks/chat/useFiles', () => ({
   useFiles: () => ({
     getTaggedFilesContent: () => ({}),
-    setCanvasContent: vi.fn(),
+    setCanvasContent: h.setCanvasContent,
     setCanvasFiles: vi.fn(),
     setCurrentCanvasFileIndex: vi.fn(),
     setCustomUIContent: vi.fn(),
@@ -1213,5 +1214,78 @@ describe('refreshJoinedConversation (issue #959)', () => {
     expect(ok1).toBe(false)
     expect(ok2).toBe(false)
     expect(result.current.messages).toBe(before)
+  })
+
+  it('refills the canvas from a stored artifact without breaking alignment', async () => {
+    const script = "print('joined')\nline two\n"
+    const loaded = {
+      id: 'conv-1',
+      messages: [
+        storedChat('user', 'What is the weather'),
+        storedChat('assistant', 'Clear skies'),
+      ],
+      metadata: {},
+    }
+    const { result } = renderChat()
+    await loadConversation(result, loaded)
+    h.setCanvasContent.mockClear()
+    h.sendMessage.mockClear()
+    const store = [
+      storedChat('user', 'What is the weather'),
+      {
+        role: 'system',
+        content: 'Canvas artifact',
+        timestamp: '2026-01-01T00:00:02Z',
+        message_type: 'canvas_artifact',
+        metadata: {
+          message_type: 'canvas_artifact',
+          artifact_id: 'c9',
+          tool_call_id: 'c9',
+          tool_name: 'atlas_canvas',
+          canvas_content: script,
+          status: 'completed',
+        },
+      },
+      storedChat('assistant', 'Clear skies'),
+    ]
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({ id: 'conv-1', messages: store, metadata: {} })
+    })
+    expect(ok).toBe(true)
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    expect(result.current.messages.some(m => m.type === 'canvas_artifact')).toBe(false)
+    const restore = restoreCalls().find(c => c.conversation_id === 'conv-1')
+    expect(restore.messages.map(m => m.message_type || m.role)).toEqual(['user', 'canvas_artifact', 'assistant'])
+    expect(restore.messages[1].metadata.canvas_content).toBe(script)
+  })
+
+  it('refills the canvas even when the transcript itself cannot be aligned', async () => {
+    const script = 'exact joined document'
+    const { result } = renderChat()
+    await loadConversation(result, {
+      id: 'conv-1',
+      messages: [storedChat('user', 'Original')],
+      metadata: {},
+    })
+    h.setCanvasContent.mockClear()
+    let ok
+    act(() => {
+      ok = result.current.refreshJoinedConversation({
+        id: 'conv-1',
+        metadata: {},
+        messages: [
+          storedChat('user', 'Different'),
+          {
+            role: 'system',
+            content: 'Canvas artifact',
+            message_type: 'canvas_artifact',
+            metadata: { canvas_content: script, artifact_id: 'c1' },
+          },
+        ],
+      })
+    })
+    expect(ok).toBe(false)
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
   })
 })

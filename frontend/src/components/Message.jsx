@@ -736,6 +736,13 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     }
   }
 
+  if (message.type === 'canvas_artifact') {
+    // The document lives in the canvas panel, not the transcript. An empty
+    // hidden node keeps the row out of the layout (including space-y gaps)
+    // without putting the script into the DOM.
+    return <div hidden className="hidden" />
+  }
+
   if (isHiddenApprovalRow) {
     // Use the HTML `hidden` attribute so Tailwind's `space-y-*` utilities
     // (`> :not([hidden]) ~ :not([hidden])`) exclude this node. The `hidden`

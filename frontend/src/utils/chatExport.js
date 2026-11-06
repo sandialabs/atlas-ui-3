@@ -78,6 +78,19 @@ const TOOL_CALL_PERSISTED_FIELDS = [
 // here, reloaded transcripts lost the flag and re-rendered auto-approved rows
 // as if the setting were still live. `status` and `rejection_reason` carry the
 // manual-approval terminal state for the same reason.
+// Fields a reloaded canvas row needs in order to refill the panel and to
+// stay associated with the invocation that wrote it (issue #1157).
+const CANVAS_ARTIFACT_PERSISTED_FIELDS = [
+  'artifact_id',
+  'tool_call_id',
+  'tool_name',
+  'canvas_content',
+  'status',
+  'invocation_id',
+  'run_id',
+  'step',
+]
+
 const TOOL_APPROVAL_PERSISTED_FIELDS = [
   'tool_call_id',
   'tool_name',
@@ -94,7 +107,15 @@ const TOOL_APPROVAL_PERSISTED_FIELDS = [
 // (atlas/domain/messages/models.py): persisted, but never replayed to the
 // LLM as conversation turns -- which is exactly what the restore payload
 // filter in ChatContext excludes them for.
-export const DISPLAY_ONLY_MESSAGE_TYPES = ['tool_call', 'agent_intermediate', 'context_checkpoint']
+export const DISPLAY_ONLY_MESSAGE_TYPES = [
+  'tool_call',
+  'agent_intermediate',
+  'context_checkpoint',
+  // Saved canvas text (issue #1157). Not a transcript row. The restore
+  // payload keeps it anyway, via messagesForRestore, because a session
+  // with no repository uses that payload as its history.
+  'canvas_artifact',
+]
 
 // A replayed bubble (issue #957) is a transient placeholder: it holds a
 // mid-answer fragment the run's stored transcript supersedes when the run
@@ -126,6 +147,12 @@ export function buildPersistedMessage(m) {
   } else if (m.type === 'tool_approval_request') {
     const metadata = {}
     for (const field of TOOL_APPROVAL_PERSISTED_FIELDS) {
+      if (m[field] !== undefined) metadata[field] = m[field]
+    }
+    persisted.metadata = metadata
+  } else if (m.type === 'canvas_artifact') {
+    const metadata = { message_type: 'canvas_artifact' }
+    for (const field of CANVAS_ARTIFACT_PERSISTED_FIELDS) {
       if (m[field] !== undefined) metadata[field] = m[field]
     }
     persisted.metadata = metadata

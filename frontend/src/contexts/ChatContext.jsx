@@ -21,8 +21,9 @@ import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
 import { alignTranscript, isLiveOnlyRow } from '../utils/transcriptAlignment'
+import { isCanvasArtifactMessage, latestCanvasArtifactContent, messagesForRestore } from '../utils/canvasArtifacts'
 import { isTerminalRun, liveInvocationCount, reconcileExecution } from '../utils/executionState'
-import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, DISPLAY_ONLY_MESSAGE_TYPES, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
+import { buildPromptInfoByKey, resolvePromptInfo, buildExportConversation, buildPersistedMessage, isReplayPlaceholder, formatToolCallForText, openBlobInNewTab } from '../utils/chatExport'
 import { findServerConfigForMcpKey } from '../utils/mcpKeys'
 import { userMessageSliceIndex } from '../utils/userMessageOrdinal'
 import { classificationOf, classificationRefusal } from '../utils/conversationClassification'
@@ -1491,9 +1492,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			}
 		}
 		if (!reconnecting) {
-			files.setCanvasContent('')
+			// The panel is React state. A saved canvas_artifact is the only
+			// copy of the document after a reload (issue #1157).
+			files.setCanvasContent(latestCanvasArtifactContent(conversationData.messages))
 			files.setCustomUIContent(null)
 			files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
+		} else {
+			// A socket blip must not clear the panel. It should still pick up
+			// a document that was saved while this tab was disconnected.
+			const restored = latestCanvasArtifactContent(conversationData.messages)
+			if (restored) files.setCanvasContent(restored)
 		}
 
 		// Track the loaded conversation. The ref is set synchronously too: the
@@ -1573,12 +1581,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
-				messages: conversationData.messages
-					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
-					.map(msg => ({
-						role: msg.role,
-						content: msg.content || '',
-					})),
+				// Canvas rows ride along so a repository-less session still
+				// has the document. Other display-only rows stay out: a bare
+				// tool row is an orphan, and a narration row is a second
+				// assistant turn. When a repository is configured the server
+				// ignores this list and loads the stored conversation.
+				messages: messagesForRestore(conversationData.messages),
 				// The conversation's level (null for none): the server refuses a
 				// conversation recorded under another classification (#1042).
 				compliance_level_filter: restoreLevel ?? null,
@@ -1628,6 +1636,14 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// pending undo and agent prompts) that a socket blip must not trigger.
 	const loadSavedConversationRef = useRef(loadSavedConversation)
 	loadSavedConversationRef.current = loadSavedConversation
+	// refreshJoinedConversation must not list `files` as a dependency: that
+	// object is new every render and would rebuild the poll callback on every
+	// token. The setter identity from useState is stable; the ref keeps the
+	// callback stable even if it is not.
+	const setCanvasContentRef = useRef(files.setCanvasContent)
+	setCanvasContentRef.current = files.setCanvasContent
+	const canvasContentRef = useRef(files.canvasContent)
+	canvasContentRef.current = files.canvasContent
 	// `hasConnectedRef` separates the first connection from a reconnect:
 	// `wasConnectedRef` alone starts `false`, so a conversation opened before
 	// the first connect would be treated as a reconnect and reloaded at once.
@@ -1654,7 +1670,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (execution && !isTerminalRun(execution) && liveInvocations > storedInvocations) return false
 		if (isRunActive(runsByConversationRef.current[id])) return true
 		if (data.in_flight === true) return true
-		const stored = Array.isArray(data.messages) ? data.messages : []
+		// A canvas artifact is not a transcript row (isLiveOnlyRow is true for
+		// it). Counting it here would make every reconnect after a canvas
+		// write look like a longer transcript and resync forever. A document
+		// the panel does not already show is still a real change: the frame
+		// that filled the panel may have been missed while the socket was down.
+		const rawStored = Array.isArray(data.messages) ? data.messages : []
+		const storedCanvas = latestCanvasArtifactContent(rawStored)
+		if (storedCanvas && storedCanvas !== (canvasContentRef.current || '')) return true
+		const stored = rawStored.filter(msg => !isCanvasArtifactMessage(msg))
 		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 		if (stored.length !== current.length) return true
 		const lastStored = stored[stored.length - 1]
@@ -1693,6 +1717,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// context: without the guard a second caller could splice one
 		// conversation's rows into another's view.
 		if (conversationData.id !== activeConversationIdRef.current) return false
+		// The joined tab never received the owning socket's canvas frames.
+		// Refill the panel from the stored artifact even when the transcript
+		// alignment below refuses, and only when there is text to show so an
+		// idle poll does not clear a document the user is looking at.
+		const restoredCanvas = latestCanvasArtifactContent(conversationData.messages)
+		if (restoredCanvas) setCanvasContentRef.current(restoredCanvas)
 		// The fetched record is itself mid-run: another run is writing into this
 		// conversation (a second turn started here while the first was settling),
 		// so what came back is a snapshot, not the final transcript. Appending it
@@ -1709,13 +1739,19 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (!live && stillInFlight && !canRearmJoinedRun(conversationData.id)) return false
 		// Metadata is spread first: it is stored data, and a stray `role`,
 		// `content` or `type` in it must not decide how an appended row renders.
-		const stored = conversationData.messages.map(msg => ({
-			...withoutInternalFlags(msg.metadata),
-			role: msg.role,
-			content: msg.content || '',
-			timestamp: msg.timestamp,
-			type: msg.message_type || 'chat',
-		}))
+		// Canvas artifacts are not transcript rows. Leaving them in this list
+		// makes alignment fail against a view that correctly hides them, and
+		// the next poll would full-reload. The panel was filled above from
+		// the unfiltered record.
+		const stored = conversationData.messages
+			.filter(msg => !isCanvasArtifactMessage(msg))
+			.map(msg => ({
+				...withoutInternalFlags(msg.metadata),
+				role: msg.role,
+				content: msg.content || '',
+				timestamp: msg.timestamp,
+				type: msg.message_type || 'chat',
+			}))
 		// Re-seed the backend session from the store. It was seeded from the
 		// run's snapshot when the view was opened and does not have the run's
 		// final turn, so the next message here would lose that context.
@@ -1733,9 +1769,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			sendMessage({
 				type: 'restore_conversation',
 				conversation_id: conversationData.id,
-				messages: conversationData.messages
-					.filter(msg => !DISPLAY_ONLY_MESSAGE_TYPES.includes(msg.message_type || 'chat'))
-					.map(msg => ({ role: msg.role, content: msg.content || '' })),
+				messages: messagesForRestore(conversationData.messages),
 				compliance_level_filter: activeComplianceFilter ?? null,
 			})
 		}
@@ -2087,6 +2121,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			}
 			let text = `Chat Export - ${config.appName}\nDate: ${new Date().toLocaleString()}\nUser: ${config.user}\nModel: ${currentModel}\nSelected Tools: ${[...selectedTools].join(', ') || 'None'}\nSelected RAG Sources: ${ragSourcesDisplay}\nAgent Mode: ${agent.agentModeEnabled ? 'Enabled' : 'Disabled'}\n${promptLine}\n${'='.repeat(50)}\n\n`
 			exportConversation.forEach(m => {
+				// The document is the CANVAS CONTENT footer below, not a
+				// "SYSTEM: Canvas artifact" line that hides the script.
+				if (isCanvasArtifactMessage(m)) return
 				const toolBlock = formatToolCallForText(m)
 				if (toolBlock) {
 					text += `${toolBlock}\n\n`

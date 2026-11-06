@@ -957,3 +957,83 @@ describe('mid-run live refresh of a joined conversation', () => {
     }
   })
 })
+
+describe('canvas rehydration (issue #1157)', () => {
+  const script = "print('hello')\nkeep this exact\n"
+  const storedCanvas = (content) => ({
+    role: 'system',
+    content: 'Canvas artifact',
+    timestamp: '2026-01-01T00:00:02Z',
+    message_type: 'canvas_artifact',
+    metadata: {
+      message_type: 'canvas_artifact',
+      artifact_id: 'c1',
+      tool_call_id: 'c1',
+      tool_name: 'atlas_canvas',
+      canvas_content: content,
+      status: 'completed',
+    },
+  })
+
+  const setConnected = async (rerender, connected) => {
+    await act(async () => {
+      h.isConnected = connected
+      rerender()
+    })
+  }
+
+  it('puts the saved canvas back in the panel and sends it on restore', async () => {
+    const { result, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [
+          storedChat('user', 'write a script'),
+          storedCanvas(script),
+          storedChat('assistant', 'Wrote it.'),
+        ],
+      })
+    })
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    const restore = h.sendMessage.mock.calls.map(c => c[0]).find(c => c?.type === 'restore_conversation')
+    expect(restore.messages.map(m => m.role)).toEqual(['user', 'system', 'assistant'])
+    expect(restore.messages[1].metadata.canvas_content).toBe(script)
+    // The row is in history for association, and it is not a visible bubble.
+    expect(result.current.messages.some(m => m.type === 'canvas_artifact' && m.canvas_content === script)).toBe(true)
+    unmount()
+  })
+
+  it('fills the panel from a canvas saved while the socket was down', async () => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original'), storedChat('assistant', 'Done')],
+      })
+    })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: false,
+        metadata: {},
+        messages: [
+          storedChat('user', 'Original'),
+          storedCanvas(script),
+          storedChat('assistant', 'Done'),
+        ],
+      }),
+    })
+    h.setCanvasContent.mockClear()
+    h.setCustomUIContent.mockClear()
+    h.setSessionFiles.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    // The blip must not wipe the rest of the workspace the way an open does.
+    expect(h.setCustomUIContent).not.toHaveBeenCalled()
+    expect(h.setSessionFiles).not.toHaveBeenCalled()
+    unmount()
+  })
+})

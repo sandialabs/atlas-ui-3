@@ -190,6 +190,7 @@ class TestToolCallRecorder:
 
     def test_skips_canvas_tool(self):
         # canvas_canvas renders into the canvas panel, not the transcript.
+        # The text is still saved, as a canvas artifact rather than a tool row.
         recorder = ToolCallRecorder(None)
 
         async def play():
@@ -205,6 +206,16 @@ class TestToolCallRecorder:
 
         _run(play())
         assert recorder.messages() == []
+        history = ConversationHistory()
+        recorder.flush(history)
+        assert recorder.messages() == []
+        artifacts = [
+            m for m in history.messages
+            if m.metadata.get("message_type") == "canvas_artifact"
+        ]
+        assert len(artifacts) == 1
+        assert artifacts[0].metadata["canvas_content"] == "x"
+        assert artifacts[0].role == MessageRole.SYSTEM
 
     def test_ignores_unrelated_events(self):
         recorder = ToolCallRecorder(None)

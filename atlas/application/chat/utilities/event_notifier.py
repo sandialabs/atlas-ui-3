@@ -228,9 +228,10 @@ async def notify_tool_complete(
         "result": sanitized_content
     }
 
-    # Canvas tool special handling
+    # Canvas tool special handling. The tool_call_id lets the recorder bind
+    # this exact displayed text to the write that tool_start opened.
     if normalize_tool_name(tool_call.function.name) == CANVAS_TOOL_NAME:
-        await notify_canvas_content(parsed_args, update_callback)
+        await notify_canvas_content(parsed_args, update_callback, tool_call.id)
 
     # Send artifacts to frontend if available
     try:
@@ -402,21 +403,28 @@ async def _handle_structured_progress_update(
 
 async def notify_canvas_content(
     parsed_args: Dict[str, Any],
-    update_callback: UpdateCallback
+    update_callback: UpdateCallback,
+    tool_call_id: Optional[str] = None,
 ) -> None:
     """
     Send canvas content notification.
 
-    Pure function that extracts and sends canvas content.
+    Pure function that extracts and sends canvas content. ``tool_call_id``
+    ties the frame to the canvas-tool invocation that produced it. Progress
+    updates from other tools omit it; those frames update the live panel
+    only and are not stored as conversation artifacts.
     """
     try:
         content_arg = parsed_args.get("content") if isinstance(parsed_args, dict) else None
         if content_arg:
             logger.info("Emitting canvas_content event (length=%s)", len(content_arg) if isinstance(content_arg, str) else "obj")
-            await safe_notify(update_callback, {
+            payload: Dict[str, Any] = {
                 "type": "canvas_content",
-                "content": content_arg
-            })
+                "content": content_arg,
+            }
+            if tool_call_id:
+                payload["tool_call_id"] = tool_call_id
+            await safe_notify(update_callback, payload)
         else:
             logger.info("Canvas tool called without 'content' arg; skipping canvas_content event")
     except Exception as e:
