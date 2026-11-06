@@ -90,6 +90,18 @@ class LiteLLMStreamingMixin:
       - _rag_service attribute
     """
 
+    def _stream_usage_kwargs(self, model_name: str, model_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Request usage only when this static model explicitly opts in.
+
+        The provider must support OpenAI-compatible stream_options; leave
+        non-opted and dynamically discovered gateway models unchanged.
+        """
+        models = getattr(getattr(self, "llm_config", None), "models", {})
+        config = models.get(model_name) if isinstance(models, dict) else None
+        if not getattr(config, "request_stream_usage", False):
+            return model_kwargs
+        return {**model_kwargs, "stream_options": {"include_usage": True}}
+
     async def stream_plain(
         self,
         model_name: str,
@@ -116,6 +128,7 @@ class LiteLLMStreamingMixin:
             if max_tokens is not None:
                 model_kwargs["max_tokens"] = max_tokens
 
+        model_kwargs = self._stream_usage_kwargs(model_name, model_kwargs)
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
@@ -377,6 +390,7 @@ class LiteLLMStreamingMixin:
             )
             litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
+        model_kwargs = self._stream_usage_kwargs(model_name, model_kwargs)
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
