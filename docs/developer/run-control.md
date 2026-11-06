@@ -70,7 +70,11 @@ earlier delivery.
   id is safe. An owner that reads a command after its deadline answers
   `command_expired` without executing it, so a caller's timeout is never
   followed by a late stop or steer. A steer re-checks the deadline after its
-  classification check and just before it is queued.
+  classification check and just before it is queued. The deadline is on the
+  shared Redis clock (`TIME`), stamped just before the `XADD` and checked by
+  the owner against `TIME`; the sender's own wait runs on its monotonic
+  clock. Wall-clock skew between replicas therefore neither expires a valid
+  command nor lets one run after its sender gave up.
 - **Authorized on the owner.** The directory only routes. The owner re-checks
   the actor against its own registry: a user may act only on their own run,
   the agent-runs service only on API-started runs, approvals only for the
@@ -90,7 +94,13 @@ earlier delivery.
   read at once; a sender past the bound waits for a slot within its own
   timeout and, if none frees, reports `command_timeout` without sending.
   Commands this replica executes are bounded by `MAX_CONCURRENT_DISPATCH`
-  (8); waiting counts against the command's deadline.
+  (8): the inbox reader takes a slot before it creates a task, so while all
+  are busy further commands stay in Redis instead of piling up in memory, and
+  waiting counts against the command's deadline.
+- **Not retained.** The owner `XDEL`s each inbox entry as soon as it has read
+  it, so a command's arguments (a steering message from an off-record
+  conversation, say) do not linger in Redis after delivery. Reply and
+  dedup keys hold the owner's answer, never the arguments.
 - **No replay.** A command only acts on a run that is still live on its
   owner. Nothing re-executes tool work; an owner that died takes its runs
   with it, and its claim lapses within one lease (30 s).

@@ -277,7 +277,7 @@ an owner consumes a single stream). The envelope, JSON in field `c`:
 | `generation` | The record's `generation` as the sender read it. The owner refuses with `stale_generation`, executing nothing, unless the record still names itself at that generation |
 | `actor` | `{"kind": "user", "email"}` or `{"kind": "service"}`; the owner re-checks it against its own registry |
 | `args` | Command arguments |
-| `deadline` | Epoch seconds; an owner that reads the command later answers `command_expired` without executing it |
+| `deadline` | Epoch seconds on the Redis server clock (`TIME`); an owner that reads the command later answers `command_expired` without executing it |
 
 Details, reply codes and guarantees: [run control](run-control.md).
 

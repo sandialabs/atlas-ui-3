@@ -142,7 +142,7 @@ class RunControlService:
         if record.is_terminal or record.steering is not steering:
             # The run ended while the classification check was awaited.
             return reply(False, "run_not_found", "The run has finished.")
-        if deadline is not None and time.time() > float(deadline):
+        if deadline is not None and await _shared_now() > float(deadline):
             # The check outlasted the sender's wait: it has already reported a
             # timeout, and a client retry without a request id would queue a
             # second copy.
@@ -188,6 +188,12 @@ class RunControlService:
         if request.run_id:
             self._registry().answer_pending_request(request.run_id, tool_call_id=request.tool_call_id)
         return reply(True, applied=True)
+
+
+async def _shared_now() -> float:
+    """The clock command deadlines are stamped on (see ``RedisRunControlBus.shared_now``)."""
+    bus = get_run_control_bus()
+    return await bus.shared_now() if bus is not None else time.time()
 
 
 def start_run_control(refusal_check: Optional[RefusalCheck] = None) -> Optional[RunControlService]:
@@ -334,7 +340,12 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     later = await route_api_follow_up_cancel(
         str(entry.get("run_id")), entry.get("conversation_id"), entry.get("user_email"), earlier,
     )
-    if later is not None and (later.get("ok") or answer.get("ok")):
+    if not answer.get("ok"):
+        # The follow-up was stopped best effort, but the named run's own stop
+        # (which cascades to the sub-conversations it launched) did not reach
+        # its owner. Report that retryable failure, never a 200.
+        return answer
+    if later is not None:
         return later
     return answer
 

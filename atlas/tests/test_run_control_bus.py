@@ -299,3 +299,55 @@ async def test_waiting_senders_are_bounded_and_the_excess_is_never_sent(pair):
     sent = [json.loads(fields[b"c"])["request_id"]
             for _id, fields in await sender.bus._client().xrange(inbox)]
     assert sent == ["held"]
+
+
+async def test_deadlines_use_the_shared_clock_not_the_replicas(pair, monkeypatch):
+    # Both replicas' wall clocks are an hour off; the deadline is stamped and
+    # checked on Redis TIME, so the command still executes.
+    owner, sender = pair
+    await owner.admit()
+    calls = []
+    owner.bus.start(_counting_handler(calls))
+    from types import SimpleNamespace
+
+    skewed = time.time() + 3600
+    monkeypatch.setattr(control_bus, "time", SimpleNamespace(time=lambda: skewed, monotonic=time.monotonic))
+    answer = await _send(sender, request_id="skewed")
+    assert answer["ok"] is True and len(calls) == 1
+    shared = await sender.bus.shared_now()
+    assert abs(calls[0]["deadline"] - shared) < 10
+
+
+async def test_read_commands_are_deleted_from_the_inbox(pair):
+    # A command's arguments (a steering message) are not retained in Redis
+    # once the owner has read them.
+    owner, sender = pair
+    await owner.admit()
+    owner.bus.start(_counting_handler([]))
+    answer = await _send(sender, "steer", {"content": "secret"}, request_id="r1")
+    assert answer["ok"] is True
+    inbox = owner.coordinator.keys.control_inbox("replica-a")
+    assert await sender.bus._client().xrange(inbox) == []
+
+
+async def test_reader_waits_for_a_dispatch_slot_before_taking_more(pair):
+    owner, sender = pair
+    await owner.admit()
+    gate = asyncio.Event()
+    started = []
+
+    async def slow(envelope):
+        started.append(envelope["request_id"])
+        await gate.wait()
+        return reply(True)
+
+    owner.bus._dispatch_slots = asyncio.Semaphore(1)
+    owner.bus.start(slow)
+    first = asyncio.create_task(_send(sender, request_id="a", timeout=3))
+    second = asyncio.create_task(_send(sender, request_id="b", timeout=3))
+    await asyncio.sleep(0.3)
+    assert len(started) == 1
+    assert len(owner.bus._handlers) == 1  # no task exists for the waiting command
+    gate.set()
+    assert (await first)["ok"] and (await second)["ok"]
+    assert sorted(started) == ["a", "b"]

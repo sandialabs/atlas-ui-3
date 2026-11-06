@@ -375,6 +375,26 @@ async def test_api_cancel_reports_a_follow_up_it_could_not_stop(cluster, monkeyp
     assert answer["ok"] is False and answer["code"] == "command_timeout"
 
 
+async def test_api_cancel_reports_a_named_run_it_could_not_stop(cluster, monkeypatch):
+    # The follow-up is stopped, but the named run's owner never answered: its
+    # stop is what cascades to the sub-conversations it launched, so the
+    # cancel must stay a retryable failure rather than a 200.
+    api = _ApiReplicas(cluster, monkeypatch)
+    original = await api.finished_on_a()
+    follow_up = await api.live_on_a(original.conversation_id)
+    real_send = run_control._send
+
+    async def named_run_unreachable(entry, command, actor, args=None, request_id=None):
+        if entry["run_id"] == original.run_id:
+            return run_control.reply(False, "command_timeout", "no answer")
+        return await real_send(entry, command, actor, args, request_id)
+
+    monkeypatch.setattr(run_control, "_send", named_run_unreachable)
+    answer = await run_control.route_api_cancel(original.run_id)
+    assert answer["ok"] is False and answer["code"] == "command_timeout"
+    assert cluster.registry.get(follow_up.run_id).is_terminal
+
+
 async def test_api_cancel_never_cascades_from_a_run_the_api_did_not_start(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     browser_run = await cluster.run()

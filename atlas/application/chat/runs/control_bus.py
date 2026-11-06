@@ -25,8 +25,11 @@ keys, built by ``RunCoordinationKeys``:
 
 Redis Streams deliver at least once at best, and a caller may retry, so a
 command never executes twice for one request id: the second delivery gets
-the first reply back. Every command carries a deadline; an owner that reads
-it late answers ``expired`` without executing it. Every command also carries
+the first reply back. Every command carries a deadline on the shared Redis
+clock (``TIME``), so replica clock skew cannot move it; an owner that reads
+it late answers ``expired`` without executing it. The owner deletes each
+inbox entry as soon as it has read it, so a command's arguments (a steering
+message, say) are not retained in Redis after delivery. Every command also carries
 the run's ``generation`` as the sender read it; the owner refuses it
 (``stale_generation``) unless the shared record still names this replica at
 that generation. Nothing here replays tool work: a command only acts on a run
@@ -140,6 +143,16 @@ class RedisRunControlBus:
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         return await self.directory.run_for_conversation(conversation_id)
 
+    async def shared_now(self) -> float:
+        """Seconds since the epoch on the Redis server's clock.
+
+        Command deadlines are stamped and checked on this one clock, so wall
+        clock skew between replicas cannot expire a valid command or let one
+        execute after its sender reported a timeout.
+        """
+        seconds, micros = await self._client().time()
+        return int(seconds) + int(micros) / 1_000_000
+
     async def _read_json(self, key: str) -> Optional[Dict[str, Any]]:
         raw = await self._client().get(key)
         if not raw:
@@ -176,7 +189,7 @@ class RedisRunControlBus:
         attempt = uuid.uuid4().hex
         scope = command_scope(actor, request_id)
         reply_key = self.keys.control_reply(scope)
-        deadline = time.time() + timeout
+        started = time.monotonic()
         envelope = {
             "v": PROTOCOL_VERSION,
             "request_id": request_id,
@@ -187,7 +200,6 @@ class RedisRunControlBus:
             "generation": generation,
             "actor": actor,
             "args": args or {},
-            "deadline": deadline,
             "sent_by": self.replica_id,
         }
         try:
@@ -196,19 +208,24 @@ class RedisRunControlBus:
             # Nothing was sent, so nothing can run late.
             return reply(False, COMMAND_TIMEOUT, "Too many run-control commands are waiting; try again.")
         try:
-            return await self._send_and_wait(owner_replica, envelope, reply_key, attempt, deadline)
+            return await self._send_and_wait(owner_replica, envelope, reply_key, attempt, started + timeout)
         finally:
             self._send_slots.release()
 
     async def _send_and_wait(self, owner_replica: str, envelope: Dict[str, Any], reply_key: str,
-                             attempt: str, deadline: float) -> Dict[str, Any]:
+                             attempt: str, give_up_at: float) -> Dict[str, Any]:
+        """``give_up_at`` is on this process's monotonic clock. The owner's
+        deadline is the same instant on the Redis clock, read after ``TIME``
+        returned, so it never falls after the moment this sender gives up."""
         client = self._client()
         inbox = self.keys.control_inbox(owner_replica)
+        now = await self.shared_now()
+        envelope["deadline"] = now + (give_up_at - time.monotonic())
         await client.xadd(inbox, {"c": json.dumps(envelope)}, maxlen=INBOX_MAXLEN, approximate=True)
         await client.expire(inbox, INBOX_TTL_SECONDS)
         last_id = "0-0"
         while True:
-            remaining = deadline - time.time()
+            remaining = give_up_at - time.monotonic()
             if remaining <= 0:
                 return reply(False, COMMAND_TIMEOUT, "The run's server did not answer in time.")
             block = max(1, min(BLOCK_MS, int(remaining * 1000)))
@@ -283,20 +300,46 @@ class RedisRunControlBus:
                 delay = min(delay * 2, 10.0)
                 continue
             for _stream, messages in entries or []:
-                for message_id, fields in messages:
-                    last_id = _text(message_id)
+                read_ids = [_text(message_id) for message_id, _fields in messages]
+                if read_ids:
+                    last_id = read_ids[-1]
+                    await self._forget_entries(inbox, read_ids)
+                for _message_id, fields in messages:
                     envelope = self._decode(fields)
                     if envelope is None:
                         continue
-                    task = asyncio.create_task(self._dispatch(envelope))
+                    # Bounded before a task exists: while every slot is busy
+                    # the reader waits and further commands stay in Redis
+                    # (their deadlines still apply) instead of piling up here.
+                    await self._dispatch_slots.acquire()
+                    task = asyncio.create_task(self._dispatch_held(envelope))
                     self._handlers.add(task)
                     task.add_done_callback(self._handlers.discard)
+
+    async def _forget_entries(self, inbox: str, message_ids: "list[str]") -> None:
+        """Delete inbox entries once read. Delivery is at most once per
+        entry anyway (the read cursor is in memory), so keeping them would
+        only retain command arguments, a steering message among them."""
+        try:
+            await self._client().xdel(inbox, *message_ids)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Trimmed by INBOX_MAXLEN and the key's TTL in the worst case.
+            logger.warning("run-control inbox entries could not be deleted", exc_info=True)
+
+    async def _dispatch_held(self, envelope: Dict[str, Any]) -> None:
+        """Run a command whose dispatch slot the reader already acquired."""
+        try:
+            await self._dispatch_now(envelope)
+        finally:
+            self._dispatch_slots.release()
 
     async def _dispatch(self, envelope: Dict[str, Any]) -> None:
         # Waiting for a slot counts against the command's deadline, which
         # _execute_once checks before acting.
-        async with self._dispatch_slots:
-            await self._dispatch_now(envelope)
+        await self._dispatch_slots.acquire()
+        await self._dispatch_held(envelope)
 
     async def _dispatch_now(self, envelope: Dict[str, Any]) -> None:
         scope = envelope.get("scope")
@@ -354,7 +397,7 @@ class RedisRunControlBus:
             answer = dict(previous.get("reply") or {})
             answer["duplicate"] = True
             return answer
-        if time.time() > float(envelope.get("deadline") or 0):
+        if await self.shared_now() > float(envelope.get("deadline") or 0):
             # The caller has already reported a timeout. Acting now would make
             # its answer wrong; the id is released so a retry can run it.
             await client.delete(done_key)
