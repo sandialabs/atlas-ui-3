@@ -1,12 +1,25 @@
 import { useReducer, useCallback } from 'react'
 import { isOpenLegacyRow } from '../../utils/executionState'
 
+// The marker-only seed (issue #957) stands for "the run is still going"; it
+// has no text, so it belongs after every row of its turn. Rows that arrive
+// after it -- a tool row, an approval card, a snapshot reconcile -- would
+// otherwise leave the marker above them. A real user message ends the turn:
+// the seed is never moved past one (the send path discards it instead).
+function reseatSeed(state) {
+  const idx = state.findIndex(m => m._seed)
+  if (idx < 0 || idx === state.length - 1) return state
+  const after = state.slice(idx + 1)
+  if (after.some(m => m.role === 'user' && !m._agentInput)) return state
+  return [...state.slice(0, idx), ...after, state[idx]]
+}
+
 function messagesReducer(state, action) {
   switch (action.type) {
     case 'ADD':
-      return [...state, action.message]
+      return reseatSeed([...state, action.message])
     case 'BULK_ADD':
-      return [...state, ...action.messages]
+      return reseatSeed([...state, ...action.messages])
     case 'UPDATE_TOOL_RESULT': {
       const patch = action.patch || {}
       if (patch.invocation_id) {
@@ -21,8 +34,10 @@ function messagesReducer(state, action) {
         m.tool_call_id === action.tool_call_id && !m.invocation_id ? { ...m, ...patch } : m
       ))
     }
-    case 'MAP':
-      return action.mapper(state)
+    case 'MAP': {
+      const next = action.mapper(state)
+      return Array.isArray(next) ? reseatSeed(next) : next
+    }
     case 'RESET':
       return []
     case 'STREAM_TOKEN': {
@@ -45,6 +60,13 @@ function messagesReducer(state, action) {
         // First target a placeholder (the seed or an earlier replay): the
         // replay is a newer snapshot of the same segment and defines it.
         const current = state.findLastIndex(m => m._streaming && m._replayed)
+        // A marker-only seed holds no text, so its position means nothing:
+        // tool rows (an atlas_sleep, an approval card) can land after it
+        // while the run is between segments. Filling it in place would put
+        // the next segment's text above those rows, so it moves to the end.
+        if (current >= 0 && state[current]._seed) {
+          return [...state.filter((_, i) => i !== current), replayed]
+        }
         if (current >= 0) {
           const updated = [...state]
           updated[current] = { ...state[current], ...replayed }
