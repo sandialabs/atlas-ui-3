@@ -246,6 +246,20 @@ class TestLaterTurnsCanReadTheCanvas:
         assert segment
         assert any("print(1)" in item["content"] for item in segment)
 
+    def test_large_canvas_counts_toward_the_keep_budget(self):
+        # Short chat around a large document must not all fit in the keep
+        # budget. The document is what makes the earlier turn worth summarizing.
+        history = ConversationHistory()
+        history.add_message(Message(role=MessageRole.USER, content="hi"))
+        history.add_message(canvas_artifact_message({
+            "tool_call_id": "c1", "tool_name": "atlas_canvas",
+            "canvas_content": "y" * 40_000, "status": "completed",
+        }))
+        history.add_message(Message(role=MessageRole.ASSISTANT, content="ok"))
+        history.add_message(Message(role=MessageRole.USER, content="next"))
+        _boundary, segment, _previous = ContextCompactor._history_segment(history, 8_000)
+        assert any("y" * 100 in item["content"] for item in segment)
+
 
 class TestRepositoryRoundTrip:
     def test_saved_canvas_reloads_and_folds(self, tmp_path):

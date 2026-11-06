@@ -1497,9 +1497,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			files.setCanvasContent(latestCanvasArtifactContent(conversationData.messages))
 			files.setCustomUIContent(null)
 			files.setSessionFiles({ total_files: 0, files: [], categories: { code: [], image: [], data: [], document: [], other: [] } })
-		} else {
-			// A socket blip must not clear the panel. It should still pick up
-			// a document that was saved while this tab was disconnected.
+		} else if (conversationData.in_flight !== true) {
+			// A socket blip must not clear the panel. An idle conversation
+			// can still pick up a document that was saved while this tab was
+			// disconnected. An in-flight run is ahead of the flushed snapshot:
+			// the panel may already show a newer canvas that has not been
+			// written to history yet, and this reload must not put the older
+			// one back.
 			const restored = latestCanvasArtifactContent(conversationData.messages)
 			if (restored) files.setCanvasContent(restored)
 		}
@@ -1677,7 +1681,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// that filled the panel may have been missed while the socket was down.
 		const rawStored = Array.isArray(data.messages) ? data.messages : []
 		const storedCanvas = latestCanvasArtifactContent(rawStored)
-		if (storedCanvas && storedCanvas !== (canvasContentRef.current || '')) return true
+		// An active run's panel can be newer than the flushed artifact. Only
+		// an idle conversation treats a different stored canvas as a change.
+		const runActive = isRunActive(runsByConversationRef.current[id]) || data.in_flight === true
+		if (!runActive && storedCanvas && storedCanvas !== (canvasContentRef.current || '')) return true
 		const stored = rawStored.filter(msg => !isCanvasArtifactMessage(msg))
 		const current = latestMessagesRef.current.filter(m => !isLiveOnlyRow(m) && !m._streaming)
 		if (stored.length !== current.length) return true

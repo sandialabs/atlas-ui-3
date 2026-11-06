@@ -27,7 +27,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.messages.canvas_context import (
     append_canvas_block,
-    artifact_text,
     canvas_folds,
 )
 from atlas.domain.messages.models import (
@@ -300,6 +299,23 @@ class ContextCompactor:
             if rows[i].metadata.get("message_type") not in DISPLAY_ONLY_MESSAGE_TYPES
         ]
         as_dicts = {i: _llm_view(rows[i]) for i in visible}
+        # Canvas rows are display-only, so this view would otherwise budget
+        # and summarize a stretch that wrote a document without ever seeing
+        # it. Fold each uncovered write onto the assistant reply that
+        # followed it before the keep budget is chosen: a short turn that
+        # carries a large canvas has to count as large, or every turn fits
+        # and compaction reports there is nothing to summarize.
+        folds, trailing, _included = canvas_folds(rows, covered, DISPLAY_ONLY_MESSAGE_TYPES)
+        for index, block in folds.items():
+            if index in as_dicts:
+                as_dicts[index]["content"] = append_canvas_block(
+                    as_dicts[index].get("content") or "", block,
+                )
+        if trailing and visible:
+            last = visible[-1]
+            as_dicts[last]["content"] = append_canvas_block(
+                as_dicts[last].get("content") or "", trailing,
+            )
         user_positions = [p for p, i in enumerate(visible) if rows[i].role == MessageRole.USER]
         if not user_positions:
             raise NothingToCompact("the conversation has no completed turn yet")
@@ -315,29 +331,6 @@ class ContextCompactor:
             running += cost
             chosen = position
         tail_index = visible[chosen]
-        # Canvas rows are display-only, so the view above would summarize a
-        # stretch that wrote a document without ever seeing the document.
-        # Fold each uncovered write onto the assistant reply that followed
-        # it, the same way a later request does. The newest canvas is put
-        # back on the request after the checkpoint; this only keeps the
-        # summary from being blind to the writes it covers.
-        folds, trailing, _included = canvas_folds(rows, covered, DISPLAY_ONLY_MESSAGE_TYPES)
-        for index, block in folds.items():
-            if index < tail_index and index in as_dicts:
-                as_dicts[index]["content"] = append_canvas_block(
-                    as_dicts[index].get("content") or "", block,
-                )
-        if trailing:
-            newest = max(
-                (i for i in range(covered + 1, len(rows)) if artifact_text(rows[i])),
-                default=-1,
-            )
-            earlier = [i for i in visible if i < tail_index]
-            if 0 <= newest < tail_index and earlier:
-                last = earlier[-1]
-                as_dicts[last]["content"] = append_canvas_block(
-                    as_dicts[last].get("content") or "", trailing,
-                )
         segment = [as_dicts[i] for i in visible if i < tail_index]
         if not segment:
             raise NothingToCompact("only the latest turn is in context")

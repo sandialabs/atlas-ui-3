@@ -127,7 +127,7 @@ vi.mock('../hooks/chat/useFiles', () => ({
     setCustomUIContent: h.setCustomUIContent,
     setSessionFiles: h.setSessionFiles,
     getFileType: vi.fn(),
-    canvasContent: null,
+    canvasContent: h.canvasContent,
     sessionFiles: { files: [], total_files: 0, categories: {} },
   }),
 }))
@@ -223,6 +223,7 @@ beforeEach(() => {
   h.workspacesEnabled = false
   h.isConnected = true
   h.saveMode = 'server'
+  h.canvasContent = null
   h.saveLocalConv.mockImplementation(() => Promise.resolve())
   vi.stubGlobal('fetch', h.fetchMock)
   h.fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) })
@@ -1034,6 +1035,37 @@ describe('canvas rehydration (issue #1157)', () => {
     // The blip must not wipe the rest of the workspace the way an open does.
     expect(h.setCustomUIContent).not.toHaveBeenCalled()
     expect(h.setSessionFiles).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('does not replace a newer live canvas with an older in-flight snapshot', async () => {
+    h.canvasContent = 'newer live document'
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+      })
+    })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: true,
+        metadata: {},
+        messages: [
+          storedChat('user', 'Original'),
+          storedCanvas('older saved document'),
+          storedChat('assistant', 'Missed answer'),
+        ],
+      }),
+    })
+    h.setCanvasContent.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(result.current.messages.some(m => m.content === 'Missed answer')).toBe(true)
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
     unmount()
   })
 })
