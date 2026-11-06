@@ -116,6 +116,8 @@ confirmation before they run.
 - **On:** tool calls run without asking -- including calls in conversations
   you are not currently viewing, and after you close the browser. The server
   applies the switch, so a run does not stop to wait for a page that is gone.
+  Turning it off during a turn asks again before the next tool, including a
+  turn that is not saved to the server.
 - **Auto-approve never answers admin-marked tools.** When an administrator
   marks a tool as requiring approval (per-tool `require_approval` or
   `FORCE_TOOL_APPROVAL_GLOBALLY`), auto-approve leaves its calls for you to

@@ -353,6 +353,14 @@ owns. A turn that opted in keeps that choice after its socket closes, including
 when a later connection lands on another replica. A connection on a replica
 that does not own the run cannot change that run's switch.
 
+A turn that is not admitted (incognito, local save, or chat history disabled)
+has no run record. The same message stores the switch on that connection's
+session, and the gate reads the live value on the next tool call, not the
+copy taken when the turn started. Turning the switch off asks again. The
+last value is kept if the socket drops while a tool is still in flight, so
+auto-approve stays on when that is how the user left it. A toggle that could
+not be sent because the socket was down is sent again when the page reconnects.
+
 The client still answers a request the server did emit (the switch is off, or
 an administrator marked the tool). Those requests are replayed when the
 conversation is opened again, as described below.

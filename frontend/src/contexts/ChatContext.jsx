@@ -706,6 +706,10 @@ export const ChatProvider = ({ children }) => {
 	settingsRef.current = settings
 	const sendMessageRef = useRef(sendMessage)
 	sendMessageRef.current = sendMessage
+	// A toggle that could not be sent (socket down) is retried on reconnect.
+	// The UI already shows the new value; dropping the frame would leave a
+	// run on this replica approving tools the user just turned off.
+	const pendingAutoApproveRef = useRef(null)
 
 	// The run a joined conversation was opened under has ended. Its save
 	// normally arrives first (see onConversationSaved); this is the fallback
@@ -2308,16 +2312,26 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// Tell the server when the switch changes, so a run already in flight
 	// picks it up before the user navigates away. The chat frame carries the
 	// same bit at admission; this covers the toggle with no new message.
+	// A send that fails because the socket is down stays pending and goes
+	// out on the next connect, so the UI and the owning replica agree again.
+	const publishAutoApprove = useCallback((enabled) => {
+		const sent = sendMessageRef.current?.({
+			type: 'auto_approve_tools',
+			enabled: enabled === true,
+		}) === true
+		pendingAutoApproveRef.current = sent ? null : enabled === true
+	}, [])
 	const updateSettingsAndPublish = useCallback((patch) => {
 		const next = updateSettings(patch)
 		if (patch && Object.prototype.hasOwnProperty.call(patch, 'autoApproveTools')) {
-			sendMessageRef.current?.({
-				type: 'auto_approve_tools',
-				enabled: patch.autoApproveTools === true,
-			})
+			publishAutoApprove(patch.autoApproveTools === true)
 		}
 		return next
-	}, [updateSettings])
+	}, [updateSettings, publishAutoApprove])
+	useEffect(() => {
+		if (!isConnected || pendingAutoApproveRef.current === null) return
+		publishAutoApprove(pendingAutoApproveRef.current)
+	}, [isConnected, publishAutoApprove])
 
 	const value = {
 		// Context meter and compaction controls (issue #877).

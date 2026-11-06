@@ -3106,13 +3106,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "auto_approve_tools":
-                # The switch changed while a run is in flight. Apply it to
-                # the user-started runs this process owns so the next tool
-                # call does not wait on a browser that is about to go away.
-                # Only a real boolean True opts in.
-                run_registry.set_auto_approve_user_tools(
-                    user_email, data.get("enabled") is True
-                )
+                # The switch changed while work is in flight. Tracked runs
+                # keep the bit on the owning record, which is what a closed
+                # browser still executes against. Turns with no record
+                # (incognito, local save, history disabled) keep it on the
+                # session, and the gate reads that live value rather than
+                # the copy taken when the turn started. Only a real boolean
+                # True opts in.
+                from atlas.application.chat.auto_approve_state import set_session_auto_approve
+                enabled = data.get("enabled") is True
+                run_registry.set_auto_approve_user_tools(user_email, enabled)
+                set_session_auto_approve(session_id, enabled)
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response. Arguments stay out of the

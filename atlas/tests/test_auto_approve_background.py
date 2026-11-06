@@ -13,6 +13,11 @@ from types import SimpleNamespace
 import pytest
 
 from atlas.application.chat.approval_manager import get_approval_manager
+from atlas.application.chat.auto_approve_state import (
+    clear_session_auto_approve,
+    session_auto_approve,
+    set_session_auto_approve,
+)
 from atlas.application.chat.runs.context import clear_current_run, set_current_run
 from atlas.application.chat.runs.registry import get_run_registry, reset_run_registry
 from atlas.application.chat.utilities.tool_executor import execute_single_tool
@@ -46,9 +51,18 @@ def _tool_call(call_id):
 def registry():
     reset_run_registry()
     clear_current_run()
+    clear_session_auto_approve()
     yield get_run_registry()
     clear_current_run()
     reset_run_registry()
+    clear_session_auto_approve()
+
+
+@pytest.fixture(autouse=True)
+def _reset_session_auto_approve():
+    clear_session_auto_approve()
+    yield
+    clear_session_auto_approve()
 
 
 @pytest.fixture
@@ -276,3 +290,106 @@ def test_preference_frame_is_strict_and_does_not_cross_users(registry):
     child.auto_approve_user_tools = True
     registry.set_auto_approve_user_tools(USER, False)
     assert child.auto_approve_user_tools is True
+
+
+def test_session_bit_is_strict_and_does_not_cross_sessions():
+    set_session_auto_approve("session-a", True)
+    set_session_auto_approve("session-b", False)
+    assert session_auto_approve("session-a") is True
+    assert session_auto_approve("session-b") is False
+    set_session_auto_approve("session-a", "true")  # type: ignore[arg-type]
+    assert session_auto_approve("session-a") is False
+    set_session_auto_approve(None, True)
+    assert session_auto_approve(None) is None
+
+
+@pytest.mark.asyncio
+async def test_untracked_turn_stops_auto_approving_when_the_switch_goes_off(
+    approval_manager, monkeypatch
+):
+    """No run record: the admission snapshot stays true, the live bit moves."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    clear_current_run()
+    set_session_auto_approve("s-live", True)
+    frames = []
+
+    first = await _run(
+        "call_live_on",
+        {"user_email": USER, "session_id": "s-live", "auto_approve_tools": True},
+        frames,
+    )
+    assert first.success is True
+    assert not any(frame.get("type") == "tool_approval_request" for frame in frames)
+
+    set_session_auto_approve("s-live", False)
+    frames.clear()
+    second = await _run(
+        "call_live_off",
+        {"user_email": USER, "session_id": "s-live", "auto_approve_tools": True},
+        frames,
+    )
+    assert second.success is False
+    assert second.error == "Approval timeout"
+    assert any(frame.get("type") == "tool_approval_request" for frame in frames)
+
+
+@pytest.mark.asyncio
+async def test_untracked_turn_still_approves_when_the_client_is_gone(
+    approval_manager, monkeypatch
+):
+    """Closing the browser does not clear a switch that is still on."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    clear_current_run()
+    set_session_auto_approve("s-closed", True)
+
+    result = await execute_single_tool(
+        _tool_call("call_closed_untracked"),
+        {"user_email": USER, "session_id": "s-closed", "auto_approve_tools": True},
+        _FakeToolManager(),
+        update_callback=None,
+        config_manager=SimpleNamespace(),
+    )
+
+    assert result.success is True
+    assert result.content == "ran"
+
+
+@pytest.mark.asyncio
+async def test_tracked_run_keeps_its_own_bit_when_the_session_disagrees(
+    registry, approval_manager, monkeypatch
+):
+    """The owning run record outlives the socket and wins over the session bit."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    record = registry.start(conversation_id="conv-authority", user_email=USER)
+    record.note_auto_approve({"auto_approve_tools": True})
+    set_session_auto_approve(record.session_id, False)
+    set_current_run(record.run_id, record.conversation_id)
+
+    approved = await execute_single_tool(
+        _tool_call("call_record_wins"),
+        {
+            "user_email": USER,
+            "session_id": record.session_id,
+            "auto_approve_tools": False,
+        },
+        _FakeToolManager(),
+        update_callback=None,
+        config_manager=SimpleNamespace(),
+    )
+    assert approved.success is True
+
+    record.note_auto_approve({"auto_approve_tools": False})
+    set_session_auto_approve(record.session_id, True)
+    frames = []
+    refused = await _run(
+        "call_record_off",
+        {
+            "user_email": USER,
+            "session_id": record.session_id,
+            "auto_approve_tools": True,
+        },
+        frames,
+    )
+    assert refused.success is False
+    assert refused.error == "Approval timeout"
+    assert any(frame.get("type") == "tool_approval_request" for frame in frames)

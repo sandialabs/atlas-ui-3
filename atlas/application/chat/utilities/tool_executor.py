@@ -220,13 +220,17 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
 def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) -> bool:
     """Whether this call can skip the browser approval gate.
 
-    The user's switch is stored on the run, so the decision does not need a
-    connected client. Admin-mandated tools are filtered by the caller (they
-    stay on the gate). A launched child is excluded even when the flag is
-    set: its arguments are model-chosen, and only the launch approval covers
-    its user-level tools. With no run bound, the session flag covers a turn
-    that is not tracked.
+    A tracked run stores the switch on its record, which outlives the socket,
+    so a closed browser does not park a user-level tool. Admin-mandated tools
+    are filtered by the caller (they stay on the gate). A launched child is
+    excluded even when the flag is set: its arguments are model-chosen, and
+    only the launch approval covers its user-level tools.
+
+    A turn with no run record (incognito, local save, history disabled) reads
+    the live session bit. That bit moves when the user toggles the switch, so
+    the copy taken into ``AgentContext`` at admission is not the decision.
     """
+    from atlas.application.chat.auto_approve_state import session_auto_approve
     from atlas.application.chat.runs.context import get_current_run
     from atlas.application.chat.runs.registry import get_run_registry
 
@@ -239,6 +243,9 @@ def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) ->
             return record.auto_approve_user_tools is True
     if not session_context:
         return False
+    live = session_auto_approve(session_context.get("session_id"))
+    if live is not None:
+        return live is True
     return session_context.get("auto_approve_tools") is True
 
 
