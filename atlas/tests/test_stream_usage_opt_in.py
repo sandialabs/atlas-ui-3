@@ -57,3 +57,53 @@ async def test_stream_usage_requires_model_opt_in(monkeypatch, enabled, with_too
     assert sink.prompt_tokens == 3
     assert sink.completion_tokens == 2
     assert sink.calls == 1
+
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.asyncio
+async def test_repeated_stream_usage_is_counted_once(monkeypatch, with_tools):
+    """A cumulative provider snapshot must not be added per SSE chunk."""
+    from atlas.modules.llm import litellm_streaming
+
+    caller = LiteLLMCaller(llm_config=LLMConfig.model_validate({
+        "models": {"test": {
+            "model_name": "openai/test-model",
+            "model_url": "http://127.0.0.1:1/v1",
+            "api_key": "synthetic-only",
+            "request_stream_usage": True,
+        }},
+    }))
+
+    async def completion(**_kwargs):
+        async def chunks():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content="hello", tool_calls=None),
+                    finish_reason=None,
+                )],
+                usage=SimpleNamespace(prompt_tokens=2, completion_tokens=1),
+            )
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content=" world", tool_calls=None),
+                    finish_reason="stop",
+                )],
+                usage=SimpleNamespace(prompt_tokens=4, completion_tokens=3),
+            )
+            yield SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(prompt_tokens=4, completion_tokens=3),
+            )
+        return chunks()
+
+    monkeypatch.setattr(litellm_streaming, "acompletion", completion)
+    messages = [{"role": "user", "content": "test"}]
+    with usage_scope() as sink:
+        if with_tools:
+            tools = [{"type": "function", "function": {
+                "name": "noop", "parameters": {"type": "object"},
+            }}]
+            result = [x async for x in caller.stream_with_tools("test", messages, tools)]
+        else:
+            result = [x async for x in caller.stream_plain("test", messages)]
+    assert "".join(x for x in result if isinstance(x, str)) == "hello world"
+    assert (sink.prompt_tokens, sink.completion_tokens, sink.calls) == (4, 3, 1)
