@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-10-14
+Last updated: 2026-11-06
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -67,6 +67,40 @@ retried using `LLM_MAX_RETRIES` (default: 5 retries after the first attempt) and
 If the budget is exhausted, the client receives an error instead of an empty
 successful response. Tool-only responses are valid, and failures after text
 has reached the client are never retried to avoid duplicating partial output.
+
+## Streaming Token Usage Reporting
+
+For a **static model** configured under `models:`, opt in to requesting
+provider-reported token usage during streaming completions only when that
+endpoint supports OpenAI-compatible `stream_options.include_usage`:
+
+```yaml
+models:
+  usage-capable-gateway:
+    model_name: openai/usage-capable-model
+    model_url: https://gateway.example.org/v1
+    api_key: "${MODEL_GATEWAY_API_KEY}"
+    request_stream_usage: true
+```
+
+The default is `false`. When enabled, Atlas asks LiteLLM to send
+`stream_options: {include_usage: true}` in both plain and tool-enabled
+streaming calls. This does not affect non-streaming requests or models
+discovered dynamically from an enterprise LiteLLM gateway.
+
+Some compatible servers return a final usage-only chunk; others may repeat
+*cumulative* counts in more than one chunk. Atlas records the **last**
+non-null usage report **once per completed streaming LLM call**, avoiding
+double counting. If the endpoint does not return usage metadata, the usage
+counter cannot supply accurate token counts. The request may also fail if
+the endpoint rejects `stream_options`, so verify compatibility with each
+provider before enabling this flag.
+
+**Usage reports are observability data, not an authorization boundary.**
+Do not use these post-response counters to enforce prepaid spending limits,
+tenant quotas, or billing. For those purposes the upstream gateway must
+authorize and bound requests before dispatch and reconcile charges using
+trusted server-side evidence, including error and interrupted-stream cases.
 
 ## Environment Variable Expansion in LLM Configs
 
