@@ -29,16 +29,20 @@ def _text(value: Any) -> Optional[str]:
     return str(value)
 
 
-def owner_entry(record: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+def owner_entry(record: Optional[Dict[str, str]], *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
     """The routing view of a run record, or None unless the run is live.
 
     A released record is kept for a while with a terminal status and
     ``lease_expires_at`` 0; it names its last owner but nothing should be sent
-    there any more.
+    there any more, except a stop (``include_terminal``): stopping a finished
+    parent still stops the sub-conversations it launched, which run on the
+    same replica (#925). A record an orphan sweep took over names no owner and
+    is never routed.
     """
-    if not record or not record.get("owner") or record.get("status") in TERMINAL_STATUSES:
+    if not record or not record.get("owner"):
         return None
-    if record.get("lease_expires_at") == "0":
+    terminal = record.get("status") in TERMINAL_STATUSES or record.get("lease_expires_at") == "0"
+    if terminal and not include_terminal:
         return None
     try:
         generation = int(record.get("generation") or "")
@@ -51,6 +55,8 @@ def owner_entry(record: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
         "user_email": record.get("user_email"),
         "generation": generation,
         "status": record.get("status"),
+        "source": record.get("source") or "",
+        "terminal": terminal,
     }
 
 
@@ -68,8 +74,8 @@ class RunDirectory:
             return None
         return await self._coordinator.read(run_id)
 
-    async def owner_of(self, run_id: str) -> Optional[Dict[str, Any]]:
-        return owner_entry(await self.record(run_id))
+    async def owner_of(self, run_id: str, *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
+        return owner_entry(await self.record(run_id), include_terminal=include_terminal)
 
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """The live run holding ``conversation_id``, whoever owns it."""

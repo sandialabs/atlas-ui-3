@@ -66,11 +66,14 @@ def test_repeated_cancel_via_non_owner_is_idempotent(cluster):
         first = cluster.cancel(cluster.b, run_id)
         second = cluster.cancel(cluster.b, run_id)
         assert first[0] == 200 and first[1]["status"] == "cancelled" and first[1]["cancelled"] is True, first
-        # The run is withdrawn from the directory as it ends; a repeat either
-        # reaches the owner again or finds nothing live to route to.
-        assert second[0] in (200, 404), second
-        if second[0] == 200:
-            assert second[1]["status"] == "cancelled" and second[1]["cancelled"] is False, second
+        # A repeat reaches the owner again, live or already released (a stop
+        # still routes to a finished run's last owner), and changes nothing.
+        assert second[0] == 200, second
+        assert second[1]["status"] == "cancelled" and second[1]["cancelled"] is False, second
+        cluster.wait_terminal(cluster.a, run_id, timeout=10)
+        time.sleep(1.0)  # let A release the claim, then cancel the finished run
+        third = cluster.cancel(cluster.b, run_id)
+        assert third[0] == 200 and third[1]["cancelled"] is False, third
         assert cluster.wait_terminal(cluster.a, run_id, timeout=10)["status"] == "cancelled"
     finally:
         cluster.cancel_everywhere(run_id)

@@ -174,7 +174,7 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
   (30 minutes after it ends). **Cancel** is the exception: with `SESSION_REPOSITORY_TYPE=redis`
   any replica accepts it and stops the run on the replica executing it (see
   [cross-replica run control](../developer/run-control.md)); a `504 command_timeout` means that
-  replica did not confirm in time, and repeating the cancel is safe. With `SESSION_REPOSITORY_TYPE=redis`, `GET /api/agent-runs/{run_id}`
+  replica did not confirm in time, and repeating the cancel is safe. A cancel naming a run that finished in the last 5 minutes still reaches the replica that ran it, so its sub-conversations and the conversation's in-progress follow-up are stopped from any replica. A `503 owner_unavailable` means the shared run directory could not be read; nothing was stopped, and the cancel can be repeated. With `SESSION_REPOSITORY_TYPE=redis`, `GET /api/agent-runs/{run_id}`
   answers on every replica from the run's shared record, kept 5 minutes after the run ends
   ([run coordination](../developer/run-coordination.md));
   otherwise a status request that reaches another replica gets `404 run_not_found`. Behind

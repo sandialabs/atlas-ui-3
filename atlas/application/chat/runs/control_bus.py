@@ -64,6 +64,13 @@ PENDING_TTL_SECONDS = 30
 # Kept below the pool's socket timeout so a blocking read never trips it.
 BLOCK_MS = 1000
 DEFAULT_TIMEOUT_SECONDS = 5.0
+# The bus shares the process's Redis pool (20 connections by default) with
+# sessions, admission and lease renewal. A waiting sender holds a connection
+# in a blocking read for up to its timeout, so at most this many wait at once;
+# a sender past the bound waits for a slot within its own timeout. Commands
+# this replica executes are bounded the same way.
+MAX_CONCURRENT_SENDS = 6
+MAX_CONCURRENT_DISPATCH = 8
 
 # Reply codes produced by the transport itself (handlers add their own).
 OWNER_UNAVAILABLE = "owner_unavailable"
@@ -121,12 +128,14 @@ class RedisRunControlBus:
         # record (or a slow Redis) says so.
         self._lost_runs: "set[str]" = set()
         self._unsubscribe_lost: Optional[Callable[[], None]] = None
+        self._send_slots = asyncio.Semaphore(MAX_CONCURRENT_SENDS)
+        self._dispatch_slots = asyncio.Semaphore(MAX_CONCURRENT_DISPATCH)
 
     def _client(self) -> Any:
         return self._redis.client
 
-    async def owner_of(self, run_id: str) -> Optional[Dict[str, Any]]:
-        return await self.directory.owner_of(run_id)
+    async def owner_of(self, run_id: str, *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
+        return await self.directory.owner_of(run_id, include_terminal=include_terminal)
 
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         return await self.directory.run_for_conversation(conversation_id)
@@ -181,6 +190,18 @@ class RedisRunControlBus:
             "deadline": deadline,
             "sent_by": self.replica_id,
         }
+        try:
+            await asyncio.wait_for(self._send_slots.acquire(), timeout)
+        except asyncio.TimeoutError:
+            # Nothing was sent, so nothing can run late.
+            return reply(False, COMMAND_TIMEOUT, "Too many run-control commands are waiting; try again.")
+        try:
+            return await self._send_and_wait(owner_replica, envelope, reply_key, attempt, deadline)
+        finally:
+            self._send_slots.release()
+
+    async def _send_and_wait(self, owner_replica: str, envelope: Dict[str, Any], reply_key: str,
+                             attempt: str, deadline: float) -> Dict[str, Any]:
         client = self._client()
         inbox = self.keys.control_inbox(owner_replica)
         await client.xadd(inbox, {"c": json.dumps(envelope)}, maxlen=INBOX_MAXLEN, approximate=True)
@@ -272,6 +293,12 @@ class RedisRunControlBus:
                     task.add_done_callback(self._handlers.discard)
 
     async def _dispatch(self, envelope: Dict[str, Any]) -> None:
+        # Waiting for a slot counts against the command's deadline, which
+        # _execute_once checks before acting.
+        async with self._dispatch_slots:
+            await self._dispatch_now(envelope)
+
+    async def _dispatch_now(self, envelope: Dict[str, Any]) -> None:
         scope = envelope.get("scope")
         request_id = envelope.get("request_id")
         if not scope or not request_id or envelope.get("v") != PROTOCOL_VERSION:

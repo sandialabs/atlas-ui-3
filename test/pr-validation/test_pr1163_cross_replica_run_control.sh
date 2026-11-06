@@ -28,7 +28,8 @@ fail() {
 echo "== run-control unit tests"
 (cd atlas && python -m pytest -q -p no:cacheprovider tests/test_run_control_bus.py \
     tests/test_run_control_service.py tests/test_reopened_run_approval.py \
-    tests/test_redis_run_coordinator.py) || fail "unit tests"
+    tests/test_redis_run_coordinator.py tests/test_websocket_run_directory_outage.py \
+    tests/test_run_leases.py) || fail "unit tests"
 echo "PASSED: transport and handler unit tests"
 
 echo "== routing on two replicas"

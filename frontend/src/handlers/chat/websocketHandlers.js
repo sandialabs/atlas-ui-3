@@ -833,8 +833,11 @@ export function createWebSocketHandler(deps) {
           break
         case 'error':
           // A refused steer (issue #1042) leaves the running turn running:
-          // report it without tearing down the turn's indicators.
-          if (data.steering === true) {
+          // report it without tearing down the turn's indicators. So does a
+          // stop or steer for a run another server executes that could not be
+          // reached (issue #1128): the run is still going there, and Stop must
+          // stay available.
+          if (data.steering === true || (data.error_type === 'run_control_unavailable' && data.run_id)) {
             addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
             break
           }

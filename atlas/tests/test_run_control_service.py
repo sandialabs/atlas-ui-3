@@ -214,15 +214,144 @@ async def test_approval_from_another_user_is_refused(cluster):
     assert not request.future.done()
 
 
-async def test_released_run_is_no_longer_routed(cluster):
-    record = await cluster.run()
-    claim = await cluster.a.coordinator.read(record.run_id)
-    assert await run_control.remote_run_for_conversation(record.conversation_id) is not None
+async def _release(cluster, record, status="completed"):
     from atlas.application.chat.runs.coordination import RunClaim
 
+    claim = await cluster.a.coordinator.read(record.run_id)
     await cluster.a.coordinator.release(RunClaim(
-        run_id=record.run_id, conversation_id=record.conversation_id, user_email=OWNER,
+        run_id=record.run_id, conversation_id=record.conversation_id, user_email=record.user_email,
         owner="replica-a", generation=int(claim["generation"]), lease_expires_at=0,
-    ), "completed")
+    ), status)
+
+
+async def test_released_run_only_routes_a_stop(cluster):
+    channel = SteeringChannel()
+    channel.activate()
+    record = await cluster.run(steering=channel)
+    assert await run_control.remote_run_for_conversation(record.conversation_id) is not None
+    cluster.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    await _release(cluster, record)
+    # Nothing is steered into, or blocks, a conversation whose run finished.
     assert await run_control.remote_run_for_conversation(record.conversation_id) is None
-    assert await run_control.route_stop(OWNER, record.run_id, None) is None
+    # A stop naming it still reaches its last owner, and changes nothing there.
+    answer = await run_control.route_stop(OWNER, record.run_id, None)
+    assert answer["ok"] is True and answer["payload"]["cancelled"] is False
+    assert cluster.registry.get(record.run_id).status is RunStatus.COMPLETED
+
+
+async def test_stopping_a_finished_parent_stops_its_live_child_on_the_owner(cluster):
+    parent = await cluster.run()
+    child = cluster.registry.start(conversation_id="conv-child", user_email=OWNER,
+                                   parent_run_id=parent.run_id, depth=1)
+    cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await cluster.a.claim(child.run_id, child.conversation_id)
+    # atlas_launch returns a handle, so the parent usually finishes first.
+    cluster.registry.set_status(parent.run_id, RunStatus.COMPLETED)
+    await _release(cluster, parent)
+    answer = await run_control.route_stop(OWNER, parent.run_id, parent.conversation_id)
+    assert answer["ok"] is True
+    assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
+
+
+async def test_finished_run_whose_last_owner_is_gone_is_not_routed(cluster):
+    record = await cluster.run()
+    cluster.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    await _release(cluster, record)
+    await cluster.a.bus.stop()  # A no longer answers
+    started = asyncio.get_running_loop().time()
+    run_control_bus = run_control.get_run_control_bus()
+    original = run_control_bus.send
+
+    async def quick(*args, **kwargs):
+        kwargs["timeout"] = 0.3
+        return await original(*args, **kwargs)
+
+    run_control_bus.send = quick
+    try:
+        assert await run_control.route_stop(OWNER, record.run_id, None) is None
+    finally:
+        run_control_bus.send = original
+    assert asyncio.get_running_loop().time() - started < 3
+
+
+async def test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere(cluster, monkeypatch):
+    from atlas.application.chat.runs import external_runs
+
+    # Replica A ran the original API run; replica B (this process) runs the
+    # follow-up in the same conversation.
+    registry_b = RunRegistry()
+    monkeypatch.setattr(external_runs, "get_run_registry", lambda: registry_b)
+    original = await cluster.run()
+    original.launch_spec = {"source": external_runs.API_SOURCE}
+    cluster.registry.set_status(original.run_id, RunStatus.COMPLETED)
+    await _release(cluster, original)
+    follow_up = registry_b.start(conversation_id=original.conversation_id, user_email=OWNER)
+    follow_up.launch_spec = {"source": external_runs.API_SOURCE}
+    registry_b.attach_task(follow_up.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await cluster.b.claim(follow_up.run_id, follow_up.conversation_id)
+    await cluster.b.bus._client().hset(
+        cluster.b.coordinator.keys.run(follow_up.run_id), "source", external_runs.API_SOURCE)
+
+    # A's service resolves API runs through the same patched registry; give it
+    # A's view for the original id.
+    def a_registry():
+        return cluster.registry
+
+    async def stop_on_a(envelope):
+        monkeypatch.setattr(external_runs, "get_run_registry", a_registry)
+        try:
+            return await cluster.service.handle(envelope)
+        finally:
+            monkeypatch.setattr(external_runs, "get_run_registry", lambda: registry_b)
+
+    cluster.a.bus._handler = stop_on_a
+    answer = await run_control.route_api_cancel(original.run_id)
+    assert answer["ok"] is True, answer
+    status = answer["payload"]["status"]
+    assert status["run_id"] == follow_up.run_id and status["cancelled"] is True
+    assert registry_b.get(follow_up.run_id).status is RunStatus.CANCELLED
+
+
+async def test_unreadable_directory_is_not_taken_for_no_owner(cluster):
+    record = await cluster.run()
+
+    async def fail(*_args, **_kwargs):
+        raise TimeoutError("redis timed out")
+
+    cluster.b.bus.owner_of = fail
+    cluster.b.bus.run_for_conversation = fail
+    with pytest.raises(run_control.RunDirectoryUnavailable):
+        await run_control.remote_run_for_conversation(record.conversation_id)
+    for answer in (
+        await run_control.route_stop(OWNER, record.run_id, None),
+        await run_control.route_stop(OWNER, None, record.conversation_id),
+        await run_control.route_api_cancel(record.run_id),
+    ):
+        assert answer["ok"] is False and answer["code"] == "owner_unavailable", answer
+    # The approval nudge is best effort: the executor polls the outcome anyway.
+    assert await run_control.route_approval(OWNER, record.run_id, "inv", "call") is None
+    assert not cluster.registry.get(record.run_id).is_terminal
+
+
+async def test_steer_whose_check_outlasted_the_deadline_is_not_queued(cluster):
+    import time as _time
+
+    channel = SteeringChannel()
+    channel.activate()
+    record = await cluster.run(steering=channel)
+    gate = asyncio.Event()
+
+    async def slow_check(_session_id, _level):
+        await gate.wait()
+        return None
+
+    cluster.service._refusal_check = slow_check
+    pending = asyncio.create_task(cluster.service.handle({
+        "command": "steer", "run_id": record.run_id, "actor": user_actor(OWNER),
+        "args": {"content": "late"}, "deadline": _time.time() + 0.1,
+    }))
+    await asyncio.sleep(0.2)
+    gate.set()
+    answer = await pending
+    assert answer["code"] == "command_expired"
+    assert channel.queue.qsize() == 0

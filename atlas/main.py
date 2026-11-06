@@ -720,12 +720,17 @@ def _find_addressed_run(run_registry, user_email: str, data: dict):
     return record
 
 
-async def _stop_remote_run(websocket, run_registry, user_email: str, data: dict) -> bool:
+async def _stop_remote_run(websocket, run_registry, user_email: str, data: dict,
+                           active_chat_task: Optional[dict] = None) -> bool:
     """Route a stop to the replica that owns the run (issue #1128).
 
     Only for a frame this replica's registry cannot resolve. Returns whether
     another replica owns the addressed run, in which case the frame is fully
     handled here and must not fall back to cancelling a local untracked turn.
+
+    When the shared directory cannot be read the owner is unknown: the client
+    is told so, except for a frame naming no run id while this socket has an
+    untracked turn of its own in flight, which the local fallback still stops.
     """
     if _find_addressed_run(run_registry, user_email, data) is not None:
         return False
@@ -737,6 +742,10 @@ async def _stop_remote_run(websocket, run_registry, user_email: str, data: dict)
     answer = await route_stop(user_email, data.get("run_id"), data.get("conversation_id"))
     if answer is None:
         return False
+    if answer.get("code") == "owner_unavailable" and not data.get("run_id"):
+        local_task = (active_chat_task or {}).get("task")
+        if local_task is not None and not local_task.done():
+            return False
     frame = stop_frame(answer, data)
     if frame is not None:
         await websocket.send_json(frame)
@@ -2206,13 +2215,24 @@ async def websocket_endpoint(websocket: WebSocket):
                 # another replica. Steer it there; never start a second turn
                 # beside it.
                 if tracked_run is None and frame_conversation_id:
-                    from atlas.application.chat.runs.remote_run_frames import steer_frame
+                    from atlas.application.chat.runs.remote_run_frames import (
+                        directory_unavailable_frame,
+                        steer_frame,
+                    )
                     from atlas.application.chat.runs.run_control import (
+                        RunDirectoryUnavailable,
                         remote_run_for_conversation,
                         route_steer,
                     )
 
-                    remote_run = await remote_run_for_conversation(frame_conversation_id)
+                    try:
+                        remote_run = await remote_run_for_conversation(frame_conversation_id)
+                    except RunDirectoryUnavailable:
+                        # Unknown is not "nobody": the conversation may be
+                        # executing elsewhere, and a turn admitted here would
+                        # run beside it (or under another user's run).
+                        await websocket.send_json(directory_unavailable_frame(frame_conversation_id))
+                        continue
                     if remote_run is not None and remote_run.get("user_email") != normalize_user_email(
                         user_email
                     ):
@@ -3230,7 +3250,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # that run and nothing else -- stopping A must never stop B.
                 # A frame with neither falls back to the untracked slot, which
                 # is what an older client sends.
-                if await _stop_remote_run(websocket, run_registry, user_email, data):
+                if await _stop_remote_run(websocket, run_registry, user_email, data, active_chat_task):
                     pass
                 elif not _cancel_addressed_run(run_registry, user_email, data):
                     task = active_chat_task.get("task")
@@ -3244,7 +3264,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the message is always handled here as a plain task cancel.
                 action = data.get("action")
                 if action == "stop":
-                    if await _stop_remote_run(websocket, run_registry, user_email, data):
+                    if await _stop_remote_run(websocket, run_registry, user_email, data, active_chat_task):
                         pass
                     elif not _cancel_addressed_run(run_registry, user_email, data):
                         task = active_chat_task.get("task")

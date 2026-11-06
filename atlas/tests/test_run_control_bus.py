@@ -271,3 +271,31 @@ async def test_a_claim_the_heartbeat_found_lost_is_fenced_at_once(pair):
     assert answer["code"] == STALE_GENERATION and calls == []
     await owner.bus.stop()
     assert owner.bus._claim_lost not in admission._claim_lost_listeners
+
+
+def test_a_stop_may_still_reach_the_last_owner_of_a_finished_run():
+    from atlas.application.chat.runs.run_directory import owner_entry
+
+    released = {"run_id": "r", "conversation_id": "c", "user_email": "u@x", "owner": "replica-a",
+                "generation": "4", "status": "completed", "lease_expires_at": "0"}
+    assert owner_entry(released) is None
+    entry = owner_entry(released, include_terminal=True)
+    assert entry["replica"] == "replica-a" and entry["terminal"] is True
+    # A run the orphan sweep took over names no owner, so not even a stop goes.
+    taken_over = {**released, "owner": "", "status": "failed", "interrupted": "1"}
+    assert owner_entry(taken_over, include_terminal=True) is None
+
+
+async def test_waiting_senders_are_bounded_and_the_excess_is_never_sent(pair):
+    owner, sender = pair
+    await owner.admit()  # A never consumes: every send waits for its timeout
+    sender.bus._send_slots = asyncio.Semaphore(1)
+    first = asyncio.create_task(_send(sender, request_id="held", timeout=1.0))
+    await asyncio.sleep(0.1)
+    excess = await _send(sender, request_id="excess", timeout=0.2)
+    assert excess["code"] == COMMAND_TIMEOUT
+    assert (await first)["code"] == COMMAND_TIMEOUT
+    inbox = owner.coordinator.keys.control_inbox("replica-a")
+    sent = [json.loads(fields[b"c"])["request_id"]
+            for _id, fields in await sender.bus._client().xrange(inbox)]
+    assert sent == ["held"]
