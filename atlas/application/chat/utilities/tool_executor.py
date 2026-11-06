@@ -217,6 +217,31 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
     return (True, True, False)  # Default to user-level approval on error
 
 
+def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) -> bool:
+    """Whether this call can skip the browser approval gate.
+
+    The user's switch is stored on the run, so the decision does not need a
+    connected client. Admin-mandated tools are filtered by the caller (they
+    stay on the gate). A launched child is excluded even when the flag is
+    set: its arguments are model-chosen, and only the launch approval covers
+    its user-level tools. With no run bound, the session flag covers a turn
+    that is not tracked.
+    """
+    from atlas.application.chat.runs.context import get_current_run
+    from atlas.application.chat.runs.registry import get_run_registry
+
+    run = get_current_run()
+    if run is not None:
+        record = get_run_registry().get(run.run_id)
+        if record is not None:
+            if record.parent_run_id:
+                return False
+            return record.auto_approve_user_tools is True
+    if not session_context:
+        return False
+    return session_context.get("auto_approve_tools") is True
+
+
 def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
     """
     Check if a tool accepts an _mcp_data parameter by examining its schema.
@@ -642,6 +667,22 @@ async def execute_single_tool(
             if _hook_denied_result is not None:
                 await event_notifier.notify_tool_error(tool_call, _hook_denied_result.error or "blocked", update_callback)
                 return _finalize_span(_hook_denied_result)
+
+            # The browser used to be the only thing that could answer a
+            # user-level approval. Once the turn has opted in, approve here
+            # so closing the page cannot park the run on the gate. Admin
+            # mandated tools, and tools a launched child still has to ask
+            # about, keep the wait below.
+            if (
+                needs_approval
+                and not admin_required
+                and server_auto_approves_user_tool(session_context)
+            ):
+                logger.info(
+                    "Tool %s auto-approved on the server; no client is required",
+                    tool_call.function.name,
+                )
+                needs_approval = False
 
             # If approval is required, request it from the user
             if needs_approval:

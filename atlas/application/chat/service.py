@@ -573,6 +573,12 @@ class ChatService:
             f"user_email: {sanitize_for_logging(user_email)}, agent_mode: {agent_mode}"
         )
 
+        # User auto-approve is a property of the turn, not of whichever
+        # browser happens to be open when a tool is called. A strict bool:
+        # anything other than True stays off. Popped so it is not forwarded
+        # as an unexpected orchestrator argument.
+        auto_approve_tools = kwargs.pop("auto_approve_tools", False) is True
+
         # Log sensitive content only at DEBUG level for development/testing
         if logger.isEnabledFor(logging.DEBUG):
             content_preview = content[:100] + "..." if len(content) > 100 else content
@@ -617,6 +623,10 @@ class ChatService:
         # where atlas_launch needs it: a sub-conversation persists its own
         # transcript, which an incognito turn must not start (#925).
         session.context["incognito"] = turn_is_incognito
+        # Same path for a turn that is not a tracked run. Tracked runs also
+        # keep the flag on the run record, which is what the gate reads after
+        # the socket that admitted them has closed.
+        session.context["auto_approve_tools"] = auto_approve_tools
 
         # Rewind / edit-and-resubmit is the one turn that legitimately ends with
         # fewer messages than are stored: it drops the edited prompt and

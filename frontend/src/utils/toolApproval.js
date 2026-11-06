@@ -15,18 +15,17 @@ export const resolveAutoApproved = (message, settings) => {
 // toggle, the Active Tools strip and the approval row, so the three never
 // disagree about what "off" means. No app name: deployments rename the app.
 //
-// Scoped to what the client actually decides. The backend can still skip the
-// prompt on its own (a policy hook that auto-approves, an agent launch whose
-// approval covers its sub-conversation), and a hook that escalates a call to
-// "ask" sends admin_required: false, so auto-approve answers it like any
-// other non-admin call. What this switch controls is narrower: it never
-// answers a tool an administrator marked (per-tool require_approval, or
-// FORCE_TOOL_APPROVAL_GLOBALLY). Those can still be skipped server-side by the
-// same hooks and launch approvals, so the copy makes no "always" promise.
+// The server applies the same switch without a connected browser. This copy
+// still describes the boundary the switch does not cross: it never answers a
+// tool an administrator marked (per-tool require_approval, or
+// FORCE_TOOL_APPROVAL_GLOBALLY). A policy hook or an agent launch can still
+// skip the prompt on its own, and a hook that escalates a call to "ask" sends
+// admin_required: false, so auto-approve answers it like any other non-admin
+// call. The copy makes no "always" promise.
 export const AUTO_APPROVE_OFF_TEXT =
   'Tool calls ask for your approval before they run, unless your deployment\'s policy or an agent launch you approved already covers them. This is the default.'
 export const AUTO_APPROVE_ON_TEXT =
-  'Tool calls run without asking. Auto-approve never answers tools an administrator has marked as requiring approval; those still ask.'
+  'Tool calls run without asking, including after you leave the page or close the browser. Auto-approve never answers tools an administrator has marked as requiring approval; those still ask.'
 export const describeAutoApprove = (on) => (on ? AUTO_APPROVE_ON_TEXT : AUTO_APPROVE_OFF_TEXT)
 
 // Why a pending approval row is asking at all. A pending row whose

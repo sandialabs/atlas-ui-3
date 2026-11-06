@@ -1130,6 +1130,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				? Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 10)
 				: (settings.maxIterations || agent.agentMaxSteps),
 			temperature: settings.llmTemperature || 0.7,
+			// User-level auto-approve. The server stores this on the run and
+			// applies it itself, so closing the browser cannot leave a tool
+			// call parked on the approval gate. Only a real boolean true opts in.
+			auto_approve_tools: settings?.autoApproveTools === true,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
@@ -2301,6 +2305,20 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		return () => clearTimeout(timer)
 	}, [activeConversationId, currentModel, isConnected, requestContextUsage])
 
+	// Tell the server when the switch changes, so a run already in flight
+	// picks it up before the user navigates away. The chat frame carries the
+	// same bit at admission; this covers the toggle with no new message.
+	const updateSettingsAndPublish = useCallback((patch) => {
+		const next = updateSettings(patch)
+		if (patch && Object.prototype.hasOwnProperty.call(patch, 'autoApproveTools')) {
+			sendMessageRef.current?.({
+				type: 'auto_approve_tools',
+				enabled: patch.autoApproveTools === true,
+			})
+		}
+		return next
+	}, [updateSettings])
+
 	const value = {
 		// Context meter and compaction controls (issue #877).
 		contextCompaction,
@@ -2457,7 +2475,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		ensureSession,
 		addSystemEvent,
 		settings,
-		updateSettings,
+		updateSettings: updateSettingsAndPublish,
 		sendMessage,
 		sendApprovalResponse: sendMessage,
 		pendingElicitation,

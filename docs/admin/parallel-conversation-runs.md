@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-11-04
+Last updated: 2026-11-05
 
 Issue #884.
 
@@ -195,6 +195,7 @@ Client to server:
 | `list_runs` | Ask for every run the user can still see. Sent on connect. |
 | `stop_streaming` / `agent_control` (`action: "stop"`) | Now accept `run_id` and/or `conversation_id`. A frame with neither falls back to the connection's untracked turn, which is what older clients send. |
 | `tool_approval_response` / `elicitation_response` | May carry `run_id` so the right run is resumed when several are paused. |
+| `auto_approve_tools` | `{enabled: true|false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering. |
 
 Server to client:
 
@@ -340,11 +341,21 @@ The poll is deliberately cheap to run and cheap to stop:
 
 ### Auto-approve covers background runs
 
-Auto-approve is a client setting. The client answers an approval request for
-a conversation it is **not** displaying immediately when the setting is on and
-the tool is not pinned to mandatory approval, so a multi-step run keeps going
-while the user works elsewhere. Requests the client does not answer are still
-deferred and replayed as described below.
+Auto-approve is the user's switch. The browser sends it on the chat frame
+(`auto_approve_tools: true`) and again, as `auto_approve_tools`, when the
+switch changes. The server stores it on the run and, for a tool that is not
+admin-mandated, approves the call itself. No browser has to be connected, and
+navigating away does not park the run on the approval gate.
+
+The preference lives on the run record in the replica that owns the run --
+the process that executes the tools. A later change updates runs that process
+owns. A turn that opted in keeps that choice after its socket closes, including
+when a later connection lands on another replica. A connection on a replica
+that does not own the run cannot change that run's switch.
+
+The client still answers a request the server did emit (the switch is off, or
+an administrator marked the tool). Those requests are replayed when the
+conversation is opened again, as described below.
 
 ### Pending approvals are replayed, not lost
 

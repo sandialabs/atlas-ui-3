@@ -1113,8 +1113,18 @@ async def wait_for_shared_approval(request, timeout: Optional[float], request_ke
         return remote.result()
     finally:
         for task in (local, remote):
-            if task is not None and not task.done():
+            if task is None:
+                continue
+            if not task.done():
                 task.cancel()
+                continue
+            # The loser can finish with TimeoutError in the same beat as the
+            # winner. Nothing else awaits it, and an unretrieved task
+            # exception is logged when the loop later garbage-collects it.
+            try:
+                task.exception()
+            except asyncio.CancelledError:
+                pass
 
 
 async def _poll_resolution(request_key: str, timeout: Optional[float]) -> dict:

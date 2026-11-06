@@ -1,6 +1,6 @@
 # Tool Approval System
 
-Last updated: 2026-01-19
+Last updated: 2026-11-05
 
 The tool approval system provides a safety layer by requiring user confirmation before a tool is executed. This gives administrators and users fine-grained control over tool usage.
 
@@ -42,3 +42,5 @@ This prevents cross-user approval bypass where one user who learned another user
 ## User-Controlled Auto-Approval
 
 For tools that are not mandated to require approval by an admin, users can choose to "auto-approve" them to streamline their workflow. This option is available in the user settings panel.
+
+When the switch is on, the server approves those tools itself. The decision is stored on the run when the turn starts, so it still applies after the user closes the browser or navigates away. Admin-mandated tools keep waiting for an explicit answer. Turning the switch off leaves the existing gate in place: the run pauses and the request is replayed when the conversation is opened again.

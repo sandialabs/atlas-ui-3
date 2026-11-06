@@ -2098,6 +2098,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     frame_conversation_id, user_email
                 )
                 if tracked_run is not None:
+                    # A follow-up frame carries the switch as it is now, so
+                    # turning it off (or on) applies to the next tool call
+                    # even when this message cannot be steered yet.
+                    tracked_run.note_auto_approve(data)
                     steering = tracked_run.steering
                     if steering is not None and steering.active:
                         refusal = await chat_service.steering_classification_refusal(
@@ -2327,6 +2331,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             # at admission.
                             title=_run_title_from_frame(data),
                         )
+                        # Record the switch before the task can call a tool.
+                        # The run keeps this after the socket closes.
+                        run_record.note_auto_approve(data)
                     except ConcurrencyLimitError as e:
                         await websocket.send_json({
                             "type": "error",
@@ -2472,6 +2479,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             # Per-conversation automatic compaction toggle
                             # (issue #877); a non-bool means the default.
                             auto_compact=data.get("auto_compact"),
+                            # User-level auto-approve. Only a real boolean
+                            # True opts in; the service stores it on the
+                            # session for turns that are not tracked runs.
+                            auto_approve_tools=data.get("auto_approve_tools") is True,
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -3093,6 +3104,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     update_callback=lambda message: websocket_update_callback(websocket, message)
                 )
                 await websocket.send_json(response)
+
+            elif message_type == "auto_approve_tools":
+                # The switch changed while a run is in flight. Apply it to
+                # the user-started runs this process owns so the next tool
+                # call does not wait on a browser that is about to go away.
+                # Only a real boolean True opts in.
+                run_registry.set_auto_approve_user_tools(
+                    user_email, data.get("enabled") is True
+                )
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response. Arguments stay out of the

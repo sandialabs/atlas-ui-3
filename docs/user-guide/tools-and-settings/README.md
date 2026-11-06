@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-11-03
+Last updated: 2026-11-05
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -114,7 +114,8 @@ confirmation before they run.
   the transcript and runs only after you click **Approve** (you can edit the
   arguments first, or **Reject** with an optional reason).
 - **On:** tool calls run without asking -- including calls in conversations
-  you are not currently viewing.
+  you are not currently viewing, and after you close the browser. The server
+  applies the switch, so a run does not stop to wait for a page that is gone.
 - **Auto-approve never answers admin-marked tools.** When an administrator
   marks a tool as requiring approval (per-tool `require_approval` or
   `FORCE_TOOL_APPROVAL_GLOBALLY`), auto-approve leaves its calls for you to
@@ -129,8 +130,8 @@ auto-approve on, it is approved automatically.
 The same switch sits on the **Active Tools** bar above the message box
 (**Auto-approve: Off / On**) whenever tools are selected, and each approval
 row says why it is asking: auto-approve is off, an administrator marked the
-tool as requiring approval, or auto-approve is on but the automatic approval could not be sent
-(for example while disconnected), so it waits for you.
+tool as requiring approval, or auto-approve is on but the server still asked
+and the automatic answer could not be sent, so it waits for you.
 
 ## Model capability icons
 

@@ -129,6 +129,8 @@ describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_mode).toBe(true)
     expect(payload.selected_tools).toEqual([])
+    // The server stores this on the run. Absent means off, never a truthy string.
+    expect(payload.auto_approve_tools).toBe(false)
     // No RAG toggle and no hand-picked sources: the frame must not claim
     // the source list was expanded on the user's behalf.
     expect(payload.data_sources_auto).toBe(false)

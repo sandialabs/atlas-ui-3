@@ -133,6 +133,12 @@ class RunRecord:
     # running for a user who is watching" from "still running unattended" in
     # logs and in the wall-clock reaper.
     detached: bool = False
+    # The user's auto-approve switch, captured when the turn was admitted and
+    # updated when they change it. The tool gate reads this on the owning
+    # replica, so a closed browser does not leave a user-level tool waiting.
+    # Server-side only: not part of the public dict. Never set on a launched
+    # child; those tools are covered by the launch approval, not this switch.
+    auto_approve_user_tools: bool = False
     # Free-form label for what the run is waiting on (e.g. "tool_approval"),
     # surfaced to the client alongside WAITING_FOR_INPUT.
     waiting_on: Optional[str] = None
@@ -191,6 +197,20 @@ class RunRecord:
     @property
     def is_terminal(self) -> bool:
         return self.status.is_terminal
+
+    def note_auto_approve(self, frame: Any) -> None:
+        """Record an explicit ``auto_approve_tools`` bit from a client frame.
+
+        Absent means the client did not say, so the run keeps what it had.
+        Only a real boolean ``True`` opts in. A launched child is left alone:
+        its tools run on model-chosen arguments, and the launch approval is
+        what covers them.
+        """
+        if self.parent_run_id or self.is_terminal:
+            return
+        if not isinstance(frame, dict) or "auto_approve_tools" not in frame:
+            return
+        self.auto_approve_user_tools = frame.get("auto_approve_tools") is True
 
     def to_public_dict(self) -> Dict[str, Any]:
         """The shape sent to the client for conversation-history indicators."""
@@ -331,6 +351,26 @@ class RunRegistry:
             if child_id in self._runs
             and (include_terminal or not self._runs[child_id].is_terminal)
         ]
+
+    def set_auto_approve_user_tools(self, user_email: str, enabled: bool) -> int:
+        """Apply the user's switch to the user-started runs this process owns.
+
+        Returns how many records changed. Launched children are skipped, and
+        another user's runs are never touched. The executor reads the flag on
+        the replica that owns the run; a socket attached to a different
+        replica can only update runs that replica itself is executing.
+        """
+        owner = normalize_user_email(user_email)
+        opted_in = enabled is True
+        changed = 0
+        for record in self._runs.values():
+            if record.user_email != owner or record.is_terminal or record.parent_run_id:
+                continue
+            if record.auto_approve_user_tools is opted_in:
+                continue
+            record.auto_approve_user_tools = opted_in
+            changed += 1
+        return changed
 
     def active_for_user(self, user_email: str) -> List[RunRecord]:
         owner = normalize_user_email(user_email)
