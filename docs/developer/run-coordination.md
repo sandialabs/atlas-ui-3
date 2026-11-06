@@ -106,7 +106,7 @@ rather than formatting keys by hand.
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
 | `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Removed on release; after a takeover, once the run's projection is closed |
-| `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Trimmed to ~1000 entries; 24 h |
+| `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; 120 s, refreshed per send |
 | `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | 120 s |
 | `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending 30 s, done 1 h |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |

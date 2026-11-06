@@ -99,8 +99,15 @@ earlier delivery.
   waiting counts against the command's deadline.
 - **Not retained.** The owner `XDEL`s each inbox entry as soon as it has read
   it, so a command's arguments (a steering message from an off-record
-  conversation, say) do not linger in Redis after delivery. Reply and
-  dedup keys hold the owner's answer, never the arguments.
+  conversation, say) do not linger in Redis after delivery. Commands sent to
+  a dead or stalled owner go with the inbox key's 120 s TTL
+  (`INBOX_TTL_SECONDS`, refreshed per send); none of them could still
+  execute by then. Reply and dedup keys hold the owner's answer, never the
+  arguments.
+- **Size-capped.** A serialized command over 256 KiB (`MAX_COMMAND_BYTES`)
+  is refused with `command_too_large` before anything is written, so a large
+  steering message cannot fill the shared Redis. The client gets a steering
+  error and keeps the run's running state.
 - **No replay.** A command only acts on a run that is still live on its
   owner. Nothing re-executes tool work; an owner that died takes its runs
   with it, and its claim lapses within one lease (30 s).

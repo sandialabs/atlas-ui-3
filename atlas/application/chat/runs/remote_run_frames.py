@@ -67,7 +67,7 @@ def steer_frame(answer: Dict[str, Any], entry: Dict[str, Any]) -> Optional[Dict[
             "steering": True,
             **_ids(entry),
         }
-    if code in ("steering_queue_full", "conversation_busy"):
+    if code in ("steering_queue_full", "conversation_busy", "command_too_large"):
         return {"type": "error", "message": answer.get("message"), "error_type": code,
                 "steering": True, **_ids(entry)}
     return {

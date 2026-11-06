@@ -57,7 +57,14 @@ PROTOCOL_VERSION = 2
 # Inbox entries are trimmed past this length; a command older than that has
 # long passed its deadline.
 INBOX_MAXLEN = 1000
-INBOX_TTL_SECONDS = 24 * 60 * 60
+# A live owner deletes each entry as it reads it, so this only bounds how long
+# commands sent to a dead or stalled owner (and their arguments, a steering
+# message among them) stay in Redis. Every command expires within seconds, so
+# nothing older than this is ever executable. Refreshed on each send.
+INBOX_TTL_SECONDS = 120
+# A serialized command larger than this is refused before it is written, so a
+# large client payload cannot fill the shared Redis (sessions, leases).
+MAX_COMMAND_BYTES = 256 * 1024
 REPLY_TTL_SECONDS = 120
 # How long a request id is remembered. A retry inside this window gets the
 # original reply; the in-flight marker is short so a command whose owner died
@@ -82,6 +89,7 @@ COMMAND_EXPIRED = "command_expired"
 IN_PROGRESS = "command_in_progress"
 REQUEST_CONFLICT = "request_id_conflict"
 STALE_GENERATION = "stale_generation"
+COMMAND_TOO_LARGE = "command_too_large"
 
 
 Handler = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
@@ -221,7 +229,11 @@ class RedisRunControlBus:
         inbox = self.keys.control_inbox(owner_replica)
         now = await self.shared_now()
         envelope["deadline"] = now + (give_up_at - time.monotonic())
-        await client.xadd(inbox, {"c": json.dumps(envelope)}, maxlen=INBOX_MAXLEN, approximate=True)
+        body = json.dumps(envelope)
+        if len(body.encode()) > MAX_COMMAND_BYTES:
+            # Nothing was written, so nothing can run; the run is unaffected.
+            return reply(False, COMMAND_TOO_LARGE, "The message is too large to send to the run's server.")
+        await client.xadd(inbox, {"c": body}, maxlen=INBOX_MAXLEN, approximate=True)
         await client.expire(inbox, INBOX_TTL_SECONDS)
         last_id = "0-0"
         while True:

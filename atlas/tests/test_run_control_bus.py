@@ -351,3 +351,36 @@ async def test_reader_waits_for_a_dispatch_slot_before_taking_more(pair):
     gate.set()
     assert (await first)["ok"] and (await second)["ok"]
     assert sorted(started) == ["a", "b"]
+
+
+async def test_oversized_command_is_refused_before_it_is_written(pair):
+    owner, sender = pair
+    await owner.admit()
+    calls = []
+    owner.bus.start(_counting_handler(calls))
+    big = "x" * (control_bus.MAX_COMMAND_BYTES + 1)
+    answer = await _send(sender, "steer", {"content": big}, request_id="big")
+    assert answer["ok"] is False and answer["code"] == control_bus.COMMAND_TOO_LARGE
+    inbox = owner.coordinator.keys.control_inbox("replica-a")
+    assert await sender.bus._client().xlen(inbox) == 0
+    assert calls == []
+
+
+async def test_unread_inbox_expires_quickly(pair):
+    # Commands to a dead owner (and their arguments) do not outlive the
+    # short inbox TTL; none of them could still execute anyway.
+    owner, sender = pair
+    await owner.admit()  # A never consumes
+    await _send(sender, "steer", {"content": "private"}, request_id="r1", timeout=0.2)
+    inbox = owner.coordinator.keys.control_inbox("replica-a")
+    ttl = await sender.bus._client().ttl(inbox)
+    assert 0 < ttl <= control_bus.INBOX_TTL_SECONDS <= 300
+
+
+def test_oversized_steer_keeps_the_client_running_state():
+    from atlas.application.chat.runs.remote_run_frames import steer_frame
+
+    frame = steer_frame(reply(False, control_bus.COMMAND_TOO_LARGE, "too large"),
+                        {"run_id": "run-1", "conversation_id": "conv-1"})
+    assert frame["error_type"] == control_bus.COMMAND_TOO_LARGE and frame["steering"] is True
+    assert frame["message"] == "too large"
