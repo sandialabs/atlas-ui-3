@@ -372,7 +372,7 @@ start_backend() {
     # precedence over package defaults in atlas/config/ (CWD is atlas/).
     APP_CONFIG_DIR="${APP_CONFIG_DIR:-$PROJECT_ROOT/config}" \
     ATLAS_HOST="$host" \
-    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
+    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" --no-use-colors &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
 }
