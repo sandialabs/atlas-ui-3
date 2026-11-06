@@ -32,7 +32,6 @@ from uuid import UUID
 
 from atlas.application.chat.runs.control_bus import (
     COMMAND_EXPIRED,
-    COMMAND_TIMEOUT,
     OWNER_UNAVAILABLE,
     STALE_GENERATION,
     get_run_control_bus,
@@ -284,16 +283,14 @@ async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args
         return reply(False, OWNER_UNAVAILABLE, "The run's server could not be reached.")
 
 
-def _unreached(answer: Dict[str, Any]) -> bool:
-    return not answer.get("ok") and answer.get("code") in (COMMAND_TIMEOUT, OWNER_UNAVAILABLE)
-
-
 async def route_stop(user_email: str, run_id: Optional[str], conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """Stop the user's run on its owner. None when no other replica owns it.
 
     Resolution mirrors the local stop: the named run first, even when it has
     finished (stopping a finished parent stops the sub-conversations it
-    launched, on its owner), then the conversation's live run.
+    launched, on its owner), then the conversation's live run. An owner that
+    does not answer is reported (``command_timeout``), never taken for "no
+    run": its live children may still be running, and a retry is safe.
     """
     email = normalize_user_email(user_email)
     try:
@@ -309,11 +306,7 @@ async def route_stop(user_email: str, run_id: Optional[str], conversation_id: Op
         return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
     if entry is None:
         return None
-    answer = await _send(entry, STOP, user_actor(user_email))
-    if entry.get("terminal") and _unreached(answer):
-        # A finished run whose last owner is gone: nothing live to stop there.
-        return None
-    return answer
+    return await _send(entry, STOP, user_actor(user_email))
 
 
 async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
@@ -324,7 +317,8 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     launched), then the conversation's in-progress API run, a follow-up that
     may execute on another replica, this one included.
     """
-    bus = get_run_control_bus()
+    from atlas.application.chat.runs.external_runs import API_SOURCE
+
     try:
         entry = await _remote_entry(run_id, include_terminal=True)
     except RunDirectoryUnavailable:
@@ -332,32 +326,59 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     if entry is None:
         return None
     answer = await _send(entry, STOP, SERVICE_ACTOR)
-    if not entry.get("terminal"):
+    if not entry.get("terminal") or entry.get("source") != API_SOURCE:
+        # Live: the owner's cancel_api_run already handles its conversation.
+        # Not an API run: the owner refuses it like an unknown id.
         return answer
+    earlier = ((answer.get("payload") or {}).get("status") or {}) if answer.get("ok") else None
+    later = await route_api_follow_up_cancel(
+        str(entry.get("run_id")), entry.get("conversation_id"), entry.get("user_email"), earlier,
+    )
+    if later is not None and (later.get("ok") or answer.get("ok")):
+        return later
+    return answer
+
+
+async def route_api_follow_up_cancel(
+    run_id: str,
+    conversation_id: Optional[str],
+    user_email: Optional[str],
+    earlier_status: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Stop the in-progress API follow-up of the finished API run ``run_id``.
+
+    For a cancel naming a finished run, after that run itself was cancelled
+    (``earlier_status``, or None if that failed). The follow-up may execute on
+    any replica. Returns None when there is no follow-up to stop (or it just
+    finished), the follow-up's status with ``cancelled`` merged when it was
+    stopped, and its failure (a timeout, the directory unreadable) otherwise,
+    so the caller reports a retryable error rather than ``cancelled: false``.
+    """
     from atlas.application.chat.runs.external_runs import API_SOURCE
 
-    try:
-        follow_up = await _conversation_entry(entry.get("conversation_id"))
-    except RunDirectoryUnavailable:
-        follow_up = None
-    if (
-        follow_up is not None and bus is not None
-        and follow_up.get("run_id") != entry.get("run_id")
-        and follow_up.get("source") == API_SOURCE
-        and follow_up.get("user_email") == entry.get("user_email")
-    ):
-        if follow_up.get("replica") == bus.replica_id:
-            later = cancel_api_run_here(str(follow_up["run_id"]))
-        else:
-            later = await _send(follow_up, STOP, SERVICE_ACTOR)
-        if later.get("ok"):
-            status = dict((later.get("payload") or {}).get("status") or {})
-            earlier = (answer.get("payload") or {}).get("status") or {} if answer.get("ok") else {}
-            status["cancelled"] = bool(status.get("cancelled") or earlier.get("cancelled"))
-            return reply(True, status=status)
-    if _unreached(answer):
+    bus = get_run_control_bus()
+    if bus is None:
         return None
-    return answer
+    try:
+        follow_up = await _conversation_entry(conversation_id)
+    except RunDirectoryUnavailable:
+        return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
+    if (
+        follow_up is None
+        or follow_up.get("run_id") == run_id
+        or follow_up.get("source") != API_SOURCE
+        or follow_up.get("user_email") != normalize_user_email(user_email or "")
+    ):
+        return None
+    if follow_up.get("replica") == bus.replica_id:
+        later = cancel_api_run_here(str(follow_up["run_id"]))
+    else:
+        later = await _send(follow_up, STOP, SERVICE_ACTOR)
+    if not later.get("ok"):
+        return None if later.get("code") == "run_not_found" else later
+    status = dict((later.get("payload") or {}).get("status") or {})
+    status["cancelled"] = bool(status.get("cancelled") or (earlier_status or {}).get("cancelled"))
+    return reply(True, status=status)
 
 
 async def route_steer(

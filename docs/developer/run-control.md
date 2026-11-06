@@ -109,8 +109,11 @@ live run. A finished run's retained record (kept 300 s after release) still
 names its last owner, and the stop goes there: stopping a finished parent
 stops the sub-conversations it launched, which run on the same replica
 (#925). An API cancel of a finished run then also stops the conversation's
-in-progress API run (a follow-up), on whichever replica executes it. A
-finished run whose last owner does not answer is treated as not routed.
+in-progress API run (a follow-up), on whichever replica executes it, also
+when the finished run is held by the replica the cancel reached. Only an
+API-started run cascades to a follow-up. A last owner or follow-up owner that
+does not answer is reported (`command_timeout`, HTTP 504), never taken for
+"nothing to stop": a retry is safe.
 
 Approvals keep the write-once outcome of [execution state](execution-state.md)
 as the only settle point: the replica that receives the answer writes it with

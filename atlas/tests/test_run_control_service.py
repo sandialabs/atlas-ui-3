@@ -253,63 +253,137 @@ async def test_stopping_a_finished_parent_stops_its_live_child_on_the_owner(clus
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 
-async def test_finished_run_whose_last_owner_is_gone_is_not_routed(cluster):
+async def test_finished_run_whose_last_owner_is_gone_reports_a_timeout(cluster):
     record = await cluster.run()
     cluster.registry.set_status(record.run_id, RunStatus.COMPLETED)
     await _release(cluster, record)
     await cluster.a.bus.stop()  # A no longer answers
-    started = asyncio.get_running_loop().time()
-    run_control_bus = run_control.get_run_control_bus()
-    original = run_control_bus.send
+    bus = run_control.get_run_control_bus()
+    original = bus.send
 
     async def quick(*args, **kwargs):
         kwargs["timeout"] = 0.3
         return await original(*args, **kwargs)
 
-    run_control_bus.send = quick
+    bus.send = quick
     try:
-        assert await run_control.route_stop(OWNER, record.run_id, None) is None
+        # Its children may still be running there: retryable, not "no run".
+        answer = await run_control.route_stop(OWNER, record.run_id, None)
     finally:
-        run_control_bus.send = original
-    assert asyncio.get_running_loop().time() - started < 3
+        bus.send = original
+    assert answer["ok"] is False and answer["code"] == "command_timeout"
+
+
+class _ApiReplicas:
+    """API runs on both replicas: A's records in ``cluster.registry``, B's in
+    ``registry_b``. ``cancel_api_run`` reads whichever replica is acting."""
+
+    def __init__(self, cluster, monkeypatch):
+        from atlas.application.chat.runs import external_runs
+        from atlas.routes import agent_run_routes
+
+        self.cluster = cluster
+        self.api_source = external_runs.API_SOURCE
+        self.registry_b = RunRegistry()
+        self.acting = {"registry": self.registry_b}
+        monkeypatch.setattr(external_runs, "get_run_registry", self._acting_registry)
+        monkeypatch.setattr(agent_run_routes, "get_run_registry", self._registry_b)
+        cluster.a.bus._handler = self._handle_on_a
+
+    def _acting_registry(self):
+        return self.acting["registry"]
+
+    def _registry_b(self):
+        return self.registry_b
+
+    async def _handle_on_a(self, envelope):
+        self.acting["registry"] = self.cluster.registry
+        try:
+            answer = await self.cluster.service.handle(envelope)
+        finally:
+            self.acting["registry"] = self.registry_b
+        return answer
+
+    async def finished_on_a(self):
+        record = await self.cluster.run()
+        record.launch_spec = {"source": self.api_source}
+        self.cluster.registry.set_status(record.run_id, RunStatus.COMPLETED)
+        await self._mark_api(record)
+        await _release(self.cluster, record)
+        return record
+
+    async def live_on_a(self, conversation_id):
+        record = self.cluster.registry.start(conversation_id=conversation_id, user_email=OWNER)
+        record.launch_spec = {"source": self.api_source}
+        self.cluster.registry.attach_task(record.run_id, asyncio.create_task(asyncio.sleep(30)))
+        await self.cluster.a.claim(record.run_id, conversation_id)
+        await self._mark_api(record)
+        return record
+
+    async def live_on_b(self, conversation_id):
+        record = self.registry_b.start(conversation_id=conversation_id, user_email=OWNER)
+        record.launch_spec = {"source": self.api_source}
+        self.registry_b.attach_task(record.run_id, asyncio.create_task(asyncio.sleep(30)))
+        await self.cluster.b.claim(record.run_id, conversation_id)
+        await self._mark_api(record)
+        return record
+
+    async def _mark_api(self, record):
+        # What the owner's lease mirror writes with the run's snapshot.
+        await self.cluster.b.bus._client().hset(
+            self.cluster.b.coordinator.keys.run(record.run_id), "source", self.api_source)
 
 
 async def test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere(cluster, monkeypatch):
-    from atlas.application.chat.runs import external_runs
-
-    # Replica A ran the original API run; replica B (this process) runs the
-    # follow-up in the same conversation.
-    registry_b = RunRegistry()
-    monkeypatch.setattr(external_runs, "get_run_registry", lambda: registry_b)
-    original = await cluster.run()
-    original.launch_spec = {"source": external_runs.API_SOURCE}
-    cluster.registry.set_status(original.run_id, RunStatus.COMPLETED)
-    await _release(cluster, original)
-    follow_up = registry_b.start(conversation_id=original.conversation_id, user_email=OWNER)
-    follow_up.launch_spec = {"source": external_runs.API_SOURCE}
-    registry_b.attach_task(follow_up.run_id, asyncio.create_task(asyncio.sleep(30)))
-    await cluster.b.claim(follow_up.run_id, follow_up.conversation_id)
-    await cluster.b.bus._client().hset(
-        cluster.b.coordinator.keys.run(follow_up.run_id), "source", external_runs.API_SOURCE)
-
-    # A's service resolves API runs through the same patched registry; give it
-    # A's view for the original id.
-    def a_registry():
-        return cluster.registry
-
-    async def stop_on_a(envelope):
-        monkeypatch.setattr(external_runs, "get_run_registry", a_registry)
-        try:
-            return await cluster.service.handle(envelope)
-        finally:
-            monkeypatch.setattr(external_runs, "get_run_registry", lambda: registry_b)
-
-    cluster.a.bus._handler = stop_on_a
+    api = _ApiReplicas(cluster, monkeypatch)
+    original = await api.finished_on_a()
+    follow_up = await api.live_on_b(original.conversation_id)
     answer = await run_control.route_api_cancel(original.run_id)
     assert answer["ok"] is True, answer
     status = answer["payload"]["status"]
     assert status["run_id"] == follow_up.run_id and status["cancelled"] is True
-    assert registry_b.get(follow_up.run_id).status is RunStatus.CANCELLED
+    assert api.registry_b.get(follow_up.run_id).status is RunStatus.CANCELLED
+
+
+async def test_api_cancel_of_a_finished_run_held_here_stops_its_follow_up_elsewhere(cluster, monkeypatch):
+    from atlas.routes.agent_run_routes import cancel_run
+
+    api = _ApiReplicas(cluster, monkeypatch)
+    # The original ran here (B) and finished; the follow-up runs on A.
+    original = api.registry_b.start(conversation_id="conv-api", user_email=OWNER)
+    original.launch_spec = {"source": api.api_source}
+    api.registry_b.set_status(original.run_id, RunStatus.COMPLETED)
+    follow_up = await api.live_on_a("conv-api")
+    status = await cancel_run(original.run_id)
+    assert status["run_id"] == follow_up.run_id and status["cancelled"] is True
+    assert cluster.registry.get(follow_up.run_id).status is RunStatus.CANCELLED
+
+
+async def test_api_cancel_reports_a_follow_up_it_could_not_stop(cluster, monkeypatch):
+    api = _ApiReplicas(cluster, monkeypatch)
+    original = await api.finished_on_a()
+    await api.live_on_a(original.conversation_id)
+    real_send = run_control._send
+
+    async def follow_up_unreachable(entry, command, actor, args=None, request_id=None):
+        if entry["run_id"] == original.run_id:
+            return await real_send(entry, command, actor, args, request_id)
+        return run_control.reply(False, "command_timeout", "no answer")
+
+    monkeypatch.setattr(run_control, "_send", follow_up_unreachable)
+    answer = await run_control.route_api_cancel(original.run_id)
+    assert answer["ok"] is False and answer["code"] == "command_timeout"
+
+
+async def test_api_cancel_never_cascades_from_a_run_the_api_did_not_start(cluster, monkeypatch):
+    api = _ApiReplicas(cluster, monkeypatch)
+    browser_run = await cluster.run()
+    cluster.registry.set_status(browser_run.run_id, RunStatus.COMPLETED)
+    await _release(cluster, browser_run)
+    follow_up = await api.live_on_b(browser_run.conversation_id)
+    answer = await run_control.route_api_cancel(browser_run.run_id)
+    assert answer["ok"] is False and answer["code"] == "run_not_found"
+    assert not api.registry_b.get(follow_up.run_id).is_terminal
 
 
 async def test_unreadable_directory_is_not_taken_for_no_owner(cluster):
