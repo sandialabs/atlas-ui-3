@@ -492,7 +492,7 @@ async def test_hook_escalation_still_waits_when_the_switch_is_on(
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     monkeypatch.setattr(
         "atlas.application.chat.utilities.tool_executor.get_hook_manager",
-        lambda: _EscalatingHooks(),
+        _EscalatingHooks,
     )
     record = registry.start(conversation_id="conv-hook", user_email=USER)
     record.note_auto_approve({"auto_approve_tools": True})

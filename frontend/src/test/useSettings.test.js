@@ -387,6 +387,14 @@ describe('useSettings', () => {
     })
   })
   describe('cross-tab sync', () => {
+  // A cross-tab write as the browser delivers it. Built on a plain Event so
+  // the test does not depend on the environment's StorageEvent constructor.
+  const storageEvent = (key, newValue) => {
+    const event = new Event('storage')
+    Object.defineProperties(event, { key: { value: key }, newValue: { value: newValue } })
+    return event
+  }
+
     it('adopts another tab\'s newer write, even for a key this tab changed', () => {
       localStorageMock.getItem.mockReturnValue(JSON.stringify({ autoApproveTools: true }))
       const { result } = renderHook(() => useSettings())
@@ -399,7 +407,7 @@ describe('useSettings', () => {
       const written = JSON.stringify({ ...DEFAULTS, autoApproveTools: false })
       localStorageMock.getItem.mockReturnValue(written)
       act(() => {
-        window.dispatchEvent(new StorageEvent('storage', { key: 'chatui-settings', newValue: written }))
+        window.dispatchEvent(storageEvent('chatui-settings', written))
       })
 
       expect(result.current.settings.autoApproveTools).toBe(false)
@@ -410,8 +418,8 @@ describe('useSettings', () => {
       localStorageMock.getItem.mockReturnValue(JSON.stringify({ autoApproveTools: true }))
       const { result } = renderHook(() => useSettings())
       act(() => {
-        window.dispatchEvent(new StorageEvent('storage', { key: 'other', newValue: '{"autoApproveTools":false}' }))
-        window.dispatchEvent(new StorageEvent('storage', { key: 'chatui-settings', newValue: 'not json' }))
+        window.dispatchEvent(storageEvent('other', '{"autoApproveTools":false}'))
+        window.dispatchEvent(storageEvent('chatui-settings', 'not json'))
       })
       expect(result.current.settings.autoApproveTools).toBe(true)
     })
