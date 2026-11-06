@@ -56,6 +56,25 @@ export function currentTurnIsSleeping(messages) {
   return false
 }
 
+// Whether the turn in progress already shows its own progress: a tool row
+// still running (or sleeping) or an approval card still waiting. The
+// marker-only replay seed is redundant then -- a second status indicator
+// beside the row that already says the run is alive. Only rows after the last
+// user message count, for the same reason as currentTurnIsSleeping.
+const ACTIVE_TOOL_STATUS = new Set(['calling', 'in_progress', 'sleeping'])
+
+export function currentTurnHasActiveRow(messages) {
+  const list = Array.isArray(messages) ? messages : []
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const message = list[i]
+    if (!message) continue
+    if (message.role === 'user') return false
+    if (message.type === 'tool_call' && ACTIVE_TOOL_STATUS.has(message.status)) return true
+    if (message.type === 'tool_approval_request' && message.status === 'pending') return true
+  }
+  return false
+}
+
 export function isSleepTool(name) {
   return SLEEP_TOOLS.has(name)
 }

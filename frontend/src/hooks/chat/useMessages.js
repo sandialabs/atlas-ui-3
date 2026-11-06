@@ -45,6 +45,13 @@ function messagesReducer(state, action) {
         // First target a placeholder (the seed or an earlier replay): the
         // replay is a newer snapshot of the same segment and defines it.
         const current = state.findLastIndex(m => m._streaming && m._replayed)
+        // A marker-only seed holds no text, so its position means nothing:
+        // tool rows (an atlas_sleep, an approval card) can land after it
+        // while the run is between segments. Filling it in place would put
+        // the next segment's text above those rows, so it moves to the end.
+        if (current >= 0 && state[current]._seed) {
+          return [...state.filter((_, i) => i !== current), replayed]
+        }
         if (current >= 0) {
           const updated = [...state]
           updated[current] = { ...state[current], ...replayed }

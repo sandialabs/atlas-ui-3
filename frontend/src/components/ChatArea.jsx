@@ -28,7 +28,7 @@ import AgentRunStatus from './AgentRunStatus'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
 import { followAfterScroll, NEAR_BOTTOM_PX } from '../utils/scrollDecision'
-import { currentTurnIsSleeping } from '../utils/executionState'
+import { currentTurnHasActiveRow, currentTurnIsSleeping } from '../utils/executionState'
 
 const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
 
@@ -145,6 +145,11 @@ const ChatArea = () => {
   // Pair each message with its rewind ordinal once per messages change, rather
   // than re-running the two-pass scan on every render (incl. each streamed token).
   const messagesWithOrdinals = useMemo(() => withUserOrdinals(messages), [messages])
+  // The marker-only replay seed (a run reopened between segments) is internal
+  // reconciliation state. While a tool row or approval card of the current
+  // turn already shows the run is alive, drawing it as well would stack a
+  // second status indicator under that row, so it is not rendered.
+  const hideReplaySeed = useMemo(() => currentTurnHasActiveRow(messages), [messages])
 
   // Fine-tune capture "correct this turn" (issue #622). Only fetch consent and
   // wire the affordance when the feature flag is on; the per-message control is
@@ -1070,7 +1075,7 @@ const ChatArea = () => {
             agent-loop answers that never enter ConversationHistory). The same
             implementation drives the truncation path so the two cannot drift.
             See utils/userMessageOrdinal and issue #142. */}
-        {messagesWithOrdinals.map(({ message, userIndex }, index) => (
+        {messagesWithOrdinals.map(({ message, userIndex }, index) => (message._seed && hideReplaySeed) ? null : (
           <Message
             key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
             message={message}
