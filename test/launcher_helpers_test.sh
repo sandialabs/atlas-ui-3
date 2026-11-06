@@ -142,6 +142,20 @@ else
     echo "SKIP: pwsh not available; PowerShell helper table not run"
 fi
 
+# --- uvicorn launch flags (PR #1173) ------------------------------------------
+# Both launchers must pass --no-use-colors, or uvicorn's colorized startup
+# banner prints "%s://%s:%d" instead of the URL (see start_backend comment).
+if grep -Eq 'uvicorn" main:app .*--no-use-colors' "$PROJECT_ROOT/agent_start.sh"; then
+    print_result 0 "agent_start.sh uvicorn launch passes --no-use-colors"
+else
+    print_result 1 "agent_start.sh uvicorn launch passes --no-use-colors"
+fi
+if grep -Eq '\$arguments = "main:app .*--no-use-colors' "$PROJECT_ROOT/ps_agent_start.ps1"; then
+    print_result 0 "ps_agent_start.ps1 uvicorn launch passes --no-use-colors"
+else
+    print_result 1 "ps_agent_start.ps1 uvicorn launch passes --no-use-colors"
+fi
+
 echo ""
 echo "Passed: $PASSED | Failed: $FAILED"
 [ "$FAILED" -eq 0 ] && exit 0 || exit 1
