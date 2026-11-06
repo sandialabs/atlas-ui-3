@@ -283,6 +283,15 @@ Either way the partial bubble is marked "answer in progress -- it will refresh
 when the response finishes": once the run ends, the client reloads the
 conversation from the store and the marker goes with the placeholder.
 
+A run reopened between segments (executing a tool, sleeping, waiting on an
+approval) has no partial text, so the client keeps an empty marker-only seed
+for reconciliation. It never renders as its own assistant bubble: while a tool
+row or approval card of the current turn is still open, that row is the
+progress indicator and the seed is not drawn at all; otherwise it shows only
+the marker line, kept below any tool rows that arrive after it. The next
+segment's text replaces the seed at the end of the transcript, below those
+rows.
+
 ### Reconnecting resynchronizes the open conversation
 
 When the WebSocket reconnects, the client revisits the currently visible

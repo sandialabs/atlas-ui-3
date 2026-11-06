@@ -370,9 +370,15 @@ start_backend() {
     # PYTHONPATH is no longer needed for atlas imports to work.
     # Set APP_CONFIG_DIR so user overrides in <project_root>/config/ take
     # precedence over package defaults in atlas/config/ (CWD is atlas/).
+    # --no-use-colors keeps the startup banner readable: litellm's log
+    # redaction filter (1.97.x) renders record.msg and clears record.args,
+    # but uvicorn's colorized formatter re-renders its separate color_message
+    # template against those (now empty) args and prints the raw
+    # "%s://%s:%d" placeholders instead of the URL. The flag also turns off
+    # uvicorn's level/access-log coloring; keep it until litellm is upgraded.
     APP_CONFIG_DIR="${APP_CONFIG_DIR:-$PROJECT_ROOT/config}" \
     ATLAS_HOST="$host" \
-    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" &
+    "$PROJECT_ROOT/.venv/bin/uvicorn" main:app --host "$host" --port "$port" --no-use-colors &
     echo "Backend server started on $host:$port"
     cd "$PROJECT_ROOT"
 }
