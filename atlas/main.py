@@ -64,6 +64,7 @@ from atlas.application.chat.runs.admission import (
 from atlas.application.chat.runs.commands import (
     cancel_superseded_leftovers as _cancel_superseded_leftovers,
     nudge_approval,
+    set_auto_approve,
     steer_addressed_run,
     stop_addressed_run,
 )
@@ -3193,7 +3194,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # True opts in.
                 from atlas.application.chat.auto_approve_state import set_session_auto_approve
                 enabled = data.get("enabled") is True
-                run_registry.set_auto_approve_user_tools(user_email, enabled)
+                await set_auto_approve(run_registry, user_email, enabled)
                 set_session_auto_approve(session_id, enabled)
 
             elif message_type == "tool_approval_response":

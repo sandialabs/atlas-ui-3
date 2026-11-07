@@ -154,6 +154,9 @@ class RedisRunControlBus:
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         return await self.directory.run_for_conversation(conversation_id)
 
+    async def runs_for_user(self, user_email: str) -> "list[Dict[str, Any]]":
+        return await self.directory.live_runs_for_user(user_email)
+
     async def shared_now(self) -> float:
         """Seconds since the epoch on the Redis server's clock.
 

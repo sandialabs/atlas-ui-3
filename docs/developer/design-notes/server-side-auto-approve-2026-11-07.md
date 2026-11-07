@@ -73,10 +73,9 @@ With the switch off, the same prompt stops at the gate and asks:
 
 ## Known limits
 
-- The switch lives on the replica that owns the run. A live toggle on a
-  connection that lands on another replica does not reach that run, which is
-  the same limit steering and stop have today. A cross-replica command channel
-  is tracked separately.
+- A live toggle is applied on the receiving replica and sent to each other
+  replica that owns one of the user's live runs. The send is best effort: an
+  owner that does not answer keeps its previous value until the next toggle.
 - The persisted preference is per browser. A second device with an older
   setting announces that value when it connects; a server-side, versioned
   preference would be needed to reconcile devices.

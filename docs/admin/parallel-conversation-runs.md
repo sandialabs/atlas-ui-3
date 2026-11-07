@@ -359,10 +359,13 @@ tool that is not admin-mandated, approves the call itself. No browser has to
 be connected, and navigating away does not park the run on the approval gate.
 
 The preference lives on the run record in the replica that owns the run --
-the process that executes the tools. A later change updates runs that process
-owns. A turn that opted in keeps that choice after its socket closes, including
-when a later connection lands on another replica. A connection on a replica
-that does not own the run cannot change that run's switch.
+the process that executes the tools. A change received on any replica is
+applied to the user's runs it owns and sent as an `auto_approve` command to
+every other replica that owns one of the user's live runs, found through the
+shared per-user run set. The send is best effort: an owner that does not
+answer is logged and keeps its previous value. A turn that opted in keeps that
+choice after its socket closes, including when a later connection lands on
+another replica.
 
 A turn that is not admitted (incognito, local save, or chat history disabled)
 has no run record. The same message stores the switch on that connection's

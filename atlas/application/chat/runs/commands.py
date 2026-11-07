@@ -13,7 +13,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from atlas.application.chat.runs import external_runs
-from atlas.application.chat.runs.control_bus import OWNER_UNAVAILABLE, reply
+from atlas.application.chat.runs.control_bus import OWNER_UNAVAILABLE, get_run_control_bus, reply
 from atlas.application.chat.runs.eligibility import turn_is_off_record
 from atlas.application.chat.runs.remote_run_frames import (
     directory_unavailable_frame,
@@ -26,6 +26,7 @@ from atlas.application.chat.runs.run_control import (
     route_api_cancel,
     route_api_follow_up_cancel,
     route_approval,
+    route_auto_approve,
     route_steer,
     route_stop,
     user_actor,
@@ -222,3 +223,40 @@ def nudge_approval(registry, user_email: str, outcome: Optional[Dict[str, Any]])
         return
     _APPROVAL_NUDGES.add(task)
     task.add_done_callback(_APPROVAL_NUDGES.discard)
+
+
+async def set_auto_approve(registry, user_email: str, enabled: bool) -> None:
+    """Apply the user's auto-approve switch here, then on every other owner.
+
+    The switch belongs to the user: it is set on the user-started runs this
+    replica holds, then sent to each distinct other replica that owns one of
+    the user's live runs (found through the shared per-user run set). Best
+    effort: an unreadable directory or an owner that does not answer is
+    logged, never surfaced; a run that starts later takes the flag from its
+    own admission frame.
+    """
+    registry.set_auto_approve_user_tools(user_email, enabled)
+    bus = get_run_control_bus()
+    if bus is None:
+        return
+    try:
+        entries = await bus.runs_for_user(user_email)
+    except Exception:
+        logger.warning("auto-approve switch not sent to other replicas: directory unreadable", exc_info=True)
+        return
+    owners: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        if entry.get("replica") != bus.replica_id:
+            owners.setdefault(entry["replica"], entry)
+    if not owners:
+        return
+    answers = await asyncio.gather(
+        *(route_auto_approve(entry, user_email, enabled) for entry in owners.values()),
+        return_exceptions=True,
+    )
+    for replica, answer in zip(owners, answers):
+        if isinstance(answer, BaseException):
+            logger.warning("auto-approve switch failed for replica %s", sanitize_for_logging(replica), exc_info=answer)
+        elif not answer.get("ok"):
+            logger.info("auto-approve switch not applied on replica %s: %s",
+                        sanitize_for_logging(replica), answer.get("code"))
