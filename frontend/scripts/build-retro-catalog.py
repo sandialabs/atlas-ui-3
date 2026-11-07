@@ -53,6 +53,19 @@ def high_contrast(surface):
     return max(((0,0,0), (255,255,255)), key=lambda c: contrast(c, surface))
 
 
+def focus_color(accent, surface, control):
+    if all(contrast(accent, bg) >= 3.1 for bg in (surface, control)):
+        return accent
+    choices = [blend(accent, endpoint, step / 100)
+               for endpoint in ((0, 0, 0), (255, 255, 255))
+               for step in range(1, 101)]
+    eligible = [c for c in choices
+                if all(contrast(c, bg) >= 3.1 for bg in (surface, control))]
+    if not eligible:
+        raise ValueError('Unusable focus color')
+    return min(eligible, key=lambda c: sum((x - y) ** 2 for x, y in zip(c, accent)))
+
+
 def text_shade(surface, minimum):
     target = high_contrast(surface)
     for n in range(101):
@@ -166,6 +179,7 @@ def build():
             f'  --atlas-retro-window-fg: {hexcolor(high_contrast(surface))};',
             f'  --atlas-radius: {radii};',
             f'  --atlas-accent: {hexcolor(accent)};',
+            f'  --atlas-focus-ring: {hexcolor(focus_color(accent, surface, control))};',
             f'  --atlas-retro-window-bg: {hexcolor(surface)};',
             f'  --atlas-retro-header-bg: {hexcolor(header)};',
             f'  --atlas-retro-header-fg: {hexcolor(header_foreground)};',

@@ -13,6 +13,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #0a246a;
+  --atlas-focus-ring: #091f5c;
   --atlas-retro-window-bg: #5475cc;
   --atlas-retro-header-bg: #0a246a;
   --atlas-retro-header-fg: #ffffff;
@@ -40,6 +41,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #b21808;
+  --atlas-focus-ring: #b01808;
   --atlas-retro-window-bg: #abbbd0;
   --atlas-retro-header-bg: #b21808;
   --atlas-retro-header-fg: #ffffff;
@@ -67,6 +69,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffffff;
+  --atlas-focus-ring: #ffffff;
   --atlas-retro-window-bg: #1f69b4;
   --atlas-retro-header-bg: #ffffff;
   --atlas-retro-header-fg: #000000;
@@ -94,6 +97,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #f0f0f4;
+  --atlas-focus-ring: #f0f0f4;
   --atlas-retro-window-bg: #696974;
   --atlas-retro-header-bg: #f0f0f4;
   --atlas-retro-header-fg: #000000;
@@ -121,6 +125,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffcc00;
+  --atlas-focus-ring: #ffcc00;
   --atlas-retro-window-bg: #44696a;
   --atlas-retro-header-bg: #ffcc00;
   --atlas-retro-header-fg: #000000;
@@ -148,6 +153,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ffff00;
   --atlas-retro-header-fg: #000000;
@@ -175,6 +181,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #55ffff;
+  --atlas-focus-ring: #55ffff;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #55ffff;
   --atlas-retro-header-fg: #000000;
@@ -202,6 +209,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ffd300;
+  --atlas-focus-ring: #ffd300;
   --atlas-retro-window-bg: #282839;
   --atlas-retro-header-bg: #ffd300;
   --atlas-retro-header-fg: #000000;
@@ -229,6 +237,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .7rem;
   --atlas-accent: #0b2a3c;
+  --atlas-focus-ring: #0b2a3c;
   --atlas-retro-window-bg: #76c1ed;
   --atlas-retro-header-bg: #0b2a3c;
   --atlas-retro-header-fg: #ffffff;
@@ -256,6 +265,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #00ff33;
+  --atlas-focus-ring: #00ff33;
   --atlas-retro-window-bg: #535353;
   --atlas-retro-header-bg: #00ff33;
   --atlas-retro-header-fg: #000000;
@@ -283,6 +293,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ffff00;
   --atlas-retro-header-fg: #000000;
@@ -310,6 +321,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ffb000;
+  --atlas-focus-ring: #ffb000;
   --atlas-retro-window-bg: #272522;
   --atlas-retro-header-bg: #ffb000;
   --atlas-retro-header-fg: #000000;
@@ -337,6 +349,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ff00e5;
+  --atlas-focus-ring: #ff00e5;
   --atlas-retro-window-bg: #352847;
   --atlas-retro-header-bg: #ff00e5;
   --atlas-retro-header-fg: #000000;
@@ -364,6 +377,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ff2e2e;
+  --atlas-focus-ring: #ff2e2e;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ff2e2e;
   --atlas-retro-header-fg: #000000;
@@ -391,6 +405,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #00ffff;
+  --atlas-focus-ring: #00ffff;
   --atlas-retro-window-bg: #27272d;
   --atlas-retro-header-bg: #00ffff;
   --atlas-retro-header-fg: #000000;
@@ -418,6 +433,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #00007f;
+  --atlas-focus-ring: #00007f;
   --atlas-retro-window-bg: #468a8a;
   --atlas-retro-header-bg: #00007f;
   --atlas-retro-header-fg: #ffffff;
@@ -445,6 +461,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #f5f5f5;
+  --atlas-focus-ring: #f5f5f5;
   --atlas-retro-window-bg: #777777;
   --atlas-retro-header-bg: #f5f5f5;
   --atlas-retro-header-fg: #000000;
@@ -472,6 +489,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #2a7ac9;
+  --atlas-focus-ring: #2773bd;
   --atlas-retro-window-bg: #d8dfe6;
   --atlas-retro-header-bg: #2a7ac9;
   --atlas-retro-header-fg: #000000;
@@ -499,6 +517,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #0f380f;
+  --atlas-focus-ring: #0f380f;
   --atlas-retro-window-bg: #aba499;
   --atlas-retro-header-bg: #0f380f;
   --atlas-retro-header-fg: #ffffff;
@@ -526,6 +545,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #6a6965;
+  --atlas-focus-ring: #6a6965;
   --atlas-retro-window-bg: #e3e2df;
   --atlas-retro-header-bg: #6a6965;
   --atlas-retro-header-fg: #ffffff;
@@ -553,6 +573,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #00e4ff;
+  --atlas-focus-ring: #00e4ff;
   --atlas-retro-window-bg: #1f1f26;
   --atlas-retro-header-bg: #00e4ff;
   --atlas-retro-header-fg: #000000;
@@ -580,6 +601,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ff1a1a;
+  --atlas-focus-ring: #ff1a1a;
   --atlas-retro-window-bg: #272727;
   --atlas-retro-header-bg: #ff1a1a;
   --atlas-retro-header-fg: #000000;
@@ -607,6 +629,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #0078b4;
+  --atlas-focus-ring: #0077b2;
   --atlas-retro-window-bg: #e2ded4;
   --atlas-retro-header-bg: #0078b4;
   --atlas-retro-header-fg: #ffffff;
@@ -634,6 +657,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #00d4d4;
+  --atlas-focus-ring: #00d4d4;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #00d4d4;
   --atlas-retro-header-fg: #000000;
@@ -661,6 +685,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ffff00;
   --atlas-retro-header-fg: #000000;
@@ -688,6 +713,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
   --atlas-retro-window-bg: #1f1fb4;
   --atlas-retro-header-bg: #ffff00;
   --atlas-retro-header-fg: #000000;
@@ -715,6 +741,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffff55;
+  --atlas-focus-ring: #ffff55;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ffff55;
   --atlas-retro-header-fg: #000000;
@@ -742,6 +769,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffff55;
+  --atlas-focus-ring: #ffff55;
   --atlas-retro-window-bg: #1f1fb4;
   --atlas-retro-header-bg: #ffff55;
   --atlas-retro-header-fg: #000000;
@@ -769,6 +797,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ff3860;
+  --atlas-focus-ring: #ff3860;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ff3860;
   --atlas-retro-header-fg: #000000;
@@ -796,6 +825,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #00e4ff;
+  --atlas-focus-ring: #00e4ff;
   --atlas-retro-window-bg: #2f303e;
   --atlas-retro-header-bg: #00e4ff;
   --atlas-retro-header-fg: #000000;
@@ -823,6 +853,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #4aff4a;
+  --atlas-focus-ring: #4aff4a;
   --atlas-retro-window-bg: #5a55cb;
   --atlas-retro-header-bg: #4aff4a;
   --atlas-retro-header-fg: #000000;
@@ -850,6 +881,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #9b59b6;
+  --atlas-focus-ring: #9656b1;
   --atlas-retro-window-bg: #dbdfe0;
   --atlas-retro-header-bg: #9b59b6;
   --atlas-retro-header-fg: #ffffff;
@@ -877,6 +909,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .7rem;
   --atlas-accent: #7873f5;
+  --atlas-focus-ring: #706be4;
   --atlas-retro-window-bg: #ededed;
   --atlas-retro-header-bg: #7873f5;
   --atlas-retro-header-fg: #000000;
@@ -904,6 +937,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #4a5568;
+  --atlas-focus-ring: #4a5568;
   --atlas-retro-window-bg: #d0d5db;
   --atlas-retro-header-bg: #4a5568;
   --atlas-retro-header-fg: #ffffff;
@@ -931,6 +965,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
   --atlas-accent: #ffe066;
+  --atlas-focus-ring: #ffe066;
   --atlas-retro-window-bg: #2a527d;
   --atlas-retro-header-bg: #ffe066;
   --atlas-retro-header-fg: #000000;
@@ -958,6 +993,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .7rem;
   --atlas-accent: #7c6ba8;
+  --atlas-focus-ring: #7666a0;
   --atlas-retro-window-bg: #dfd9ed;
   --atlas-retro-header-bg: #7c6ba8;
   --atlas-retro-header-fg: #ffffff;
@@ -985,6 +1021,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #ff0000;
+  --atlas-focus-ring: #f50000;
   --atlas-retro-window-bg: #ededed;
   --atlas-retro-header-bg: #ff0000;
   --atlas-retro-header-fg: #000000;
@@ -1012,6 +1049,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #e63946;
+  --atlas-focus-ring: #d63541;
   --atlas-retro-window-bg: #e3e2dd;
   --atlas-retro-header-bg: #e63946;
   --atlas-retro-header-fg: #000000;
@@ -1039,6 +1077,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #d32027;
+  --atlas-focus-ring: #d32027;
   --atlas-retro-window-bg: #dfdbd0;
   --atlas-retro-header-bg: #d32027;
   --atlas-retro-header-fg: #ffffff;
@@ -1066,6 +1105,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #ed1c24;
+  --atlas-focus-ring: #ed1c24;
   --atlas-retro-window-bg: #edece7;
   --atlas-retro-header-bg: #ed1c24;
   --atlas-retro-header-fg: #000000;
@@ -1093,6 +1133,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ec1e23;
+  --atlas-focus-ring: #ef3e42;
   --atlas-retro-window-bg: #272727;
   --atlas-retro-header-bg: #ec1e23;
   --atlas-retro-header-fg: #000000;
@@ -1120,6 +1161,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #3d5a80;
+  --atlas-focus-ring: #3d5a80;
   --atlas-retro-window-bg: #cdba8f;
   --atlas-retro-header-bg: #3d5a80;
   --atlas-retro-header-fg: #ffffff;
@@ -1147,6 +1189,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #0a0a0a;
+  --atlas-focus-ring: #0a0a0a;
   --atlas-retro-window-bg: #e8e8e6;
   --atlas-retro-header-bg: #0a0a0a;
   --atlas-retro-header-fg: #ffffff;
@@ -1174,6 +1217,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
   --atlas-retro-window-bg: #ededed;
   --atlas-retro-header-bg: #000000;
   --atlas-retro-header-fg: #ffffff;
@@ -1201,6 +1245,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #2a2a2a;
+  --atlas-focus-ring: #2a2a2a;
   --atlas-retro-window-bg: #e9e8e3;
   --atlas-retro-header-bg: #2a2a2a;
   --atlas-retro-header-fg: #ffffff;
@@ -1228,6 +1273,7 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ffe600;
+  --atlas-focus-ring: #ffe600;
   --atlas-retro-window-bg: #272727;
   --atlas-retro-header-bg: #ffe600;
   --atlas-retro-header-fg: #000000;
@@ -1255,6 +1301,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #5a6478;
+  --atlas-focus-ring: #5a6478;
   --atlas-retro-window-bg: #c8dfed;
   --atlas-retro-header-bg: #5a6478;
   --atlas-retro-header-fg: #ffffff;
@@ -1282,6 +1329,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #1a1a3a;
+  --atlas-focus-ring: #1a1a3a;
   --atlas-retro-window-bg: #e3dac4;
   --atlas-retro-header-bg: #1a1a3a;
   --atlas-retro-header-fg: #ffffff;
@@ -1309,6 +1357,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
   --atlas-accent: #c83030;
+  --atlas-focus-ring: #c83030;
   --atlas-retro-window-bg: #e8e8df;
   --atlas-retro-header-bg: #c83030;
   --atlas-retro-header-fg: #ffffff;
@@ -1336,6 +1385,7 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
   --atlas-retro-window-bg: #ed00ed;
   --atlas-retro-header-bg: #ffff00;
   --atlas-retro-header-fg: #000000;

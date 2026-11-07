@@ -9,6 +9,7 @@
   --atlas-surface: rgb(var(--gray-800));
   --atlas-border: rgb(var(--gray-600));
   --atlas-accent: #60a5fa;
+  --atlas-focus-ring: #93c5fd;
   --atlas-radius: 0.5rem;
 }
 
@@ -26,6 +27,7 @@
   --gray-900: 0 26 0;
   --atlas-font-ui: var(--font);
   --atlas-accent: var(--ink);
+  --atlas-focus-ring: #33ff33;
   --atlas-radius: 0;
   color-scheme: dark;
 }
@@ -44,6 +46,7 @@
   --gray-900: 192 192 192;
   --atlas-font-ui: var(--font);
   --atlas-accent: var(--title);
+  --atlas-focus-ring: #000080;
   --atlas-radius: 0;
   color-scheme: light;
 }
@@ -62,9 +65,12 @@
   --gray-900: 245 245 245;
   --atlas-font-ui: var(--font-sys);
   --atlas-accent: var(--ink);
+  --atlas-focus-ring: #000000;
   --atlas-radius: 0;
   color-scheme: light;
 }
+
+[data-theme="light"] { --atlas-focus-ring: #1d4ed8; }
 
 body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--gray-100))); }
 
@@ -159,16 +165,16 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   position: relative;
 }
 .atlas-theme-option:focus-within {
-  outline: 3px solid var(--atlas-accent);
+  outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 2px;
 }
-.atlas-theme-radio { accent-color: var(--atlas-accent); }
+.atlas-theme-radio { accent-color: var(--atlas-focus-ring); }
 .atlas-theme-option:has(.atlas-theme-radio:checked) {
-  outline: 2px solid var(--atlas-accent);
+  outline: 2px solid var(--atlas-focus-ring);
   outline-offset: -2px;
 }
 .atlas-theme-source-link:focus-visible {
-  outline: 3px solid var(--atlas-accent);
+  outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 3px;
 }
 [data-atlas-theme="win95"] .atlas-theme-preview[data-preview="win95"] {
@@ -240,7 +246,7 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   font-weight: 600;
 }
 .atlas-retro-workbench-details > summary:focus-visible {
-  outline: 3px solid var(--atlas-accent);
+  outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 4px;
 }
 .atlas-retro-window {
@@ -274,7 +280,7 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   cursor: pointer;
 }
 .atlas-retro-window-close:focus-visible {
-  outline: 3px solid var(--atlas-accent);
+  outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 3px;
 }
 .atlas-retro-window-symbol, .atlas-retro-window-glyphs { font: inherit; }
@@ -313,7 +319,7 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
 .atlas-retro-output { display: block; margin-top: 0.85rem; overflow-wrap: anywhere; }
 .atlas-retro-input:focus-visible,
 .atlas-retro-button:focus-visible {
-  outline: 3px solid var(--atlas-accent);
+  outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 3px;
 }
 .atlas-retro-button:disabled { cursor: not-allowed; opacity: 0.65; }
@@ -377,6 +383,6 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   color: var(--atlas-retro-input-fg);
 }
 .atlas-theme-category > select:focus-visible {
-  outline: 3px solid var(--atlas-accent);
+  outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 3px;
 }

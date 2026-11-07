@@ -103,6 +103,10 @@ jobs:
         cd frontend
         VITE_APP_NAME="ATLAS" VITE_FEATURE_ANIMATED_LOGO="true" VITE_FEATURE_POWERED_BY_ATLAS="false" VITE_FEATURE_RAG_CITATIONS="false" npm run build
 
+    - name: Check Retro Design System browser contrast
+      run: |
+        python3 frontend/scripts/check-retro-browser.py --chrome "$(command -v google-chrome)"
+
     - name: Create build directory structure
       run: |
         mkdir -p build-artifacts

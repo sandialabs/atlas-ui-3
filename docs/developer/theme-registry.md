@@ -35,7 +35,22 @@ manifest slugs. For example, `03-windows-xp-luna` becomes
 `windows-xp-luna`.
 
 The generated assets are static: **no network fetch, remotely installed CSS,
-arbitrary script, external font, logo, bitmap or historical art**. The source
+arbitrary script, external font, logo, bitmap or historical art**.
+
+After `cd frontend && npm run build`, verify the rendered CSS against all
+55 modes using an installed Chrome/Chromium binary:
+
+```bash
+python3 frontend/scripts/check-retro-browser.py --chrome /path/to/chrome
+```
+
+The headless browser checks computed body, window, title, button and input
+text contrast (at least 4.5:1), the keyboard-focus outline against both
+its button and surrounding window (at least 3:1), focus visibility, and
+matching dark/light color-scheme. The Build Artifacts GitHub workflow runs
+this check on the built frontend using the runner's installed Chrome. This
+is a targeted theme contrast test, not a blanket accessibility certification.
+ The source
 token parser rejects additional selectors, non-token CSS, and external
 resource imports. The original token files and license remain inspectable
 and attributed. CI verifies the generated output is up to date.
