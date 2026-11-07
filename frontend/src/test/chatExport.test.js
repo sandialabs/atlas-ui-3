@@ -281,6 +281,26 @@ describe('chatExport.buildPersistedMessage', () => {
     })
   })
 
+  it('persists auto_approvable so a reloaded pending row stays on the gate', () => {
+    // auto_approvable: false marks a request the server kept on the gate on
+    // purpose (hook escalation, launched child). Dropping it on reload would
+    // let the browser's own auto-approve answer it.
+    const out = buildPersistedMessage({
+      role: 'system',
+      type: 'tool_approval_request',
+      tool_call_id: 'call_2',
+      tool_name: 'run_python',
+      status: 'pending',
+      auto_approvable: false,
+    })
+    expect(out.metadata).toEqual({
+      tool_call_id: 'call_2',
+      tool_name: 'run_python',
+      auto_approvable: false,
+      status: 'pending',
+    })
+  })
+
   it('omits undefined approval fields from metadata', () => {
     const out = buildPersistedMessage({
       role: 'system',

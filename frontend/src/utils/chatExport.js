@@ -84,6 +84,10 @@ const TOOL_APPROVAL_PERSISTED_FIELDS = [
   'arguments',
   'allow_edit',
   'admin_required',
+  // The server's "kept on the gate on purpose" marker (hook escalation,
+  // launched child). Without it a reloaded pending row would be answered
+  // by the browser's own auto-approve.
+  'auto_approvable',
   'status',
   'auto_approved',
   'rejection_reason',

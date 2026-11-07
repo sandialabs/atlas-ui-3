@@ -1154,7 +1154,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// User-level auto-approve. The server stores this on the run and
 			// applies it itself, so closing the browser cannot leave a tool
 			// call parked on the approval gate. Only a real boolean true opts in.
-			auto_approve_tools: settings?.autoApproveTools === true,
+			// Read from the latest persisted settings, as the announcement and
+			// the cross-tab forward do: render state can lag another tab's
+			// off-toggle and would admit the run with the older bit.
+			auto_approve_tools: (readLatestSettingsRef.current?.() || settings)?.autoApproveTools === true,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
