@@ -132,6 +132,74 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   background: var(--chrome);
   padding-inline: 0.5rem;
 }
+/* The actual Tools and Settings dialog should use the same Finder-like
+ * caption, not a modern 24px header with a right-side close icon. */
+[data-atlas-theme="mac7"] .atlas-theme-chrome {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--shadow);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar {
+  position: relative;
+  justify-content: center;
+  min-height: 27px;
+  padding: 3px 30px;
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image: repeating-linear-gradient(to bottom,
+    var(--paper) 0 2px, var(--ink) 2px 3px, var(--paper) 3px 5px);
+  border-bottom: 1px solid var(--ink);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar h2 {
+  max-width: 100%;
+  padding: 0 9px;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: var(--font-sys);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar h2 svg {
+  display: none;
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar > button[aria-label="Close tools and settings"] {
+  position: absolute;
+  z-index: 2;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  min-height: 13px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 0 0 0 2px var(--paper);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar > button[aria-label="Close tools and settings"] svg {
+  display: none;
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar > button[aria-label="Close tools and settings"]:active {
+  background: var(--ink);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar > button[aria-label="Close tools and settings"]:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+[data-atlas-theme="mac7"] .atlas-theme-option {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 1px 1px 0 var(--shadow);
+}
 [data-atlas-theme="crt-phosphor"] .atlas-theme-titlebar {
   border-bottom: 1px solid var(--ink);
 }
