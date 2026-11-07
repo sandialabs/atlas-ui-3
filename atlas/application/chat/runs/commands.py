@@ -39,6 +39,19 @@ _DIRECTORY_UNAVAILABLE_MESSAGE = "The shared run directory could not be read."
 _APPROVAL_NUDGES: "set[asyncio.Task]" = set()
 
 
+def cancel_superseded_leftovers(active_chat_task: dict) -> int:
+    """Cancel superseded turns that outlived their bounded wait; drop done ones.
+
+    Returns how many were still running.
+    """
+    leftovers = [t for t in active_chat_task.get("superseded", ()) if not t.done()]
+    for task in leftovers:
+        task.cancel()
+    if "superseded" in active_chat_task:
+        active_chat_task["superseded"] = leftovers
+    return len(leftovers)
+
+
 async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
                              active_chat_task: Optional[dict] = None) -> None:
     """Stop the run a ``stop_streaming`` / ``agent_control`` stop frame names.
@@ -89,6 +102,7 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
         # Addressed a run that is finished, reaped, or not the user's.
         return
     # Nothing addressed: the untracked turn (removed once every turn is a run).
+    cancel_superseded_leftovers(active_chat_task or {})
     if task_live:
         logger.info("Cancelling active chat task (stop frame)")
         task.cancel()

@@ -141,7 +141,10 @@ The simplest useful hook is three lines of bash with no JSON emitted at all.
   the loop continues gracefully; for prompt/LLM events the reason surfaces to
   the user.
 - **`require_approval`** — (PreToolUse / PermissionRequest) force the runtime
-  approval gate even if it would have passed. Sticky across hooks.
+  approval gate even if it would have passed. Sticky across hooks. The user's
+  auto-approve switch does not answer an escalated call, on the server or in
+  the browser: the approval request carries `auto_approvable: false`, and the
+  call waits for an explicit answer from the user.
 
 ## Security & governance
 

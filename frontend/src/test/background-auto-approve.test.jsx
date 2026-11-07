@@ -212,6 +212,20 @@ describe('background auto-approve of tool approvals', () => {
     expect(approvalSends()).toHaveLength(0)
   })
 
+  // A child launched from an untracked turn has no parent_run_id, so the
+  // tab cannot tell it is a child; the server marks the request instead.
+  // A policy hook escalation arrives the same way.
+  it('answers nothing for a request the server marked not auto-approvable', () => {
+    const { result } = renderChat()
+    const handler = runHandler()
+
+    act(() => handler(runStarted()))
+    act(() => { result.current.loadSavedConversation({ id: 'other', messages: [] }) })
+    act(() => handler(approvalFrame({ auto_approvable: false })))
+
+    expect(approvalSends()).toHaveLength(0)
+  })
+
   it('still answers a user-started run that merely carries no parent info', () => {
     const { result } = renderChat()
     const handler = runHandler()

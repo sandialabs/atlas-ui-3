@@ -60,9 +60,24 @@ describe('Tool Approval WebSocket Tests', () => {
         arguments: { code: 'rm -rf /' },
         allow_edit: true,
         admin_required: false,
+        auto_approvable: true,
         status: 'pending',
         timestamp: expect.any(String)
       }])
+    })
+
+    it('keeps a server auto_approvable: false on the row', () => {
+      handler({
+        type: 'tool_approval_request',
+        tool_call_id: 'test_gated',
+        tool_name: 'escalated_tool',
+        arguments: {},
+        allow_edit: true,
+        admin_required: false,
+        auto_approvable: false,
+      })
+
+      expect(messages[0].auto_approvable).toBe(false)
     })
 
     it('should handle tool_approval_request with allow_edit=false', () => {
@@ -86,6 +101,7 @@ describe('Tool Approval WebSocket Tests', () => {
         arguments: { param: 'value' },
         allow_edit: false,
         admin_required: true,
+        auto_approvable: true,
         status: 'pending',
         timestamp: expect.any(String)
       }])
@@ -112,6 +128,7 @@ describe('Tool Approval WebSocket Tests', () => {
         arguments: {},
         allow_edit: true,
         admin_required: false,
+        auto_approvable: true,
         status: 'pending',
         timestamp: expect.any(String)
       }])
@@ -146,6 +163,7 @@ describe('Tool Approval WebSocket Tests', () => {
         arguments: message.arguments,
         allow_edit: true,
         admin_required: false,
+        auto_approvable: true,
         status: 'pending',
         timestamp: expect.any(String)
       }])

@@ -88,7 +88,10 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     // Do not auto-send again in either case.
     if (typeof message.auto_approved === 'boolean') return
     if (autoApprovalSentRef.current) return
-    if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
+    // Same rule as clientMayAutoApprove, spelled out so the effect's
+    // dependencies stay checkable. `auto_approvable: false` is a request the
+    // server kept on the gate on purpose (hook escalation, launched child).
+    if (settings?.autoApproveTools && !message.admin_required && message.auto_approvable !== false && message.status === 'pending') {
       const timer = setTimeout(() => {
         if (autoApprovalSentRef.current) return
         // Only record a successful auto-approve once the server has actually
@@ -124,7 +127,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [settings?.autoApproveTools, message.admin_required, message.status, message.auto_approved, message.tool_call_id, message.arguments, message.run_id, message.conversation_id, message.invocation_id, message.step, sendApprovalResponse, updateToolResult])
+  }, [settings?.autoApproveTools, message.admin_required, message.auto_approvable, message.status, message.auto_approved, message.tool_call_id, message.arguments, message.run_id, message.conversation_id, message.invocation_id, message.step, sendApprovalResponse, updateToolResult])
 
   const handleApprove = () => {
     if (resolvedStatus !== 'pending') return

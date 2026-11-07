@@ -229,6 +229,32 @@ describe('ToolApprovalMessage — compact (default) layout', () => {
     expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
   })
 
+  // The server keeps a hook escalation, or a launched child's call, on the
+  // gate even with the switch on, and says so with auto_approvable: false.
+  // The row must leave it to the user rather than answer it automatically.
+  it.each([true, false])('does not auto-answer a request the server marked not auto-approvable (compact=%s)', async (compact) => {
+    vi.useFakeTimers()
+    try {
+      const sendApprovalResponse = vi.fn().mockReturnValue(true)
+      const { updateToolResult } = setChat({ settings: { autoApproveTools: true }, sendApprovalResponse })
+      render(<ToolApprovalMessage message={{ ...baseMessage, auto_approvable: false }} compact={compact} />)
+
+      await vi.advanceTimersByTimeAsync(300)
+      expect(sendApprovalResponse).not.toHaveBeenCalled()
+      expect(updateToolResult).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: /Approve/ })).toBeInTheDocument()
+      expect(screen.getByText(/Auto-approve is on, but this call needs your answer/)).toBeInTheDocument()
+
+      // Manual approval still works.
+      fireEvent.click(screen.getByRole('button', { name: /Approve/ }))
+      expect(sendApprovalResponse).toHaveBeenCalledWith(
+        expect.objectContaining({ tool_call_id: 'call_1', approved: true })
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // The row used to give no hint that the user could stop being asked, or why
   // an admin-gated call still asks with auto-approve on.
   it.each([true, false])('says why it is asking (compact=%s)', (compact) => {
