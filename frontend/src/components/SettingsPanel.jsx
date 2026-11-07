@@ -709,7 +709,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                   {ctxSettings?.autoApproveTools ? 'Currently on.' : 'Currently off.'}
                 </strong>{' '}
                 {describeAutoApprove(!!ctxSettings?.autoApproveTools)}
-                {ctxSettings?.autoApproveTools && ' This includes tool calls in conversations you are not currently viewing.'}
+                {ctxSettings?.autoApproveTools && ' This includes tool calls in conversations you are not currently viewing, and it keeps working after you close the browser.'}
               </p>
             </div>
           </div>

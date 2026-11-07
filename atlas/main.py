@@ -683,6 +683,57 @@ async def _release_finished_run(
         logger.debug("Error releasing MCP sessions for run %s: %s", run_id, e)
 
 
+# Seconds to wait for a superseded untracked turn to unwind after cancel.
+SUPERSEDED_TURN_CANCEL_TIMEOUT = 5.0
+
+
+async def _cancel_superseded_untracked_turn(active_chat_task: dict) -> bool:
+    """Cancel the untracked turn this connection is still running, and wait.
+
+    ``active_chat_task`` holds at most one task per connection: an untracked
+    chat turn or a compaction. Tracked runs live in the registry, not here,
+    so a background run in another conversation is never touched. A chat
+    frame for a different conversation used to overwrite the slot and leave
+    the old turn executing with nothing pointing at it: Stop reached only the
+    new task, and with the server-side switch on, the orphan kept executing
+    user-level tools on its own. Cancel it, and wait for it to unwind so its
+    session hold is released before the new turn opens one.
+
+    Returns True when a running turn was cancelled.
+    """
+    previous = active_chat_task.get("task")
+    if previous is None or previous.done() or active_chat_task.get("kind") != "chat":
+        return False
+    previous.cancel()
+    # ``wait`` reports completion without re-raising the task's own
+    # CancelledError into this coroutine. Bounded: a tool that resists
+    # cancellation must not hold this connection's receive loop, and with
+    # it every later chat, Stop and approval frame.
+    _done, pending = await asyncio.wait([previous], timeout=SUPERSEDED_TURN_CANCEL_TIMEOUT)
+    if pending:
+        # Keep it reachable: Stop, reset and the disconnect cleanup cancel
+        # it again, so a late unwinding is still driven by this connection.
+        logger.warning(
+            "Superseded untracked turn did not unwind within %ss; continuing",
+            SUPERSEDED_TURN_CANCEL_TIMEOUT,
+        )
+        active_chat_task.setdefault("superseded", []).append(previous)
+    return True
+
+
+def _cancel_superseded_leftovers(active_chat_task: dict) -> int:
+    """Cancel superseded turns that outlived their bounded wait; drop done ones.
+
+    Returns how many were still running.
+    """
+    leftovers = [t for t in active_chat_task.get("superseded", ()) if not t.done()]
+    for task in leftovers:
+        task.cancel()
+    if "superseded" in active_chat_task:
+        active_chat_task["superseded"] = leftovers
+    return len(leftovers)
+
+
 def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     """Cancel the run a stop frame names, if it names one.
 
@@ -1240,6 +1291,7 @@ async def cleanup_disconnected_session(
             len(surviving),
         )
 
+    _cancel_superseded_leftovers(active_chat_task)
     task = active_chat_task.get("task")
     if task and not task.done():
         logger.info("Cancelling active chat task (client disconnected)")
@@ -2171,6 +2223,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     frame_conversation_id, user_email
                 )
                 if tracked_run is not None:
+                    # A chat or steer frame must not rewrite the switch on a
+                    # run that is already going. A second tab, or a steer the
+                    # server then refuses, can carry a stale true and turn
+                    # auto-approve back on. Admission records the bit, and
+                    # the auto_approve_tools message is what changes it later.
                     steering = tracked_run.steering
                     if steering is not None and steering.active:
                         refusal = await chat_service.steering_classification_refusal(
@@ -2454,6 +2511,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             # at admission.
                             title=_run_title_from_frame(data),
                         )
+                        # Record the switch before the task can call a tool.
+                        # The run keeps this after the socket closes.
+                        run_record.note_auto_approve(data)
                     except ConcurrencyLimitError as e:
                         await websocket.send_json({
                             "type": "error",
@@ -2599,6 +2659,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             # Per-conversation automatic compaction toggle
                             # (issue #877); a non-bool means the default.
                             auto_compact=data.get("auto_compact"),
+                            # User-level auto-approve. Only a real boolean
+                            # True opts in; the service stores it on the
+                            # session for turns that are not tracked runs.
+                            auto_approve_tools=data.get("auto_approve_tools") is True,
                         )
                     except RateLimitError as e:
                         logger.warning(f"Rate limit error in chat handler: {e}")
@@ -2816,10 +2880,48 @@ async def websocket_endpoint(websocket: WebSocket):
                                 pass
 
                 if run_record is None:
+                    # A turn for another conversation supersedes the untracked
+                    # turn still running on this connection. Cancel it first;
+                    # otherwise it runs on unreachable by Stop, and with the
+                    # switch on it keeps approving its own tool calls.
+                    if await _cancel_superseded_untracked_turn(active_chat_task):
+                        logger.info(
+                            "Cancelled the previous untracked turn on this "
+                            "connection before starting a new one"
+                        )
+                    # Open the live switch entry before the task exists. The
+                    # service only reaches the tool loop after several awaits;
+                    # an off-toggle received in that window must update this
+                    # entry, not be overwritten by the admission value later.
+                    from atlas.application.chat.auto_approve_state import (
+                        begin_untracked_turn,
+                    )
+                    begin_untracked_turn(
+                        turn_session_id, data.get("auto_approve_tools") is True
+                    )
                     chat_task = asyncio.create_task(handle_chat_guarded())
+                    # Release the hold when the task is done, however it ends.
+                    # A done callback also runs for a task cancelled before
+                    # its first step, where a ``finally`` inside it would not.
+                    # An overlapping turn on the same session keeps the entry,
+                    # and the latest toggle, until it finishes too.
+                    from atlas.application.chat.auto_approve_state import (
+                        end_untracked_turn,
+                    )
+                    chat_task.add_done_callback(
+                        lambda _task, _sid=turn_session_id: end_untracked_turn(_sid)
+                    )
                     active_chat_task["task"] = chat_task
                     active_chat_task["kind"] = "chat"
                 else:
+                    # The same supersession applies before a tracked run: an
+                    # untracked turn left running here would sit outside the
+                    # new run's Stop control.
+                    if await _cancel_superseded_untracked_turn(active_chat_task):
+                        logger.info(
+                            "Cancelled the previous untracked turn on this "
+                            "connection before starting a tracked run"
+                        )
                     # From a granted admission until the task is attached the
                     # run holds a cluster-wide claim (its conversation lock and
                     # one of the user's slots) that nothing would ever release:
@@ -3160,6 +3262,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # session (defense-in-depth; the frontend also sends
                 # stop_streaming before reset_session when it knows generation
                 # is in progress).
+                _cancel_superseded_leftovers(active_chat_task)
                 task = active_chat_task.get("task")
                 if task and not task.done():
                     logger.info("Cancelling active chat task (reset_session)")
@@ -3221,6 +3324,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 await websocket.send_json(response)
 
+            elif message_type == "auto_approve_tools":
+                # The switch changed while work is in flight. Tracked runs
+                # keep the bit on the owning record, which is what a closed
+                # browser still executes against. Turns with no record
+                # (incognito, local save, history disabled) keep it on the
+                # session, and the gate reads that live value rather than
+                # the copy taken when the turn started. Only a real boolean
+                # True opts in.
+                from atlas.application.chat.auto_approve_state import set_session_auto_approve
+                enabled = data.get("enabled") is True
+                run_registry.set_auto_approve_user_tools(user_email, enabled)
+                set_session_auto_approve(session_id, enabled)
+
             elif message_type == "tool_approval_response":
                 # Handle tool approval response. Arguments stay out of the
                 # info log: they may include sensitive user data.
@@ -3274,6 +3390,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if await _stop_remote_run(websocket, run_registry, user_email, data, active_chat_task):
                     pass
                 elif not _cancel_addressed_run(run_registry, user_email, data):
+                    _cancel_superseded_leftovers(active_chat_task)
                     task = active_chat_task.get("task")
                     if task and not task.done():
                         logger.info("Cancelling active chat task (stop_streaming)")
@@ -3288,6 +3405,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if await _stop_remote_run(websocket, run_registry, user_email, data, active_chat_task):
                         pass
                     elif not _cancel_addressed_run(run_registry, user_email, data):
+                        _cancel_superseded_leftovers(active_chat_task)
                         task = active_chat_task.get("task")
                         if task and not task.done():
                             logger.info("Cancelling active chat task (agent_control stop)")

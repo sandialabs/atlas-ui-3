@@ -31,6 +31,7 @@ import { resolveTurnDataSources } from '../utils/ragSources'
 import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTools'
 import { isKnownUser } from '../utils/userStorage'
 import { normalizeSaveMode } from '../utils/saveModeConfig'
+import { clientMayAutoApprove } from '../utils/toolApproval'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -117,6 +118,10 @@ const MUTATING_SELECTION_ACTIONS = [
 	'setRagEnabled', 'toggleRagEnabled',
 ]
 
+// Reconnect announcements of the auto-approve switch retry with backoff up to
+// this many sends; the next connection owes the announcement again.
+const AUTO_APPROVE_ANNOUNCE_MAX_TRIES = 8
+
 export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
@@ -139,7 +144,7 @@ export const ChatProvider = ({ children }) => {
 		const agent = useAgentMode(config.agentModeAvailable)
 	const files = useFiles()
 	const { messages, addMessage, bulkAdd, mapMessages, updateToolResult, resetMessages, streamToken, streamEnd, discardReplayPlaceholders, refreshAppend } = useMessages()
-	const { settings, updateSettings } = useSettings()
+	const { settings, updateSettings, isLoaded: settingsLoaded, readLatestSettings } = useSettings()
 
 	// A replayed placeholder (issue #957) is not this tab streaming: it marks a
 	// run whose frames go to another socket, and a live append would have
@@ -672,11 +677,17 @@ export const ChatProvider = ({ children }) => {
 					// model launched (atlas_launch) runs on model-chosen
 					// arguments, and an on/off toggle must not silently broaden
 					// to approving those unattended.
+					// The server also marks a request it kept on the gate on
+					// purpose (`auto_approvable: false`): a hook escalation, or
+					// a launched child that has no parent_run_id because its
+					// parent turn was not a tracked run.
 					const frame = data.frame
 					const childRun = runs.getRun(frame.conversation_id)?.parent_run_id
+					// Latest persisted settings, not render state: another tab may
+					// have turned the switch off since this one last rendered.
+					const latestSettings = readLatestSettingsRef.current?.() || settingsRef.current
 					if (
-						settingsRef.current?.autoApproveTools &&
-						!frame.admin_required &&
+						clientMayAutoApprove(frame, latestSettings) &&
 						!childRun &&
 						sendMessageRef.current
 					) {
@@ -714,6 +725,19 @@ export const ChatProvider = ({ children }) => {
 	settingsRef.current = settings
 	const sendMessageRef = useRef(sendMessage)
 	sendMessageRef.current = sendMessage
+	// A toggle that could not be sent (socket down) is retried on reconnect.
+	// The UI already shows the new value; dropping the frame would leave a
+	// run on this replica approving tools the user just turned off. The
+	// pending ref does not survive a reload, so a fresh connection also
+	// sends the value saved in settings. That update reaches only the runs
+	// this connection's server process owns.
+	const pendingAutoApproveRef = useRef(null)
+	const readLatestSettingsRef = useRef(readLatestSettings)
+	readLatestSettingsRef.current = readLatestSettings
+	const autoApproveNeedsAnnounceRef = useRef(true)
+	// The value this connection last delivered, so a change that arrives from
+	// another tab (a storage event) is forwarded on this tab's socket too.
+	const lastPublishedAutoApproveRef = useRef(null)
 
 	// The run a joined conversation was opened under has ended. Its save
 	// normally arrives first (see onConversationSaved); this is the fallback
@@ -1138,6 +1162,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				? Math.min(settings.maxIterations || agent.agentMaxSteps, config.agentMaxStepsLimit || 10)
 				: (settings.maxIterations || agent.agentMaxSteps),
 			temperature: settings.llmTemperature || 0.7,
+			// User-level auto-approve. The server stores this on the run and
+			// applies it itself, so closing the browser cannot leave a tool
+			// call parked on the approval gate. Only a real boolean true opts in.
+			// Read from the latest persisted settings, as the announcement and
+			// the cross-tab forward do: render state can lag another tab's
+			// off-toggle and would admit the run with the older bit.
+			auto_approve_tools: (readLatestSettingsRef.current?.() || settings)?.autoApproveTools === true,
 			compliance_level_filter: selections.complianceLevelFilter,
 			save_mode: saveMode,
 			// Backward compat: backend still checks incognito for older clients
@@ -2381,6 +2412,80 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		return () => clearTimeout(timer)
 	}, [activeConversationId, currentModel, isConnected, requestContextUsage])
 
+	// Tell the server when the switch changes, so a run already in flight
+	// picks it up before the user navigates away. The chat frame carries the
+	// same bit at admission; this covers the toggle with no new message.
+	// A failed send stays pending. A reload drops that ref, so each new
+	// connection also sends the saved setting and retries until the socket
+	// accepts it. Either way the frame only updates runs on this process.
+	const publishAutoApprove = useCallback((enabled) => {
+		const sent = sendMessageRef.current?.({
+			type: 'auto_approve_tools',
+			enabled: enabled === true,
+		}) === true
+		pendingAutoApproveRef.current = sent ? null : enabled === true
+		if (sent) lastPublishedAutoApproveRef.current = enabled === true
+		return sent
+	}, [])
+	const updateSettingsAndPublish = useCallback((patch) => {
+		const next = updateSettings(patch)
+		if (patch && Object.prototype.hasOwnProperty.call(patch, 'autoApproveTools')) {
+			publishAutoApprove(patch.autoApproveTools === true)
+		}
+		return next
+	}, [updateSettings, publishAutoApprove])
+	useEffect(() => {
+		if (!isConnected) {
+			autoApproveNeedsAnnounceRef.current = true
+			return undefined
+		}
+		// Wait for the saved setting. Sending the default first would turn
+		// the switch off on the server for a user who had it on.
+		if (!settingsLoaded || !autoApproveNeedsAnnounceRef.current) return undefined
+		let cancelled = false
+		let timer = null
+		let tries = 0
+		const attempt = () => {
+			if (cancelled) return
+			// The latest persisted choice, not this tab's state: another tab
+			// may have turned the switch off since this one last rendered,
+			// and announcing the older value would turn it back on.
+			const latest = readLatestSettingsRef.current?.() || settingsRef.current
+			const enabled = latest?.autoApproveTools === true
+			if (publishAutoApprove(enabled)) {
+				autoApproveNeedsAnnounceRef.current = false
+				return
+			}
+			// Exponential backoff with jitter, capped. After the last try the
+			// announcement stays owed and the next reconnect sends it.
+			tries += 1
+			if (tries >= AUTO_APPROVE_ANNOUNCE_MAX_TRIES) return
+			const base = Math.min(250 * 2 ** (tries - 1), 10000)
+			timer = window.setTimeout(attempt, base / 2 + Math.random() * (base / 2))
+		}
+		attempt()
+		return () => {
+			cancelled = true
+			if (timer != null) window.clearTimeout(timer)
+		}
+	}, [isConnected, settingsLoaded, publishAutoApprove])
+	// Another tab changed the switch: useSettings adopted it from the storage
+	// event, but only that tab's socket was told. Forward it on this socket so
+	// an untracked turn on this connection's session follows it too. A change
+	// made in this tab was already sent, so it matches and nothing goes out.
+	// The value sent is the latest persisted one, as for the announcement,
+	// so a render that lags behind another tab's off-toggle cannot send the
+	// older bit back.
+	const autoApproveSetting = settings?.autoApproveTools === true
+	useEffect(() => {
+		if (!isConnected || !settingsLoaded || autoApproveNeedsAnnounceRef.current) return
+		if (lastPublishedAutoApproveRef.current === null) return
+		const latest = readLatestSettingsRef.current?.() || settingsRef.current
+		const enabled = latest?.autoApproveTools === true
+		if (lastPublishedAutoApproveRef.current === enabled) return
+		publishAutoApprove(enabled)
+	}, [autoApproveSetting, isConnected, settingsLoaded, publishAutoApprove])
+
 	const value = {
 		// Context meter and compaction controls (issue #877).
 		contextCompaction,
@@ -2537,7 +2642,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		ensureSession,
 		addSystemEvent,
 		settings,
-		updateSettings,
+		updateSettings: updateSettingsAndPublish,
 		sendMessage,
 		sendApprovalResponse: sendMessage,
 		pendingElicitation,

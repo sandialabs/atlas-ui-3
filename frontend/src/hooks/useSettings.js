@@ -37,6 +37,45 @@ export function useSettings() {
     setIsLoaded(true)
   }, [])
 
+  // Follow writes from other tabs. The browser fires `storage` only in the
+  // tabs that did not write, so this is always someone else's newer choice:
+  // it replaces this tab's copy, including keys this tab changed earlier.
+  // Without it a second tab keeps a stale auto-approve value and announces
+  // it to the server when it reconnects.
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key !== 'chatui-settings' || event.newValue == null) return
+      let parsed
+      try {
+        parsed = JSON.parse(event.newValue)
+      } catch {
+        return
+      }
+      if (!parsed || typeof parsed !== 'object') return
+      const nextInMemory = { ...inMemoryRef.current }
+      for (const key of Object.keys(parsed)) delete nextInMemory[key]
+      inMemoryRef.current = nextInMemory
+      setSettings({ ...DEFAULT_SETTINGS, ...parsed, ...nextInMemory })
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  // The settings as they stand now: the persisted snapshot (which another
+  // tab may have just written) with this tab's unsaved values on top, the
+  // same merge `updateSettings` writes. Read this, not render state, when
+  // acting on a setting at a moment the tab may be stale.
+  const readLatestSettings = () => {
+    let latest = { ...DEFAULT_SETTINGS }
+    try {
+      const saved = localStorage.getItem('chatui-settings')
+      if (saved) latest = { ...DEFAULT_SETTINGS, ...JSON.parse(saved) }
+    } catch {
+      // Unreadable storage: fall back to the defaults plus this tab's values.
+    }
+    return { ...latest, ...inMemoryRef.current }
+  }
+
   // Function to update settings. Merge onto the latest persisted snapshot,
   // not just this hook's in-memory copy: the Settings panel keeps its own
   // draft and may have saved other fields in the same session, and a
@@ -58,6 +97,13 @@ export function useSettings() {
     setSettings(updatedSettings)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))
+      // Persisted now: stop overlaying these keys, so a later write from
+      // another tab is what `readLatestSettings` reports even before this
+      // tab has processed its `storage` event. Only values whose write
+      // failed stay in memory.
+      const remaining = { ...inMemoryRef.current }
+      for (const key of Object.keys(newSettings || {})) delete remaining[key]
+      inMemoryRef.current = remaining
     } catch (error) {
       console.error('Failed to save settings to localStorage:', error)
     }
@@ -70,6 +116,7 @@ export function useSettings() {
     setSettings(DEFAULT_SETTINGS)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(DEFAULT_SETTINGS))
+      inMemoryRef.current = {}
     } catch (error) {
       console.error('Failed to save default settings to localStorage:', error)
     }
@@ -85,6 +132,7 @@ export function useSettings() {
     settings,
     isLoaded,
     updateSettings,
+    readLatestSettings,
     resetSettings,
     getSetting
   }

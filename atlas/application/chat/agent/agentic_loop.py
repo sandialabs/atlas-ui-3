@@ -345,6 +345,7 @@ class AgenticLoop(AgentLoopProtocol):
                     # Off-the-server turns: atlas_launch refuses to start a
                     # sub-conversation that would persist one (#925).
                     "incognito": context.incognito,
+                    "auto_approve_tools": context.auto_approve_tools is True,
                     # Required so MCP tool calls reuse a persistent session via
                     # MCPSessionManager. Without it, call_tool() falls back to a
                     # single-use session per call and stateful MCP servers raise
