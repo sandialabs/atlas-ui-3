@@ -280,3 +280,113 @@ async def test_retry_records_usage_for_both_provider_attempts(monkeypatch, with_
     assert "recovered" in result
     assert len(attempts) == 2
     assert (sink.prompt_tokens, sink.completion_tokens, sink.calls) == (30, 3, 2)
+
+
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.asyncio
+async def test_opted_in_stream_without_usage_logs_diagnostic(monkeypatch, caplog, with_tools):
+    """An endpoint ignoring stream_options must not look like a working flag."""
+    from atlas.modules.llm import litellm_streaming
+
+    cfg = LLMConfig.model_validate({"models": {"test": {
+        "model_name": "openai/test-model",
+        "model_url": "http://127.0.0.1:1/v1",
+        "api_key": "synthetic-only",
+        "request_stream_usage": True,
+    }}})
+    caller = LiteLLMCaller(llm_config=cfg)
+
+    async def completion(**_kwargs):
+        async def chunks():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content="ok", tool_calls=None),
+                    finish_reason="stop",
+                )],
+                usage=None,
+            )
+        return chunks()
+
+    monkeypatch.setattr(litellm_streaming, "acompletion", completion)
+    with caplog.at_level("WARNING", logger=litellm_streaming.__name__):
+        with usage_scope() as sink:
+            if with_tools:
+                tools = [{"type": "function", "function": {
+                    "name": "noop", "parameters": {"type": "object"},
+                }}]
+                result = [x async for x in caller.stream_with_tools("test", [], tools)]
+            else:
+                result = [x async for x in caller.stream_plain("test", [])]
+    assert "ok" in result
+    assert sink.calls == 0
+    assert "request_stream_usage is enabled for model test" in caplog.text
+
+
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.asyncio
+async def test_provider_rejecting_stream_options_is_actionable(monkeypatch, with_tools, caplog):
+    """User should be told to disable the specific unsupported flag."""
+    from atlas.domain.errors import LLMBadRequestError
+    from atlas.modules.llm import litellm_streaming
+
+    cfg = LLMConfig.model_validate({"models": {"test": {
+        "model_name": "openai/test-model",
+        "model_url": "http://127.0.0.1:1/v1",
+        "api_key": "synthetic-only",
+        "request_stream_usage": True,
+    }}})
+    caller = LiteLLMCaller(llm_config=cfg)
+
+    async def completion(**_kwargs):
+        raise ValueError("unknown parameter: stream_options.include_usage")
+
+    monkeypatch.setattr(litellm_streaming, "acompletion", completion)
+    with caplog.at_level("WARNING", logger=litellm_streaming.__name__):
+        if with_tools:
+            tools = [{"type": "function", "function": {
+                "name": "noop", "parameters": {"type": "object"},
+            }}]
+            stream = caller.stream_with_tools("test", [], tools)
+        else:
+            stream = caller.stream_plain("test", [])
+        with pytest.raises(LLMBadRequestError, match="Disable request_stream_usage"):
+            [x async for x in stream]
+    assert "Provider rejected request_stream_usage" in caplog.text
+
+
+@pytest.mark.parametrize("via_tools", [False, True])
+@pytest.mark.asyncio
+async def test_delegated_stream_closure_records_usage(monkeypatch, via_tools):
+    """Closing RAG/no-tools wrappers must close their inner plain stream."""
+    from atlas.modules.llm import litellm_streaming
+
+    cfg = LLMConfig.model_validate({"models": {"test": {
+        "model_name": "openai/test-model",
+        "model_url": "http://127.0.0.1:1/v1",
+        "api_key": "synthetic-only",
+    }}})
+    caller = LiteLLMCaller(llm_config=cfg)
+
+    async def completion(**_kwargs):
+        async def chunks():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content="hello", tool_calls=None),
+                    finish_reason="stop",
+                )],
+                usage={"prompt_tokens": 23, "completion_tokens": 5},
+            )
+            yield SimpleNamespace(choices=[], usage=None)
+        return chunks()
+
+    monkeypatch.setattr(litellm_streaming, "acompletion", completion)
+    messages = [{"role": "user", "content": "test"}]
+    if via_tools:
+        stream = caller.stream_with_tools("test", messages, [])
+    else:
+        stream = caller.stream_with_rag("test", messages, [], "synthetic@example.invalid")
+
+    with usage_scope() as sink:
+        assert await anext(stream) == "hello"
+        await stream.aclose()
+        assert (sink.prompt_tokens, sink.completion_tokens, sink.calls) == (23, 5, 1)

@@ -7,6 +7,7 @@ LLM responses token-by-token.
 
 import asyncio
 import logging
+from contextlib import aclosing
 from typing import AsyncGenerator
 
 from atlas.domain.errors import (
@@ -57,18 +58,19 @@ async def stream_and_accumulate(
 
     try:
         token_count = 0
-        async for token in token_generator:
-            token_count += 1
-            if token_count <= 2:
-                logger.debug(
-                    "%s stream token #%d: %r (len=%d)",
-                    context_label, token_count, token[:50] if token else "", len(token) if token else 0,
+        async with aclosing(token_generator):
+            async for token in token_generator:
+                token_count += 1
+                if token_count <= 2:
+                    logger.debug(
+                        "%s stream token #%d: %r (len=%d)",
+                        context_label, token_count, token[:50] if token else "", len(token) if token else 0,
+                    )
+                await event_publisher.publish_token_stream(
+                    token=token, is_first=is_first, is_last=False,
                 )
-            await event_publisher.publish_token_stream(
-                token=token, is_first=is_first, is_last=False,
-            )
-            accumulated += token
-            is_first = False
+                accumulated += token
+                is_first = False
 
         if not accumulated and fallback_fn:
             logger.info(
