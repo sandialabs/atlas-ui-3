@@ -4,12 +4,11 @@ Last updated: 2026-11-06
 
 The source of the historical aesthetics is **NovusGFX Retro Design System**
 (<https://github.com/NovusGFX/retro-design-system>, MIT, reviewed at commit
-`8988f50`). Atlas vendors only four token sets initially:
+`8988f50`). Atlas vendors three token sets initially:
 
 - `01-mac-system-7` → `mac7`
 - `02-windows-95` → `win95`
 - `09-crt-phosphor` → `crt-phosphor`
-- `30-bbs-ansi` → `bbs-ansi`
 
 These are **not** invented substitutes: `src/themes/vendor/retro-design-system/tokens.css`
 contains the upstream design tokens with only `:root` selectors replaced by
@@ -49,13 +48,18 @@ The collapsed **Try live retro controls** section in Settings → General
 instantiates these components as an interactive workbench. It echoes an
 80-character maximum sample label as ordinary React text; it neither executes
 commands nor sends data to an API. Border treatments and control surfaces
-use only the registered Retro Design System token adapters. It is an
-integration example for future feature components, not the full BBS runtime.
+use only the registered Retro Design System token adapters. It is an integration example for future feature components.
+
+The same `RetroWindow` and `RetroButton` now power the real General
+Settings appearance toggle. The gallery uses `RetroInput` for its real,
+client-side theme filter. These preserve their labels, existing settings
+callbacks, and modal close guards. This is an incremental migration,
+not a replacement of workflow logic.
 
 The legacy Light/Dark quick toggle switches the **base light/dark mode**,
 even if a non-default registered theme is active; the gallery controls exact
-theme identity. This avoids a CRT/BBS theme reporting it is already in
-light mode when it is actually dark.
+theme identity. This avoids a dark phosphor preset incorrectly reporting
+that it is already light.
 
 The root element exposes:
 - `data-theme="dark|light"` for existing selectors
@@ -66,15 +70,14 @@ New UI chrome should prefer the semantic `--atlas-font-ui`,
 and `--atlas-radius` properties; existing Tailwind grays remain a
 compatibility bridge during incremental migration.
 
-## Art canon and accessibility
+## Asset rights and accessibility
 
-The CSS theme is **not** a license to redistribute historic BBS art.
-ANSI/CP437 artifacts require separate manifests preserving creator,
-artpack, provenance, rights, and the interaction mapping. This first
-integration includes no historical art, proprietary fonts or OS icons.
-The BBS museum's provenance model remains applicable to a future artifact
-renderer. All text must remain accessible DOM content, and classification
-labels must remain recognizable in every theme.
+This PR contains only styles for classic desktop and phosphor-terminal
+interfaces. It contains no historic artwork, proprietary fonts, icons, or
+terminal-art rendering pipeline. Asset collections are a separate project;
+redistribution would require independent provenance and rights review.
+All text must remain accessible DOM content, and classification labels must
+remain recognizable in every theme.
 
 Theme previews are decorative; native HTML radio controls provide keyboard
 and screen-reader selection. CRT animation and scanline effects have been

@@ -130,7 +130,11 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     renderPanel({ initialTab: 'general' })
 
     const windows = screen.getByRole('radio', { name: 'Windows 95' })
-    const bbs = screen.getByRole('radio', { name: 'BBS ANSI Art' })
+    const crt = screen.getByRole('radio', { name: 'CRT Phosphor' })
+    const appearance = screen.getByRole('region', { name: 'Appearance' })
+    expect(appearance.querySelector('.atlas-retro-window-titlebar')).toBeInTheDocument()
+    expect(appearance.querySelector('.atlas-retro-button')).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: 'BBS ANSI Art' })).not.toBeInTheDocument()
     expect(windows).not.toBeChecked()
 
     fireEvent.click(windows)
@@ -139,14 +143,24 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'win95')
     expect(localStorage.getItem('atlas-theme')).toBe('win95')
 
-    fireEvent.click(bbs)
-    expect(bbs).toBeChecked()
+    fireEvent.click(crt)
+    expect(crt).toBeChecked()
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
-    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'bbs-ansi')
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'crt-phosphor')
     expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light mode' }))
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'light')
     expect(screen.getByText('Currently using Light theme.')).toBeInTheDocument()
+
+    // The live filter is part of the real General settings panel, not a mock.
+    const themeFilter = screen.getByRole('searchbox', { name: 'Find a theme' })
+    fireEvent.change(themeFilter, { target: { value: 'Mac' } })
+    expect(screen.getAllByRole('radio')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('radio', { name: 'Mac System 7' }))
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear theme filter' }))
+    expect(screen.getAllByRole('radio')).toHaveLength(5)
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
   })
 
   it('passes a prompt intent through to the prompt manager', () => {

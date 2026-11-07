@@ -47,7 +47,7 @@ describe('Retro Design System attribution and CSS isolation', () => {
       )
       expect(adapter).toContain(`[data-atlas-theme="${entry.id}"]`)
     }
-    expect(tokenStylesheet).toContain('--cyan-hi: #55ffff;')
+    expect(tokenStylesheet).toContain('--ink: #33ff33;')
     expect(tokenStylesheet).toContain('--title: #000080;')
     expect(tokenStylesheet).toContain('--font-sys: "Chicago"')
   })

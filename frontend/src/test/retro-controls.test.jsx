@@ -67,9 +67,9 @@ describe('Retro Design System semantic components', () => {
     )
     expect(screen.getByRole('status')).toHaveTextContent('Ready')
     const input = screen.getByRole('textbox', { name: 'Sample label' })
-    fireEvent.change(input, { target: { value: 'HELLO BBS' } })
+    fireEvent.change(input, { target: { value: 'HELLO ATLAS' } })
     fireEvent.click(screen.getByRole('button', { name: 'Preview label' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Preview: HELLO BBS')
+    expect(screen.getByRole('status')).toHaveTextContent('Preview: HELLO ATLAS')
 
     fireEvent.click(screen.getByRole('button', { name: 'Select Windows 95' }))
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'win95')

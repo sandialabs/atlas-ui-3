@@ -15,6 +15,7 @@ import { describeAutoApprove } from '../utils/toolApproval'
 import { FOCUS_RING } from '../utils/focusRing'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
 import ThemePicker from '../themes/ThemePicker'
+import { RetroButton, RetroWindow } from '../themes/RetroControls'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -555,24 +556,21 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6"
         >
           {/* Appearance -- moved off the top bar in issue #836 */}
-          <div className="bg-gray-700 rounded-lg p-4 atlas-theme-chrome">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-50 font-medium">Appearance</label>
-              <button
-                onClick={toggleTheme}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
-                title={reduceHelpText ? undefined : (darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode')}
-              >
-                {darkBaseTheme ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                {darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode'}
-              </button>
-            </div>
+          <RetroWindow title="Appearance">
+            <RetroButton
+              onClick={toggleTheme}
+              className="inline-flex items-center gap-2 text-sm"
+              title={reduceHelpText ? undefined : (darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode')}
+            >
+              {darkBaseTheme ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode'}
+            </RetroButton>
             {!reduceHelpText && (
-              <p className="text-sm text-gray-400">
+              <p className="mt-2 text-sm">
                 Currently using {themeDefinition.name} theme.
               </p>
             )}
-          </div>
+          </RetroWindow>
 
           <ThemePicker />
 

@@ -1,16 +1,40 @@
+import { useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import { THEME_REGISTRY } from './themeRegistry'
-import { RetroWorkbench } from './RetroControls'
+import { RetroWorkbench, RetroInput, RetroButton } from './RetroControls'
 
 /** Native radio controls preserve arrow-key navigation and screen-reader state. */
 export default function ThemePicker() {
   const { theme, setTheme } = useTheme()
+  const [filter, setFilter] = useState('')
+  const query = filter.trim().toLowerCase()
+  const visibleThemes = query
+    ? THEME_REGISTRY.filter(entry =>
+      [entry.name, entry.era, entry.description].join(' ').toLowerCase().includes(query))
+    : THEME_REGISTRY
 
   return (
     <fieldset className="space-y-3" aria-label="Registered interface themes">
       <legend className="text-sm font-medium text-gray-100">Theme gallery</legend>
+      <div className="atlas-theme-filter flex flex-wrap items-end gap-2">
+        <RetroInput
+          label="Find a theme"
+          type="search"
+          maxLength={80}
+          value={filter}
+          onChange={event => setFilter(event.target.value)}
+          placeholder="Filter by name or era"
+          autoComplete="off"
+        />
+        {filter && (
+          <RetroButton onClick={() => setFilter('')}>Clear theme filter</RetroButton>
+        )}
+      </div>
+      <p className="text-xs text-gray-400" aria-live="polite">
+        Showing {visibleThemes.length} of {THEME_REGISTRY.length} themes
+      </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Interface theme">
-        {THEME_REGISTRY.map(entry => (
+        {visibleThemes.map(entry => (
           <label
             key={entry.id}
             className="atlas-theme-option atlas-theme-chrome flex cursor-pointer items-center gap-3 rounded-lg border border-gray-600 bg-gray-800 p-3 text-gray-100"
@@ -46,6 +70,11 @@ export default function ThemePicker() {
             </span>
           </label>
         ))}
+        {visibleThemes.length === 0 && (
+          <p className="text-sm text-gray-300">
+            No matching themes. Clear the filter to see all available styles.
+          </p>
+        )}
       </div>
       <p className="text-xs text-gray-400">
         Retro palettes from{' '}

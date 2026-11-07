@@ -24,12 +24,6 @@ export const THEME_REGISTRY = Object.freeze([
     preview: Object.freeze({ background: '#001a00', surface: '#003300', foreground: '#aaffaa', accent: '#33ff33' }),
   }),
   Object.freeze({
-    id: 'bbs-ansi', name: 'BBS ANSI Art', era: 'Retro Design System · 30',
-    description: '16-color ANSI bulletin board', mode: 'dark',
-    reference: '30-bbs-ansi',
-    preview: Object.freeze({ background: '#000000', surface: '#0000aa', foreground: '#ffffff', accent: '#55ffff' }),
-  }),
-  Object.freeze({
     id: 'win95', name: 'Windows 95', era: 'Retro Design System · 02',
     description: 'Silver bevels and navy title bars', mode: 'light',
     reference: '02-windows-95',

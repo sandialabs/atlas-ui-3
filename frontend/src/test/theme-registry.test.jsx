@@ -28,9 +28,10 @@ describe('build-time theme registry', () => {
   it('does not accept unknown themes or remote CSS identifiers', () => {
     expect(resolveThemeId('https://remote.invalid/theme.css')).toBe(DEFAULT_THEME_ID)
     expect(resolveThemeId('removed-preset')).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemeId('bbs-ansi')).toBe(DEFAULT_THEME_ID)
     expect(new Set(THEME_REGISTRY.map(t => t.id)).size).toBe(THEME_REGISTRY.length)
     expect(THEME_REGISTRY.filter(t => t.reference).map(t => t.reference)).toEqual([
-      '09-crt-phosphor', '30-bbs-ansi', '02-windows-95', '01-mac-system-7',
+      '09-crt-phosphor', '02-windows-95', '01-mac-system-7',
     ])
     expect(THEME_REGISTRY.every(t => ['dark', 'light'].includes(t.mode))).toBe(true)
   })
@@ -39,7 +40,6 @@ describe('build-time theme registry', () => {
     ['dark', 'dark'],
     ['light', 'light'],
     ['crt-phosphor', 'dark'],
-    ['bbs-ansi', 'dark'],
     ['win95', 'light'],
     ['mac7', 'light'],
   ])('restores %s with backwards-compatible %s base selectors', (id, mode) => {
@@ -87,6 +87,29 @@ describe('build-time theme registry', () => {
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle classic light/dark' }))
+    expect(screen.getByTestId('selected-theme')).toHaveTextContent('dark')
+  })
+
+  it('filters the real theme registry by name, era, and description without changing the active theme', () => {
+    render(
+      <ThemeProvider>
+        <Probe />
+        <ThemePicker />
+      </ThemeProvider>
+    )
+    const search = screen.getByRole('searchbox', { name: 'Find a theme' })
+    expect(search).toHaveAttribute('maxlength', '80')
+    fireEvent.change(search, { target: { value: 'Windows' } })
+    expect(screen.getAllByRole('radio')).toHaveLength(1)
+    expect(screen.getByRole('radio', { name: 'Windows 95' })).toBeInTheDocument()
+    expect(screen.getByText('Showing 1 of 5 themes')).toBeInTheDocument()
+    expect(screen.getByTestId('selected-theme')).toHaveTextContent('dark')
+    fireEvent.change(search, { target: { value: 'no-such-desktop' } })
+    expect(screen.queryAllByRole('radio')).toHaveLength(0)
+    expect(screen.getByText(/No matching themes/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear theme filter' }))
+    expect(search).toHaveValue('')
+    expect(screen.getAllByRole('radio')).toHaveLength(5)
     expect(screen.getByTestId('selected-theme')).toHaveTextContent('dark')
   })
 
