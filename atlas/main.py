@@ -683,6 +683,30 @@ async def _release_finished_run(
         logger.debug("Error releasing MCP sessions for run %s: %s", run_id, e)
 
 
+async def _cancel_superseded_untracked_turn(active_chat_task: dict) -> bool:
+    """Cancel the untracked turn this connection is still running, and wait.
+
+    ``active_chat_task`` holds at most one task per connection: an untracked
+    chat turn or a compaction. Tracked runs live in the registry, not here,
+    so a background run in another conversation is never touched. A chat
+    frame for a different conversation used to overwrite the slot and leave
+    the old turn executing with nothing pointing at it: Stop reached only the
+    new task, and with the server-side switch on, the orphan kept executing
+    user-level tools on its own. Cancel it, and wait for it to unwind so its
+    session hold is released before the new turn opens one.
+
+    Returns True when a running turn was cancelled.
+    """
+    previous = active_chat_task.get("task")
+    if previous is None or previous.done() or active_chat_task.get("kind") != "chat":
+        return False
+    previous.cancel()
+    # ``wait`` reports completion without re-raising the task's own
+    # CancelledError into this coroutine.
+    await asyncio.wait([previous])
+    return True
+
+
 def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
     """Cancel the run a stop frame names, if it names one.
 
@@ -2701,6 +2725,15 @@ async def websocket_endpoint(websocket: WebSocket):
                                 pass
 
                 if run_record is None:
+                    # A turn for another conversation supersedes the untracked
+                    # turn still running on this connection. Cancel it first;
+                    # otherwise it runs on unreachable by Stop, and with the
+                    # switch on it keeps approving its own tool calls.
+                    if await _cancel_superseded_untracked_turn(active_chat_task):
+                        logger.info(
+                            "Cancelled the previous untracked turn on this "
+                            "connection before starting a new one"
+                        )
                     # Open the live switch entry before the task exists. The
                     # service only reaches the tool loop after several awaits;
                     # an off-toggle received in that window must update this

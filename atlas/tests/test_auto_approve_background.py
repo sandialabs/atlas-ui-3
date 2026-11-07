@@ -565,3 +565,48 @@ async def test_run_without_a_record_is_not_auto_approved(
     assert result.error == "Approval timeout"
     request = next(f for f in frames if f.get("type") == "tool_approval_request")
     assert request["auto_approvable"] is False
+
+
+# ---------------------------------------------------------------------------
+# A chat frame for another conversation must not orphan the untracked turn
+# still running on the connection (review of #1171).
+# ---------------------------------------------------------------------------
+
+
+async def _sleep_forever():
+    await asyncio.sleep(3600)
+
+
+@pytest.mark.asyncio
+async def test_superseded_untracked_turn_is_cancelled_and_awaited():
+    from atlas.main import _cancel_superseded_untracked_turn
+
+    previous = asyncio.create_task(_sleep_forever())
+    await asyncio.sleep(0)
+    slot = {"task": previous, "kind": "chat", "steering": None, "conversation_id": "c1"}
+
+    assert await _cancel_superseded_untracked_turn(slot) is True
+    assert previous.done()
+    assert previous.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone():
+    from atlas.main import _cancel_superseded_untracked_turn
+
+    # Nothing running on the connection: a tracked run lives in the registry,
+    # not in this slot, so an empty slot is the background-run case.
+    assert await _cancel_superseded_untracked_turn({"task": None, "kind": None}) is False
+
+    finished = asyncio.create_task(asyncio.sleep(0))
+    await finished
+    assert await _cancel_superseded_untracked_turn({"task": finished, "kind": "chat"}) is False
+
+    compacting = asyncio.create_task(_sleep_forever())
+    await asyncio.sleep(0)
+    try:
+        assert await _cancel_superseded_untracked_turn({"task": compacting, "kind": "compact"}) is False
+        assert not compacting.done()
+    finally:
+        compacting.cancel()
+        await asyncio.wait([compacting])

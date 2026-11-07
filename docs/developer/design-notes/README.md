@@ -1,6 +1,6 @@
 # Design Notes
 
-Last updated: 2026-10-20
+Last updated: 2026-11-07
 
 Point-in-time records of how and why specific features were built. Each is
 dated and reflects the system as of that date — useful background for
@@ -43,3 +43,4 @@ docs that describe how the system works today, see the
 - [RAG Sources Drawer as an Overlay](rag-drawer-overlay-2026-10-08.md) - The Data Sources drawer overlays the chat at every width instead of reflowing it (issue #1037)
 - [Parent-Child Conversations in the Sidebar](conversation-tree-sidebar-2026-10-17.md) - Launched sub-conversations nest under their parent, durably and with owner-scoped links (issue #1081)
 - [Empty Checkpoint Recovery](empty-checkpoint-recovery-2026-11-01.md) - Diagnostics, reasoning-aware output budget and one bounded retry for blank summarizer replies (issue #1138)
+- [Server-side Auto-approve for Background Runs](server-side-auto-approve-2026-11-07.md) - The auto-approve switch is captured on the run and answered by the tool gate, so opted-in runs keep executing after the browser closes (PR #1171)
