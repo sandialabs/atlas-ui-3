@@ -635,8 +635,13 @@ async def test_canvas_calls_are_not_projected(store, monkeypatch):
         update_callback=update_callback,
         config_manager=_config(),
     )
+    # No projection row. The frames still carry invocation identity so a
+    # reused provider id does not merge two canvas documents (issue #1157).
     assert await store.get(CONV, EMAIL) is None
-    assert all("invocation_id" not in frame for frame in frames)
+    stamped = [frame for frame in frames if frame.get("type") in ("tool_start", "canvas_content", "tool_complete")]
+    assert stamped
+    assert {frame.get("invocation_id") for frame in stamped} == {invocation_id(RUN, 0, "call_canvas")}
+    assert all(frame.get("type") != "invocation" for frame in frames)
 
 
 @pytest.mark.asyncio

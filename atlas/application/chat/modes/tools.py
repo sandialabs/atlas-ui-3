@@ -1,6 +1,7 @@
 """Tools mode runner - handles LLM calls with tool execution."""
 
 import logging
+from contextlib import aclosing
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.domain.chat.citation_register import (
@@ -137,15 +138,16 @@ class ToolsModeRunner:
                 temperature=temperature, user_email=user_email,
             )
 
-            async for item in stream:
-                if isinstance(item, str):
-                    await self.event_publisher.publish_token_stream(
-                        token=item, is_first=is_first, is_last=False,
-                    )
-                    accumulated_content += item
-                    is_first = False
-                elif isinstance(item, LLMResponse):
-                    final_llm_response = item
+            async with aclosing(stream):
+                async for item in stream:
+                    if isinstance(item, str):
+                        await self.event_publisher.publish_token_stream(
+                            token=item, is_first=is_first, is_last=False,
+                        )
+                        accumulated_content += item
+                        is_first = False
+                    elif isinstance(item, LLMResponse):
+                        final_llm_response = item
         except Exception as exc:
             if not isinstance(exc, LLMBudgetExceededError):
                 logger.error("Streaming tools error: %s", exc)
@@ -730,15 +732,16 @@ class ToolsModeRunner:
                 model, messages, tools_schema, "auto",
                 temperature=temperature, user_email=user_email,
             )
-            async for item in stream:
-                if isinstance(item, str):
-                    await self.event_publisher.publish_token_stream(
-                        token=item, is_first=is_first, is_last=False,
-                    )
-                    accumulated += item
-                    is_first = False
-                elif isinstance(item, LLMResponse):
-                    response = item
+            async with aclosing(stream):
+                async for item in stream:
+                    if isinstance(item, str):
+                        await self.event_publisher.publish_token_stream(
+                            token=item, is_first=is_first, is_last=False,
+                        )
+                        accumulated += item
+                        is_first = False
+                    elif isinstance(item, LLMResponse):
+                        response = item
         except Exception as exc:
             if not isinstance(exc, LLMBudgetExceededError):
                 logger.error("Streaming tools continuation error: %s", exc)

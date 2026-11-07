@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import aclosing
 from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
@@ -544,15 +545,16 @@ class AgenticLoop(AgentLoopProtocol):
         is_first = True
 
         try:
-            async for item in stream:
-                if isinstance(item, str):
-                    await event_publisher.publish_token_stream(
-                        token=item, is_first=is_first, is_last=False,
-                    )
-                    accumulated_content += item
-                    is_first = False
-                elif isinstance(item, LLMResponse):
-                    final_response = item
+            async with aclosing(stream):
+                async for item in stream:
+                    if isinstance(item, str):
+                        await event_publisher.publish_token_stream(
+                            token=item, is_first=is_first, is_last=False,
+                        )
+                        accumulated_content += item
+                        is_first = False
+                    elif isinstance(item, LLMResponse):
+                        final_response = item
         except LLMMalformedToolCallError:
             # The model announced tool calls that could not be run, and none
             # survived the JSON check. Treating the narration as a finished
