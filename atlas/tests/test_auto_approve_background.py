@@ -600,7 +600,8 @@ async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone():
     assert cancelled_empty is False
 
     finished = asyncio.create_task(asyncio.sleep(0))
-    await finished
+    await asyncio.wait([finished])
+    assert finished.done()
     cancelled_finished = await _cancel_superseded_untracked_turn({"task": finished, "kind": "chat"})
     assert cancelled_finished is False
 
