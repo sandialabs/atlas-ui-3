@@ -19,6 +19,10 @@ CONV = "conv-local"
 
 @pytest.fixture
 async def local():
+    # Requested after ``cluster``: let replica A's inbox reader take its first
+    # turn, because the shared fixture's teardown cannot stop a reader that
+    # never started (it hangs on Python 3.11).
+    await asyncio.sleep(0.05)
     registry = RunRegistry()
     yield registry
     tasks = [r.task for r in registry.all_records() if r.task is not None]
@@ -34,10 +38,6 @@ def _local_run(local, conversation_id=CONV, user_email=OWNER):
 
 
 async def _unreadable(cluster):
-    # Let replica A's inbox reader take its first turn: the shared fixture's
-    # teardown cannot stop a reader that never started (hangs on Python 3.11).
-    await asyncio.sleep(0.05)
-
     async def fail(*_a, **_k):
         raise TimeoutError("redis timed out")
 
