@@ -579,36 +579,36 @@ async def _sleep_forever():
 
 @pytest.mark.asyncio
 async def test_superseded_untracked_turn_is_cancelled_and_awaited():
-    from atlas.main import _cancel_superseded_untracked_turn
+    import atlas.main as main_module
 
     previous = asyncio.create_task(_sleep_forever())
     await asyncio.sleep(0)
     slot = {"task": previous, "kind": "chat", "steering": None, "conversation_id": "c1"}
 
-    assert await _cancel_superseded_untracked_turn(slot) is True
+    assert await main_module._cancel_superseded_untracked_turn(slot) is True
     assert previous.done()
     assert previous.cancelled()
 
 
 @pytest.mark.asyncio
 async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone():
-    from atlas.main import _cancel_superseded_untracked_turn
+    import atlas.main as main_module
 
     # Nothing running on the connection: a tracked run lives in the registry,
     # not in this slot, so an empty slot is the background-run case.
-    cancelled_empty = await _cancel_superseded_untracked_turn({"task": None, "kind": None})
+    cancelled_empty = await main_module._cancel_superseded_untracked_turn({"task": None, "kind": None})
     assert cancelled_empty is False
 
     finished = asyncio.create_task(asyncio.sleep(0))
     await asyncio.wait([finished])
     assert finished.done()
-    cancelled_finished = await _cancel_superseded_untracked_turn({"task": finished, "kind": "chat"})
+    cancelled_finished = await main_module._cancel_superseded_untracked_turn({"task": finished, "kind": "chat"})
     assert cancelled_finished is False
 
     compacting = asyncio.create_task(_sleep_forever())
     await asyncio.sleep(0)
     try:
-        cancelled_compact = await _cancel_superseded_untracked_turn({"task": compacting, "kind": "compact"})
+        cancelled_compact = await main_module._cancel_superseded_untracked_turn({"task": compacting, "kind": "compact"})
         assert cancelled_compact is False
         assert not compacting.done()
     finally:
