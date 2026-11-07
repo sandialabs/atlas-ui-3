@@ -35,10 +35,18 @@ Object.defineProperty(window, 'localStorage', {
 const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
 describe('useSettings', () => {
+  // A write-through store: the hook stops overlaying a value once its write
+  // succeeded, so a mock whose writes vanish would lose every earlier update.
+  // `clearAllMocks` keeps implementations, so a test that makes `setItem`
+  // throw must not leak into the next one either.
+  let store
   beforeEach(() => {
-    // Clear all mocks before each test
     vi.clearAllMocks()
-    localStorageMock.getItem.mockReturnValue(null)
+    store = {}
+    localStorageMock.getItem.mockImplementation((key) => store[key] ?? null)
+    localStorageMock.setItem.mockImplementation((key, value) => {
+      store[key] = value
+    })
   })
 
   afterEach(() => {
@@ -422,6 +430,33 @@ describe('useSettings', () => {
         window.dispatchEvent(storageEvent('chatui-settings', 'not json'))
       })
       expect(result.current.settings.autoApproveTools).toBe(true)
+    })
+
+    it('a persisted off-toggle wins over this tab\'s earlier on, before its storage event arrives', () => {
+      localStorageMock.getItem.mockReturnValue(JSON.stringify(DEFAULTS))
+      const { result } = renderHook(() => useSettings())
+      act(() => {
+        result.current.updateSettings({ autoApproveTools: true })
+      })
+      expect(result.current.settings.autoApproveTools).toBe(true)
+      // Another tab turned it off and wrote storage; this tab has not yet
+      // processed the storage event. The write above succeeded, so the
+      // persisted value, not this tab's in-memory copy, is the latest.
+      localStorageMock.getItem.mockReturnValue(JSON.stringify({ ...DEFAULTS, autoApproveTools: false }))
+      expect(result.current.readLatestSettings().autoApproveTools).toBe(false)
+    })
+
+    it('keeps a value in memory only while its write failed', () => {
+      localStorageMock.getItem.mockReturnValue(JSON.stringify(DEFAULTS))
+      const { result } = renderHook(() => useSettings())
+      localStorageMock.setItem.mockImplementationOnce(() => {
+        throw new Error('quota')
+      })
+      act(() => {
+        result.current.updateSettings({ autoApproveTools: true })
+      })
+      // Storage still holds the old value; the failed write stays on top.
+      expect(result.current.readLatestSettings().autoApproveTools).toBe(true)
     })
 
     it('readLatestSettings reads the persisted value, not render state', () => {

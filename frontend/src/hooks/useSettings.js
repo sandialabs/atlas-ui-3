@@ -97,6 +97,13 @@ export function useSettings() {
     setSettings(updatedSettings)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(updatedSettings))
+      // Persisted now: stop overlaying these keys, so a later write from
+      // another tab is what `readLatestSettings` reports even before this
+      // tab has processed its `storage` event. Only values whose write
+      // failed stay in memory.
+      const remaining = { ...inMemoryRef.current }
+      for (const key of Object.keys(newSettings || {})) delete remaining[key]
+      inMemoryRef.current = remaining
     } catch (error) {
       console.error('Failed to save settings to localStorage:', error)
     }
@@ -109,6 +116,7 @@ export function useSettings() {
     setSettings(DEFAULT_SETTINGS)
     try {
       localStorage.setItem('chatui-settings', JSON.stringify(DEFAULT_SETTINGS))
+      inMemoryRef.current = {}
     } catch (error) {
       console.error('Failed to save default settings to localStorage:', error)
     }

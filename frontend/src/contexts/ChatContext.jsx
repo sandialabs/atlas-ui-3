@@ -675,8 +675,11 @@ export const ChatProvider = ({ children }) => {
 					// parent turn was not a tracked run.
 					const frame = data.frame
 					const childRun = runs.getRun(frame.conversation_id)?.parent_run_id
+					// Latest persisted settings, not render state: another tab may
+					// have turned the switch off since this one last rendered.
+					const latestSettings = readLatestSettingsRef.current?.() || settingsRef.current
 					if (
-						clientMayAutoApprove(frame, settingsRef.current) &&
+						clientMayAutoApprove(frame, latestSettings) &&
 						!childRun &&
 						sendMessageRef.current
 					) {
