@@ -1,0 +1,97 @@
+# Staging Redis for live session state. Unreplicated and without persistence:
+# losing it costs only resumable session state (docs/admin/session-store.md),
+# and the outage drill in the runbook restarts it on purpose.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-redis
+  labels:
+    app.kubernetes.io/name: atlas-redis
+    app.kubernetes.io/component: session-store
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-redis
+        app.kubernetes.io/component: session-store
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's redis user. The OpenShift overlay removes these so the
+        # restricted SCC can assign the namespace's UID range instead.
+        runAsUser: 999
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: docker.io/library/redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+          args:
+            - redis-server
+            - --requirepass
+            - $(REDIS_PASSWORD)
+            - --appendonly
+            - "no"
+            - --save
+            - ""
+            # Budget: replicas x REDIS_MAX_CONNECTIONS (+ one surge replica).
+            - --maxclients
+            - "1000"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: REDIS_PASSWORD}
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: REDIS_PASSWORD}
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-redis
+  labels:
+    app.kubernetes.io/name: atlas-redis
+    app.kubernetes.io/component: session-store
+spec:
+  selector:
+    app.kubernetes.io/name: atlas-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

@@ -131,9 +131,13 @@ Atlas pool stays enabled, the psycopg driver can still auto-prepare
 statements: use PgBouncer 1.21 or later (`max_prepared_statements` set) or
 `session` mode.
 
-Run schema migrations once per deployment, before any replica starts (for
-example a Kubernetes Job or init step that runs `alembic upgrade head`), not
-from every replica. Atlas also runs `create_all` at startup, which creates only
+Run schema migrations once per deployment, before any replica serves, not
+by racing `create_all` from every replica. The container image ships
+`alembic.ini`, `alembic/` and the `alembic` CLI, and
+`python -m atlas.modules.chat_history.schema_migration` runs
+`alembic upgrade head` under a PostgreSQL advisory lock, so it is safe as an
+init container of every pod: one applies a pending migration, the rest wait
+and find nothing to do ([Kubernetes staging](kubernetes-staging.md)). Atlas also runs `create_all` at startup, which creates only
 missing tables, so after the migration it changes nothing. The reverse order
 breaks: on a database whose tables were first created by an Atlas startup,
 `alembic upgrade head` fails with `DuplicateTable`; run `alembic stamp head`

@@ -1,6 +1,6 @@
 # Administrator's Guide
 
-Last updated: 2026-10-29
+Last updated: 2026-11-04
 
 For administrators responsible for deploying, configuring, and managing Atlas UI 3.
 
@@ -31,6 +31,7 @@ For administrators responsible for deploying, configuring, and managing Atlas UI
 
 - [File Storage (S3)](file-storage.md) - Configuring S3-compatible object storage
 - [Session Store](session-store.md) - Process-local or shared Redis session repository, reconnect to any replica, outage behavior
+- [Multi-Replica Staging on Kubernetes/OpenShift](kubernetes-staging.md) - Three API replicas on shared Redis/PostgreSQL/S3: overlay, lock-serialized migrations, probes, validation and failover drills
 - [Troubleshooting File Access](troubleshooting-file-access.md) - Common file-access issues for MCP servers
 
 ## Operations

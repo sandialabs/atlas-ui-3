@@ -435,3 +435,7 @@ A PR that touches any of the following must run it and paste the pytest summary 
 - run admission, cancel, steering or tool-approval paths (`atlas/application/chat/service.py`, `approval_manager.py`, `elicitation_manager.py`, `atlas/routes/agent_run_routes.py`, the run handling in `atlas/main.py`)
 
 The run must end with no failures. Tests marked `xfail(strict=True)` describe #1128 acceptance criteria not met yet; a PR that meets one gets an XPASS, which fails the run, and removes that marker in the same PR (and lowers `EXPECTED_GAPS` in `test/pr-validation/test_pr1146_multireplica_harness.sh`). Infrastructure that fails to come up fails the run; it is never a skip.
+
+### Staging deployment (issue #1129)
+
+`deploy/kubernetes/` holds the Kubernetes/OpenShift staging overlay (three replicas, shared Redis/PostgreSQL/S3, no affinity or sticky sessions); runbook in `docs/admin/kubernetes-staging.md`. It is deployment validation, not a per-PR gate. `bash test/k8s_render_checks.sh` (CI) renders it offline; keep it passing when changing settings, probes or the image recipe. Schema migrations run from every pod's `migrate` init container under a PostgreSQL advisory lock (`atlas/modules/chat_history/schema_migration.py`); a new Alembic revision needs no deployment change.
