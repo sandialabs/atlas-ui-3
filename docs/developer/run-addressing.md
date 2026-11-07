@@ -37,7 +37,10 @@ exists yet.
 
 Expected outcomes are what the user observes. "No frame" means the client gets
 nothing back; "status" is a `run_status` frame; "unavailable" is an error frame
-with `error_type: run_control_unavailable` that keeps the client's running state.
+with `error_type: run_control_unavailable`. It keeps the client's running state only
+when it carries a `run_id` (a stop naming the run, or a steer routed to a known
+run). A conversation-only stop or a turn refused before any run was found has no
+run id, so the client ends the turn it started (rows `S15`, `S18`, `C04`).
 
 ## Collapsed cells
 
@@ -121,7 +124,7 @@ first (`cancel_api_run`), then `route_api_cancel`, then
 | `R05` REST cancel | run_id only | any | unknown everywhere | 404 | `route_api_cancel` None, then `_refused` | `atlas/tests/test_run_addressing_table.py` |
 | `R06` REST cancel | run_id only | any | unreadable, id unknown | 503, never 404 | `route_api_cancel` -> `owner_unavailable` | `atlas/tests/test_run_addressing_table.py` |
 | `R07` REST cancel | run_id only | finished API run | remote terminal, record expired | run and its children stopped on owner | GAP: same cause as `S09`; `_remote_entry` None, 404 (`agent_run_routes.py:430-432`) | `atlas/tests/test_run_addressing_table.py` |
-| `R08` REST cancel | run_id only | finished parent | remote terminal | children stopped | owner cascade | `test_stopping_a_finished_parent_stops_its_live_child_on_the_owner` |
+| `R08` REST cancel | run_id only | finished parent (API-started) | remote terminal | children stopped | owner cascade; the cited test drives the user-actor stop, the API-sourced REST case has no test yet | n/a: untested; see `test_stopping_a_finished_parent_stops_its_live_child_on_the_owner` for the cascade |
 | `R09` REST cancel | run_id only | API follow-up | named run local, follow-up remote | follow-up stopped on its owner | `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_held_here_stops_its_follow_up_elsewhere` |
 | `R10` REST cancel | run_id only | API follow-up | named run remote terminal, follow-up here | follow-up stopped | `route_api_cancel`, then `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere` |
 | `R11` REST cancel | run_id only | API follow-up | unreadable on the follow-up lookup | 503, not `cancelled: false` | `route_api_follow_up_cancel` returns the failure | n/a: untested; `test_api_cancel_reports_a_follow_up_it_could_not_stop` covers the owner timing out (504) |
@@ -143,7 +146,7 @@ connection's untracked turn (`should_steer`), then a new turn.
 | `C06` ws chat | conversation | API follow-up | remote live | steered like any tracked run | `route_steer` | `atlas/tests/test_run_addressing_table.py` |
 | `C07` ws chat | conversation | off-record turn | remote live | refused `off_record`, nothing written | off-record guard in `RedisRunControlBus.send` | `atlas/tests/test_run_addressing_table.py` |
 | `C08` ws chat | conversation | tracked | local, loop draining | message queued, `steering_queued` | `main.py:2177-2214` | `atlas/tests/test_run_addressing_table.py` |
-| `C09` ws chat | conversation | tracked | local, loop not draining | refused `conversation_busy` | `main.py:2215-2231` | `atlas/tests/test_run_addressing_table.py` |
+| `C09` ws chat | conversation | tracked | local, loop not draining | refused `conversation_busy`; unlike the routed refusal (`steer_frame`) the local frame carries no `steering: true` | `main.py:2215-2231` | `atlas/tests/test_run_addressing_table.py` |
 | `C10` ws chat | conversation | off-record turn | local | refused `off_record`, as the remote path does | GAP: the local branch (`main.py:2177-2214`) never reads `turn_is_off_record`, so incognito text is queued into a recorded run | `atlas/tests/test_run_addressing_table.py` |
 | `C11` ws chat | conversation | untracked turn | local | queued into the connection's loop when the conversation matches, else a new turn | `should_steer` (`agent/steering.py:84-110`) | `test_agent_steering_through_chat_service` |
 | `C12` ws chat | conversation | untracked turn | on another replica | busy refusal | GAP: the directory cannot see an untracked turn (`main.py:2237-2290`), so a second turn starts beside it | n/a: needs two real processes, none exists yet (step E retires the untracked turn) |

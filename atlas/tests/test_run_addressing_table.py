@@ -672,14 +672,20 @@ def test_every_tested_row_is_in_the_doc_and_every_doc_row_names_its_test():
             assert f"def {name}(" in corpus, f"{row_id}: {name} does not exist"
 
 
+UNTESTED_GAPS = {"C12"}  # needs two real processes; see the doc row
+
+
 def test_gap_rows_in_the_doc_are_exactly_the_strict_xfails():
     rows = _doc_rows()
-    doc_gaps = {i for i, cells in rows.items() if "GAP" in cells[5]}
+    for row_id, cells in rows.items():
+        assert len(cells) == 7, f"{row_id}: expected 7 columns, found {len(cells)}"
+    # A GAP label anywhere in the row counts, not only in the code-path column.
+    doc_gaps = {i for i, cells in rows.items() if any("GAP" in c for c in cells)}
     marked = set()
     for name, obj in globals().items():
         match = re.match(r"test_([A-Z]\d+)_", name)
         if match and any(m.name == "xfail" and m.kwargs.get("strict") is True
                          for m in getattr(obj, "pytestmark", [])):
             marked.add(match.group(1))
-    untested_gaps = {i for i in doc_gaps if THIS_FILE not in rows[i][-1]}
-    assert doc_gaps - untested_gaps == marked
+    assert doc_gaps - UNTESTED_GAPS == marked
+    assert UNTESTED_GAPS <= doc_gaps
