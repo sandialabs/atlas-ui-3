@@ -10,9 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from main import _stop_remote_run, app
+from main import app
 
 from atlas.application.chat.runs import reset_run_registry
+from atlas.application.chat.runs.commands import stop_addressed_run
 from atlas.application.chat.runs.control_bus import set_run_control_bus
 
 USER = "owner@example.com"
@@ -142,6 +143,7 @@ class _Registry:
 
     def __init__(self, follow_up=True):
         self.follow_up = MagicMock(run_id="follow-up") if follow_up else None
+        self.cancelled = []
 
     def get_for_user(self, run_id, user_email):
         return self.follow_up if run_id == "follow-up" else None
@@ -149,43 +151,109 @@ class _Registry:
     def active_for_conversation(self, conversation_id, user_email):
         return self.follow_up if conversation_id == CONV else None
 
+    def cancel(self, run_id, user_email):
+        self.cancelled.append(run_id)
+        return True
 
-async def _stop(registry, data, answers):
-    calls = []
 
-    async def fake_route_stop(user_email, run_id, conversation_id):
-        calls.append((run_id, conversation_id))
-        return answers.get((run_id, conversation_id))
+class _StopBus:
+    """A directory with canned entries; records the stops it is asked to send."""
 
-    ws = MagicMock()
-    ws.send_json = AsyncMock()
-    with patch("atlas.application.chat.runs.run_control.route_stop", fake_route_stop):
-        handled = await _stop_remote_run(ws, registry, USER, data)
-    return handled, calls, ws
+    replica_id = "replica-b"
+
+    def __init__(self, by_run=None, by_conversation=None, answer=None):
+        self.by_run = by_run or {}
+        self.by_conversation = by_conversation
+        self.answer = answer
+        self.lookups = []
+        self.sent = []
+
+    async def owner_of(self, run_id, *, include_terminal=False):
+        self.lookups.append(("run", run_id))
+        return self.by_run.get(run_id)
+
+    async def run_for_conversation(self, conversation_id):
+        self.lookups.append(("conversation", conversation_id))
+        return self.by_conversation
+
+    async def send(self, owner_replica, command, run_id, actor, args=None, **kwargs):
+        self.sent.append((owner_replica, command, run_id))
+        return self.answer
+
+
+def _entry(run_id):
+    return {"run_id": run_id, "conversation_id": CONV, "replica": "replica-a",
+            "generation": 1, "user_email": USER}
+
+
+async def _stop(registry, data, bus):
+    set_run_control_bus(bus)
+    try:
+        ws = MagicMock()
+        ws.send_json = AsyncMock()
+        await stop_addressed_run(ws, registry, USER, data)
+    finally:
+        set_run_control_bus(None)
+    return ws
 
 
 async def test_stop_naming_a_remote_parent_reaches_it_before_the_local_follow_up():
-    ok = {"ok": True, "code": "ok", "message": "", "payload": {"run": {"run_id": "parent"}}, "run_id": "parent"}
-    handled, calls, ws = await _stop(_Registry(), {"run_id": "parent", "conversation_id": CONV},
-                                     {("parent", None): ok})
-    assert handled is True and calls == [("parent", None)]
+    ok = {"ok": True, "code": "ok", "message": "", "payload": {"run": {"run_id": "parent"}}}
+    bus = _StopBus(by_run={"parent": _entry("parent")}, answer=ok)
+    registry = _Registry()
+    ws = await _stop(registry, {"run_id": "parent", "conversation_id": CONV}, bus)
+    assert bus.sent == [("replica-a", "stop", "parent")] and registry.cancelled == []
     ws.send_json.assert_awaited_once_with({"type": "run_status", "run": {"run_id": "parent"}})
 
 
 async def test_stop_naming_an_unknown_run_falls_back_to_the_local_follow_up():
-    handled, calls, _ws = await _stop(_Registry(), {"run_id": "gone", "conversation_id": CONV}, {})
+    bus = _StopBus()
+    registry = _Registry()
+    await _stop(registry, {"run_id": "gone", "conversation_id": CONV}, bus)
     # Nobody owns "gone": the conversation's run here is stopped locally.
-    assert handled is False and calls == [("gone", None)]
+    assert bus.lookups == [("run", "gone")] and bus.sent == []
+    assert registry.cancelled == ["follow-up"]
 
 
 async def test_stop_by_conversation_only_is_routed_when_nothing_is_local():
-    answer = {"ok": False, "code": "command_timeout", "message": "", "payload": {}, "run_id": "r9"}
-    handled, calls, ws = await _stop(_Registry(follow_up=False), {"conversation_id": CONV},
-                                     {(None, CONV): answer})
-    assert handled is True and calls == [(None, CONV)]
+    answer = {"ok": False, "code": "command_timeout", "message": "", "payload": {}}
+    bus = _StopBus(by_conversation=_entry("r9"), answer=answer)
+    registry = _Registry(follow_up=False)
+    ws = await _stop(registry, {"conversation_id": CONV}, bus)
+    assert bus.sent == [("replica-a", "stop", "r9")] and registry.cancelled == []
     assert ws.send_json.await_args.args[0]["run_id"] == "r9"
 
 
 async def test_local_run_named_by_id_is_not_routed():
-    handled, calls, _ws = await _stop(_Registry(), {"run_id": "follow-up", "conversation_id": CONV}, {})
-    assert handled is False and calls == []
+    bus = _StopBus()
+    registry = _Registry()
+    await _stop(registry, {"run_id": "follow-up", "conversation_id": CONV}, bus)
+    assert bus.lookups == [] and registry.cancelled == ["follow-up"]
+
+
+async def test_stop_to_an_owner_that_does_not_answer_still_stops_the_local_follow_up():
+    unreachable = {"ok": False, "code": "owner_unavailable", "message": "", "payload": {}}
+    bus = _StopBus(by_run={"parent": _entry("parent")}, answer=unreachable)
+    registry = _Registry()
+    ws = await _stop(registry, {"run_id": "parent", "conversation_id": CONV}, bus)
+    # The parent's owner never answered: the conversation's run held here is
+    # stopped rather than nothing, and the client is not told of an outage.
+    assert bus.sent == [("replica-a", "stop", "parent")]
+    assert registry.cancelled == ["follow-up"] and ws.send_json.await_count == 0
+
+
+async def test_conversation_stop_to_an_owner_that_does_not_answer_stops_the_untracked_turn():
+    unreachable = {"ok": False, "code": "owner_unavailable", "message": "", "payload": {}}
+    bus = _StopBus(by_conversation=_entry("r9"), answer=unreachable)
+    task = MagicMock()
+    task.done.return_value = False
+    set_run_control_bus(bus)
+    try:
+        ws = MagicMock()
+        ws.send_json = AsyncMock()
+        await stop_addressed_run(ws, _Registry(follow_up=False), USER, {"conversation_id": CONV},
+                                 {"task": task})
+    finally:
+        set_run_control_bus(None)
+    task.cancel.assert_called_once()
+    assert ws.send_json.await_count == 0

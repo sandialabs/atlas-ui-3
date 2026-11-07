@@ -9,7 +9,6 @@ for a conversation another replica is still executing.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -22,7 +21,6 @@ _UNAVAILABLE_MESSAGE = (
     "This conversation's run is executing on another server that did not answer. "
     "Try again in a moment, or stop the run."
 )
-_APPROVAL_NUDGES: "set[asyncio.Task]" = set()
 
 
 def _ids(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -102,31 +100,3 @@ def stop_frame(answer: Dict[str, Any], data: Dict[str, Any]) -> Optional[Dict[st
         "run_id": data.get("run_id") or answer.get("run_id"),
         "conversation_id": data.get("conversation_id"),
     }
-
-
-def nudge_approval_owner(user_email: str, outcome: Optional[Dict[str, Any]]) -> None:
-    """Wake the executor of an approval this replica just recorded.
-
-    Fire and forget: the executor also polls the shared outcome, so a lost
-    nudge only delays the tool by one poll interval.
-    """
-    if not isinstance(outcome, dict) or not outcome.get("run_id"):
-        return
-    from atlas.application.chat.runs.run_control import route_approval
-
-    async def _nudge() -> None:
-        try:
-            answer = await route_approval(
-                user_email, outcome.get("run_id"), outcome.get("invocation_id"), outcome.get("tool_call_id"),
-            )
-            if answer is not None and not answer.get("ok"):
-                logger.info("approval nudge not applied: %s", answer.get("code"))
-        except Exception:
-            logger.warning("approval nudge failed", exc_info=True)
-
-    try:
-        task = asyncio.get_running_loop().create_task(_nudge())
-    except RuntimeError:
-        return
-    _APPROVAL_NUDGES.add(task)
-    task.add_done_callback(_APPROVAL_NUDGES.discard)

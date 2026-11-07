@@ -25,9 +25,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from atlas.application.chat.runs.commands import cancel_api_run_addressed
 from atlas.application.chat.runs.external_runs import (
     agent_runs_api_enabled,
-    cancel_api_run,
     follow_up_api_run,
     get_api_run_anywhere,
     launch_api_run,
@@ -35,8 +35,6 @@ from atlas.application.chat.runs.external_runs import (
     list_api_runs,
 )
 from atlas.application.chat.runs.launcher import LaunchRefused
-from atlas.application.chat.runs.registry import get_run_registry
-from atlas.application.chat.runs.run_control import route_api_cancel, route_api_follow_up_cancel
 from atlas.core.agent_runs_paths import AGENT_RUNS_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -410,26 +408,10 @@ async def cancel_run(run_id: str):
     stopped there (issue #1128) and the response is that replica's answer. A
     504 means the owner did not confirm in time; repeating the cancel is safe.
     """
-    named = get_run_registry().get(run_id)
-    finished = named is not None and named.is_terminal
     try:
-        status = cancel_api_run(run_id)
+        answer = await cancel_api_run_addressed(run_id)
     except LaunchRefused as e:
-        if getattr(e, "code", None) != "run_not_found":
-            raise _refused(e)
-        local_refusal = e
-    else:
-        if not finished or status.get("run_id") != run_id:
-            return status
-        # The named run had finished here and no follow-up of it is live
-        # here; one may be executing on another replica.
-        later = await route_api_follow_up_cancel(run_id, named.conversation_id, named.user_email, status)
-        if later is None:
-            return status
-        return _routed_status(later)
-    answer = await route_api_cancel(run_id)
-    if answer is None:
-        raise _refused(local_refusal)
+        raise _refused(e)
     return _routed_status(answer)
 
 

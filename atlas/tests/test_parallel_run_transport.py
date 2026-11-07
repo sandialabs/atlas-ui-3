@@ -7,10 +7,10 @@ frame is resolved to exactly one run.
 
 import asyncio
 import copy
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from main import (
-    _cancel_addressed_run,
     _DOWNLOAD_ERROR_PRIORITY,
     _download_error_rank,
     _download_session_candidates,
@@ -26,6 +26,7 @@ from main import (
     tag_run_event,
 )
 
+from atlas.application.chat.runs.commands import stop_addressed_run
 from atlas.application.chat.service import DownloadError
 from atlas.application.chat.runs import RunRegistry, RunStatus, reset_run_registry
 
@@ -84,19 +85,29 @@ def test_non_dict_event_passes_through():
 # Stop routing
 # ---------------------------------------------------------------------------
 
-def test_stop_by_run_id_cancels_only_that_run(registry):
+async def _stop(registry, frame, user=None):
+    """Press Stop the way the transport does; whether the untracked task was cancelled."""
+    task = MagicMock()
+    task.done.return_value = False
+    ws = MagicMock()
+    ws.send_json = AsyncMock()
+    await stop_addressed_run(ws, registry, user or USER, frame, {"task": task})
+    return task.cancel.called
+
+
+async def test_stop_by_run_id_cancels_only_that_run(registry):
     run_a = registry.start(conversation_id="conv-a", user_email=USER)
     run_b = registry.start(conversation_id="conv-b", user_email=USER)
 
     # The frame addressed a run, so the transport must NOT fall back to the
     # connection's untracked task -- even though no task was attached here and
     # so nothing was actually cancelled.
-    assert _cancel_addressed_run(registry, USER, {"run_id": run_a.run_id}) is True
+    assert await _stop(registry, {"run_id": run_a.run_id}) is False
     assert registry.get(run_a.run_id).status == RunStatus.CANCELLED
     assert registry.get(run_b.run_id).status != RunStatus.CANCELLED
 
 
-def test_stale_stop_frame_does_not_fall_back_to_the_legacy_slot(registry):
+async def test_stale_stop_frame_does_not_fall_back_to_the_legacy_slot(registry):
     """A stop frame naming an already-terminal run must not cancel something else.
 
     `cancel()` reports False for a run that has already finished, which is
@@ -108,36 +119,33 @@ def test_stale_stop_frame_does_not_fall_back_to_the_legacy_slot(registry):
     run = registry.start(conversation_id="conv-a", user_email=USER)
     registry.set_status(run.run_id, RunStatus.COMPLETED)
 
-    assert _cancel_addressed_run(registry, USER, {"run_id": run.run_id}) is True
+    assert await _stop(registry, {"run_id": run.run_id}) is False
 
 
-def test_stop_frame_naming_an_unknown_run_does_not_fall_back(registry):
+async def test_stop_frame_naming_an_unknown_run_does_not_fall_back(registry):
     """Reaped or foreign run ids are addressed, not absent."""
-    assert _cancel_addressed_run(registry, USER, {"run_id": "no-such-run"}) is True
+    assert await _stop(registry, {"run_id": "no-such-run"}) is False
 
 
-def test_stop_frame_with_only_an_unknown_conversation_falls_back(registry):
+async def test_stop_frame_with_only_an_unknown_conversation_falls_back(registry):
     """Nothing resolvable and no run id named: the legacy slot is the target."""
-    assert (
-        _cancel_addressed_run(registry, USER, {"conversation_id": "conv-unknown"})
-        is False
-    )
+    assert await _stop(registry, {"conversation_id": "conv-unknown"}) is True
 
 
-def test_stop_by_conversation_id_resolves_the_run(registry):
+async def test_stop_by_conversation_id_resolves_the_run(registry):
     run = registry.start(conversation_id="conv-a", user_email=USER)
-    _cancel_addressed_run(registry, USER, {"conversation_id": "conv-a"})
+    await _stop(registry, {"conversation_id": "conv-a"})
     assert registry.get(run.run_id).status == RunStatus.CANCELLED
 
 
-def test_stop_frame_without_ids_falls_back_to_the_legacy_slot(registry):
+async def test_stop_frame_without_ids_falls_back_to_the_legacy_slot(registry):
     registry.start(conversation_id="conv-a", user_email=USER)
-    assert _cancel_addressed_run(registry, USER, {}) is False
+    assert await _stop(registry, {}) is True
 
 
-def test_stop_cannot_reach_another_users_run(registry):
+async def test_stop_cannot_reach_another_users_run(registry):
     run = registry.start(conversation_id="conv-a", user_email=OTHER)
-    _cancel_addressed_run(registry, USER, {"run_id": run.run_id})
+    await _stop(registry, {"run_id": run.run_id})
     assert registry.get(run.run_id).status != RunStatus.CANCELLED
 
 

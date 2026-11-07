@@ -2,7 +2,7 @@
 
 Issue #755 made a cancelled turn persist instead of being discarded, and
 issue #884 then moved the Stop button onto the run registry, so the cancel now
-arrives through ``_cancel_addressed_run`` -> ``RunRegistry.cancel`` rather than
+arrives through ``stop_addressed_run`` -> ``RunRegistry.cancel`` rather than
 through the connection's single untracked task. These tests pin the whole chain
 a user actually exercises -- stop a long agent run, reload the page -- entering
 at the transport's own stop resolver and ending at a read-back out of DuckDB,
@@ -23,9 +23,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from main import _cancel_addressed_run
 
 from atlas.application.chat.runs import get_run_registry, reset_run_registry
+from atlas.application.chat.runs.commands import stop_addressed_run
 from atlas.application.chat.service import ChatService
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.modules.chat_history import (
@@ -84,9 +84,10 @@ def _make_service(repo):
 
 async def _stop_and_await(task, stop_frame):
     """Press Stop the way the transport does, then wait -- with a deadline."""
-    assert _cancel_addressed_run(get_run_registry(), USER, stop_frame) is True, (
-        "the stop frame did not resolve to a tracked run"
-    )
+    untracked = MagicMock()
+    untracked.done.return_value = False
+    await stop_addressed_run(MagicMock(), get_run_registry(), USER, stop_frame, {"task": untracked})
+    assert not untracked.cancel.called, "the stop frame did not resolve to a tracked run"
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, CANCEL_DEADLINE_SECONDS)
 

@@ -8,13 +8,12 @@ Two halves share this module:
   agent-runs service, for an API-started run), and the run must still be
   live here. The directory entry that routed the command is never trusted
   for authorization.
-* **Sender side.** ``route_*`` find a run that is not in this replica's
-  registry in the shared directory and send the command to its owner. They
-  return ``None`` when nothing in the directory matches, so the caller keeps
-  its single-instance answer. A directory that cannot be read is never taken
-  for "nothing matches": the lookups raise :class:`RunDirectoryUnavailable`
-  and the routes answer ``owner_unavailable``, so a Redis outage cannot start
-  a second turn beside a run another replica is executing.
+* **Sender side.** ``route_*`` send a command to the owner of a run that
+  ``resolve`` found in the shared directory (see ``resolve`` and ``commands``);
+  they do no lookup of their own. A directory that cannot be read is never
+  taken for "nothing matches": ``resolve`` answers ``Unknown`` and the callers
+  report ``owner_unavailable``, so a Redis outage cannot start a second turn
+  beside a run another replica is executing.
 
 Commands are idempotent. Stop is (terminal is sticky). A steer is queued once
 per request id. An approval is settled once by the shared write-once outcome
@@ -217,7 +216,7 @@ def start_run_control(refusal_check: Optional[RefusalCheck] = None) -> Optional[
 # ---------------------------------------------------------------------------
 
 
-async def _remote_entry(run_id: Optional[str], *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
+async def remote_entry(run_id: Optional[str], *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
     """Another replica's directory entry for ``run_id``, or None.
 
     Raises :class:`RunDirectoryUnavailable` when the directory cannot be read.
@@ -236,7 +235,7 @@ async def _remote_entry(run_id: Optional[str], *, include_terminal: bool = False
     return entry
 
 
-async def _conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
+async def conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """The live run holding ``conversation_id``, on any replica (this one included)."""
     bus = get_run_control_bus()
     if bus is None or not conversation_id:
@@ -246,21 +245,6 @@ async def _conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[s
     except Exception as exc:
         logger.warning("run directory lookup failed", exc_info=True)
         raise RunDirectoryUnavailable(str(exc)) from exc
-
-
-async def remote_run_for_conversation(conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """The run another replica is executing for a conversation, any owner.
-
-    The caller compares ``user_email``: a conversation another user's run
-    holds is refused like the local guard refuses it. Raises
-    :class:`RunDirectoryUnavailable` when the directory cannot be read; the
-    caller must then refuse rather than start a turn.
-    """
-    entry = await _conversation_entry(conversation_id)
-    bus = get_run_control_bus()
-    if entry is None or bus is None or entry.get("replica") == bus.replica_id:
-        return None
-    return entry
 
 
 async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args=None, request_id=None,
@@ -280,7 +264,7 @@ async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args
         if answer.get("code") != STALE_GENERATION:
             return answer
         try:
-            fresh = await _remote_entry(entry["run_id"], include_terminal=bool(entry.get("terminal")))
+            fresh = await remote_entry(entry["run_id"], include_terminal=bool(entry.get("terminal")))
         except RunDirectoryUnavailable:
             return answer
         moved = fresh is not None and (fresh["replica"], fresh.get("generation")) != (
@@ -295,29 +279,13 @@ async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args
         return reply(False, OWNER_UNAVAILABLE, "The run's server could not be reached.")
 
 
-async def route_stop(user_email: str, run_id: Optional[str], conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Stop the user's run on its owner. None when no other replica owns it.
+async def route_stop(entry: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+    """Stop the user's run on its owner (``entry`` is where ``resolve`` found it).
 
-    Resolution mirrors the local stop: the named run first, even when it has
-    finished (stopping a finished parent stops the sub-conversations it
-    launched, on its owner), then the conversation's live run. An owner that
-    does not answer is reported (``command_timeout``), never taken for "no
-    run": its live children may still be running, and a retry is safe.
+    An owner that does not answer is reported (``command_timeout``), never
+    taken for "no run": its live children may still be running, and a retry is
+    safe. Stopping a finished parent stops the sub-conversations it launched.
     """
-    email = normalize_user_email(user_email)
-    try:
-        entry = await _remote_entry(run_id, include_terminal=True)
-        if entry is not None and entry.get("user_email") != email:
-            # Another user's run answers like one that does not exist.
-            entry = None
-        if entry is None:
-            entry = await remote_run_for_conversation(conversation_id)
-            if entry is not None and entry.get("user_email") != email:
-                entry = None
-    except RunDirectoryUnavailable:
-        return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
-    if entry is None:
-        return None
     answer = await _send(entry, STOP, user_actor(user_email))
     # The run the stop resolved to, so a failure frame for a stop addressed
     # only by conversation still names the run (the client keeps its running
@@ -325,8 +293,8 @@ async def route_stop(user_email: str, run_id: Optional[str], conversation_id: Op
     return {**answer, "run_id": entry["run_id"]}
 
 
-async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
-    """The agent-runs API's cancel, on the owner. None when nobody owns it.
+async def route_api_cancel(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """The agent-runs API's cancel, on the owner of ``entry``.
 
     As ``cancel_api_run`` does on one replica, a finished run is stopped
     first (on its last owner, which cascades to the sub-conversations it
@@ -335,12 +303,6 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     """
     from atlas.application.chat.runs.external_runs import API_SOURCE
 
-    try:
-        entry = await _remote_entry(run_id, include_terminal=True)
-    except RunDirectoryUnavailable:
-        return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
-    if entry is None:
-        return None
     answer = await _send(entry, STOP, SERVICE_ACTOR)
     if entry.get("source") != API_SOURCE:
         # Not an API run: the owner refuses it like an unknown id.
@@ -384,7 +346,7 @@ async def route_api_follow_up_cancel(
     if bus is None:
         return None
     try:
-        follow_up = await _conversation_entry(conversation_id)
+        follow_up = await conversation_entry(conversation_id)
     except RunDirectoryUnavailable:
         return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
     if (
@@ -420,20 +382,13 @@ async def route_steer(
                        off_record=off_record)
 
 
-async def route_approval(user_email: str, run_id: Optional[str], invocation_id: Optional[str],
-                         tool_call_id: Optional[str]) -> Optional[Dict[str, Any]]:
+async def route_approval(entry: Dict[str, Any], user_email: str, invocation_id: Optional[str],
+                         tool_call_id: Optional[str]) -> Dict[str, Any]:
     """Wake the owner's waiting tool after this replica recorded the outcome.
 
     The request id is derived from the invocation, so every replica that
     records or re-sends the same answer sends the same command.
     """
-    try:
-        entry = await _remote_entry(run_id)
-    except RunDirectoryUnavailable:
-        # Best effort: the executor also polls the shared outcome.
-        return None
-    if entry is None or entry.get("user_email") != normalize_user_email(user_email):
-        return None
     args = {"invocation_id": invocation_id, "tool_call_id": tool_call_id}
     request_id = f"approval:{invocation_id or tool_call_id}"
     return await _send(entry, APPROVAL, user_actor(user_email), args, request_id=request_id)

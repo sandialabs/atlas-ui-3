@@ -15,12 +15,12 @@ This file describes today's behaviour and changes no production code.
 
 # ruff: noqa: F811
 import asyncio
+import contextlib
 import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from main import _cancel_addressed_run, _stop_remote_run
 from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
     OWNER,
     _ApiReplicas,
@@ -30,7 +30,13 @@ from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
 )
 
 from atlas.application.chat.agent.steering import SteeringChannel
-from atlas.application.chat.runs import run_control
+from atlas.application.chat.runs.commands import (
+    approval_nudge,
+    cancel_api_run_addressed,
+    steer_addressed_run,
+    stop_addressed_run,
+)
+from atlas.application.chat.runs.launcher import LaunchRefused
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "developer" / "run-addressing.md"
@@ -63,18 +69,13 @@ class _Untracked:
 # Rows with no ``cluster`` argument run with no run-control bus bound, as a
 # single-instance deployment does: nothing is read from a directory.
 async def ws_stop(local, data, untracked=None):
-    """The stop branch of ``websocket_endpoint`` (main.py, ``stop_streaming`` and
-    ``agent_control`` stop are the same code): returns (frames sent, untracked
-    turn cancelled)."""
+    """The stop branch of ``websocket_endpoint`` (``stop_streaming`` and
+    ``agent_control`` stop both call ``stop_addressed_run``): returns (frames
+    sent, untracked turn cancelled)."""
     untracked = untracked or _Untracked(live=False)
     ws = MagicMock()
     ws.send_json = AsyncMock()
-    if await _stop_remote_run(ws, local, OWNER, data, untracked.slot):
-        pass
-    elif not _cancel_addressed_run(local, OWNER, data):
-        task = untracked.slot.get("task")
-        if task and not task.done():
-            task.cancel()
+    await stop_addressed_run(ws, local, OWNER, data, untracked.slot)
     return [c.args[0] for c in ws.send_json.await_args_list], untracked.cancelled
 
 
@@ -394,15 +395,15 @@ async def test_S33_neither_stops_only_the_untracked_turn(local):
 
 
 # ---------------------------------------------------------------------------
-# REST cancel (route_api_cancel is the sender half; the local half is
-# cancel_api_run, covered by test_agent_runs_api.py)
+# REST cancel (cancel_api_run_addressed; the local half is cancel_api_run,
+# covered by test_agent_runs_api.py)
 # ---------------------------------------------------------------------------
 
 
 async def test_R01_api_run_remote_live(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.live_on_a("conv-api")
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] and answer["payload"]["status"]["cancelled"] is True
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
@@ -410,7 +411,7 @@ async def test_R01_api_run_remote_live(cluster, monkeypatch):
 async def test_R02_api_run_remote_terminal(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.finished_on_a()
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] and answer["payload"]["status"]["cancelled"] is False
 
 
@@ -418,27 +419,29 @@ async def test_R03_api_run_unreadable(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.live_on_a("conv-api")
     await _unreadable(cluster)
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] is False and answer["code"] == "owner_unavailable"
 
 
 async def test_R04_run_not_started_by_the_api_is_not_found(cluster, monkeypatch):
     _ApiReplicas(cluster, monkeypatch)
     run = await cluster.run()
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] is False and answer["code"] == "run_not_found"
     assert not cluster.registry.get(run.run_id).is_terminal
 
 
 async def test_R05_unknown_id_is_nobodys(cluster, monkeypatch):
     _ApiReplicas(cluster, monkeypatch)
-    assert await run_control.route_api_cancel("nobody") is None
+    with pytest.raises(LaunchRefused) as refused:
+        await cancel_api_run_addressed("nobody")
+    assert refused.value.code == "run_not_found"
 
 
 async def test_R06_unknown_id_unreadable(cluster, monkeypatch):
     _ApiReplicas(cluster, monkeypatch)
     await _unreadable(cluster)
-    answer = await run_control.route_api_cancel("nobody")
+    answer = await cancel_api_run_addressed("nobody")
     assert answer["ok"] is False and answer["code"] == "owner_unavailable"
 
 
@@ -452,7 +455,8 @@ async def test_R07_api_run_finished_record_expired(cluster, monkeypatch):
     cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
     await cluster.a.claim(child.run_id, child.conversation_id)
     await cluster.b.bus._client().delete(cluster.b.coordinator.keys.run(run.run_id))
-    await run_control.route_api_cancel(run.run_id)
+    with contextlib.suppress(LaunchRefused):
+        await cancel_api_run_addressed(run.run_id)
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 
@@ -467,39 +471,48 @@ def _active_channel():
     return channel
 
 
+async def _steer(conversation_id, **extra):
+    """The remote-steer step of the ``chat`` branch: (handled, frames sent)."""
+    ws = MagicMock()
+    ws.send_json = AsyncMock()
+    data = {"conversation_id": conversation_id, "content": "go left", **extra}
+    handled = await steer_addressed_run(ws, RunRegistry(), OWNER, data)
+    return handled, [c.args[0] for c in ws.send_json.await_args_list]
+
+
 async def test_C01_remote_live_steer_is_queued_on_the_owner(cluster):
     channel = _active_channel()
     run = await cluster.run(steering=channel)
-    entry = await run_control.remote_run_for_conversation(run.conversation_id)
-    answer = await run_control.route_steer(entry, OWNER, "go left", None, request_id="r1")
-    assert answer["ok"] is True and channel.queue.get_nowait() == "go left"
+    handled, frames = await _steer(run.conversation_id, request_id="r1")
+    assert handled and [f["update_type"] for f in frames] == ["steering_queued"]
+    assert channel.queue.get_nowait() == "go left"
 
 
 async def test_C02_remote_live_run_not_draining_refuses_the_steer(cluster):
     run = await cluster.run()
-    entry = await run_control.remote_run_for_conversation(run.conversation_id)
-    answer = await run_control.route_steer(entry, OWNER, "go left", None)
-    assert answer["ok"] is False and answer["code"] == "conversation_busy"
+    handled, frames = await _steer(run.conversation_id)
+    assert handled and frames[0]["error_type"] == "conversation_busy" and frames[0]["steering"] is True
 
 
 async def test_C03_remote_terminal_run_is_not_steered(cluster):
     run = await cluster.run(steering=_active_channel())
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    assert await run_control.remote_run_for_conversation(run.conversation_id) is None
+    # Not handled: the message starts a new turn.
+    assert await _steer(run.conversation_id) == (False, [])
 
 
 async def test_C04_unreadable_directory_refuses_instead_of_starting_a_turn(cluster):
     run = await cluster.run(steering=_active_channel())
     await _unreadable(cluster)
-    with pytest.raises(run_control.RunDirectoryUnavailable):
-        await run_control.remote_run_for_conversation(run.conversation_id)
+    handled, frames = await _steer(run.conversation_id)
+    assert handled and [f["error_type"] for f in frames] == ["run_control_unavailable"]
 
 
 async def test_C05_finished_parent_conversation_is_not_a_steer_target(cluster):
     parent, _child = await _finished_parent_with_live_child_on_a(cluster)
     # The parent's conversation key is released: the message starts a new turn.
-    assert await run_control.remote_run_for_conversation(parent.conversation_id) is None
+    assert await _steer(parent.conversation_id) == (False, [])
 
 
 async def test_C06_remote_api_follow_up_is_steered_like_any_tracked_run(cluster):
@@ -511,16 +524,15 @@ async def test_C06_remote_api_follow_up_is_steered_like_any_tracked_run(cluster)
                                        steering=channel)
     cluster.registry.attach_task(follow_up.run_id, asyncio.create_task(asyncio.sleep(30)))
     await cluster.a.claim(follow_up.run_id, first.conversation_id)
-    entry = await run_control.remote_run_for_conversation(first.conversation_id)
-    assert entry["run_id"] == follow_up.run_id
-    assert (await run_control.route_steer(entry, OWNER, "x", None))["ok"] is True
+    handled, frames = await _steer(first.conversation_id)
+    assert handled and frames[0]["run_id"] == follow_up.run_id
+    assert frames[0]["update_type"] == "steering_queued"
 
 
 async def test_C07_remote_off_record_steer_is_refused_before_it_is_written(cluster):
     run = await cluster.run(steering=_active_channel())
-    entry = await run_control.remote_run_for_conversation(run.conversation_id)
-    answer = await run_control.route_steer(entry, OWNER, "private", None, off_record=True)
-    assert answer["ok"] is False and answer["code"] == "off_record"
+    handled, frames = await _steer(run.conversation_id, incognito=True)
+    assert handled and frames[0]["error_type"] == "off_record"
     assert cluster.registry.get(run.run_id).steering.queue.empty()
 
 
@@ -567,9 +579,14 @@ def test_C10_local_off_record_steer_is_refused(chat_service, off_record):
 
 
 # ---------------------------------------------------------------------------
-# ws tool_approval_response (route_approval is the owner nudge; the shared
+# ws tool_approval_response (approval_nudge is the owner nudge; the shared
 # outcome write is decide_tool_approval, covered by test_approval_resolution)
 # ---------------------------------------------------------------------------
+
+
+async def _nudge(run_id, invocation_id):
+    outcome = {"run_id": run_id, "invocation_id": invocation_id, "tool_call_id": "call_0"}
+    return await approval_nudge(RunRegistry(), OWNER, outcome)
 
 
 async def test_P01_remote_live_approval_nudges_the_owner(cluster):
@@ -579,7 +596,7 @@ async def test_P01_remote_live_approval_nudges_the_owner(cluster):
 
     await cluster.store.put_resolution(approval_storage_key(request.invocation_id, "call_0", OWNER),
                                        {"approved": True})
-    answer = await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0")
+    answer = await _nudge(run.run_id, request.invocation_id)
     assert answer["ok"] and answer["payload"]["applied"] is True and request.future.done()
 
 
@@ -587,7 +604,7 @@ async def test_P02_approval_naming_no_run_sends_no_nudge(cluster):
     run = await cluster.run()
     request = await _pending_approval(cluster, run)
     # The executor still polls the shared outcome; only the wake-up is skipped.
-    assert await run_control.route_approval(OWNER, None, request.invocation_id, "call_0") is None
+    assert await _nudge(None, request.invocation_id) is None
     assert not request.future.done()
 
 
@@ -596,14 +613,14 @@ async def test_P03_remote_terminal_run_gets_no_nudge(cluster):
     request = await _pending_approval(cluster, run)
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    assert await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0") is None
+    assert await _nudge(run.run_id, request.invocation_id) is None
 
 
 async def test_P04_unreadable_directory_is_best_effort(cluster):
     run = await cluster.run()
     request = await _pending_approval(cluster, run)
     await _unreadable(cluster)
-    assert await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0") is None
+    assert await _nudge(run.run_id, request.invocation_id) is None
 
 
 def _two_pending_call_zero():
