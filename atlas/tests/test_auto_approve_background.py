@@ -596,16 +596,19 @@ async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone():
 
     # Nothing running on the connection: a tracked run lives in the registry,
     # not in this slot, so an empty slot is the background-run case.
-    assert await _cancel_superseded_untracked_turn({"task": None, "kind": None}) is False
+    cancelled_empty = await _cancel_superseded_untracked_turn({"task": None, "kind": None})
+    assert cancelled_empty is False
 
     finished = asyncio.create_task(asyncio.sleep(0))
     await finished
-    assert await _cancel_superseded_untracked_turn({"task": finished, "kind": "chat"}) is False
+    cancelled_finished = await _cancel_superseded_untracked_turn({"task": finished, "kind": "chat"})
+    assert cancelled_finished is False
 
     compacting = asyncio.create_task(_sleep_forever())
     await asyncio.sleep(0)
     try:
-        assert await _cancel_superseded_untracked_turn({"task": compacting, "kind": "compact"}) is False
+        cancelled_compact = await _cancel_superseded_untracked_turn({"task": compacting, "kind": "compact"})
+        assert cancelled_compact is False
         assert not compacting.done()
     finally:
         compacting.cancel()
