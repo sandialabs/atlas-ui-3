@@ -30,6 +30,18 @@ describe('complete Retro Design System chrome coverage', () => {
     expect((generated.match(/\/\* #\d{2} — /g) || [])).toHaveLength(45)
   })
 
+
+  it('keeps System 7 window controls and the Settings caption faithfully scoped', () => {
+    const css = read('theme-presets.css')
+    expect(css).toMatch(/\[data-atlas-theme="mac7"\] \.atlas-retro-window-titlebar\s*\{[^}]*background-image: repeating-linear-gradient/s)
+    expect(css).toMatch(/\[data-atlas-theme="mac7"\] \.atlas-retro-window-title\s*\{[^}]*font-size: 12px;/s)
+    expect(css).toMatch(/\[data-atlas-theme="mac7"\] \.atlas-retro-window-close\s*\{[^}]*left: 7px;/s)
+    expect(css).toMatch(/\[data-atlas-theme="mac7"\] \.atlas-theme-titlebar > button\[aria-label="Close tools and settings"\]\s*\{[^}]*left: 7px;/s)
+    expect(css).toMatch(/\[data-atlas-theme="mac7"\] \.atlas-retro-input\s*\{[^}]*border-radius: 0;/s)
+    expect(css).toContain('.atlas-theme-preview[data-preview="mac7"] .atlas-theme-preview-bar')
+    expect(css).not.toMatch(/@font-face|@import|url\s*\(/)
+  })
+
   it('keeps the extra design chrome scoped and free of external assets and animation', () => {
     for (const source of [generated, read('retroChrome.css')]) {
       expect(source).not.toMatch(/@import|@font-face|@keyframes|url\s*\(/)
