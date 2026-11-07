@@ -390,3 +390,30 @@ async def test_delegated_stream_closure_records_usage(monkeypatch, via_tools):
         assert await anext(stream) == "hello"
         await stream.aclose()
         assert (sink.prompt_tokens, sink.completion_tokens, sink.calls) == (23, 5, 1)
+
+
+def test_stream_usage_diagnostics_resist_log_forgery(caplog):
+    """Both flagged log sites must emit a single safe entry for hostile names."""
+    from atlas.domain.errors import LLMBadRequestError
+    from atlas.modules.llm import litellm_streaming
+    from atlas.modules.llm.usage_tracking import StreamUsageAccumulator
+
+    malicious = "m\r\n[CRITICAL] forged\x1b[31m\u2028\u2029\x7f\x85"
+    with caplog.at_level("WARNING", logger=litellm_streaming.__name__):
+        with pytest.raises(LLMBadRequestError, match="Disable request_stream_usage"):
+            LiteLLMCaller._check_stream_usage_rejection(
+                ValueError("invalid stream_options.include_usage"), malicious, True
+            )
+        LiteLLMCaller._warn_missing_stream_usage(
+            malicious, True, True, StreamUsageAccumulator()
+        )
+
+    messages = [r.getMessage() for r in caplog.records if r.name == litellm_streaming.__name__]
+    assert len(messages) == 2
+    assert messages[0].startswith("Provider rejected request_stream_usage")
+    assert messages[1].startswith("request_stream_usage is enabled for model")
+    assert all("m[CRITICAL] forged[31m" in msg for msg in messages)
+    assert all(
+        not any(char in msg for char in "\r\n\x1b\u2028\u2029\x7f\x85")
+        for msg in messages
+    )

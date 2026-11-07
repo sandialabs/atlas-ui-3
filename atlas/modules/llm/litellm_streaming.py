@@ -125,7 +125,10 @@ class LiteLLMStreamingMixin:
         if "stream_options" in message or "include_usage" in message:
             logger.warning(
                 "Provider rejected request_stream_usage (stream_options.include_usage) for model %s",
-                sanitize_for_logging(model_name),
+                # This call-site CR/LF removal is intentional: the shared
+                # sanitizer already removes control characters, but CodeQL's
+                # log-injection analysis does not model that helper here.
+                sanitize_for_logging(model_name).replace("\r", "").replace("\n", ""),
             )
             raise LLMBadRequestError(
                 "The model provider rejected request_stream_usage "
@@ -149,7 +152,10 @@ class LiteLLMStreamingMixin:
             logger.warning(
                 "request_stream_usage is enabled for model %s, but the stream returned "
                 "no usage metadata; verify provider support for stream_options.include_usage",
-                sanitize_for_logging(model_name),
+                # This call-site CR/LF removal is intentional: the shared
+                # sanitizer already removes control characters, but CodeQL's
+                # log-injection analysis does not model that helper here.
+                sanitize_for_logging(model_name).replace("\r", "").replace("\n", ""),
             )
 
     async def stream_plain(
