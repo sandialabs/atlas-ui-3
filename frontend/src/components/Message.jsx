@@ -736,6 +736,13 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     }
   }
 
+  if (message.type === 'canvas_artifact') {
+    // The document lives in the canvas panel, not the transcript. An empty
+    // hidden node keeps the row out of the layout (including space-y gaps)
+    // without putting the script into the DOM.
+    return <div hidden className="hidden" />
+  }
+
   if (isHiddenApprovalRow) {
     // Use the HTML `hidden` attribute so Tailwind's `space-y-*` utilities
     // (`> :not([hidden]) ~ :not([hidden])`) exclude this node. The `hidden`
@@ -761,14 +768,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   }
 
   // A marker-only seed (issue #957): a run parked between segments gets no
-  // full assistant chrome -- avatar, author and a live Copy button around no
-  // content reads as a broken reply and copies an empty string.
+  // assistant chrome at all -- avatar, author and a live Copy button around no
+  // content reads as a broken reply and copies an empty string, and even a
+  // bare gray bubble reads as a separate (empty) assistant message. It is a
+  // status line aligned with the transcript, not a message. ChatArea skips it
+  // entirely while a tool row or approval card already shows progress.
   if (message._seed) {
     return (
-      <div className="flex items-start gap-0 sm:gap-3 w-full group">
-        <div ref={containerRef} className="min-w-0 flex-1 bg-gray-800 rounded-lg p-3 sm:p-4">
-          {replayMarker}
-        </div>
+      <div ref={containerRef} className="w-full min-w-0 pl-0 sm:pl-11 pr-2" data-testid="stream-replay-seed">
+        {replayMarker}
       </div>
     )
   }

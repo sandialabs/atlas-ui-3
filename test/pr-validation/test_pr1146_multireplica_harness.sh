@@ -12,7 +12,7 @@
 # EXPECTED_GAPS in the same PR.
 set -uo pipefail
 
-EXPECTED_GAPS=7   # 6 in test_run_coordination_gaps.py + 1 in test_known_bugs.py
+EXPECTED_GAPS=1   # in test_run_coordination_gaps.py: stop routing (#1128 closed admission, inspection, owner loss, fencing and the cap bug)
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"

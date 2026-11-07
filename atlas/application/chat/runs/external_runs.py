@@ -47,6 +47,7 @@ from atlas.application.chat.runs.launcher import (
     resolve_model,
     resolve_workspace,
 )
+from atlas.application.chat.runs.leases import publish_run_now
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
@@ -57,6 +58,7 @@ __all__ = [
     "cancel_api_run",
     "follow_up_api_run",
     "get_api_run",
+    "get_api_run_anywhere",
     "launch_api_run",
     "list_api_runs",
     "list_api_options",
@@ -406,6 +408,8 @@ async def launch_api_run(
         )
         handle = _handle(record, spec, admin_gated)
         _audit("launch", record, spec)
+        # Before the 202: a poll that lands on another replica must find it.
+        await publish_run_now(record.run_id)
         return handle
     finally:
         _release(slot, handle)
@@ -495,6 +499,7 @@ def _status(record: Any) -> Dict[str, Any]:
             "previous_run_id": spec.get("previous_run_id"),
             "result": None,
             "result_status": "pending" if not record.is_terminal else "unavailable",
+            "interrupted": bool(record.fenced),
         }
     )
     if record.status is RunStatus.COMPLETED:
@@ -510,6 +515,85 @@ def _status(record: Any) -> Dict[str, Any]:
 def get_api_run(run_id: str) -> Dict[str, Any]:
     """``atlas_result``: status, timestamps, error and final reply of one run."""
     return _status(_api_record(run_id))
+
+
+def _status_from_shared(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """The status of a run another replica owns (or owned), from its
+    shared record (#1128). Same shape as :func:`_status`."""
+    payload = {
+        key: doc.get(key)
+        for key in (
+            "run_id", "conversation_id", "status", "waiting_on", "created_at",
+            "updated_at", "ended_at", "error", "title", "parent_run_id",
+            "parent_conversation_id", "workspace", "model", "compliance_level",
+            "previous_run_id",
+        )
+    }
+    payload.update({
+        "user": doc.get("user_email"),
+        "detached": bool(doc.get("detached")),
+        "depth": int(doc.get("depth") or 0),
+        "tools": list(doc.get("tools") or []),
+        "data_sources": list(doc.get("data_sources") or []),
+        "interrupted": bool(doc.get("interrupted")),
+        "result": None,
+        "result_status": (
+            "pending" if doc.get("status") not in ("completed", "failed", "cancelled")
+            else "unavailable"
+        ),
+    })
+    if doc.get("status") == "completed":
+        result = doc.get("result")
+        if result == "":
+            payload["result_status"] = "empty"
+        elif result is not None:
+            _set_result(payload, result)
+        else:
+            payload["result_error"] = "This run's reply could not be captured."
+    return payload
+
+
+async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
+    """:func:`get_api_run`, falling back to the shared run record.
+
+    The replica that owns a run answers from its registry. Any other
+    replica answers from the record the owner mirrors to Redis -- including
+    a run whose owner died, which the orphan sweep marked interrupted.
+    """
+    try:
+        return get_api_run(run_id)
+    except LaunchRefused:
+        from atlas.application.chat.runs.leases import get_lease_guard
+
+        guard = get_lease_guard()
+        if guard is None:
+            raise
+        try:
+            doc = await guard.read_record(run_id)
+        except Exception as exc:
+            # Not "no such run": a client that relaunches on 404 would repeat
+            # a live run's side effects.
+            logger.warning("shared run record unreadable: %s", type(exc).__name__)
+            raise LaunchRefused(
+                "The run's status could not be read right now. Try again.", code="unavailable"
+            ) from exc
+        if doc is None:
+            raise
+        if doc.get("snapshot_unreadable"):
+            raise LaunchRefused(
+                "The run's status could not be read right now. Try again.", code="unavailable"
+            )
+        source = doc.get("source")
+        if source is None:
+            # No launch source written (the launch had not returned, or the
+            # write failed and the owner died or is retrying): it may well be
+            # an API run, interrupted or not, so never a 404.
+            raise LaunchRefused(
+                "The run's status is not available yet. Try again.", code="unavailable"
+            )
+        if source != API_SOURCE:
+            raise
+        return _status_from_shared(doc)
 
 
 def list_api_runs(user_email: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -632,6 +716,7 @@ async def follow_up_api_run(
         handle = _handle(record, new_spec, admin_gated)
         handle["previous_run_id"] = target.run_id
         _audit("follow_up", record, new_spec, previous_run=target.run_id)
+        await publish_run_now(record.run_id)
         return handle
     finally:
         _release(slot, handle)

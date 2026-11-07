@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-10-17
+Last updated: 2026-11-05
 
 Issue #884.
 
@@ -43,6 +43,7 @@ of one completion and nothing more.
 | `MAX_CONCURRENT_RUNS_PER_USER` | `5` | Maximum simultaneous runs for one user. |
 | `MAX_RUN_WALL_CLOCK_SECONDS` | `3600` | Hard limit on a single run's execution time. A run that exceeds it is stopped and recorded as **failed**. `0` disables it. |
 | `TOOL_APPROVAL_TIMEOUT_SECONDS` | `300` | How long a run waits for a tool approval or elicitation response. `0` waits indefinitely. |
+| `RUN_LEASE_SECONDS` | `30` | With `SESSION_REPOSITORY_TYPE=redis`: how long a run's ownership lease lasts without a heartbeat. When it lapses another replica marks the run **failed** (interrupted) without retrying any tool. See [run coordination](../developer/run-coordination.md). |
 
 ### The concurrency cap
 
@@ -52,6 +53,15 @@ a paused run still holds a session, MCP clients, and conversation state.
 
 A turn that would exceed the cap is refused with an `error` frame of type
 `run_limit_exceeded` and a message naming the limit. It is not queued.
+
+With Redis configured (`SESSION_REPOSITORY_TYPE=redis`), the cap and the
+one-run-per-conversation rule hold **across all replicas**: every replica
+claims the run in Redis before starting it, atomically, so two replicas racing
+for a user's last slot cannot both win. The same cap applies to browser turns,
+`atlas_launch` and the agent-runs API alike. If Redis is unreachable, new runs
+are refused (`error_type: run_coordination_unavailable`) rather than admitted
+unchecked. A replica that dies holding runs frees their slots within 30
+seconds. See [Run coordination](../developer/run-coordination.md).
 
 ### Approvals and the timeout
 
@@ -272,6 +282,15 @@ Either way the partial bubble is marked "answer in progress -- it will refresh
 when the response finishes": once the run ends, the client reloads the
 conversation from the store and the marker goes with the placeholder.
 
+A run reopened between segments (executing a tool, sleeping, waiting on an
+approval) has no partial text, so the client keeps an empty marker-only seed
+for reconciliation. It never renders as its own assistant bubble: while a tool
+row or approval card of the current turn is still open, that row is the
+progress indicator and the seed is not drawn at all; otherwise it shows only
+the marker line, kept below any tool rows that arrive after it. The next
+segment's text replaces the seed at the end of the transcript, below those
+rows.
+
 ### Reconnecting resynchronizes the open conversation
 
 When the WebSocket reconnects, the client revisits the currently visible
@@ -417,7 +436,13 @@ These are known and deliberate, not oversights:
   issue #760.
 - **Multi-process deployments track runs per process.** A user whose second
   connection lands on a different worker will not see the first worker's runs.
-  Use a single worker, or sticky sessions, until the run store is shared.
+  Admission is shared through Redis (the cap and conversation exclusivity
+  hold cluster-wide), and every replica can read a run's status. A run whose
+  replica is lost is reported failed (interrupted) by the others, with its
+  finished tool rows kept and nothing retried (see
+  [run coordination](../developer/run-coordination.md)). Stopping and
+  steering a run still needs the replica that owns it; use a single worker,
+  or sticky sessions, until that routing lands (issue #1128).
 
 ## Troubleshooting
 

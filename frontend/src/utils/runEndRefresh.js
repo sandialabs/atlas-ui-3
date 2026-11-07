@@ -15,6 +15,6 @@
 export function applyRunEndRefresh({ fullConv, refreshJoinedConversation, loadSavedConversation }) {
   if (!fullConv || fullConv.error) return 'skipped'
   if (refreshJoinedConversation(fullConv)) return 'appended'
-  loadSavedConversation(fullConv)
+  loadSavedConversation(fullConv, { origin: 'refresh' })
   return 'reloaded'
 }

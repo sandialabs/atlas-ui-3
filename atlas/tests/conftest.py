@@ -401,6 +401,9 @@ _SINGLETON_GLOBALS = (
     ("atlas.core.compliance", "_compliance_manager"),
     ("atlas.application.chat.approval_manager", "_approval_manager"),
     ("atlas.application.chat.elicitation_manager", "_elicitation_manager"),
+    ("atlas.application.chat.runs.coordination", "_coordinator"),
+    ("atlas.application.chat.runs.admission", "_heartbeat"),
+    ("atlas.application.chat.runs.admission", "_admission_closed"),
     ("atlas.modules.file_storage.content_extractor", "_extractor_instance"),
     ("atlas.routes.telemetry_routes", "_reader_override"),
 )

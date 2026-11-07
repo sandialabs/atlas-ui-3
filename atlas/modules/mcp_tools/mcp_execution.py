@@ -242,6 +242,14 @@ def _client():
     return client
 
 
+async def _ensure_current_run_may_act() -> None:
+    """Fencing (#1128) right before each request to the server: client and
+    session setup await, and the run's lease may lapse meanwhile."""
+    from atlas.application.chat.runs.leases import ensure_current_run_may_act
+
+    await ensure_current_run_may_act()
+
+
 class ExecutionMixin:
     """Tool/prompt execution, task-mode polling, and result assembly."""
 
@@ -716,6 +724,7 @@ class ExecutionMixin:
                 # Fallback: no conversation context, use per-call session
                 # Can't use task mode without a persistent session
                 async with client:
+                    await _ensure_current_run_may_act()  # connecting awaited
                     result = await asyncio.wait_for(
                         client.call_tool(tool_name, arguments, **kwargs),
                         timeout=call_timeout,
@@ -734,6 +743,7 @@ class ExecutionMixin:
             tool_task = None
             if use_tasks:
                 try:
+                    await _ensure_current_run_may_act()  # session acquire awaited
                     tool_task = await active_client.call_tool(tool_name, arguments, task=True, **kwargs)
                 except Exception as task_exc:
                     if _is_task_forbidden_error(task_exc):
@@ -820,6 +830,7 @@ class ExecutionMixin:
                         raise
 
             if not use_tasks:
+                await _ensure_current_run_may_act()
                 result = await asyncio.wait_for(
                     active_client.call_tool(tool_name, arguments, **kwargs),
                     timeout=call_timeout,
@@ -1185,6 +1196,12 @@ class ExecutionMixin:
                 except Exception:
                     logger.debug("Progress handler forwarding failed", exc_info=True)
 
+            # Fencing (#1128), at the dispatch boundary: authorization above
+            # awaited, and the run's lease may have lapsed meanwhile. Raises
+            # CancelledError for a run this replica no longer owns.
+            from atlas.application.chat.runs.leases import ensure_current_run_may_act
+
+            await ensure_current_run_may_act()
             if update_cb is not None:
                 async with self._use_log_callback(_tool_log_callback):
                     async with self._use_elicitation_context(server_name, tool_call, update_cb, user_email or ""):

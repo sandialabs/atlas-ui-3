@@ -27,8 +27,8 @@ import { parseCompactCommand } from '../hooks/chat/useContextCompaction'
 import AgentRunStatus from './AgentRunStatus'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
-import { computeMessageChangeScroll } from '../utils/scrollDecision'
-import { currentTurnIsSleeping } from '../utils/executionState'
+import { followAfterScroll, NEAR_BOTTOM_PX } from '../utils/scrollDecision'
+import { currentTurnHasActiveRow, currentTurnIsSleeping } from '../utils/executionState'
 
 const DEFAULT_MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024
 
@@ -63,9 +63,9 @@ const ChatArea = () => {
   const [composerFocused, setComposerFocused] = useState(false)
   const textareaRef = useRef(null)
   const messagesRef = useRef(null)
-  const endRef = useRef(null)
-  const userScrolledRef = useRef(false)
-  const prevMessageCountRef = useRef(0)
+  const followBottomRef = useRef(true)
+  const scrollGeometryRef = useRef(null)
+  const scrollIntentRef = useRef(null)
   const fileInputRef = useRef(null)
   const dragCounterRef = useRef(0)
   const composerRef = useRef(null)
@@ -73,6 +73,7 @@ const ChatArea = () => {
   
   const {
     messages,
+    conversationNavigationVersion,
     isWelcomeVisible,
     isThinking,
     isAgentRunning,
@@ -144,6 +145,11 @@ const ChatArea = () => {
   // Pair each message with its rewind ordinal once per messages change, rather
   // than re-running the two-pass scan on every render (incl. each streamed token).
   const messagesWithOrdinals = useMemo(() => withUserOrdinals(messages), [messages])
+  // The marker-only replay seed (a run reopened between segments) is internal
+  // reconciliation state. While a tool row or approval card of the current
+  // turn already shows the run is alive, drawing it as well would stack a
+  // second status indicator under that row, so it is not rendered.
+  const hideReplaySeed = useMemo(() => currentTurnHasActiveRow(messages, settings), [messages, settings])
 
   // Fine-tune capture "correct this turn" (issue #622). Only fetch consent and
   // wire the affordance when the feature flag is on; the per-message control is
@@ -180,12 +186,17 @@ const ChatArea = () => {
 
   const handleSubmitCorrection = useCallback((chosenTool, note) => {
     if (!pendingCorrection) return
-    sendCaptureCorrection(
+    const sent = sendCaptureCorrection(
       pendingCorrection.userIndex,
       pendingCorrection.content,
       chosenTool,
       { note, rejected: pendingCorrection.rejected }
     )
+    if (sent) {
+      followBottomRef.current = true
+      scrollGeometryRef.current = null
+      scrollIntentRef.current = null
+    }
     setPendingCorrection(null)
   }, [pendingCorrection, sendCaptureCorrection])
 
@@ -256,81 +267,194 @@ const ChatArea = () => {
     return () => clearTimeout(timeoutId)
   }, [isMobile])
 
-  // Track if user manually scrolled up (to disable auto-scroll until they return near bottom)
+  // The last observed geometry lets us distinguish a resize/scroll-anchor
+  // adjustment from an ordinary scroll, including a pending scroll event.
+  const rememberScrollGeometry = useCallback((el) => {
+    scrollGeometryRef.current = {
+      top: el.scrollTop, height: el.scrollHeight, viewport: el.clientHeight,
+    }
+  }, [])
+
+  // Follow state is changed by scroll direction, not by message arrival. Even a
+  // small upward movement pauses following; scrolling down near the end resumes it.
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
+    rememberScrollGeometry(el)
+    let intentTimer
+    let touchY
+    let scrollbarDrag
+    const noteIntent = (direction) => {
+      scrollIntentRef.current = direction
+      if (direction === 'up' && el.scrollTop > 0) followBottomRef.current = false
+      // At the bottom a downward gesture may produce no scroll event at all.
+      if (direction === 'down' && el.scrollHeight - el.clientHeight - el.scrollTop <= NEAR_BOTTOM_PX) {
+        followBottomRef.current = true
+      }
+      clearTimeout(intentTimer)
+      intentTimer = setTimeout(() => { scrollIntentRef.current = null }, 1000)
+    }
     const handleScroll = () => {
-      const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
-      userScrolledRef.current = distanceFromBottom > 140 // threshold
+      const previous = scrollGeometryRef.current
+      const resized = previous && (el.scrollHeight !== previous.height || el.clientHeight !== previous.viewport)
+      const movement = previous ? el.scrollTop - previous.top : 0
+      const intended = (movement < -0.5 && scrollIntentRef.current === 'up') ||
+        (movement > 0.5 && scrollIntentRef.current === 'down')
+      if (previous && (!resized || intended)) {
+        followBottomRef.current = followAfterScroll(followBottomRef.current, previous.top, el)
+      }
+      if (intended) scrollIntentRef.current = null
+      rememberScrollGeometry(el)
+    }
+    // Nested panels get first use of wheel/touch scrolling. Only navigation
+    // past their boundary can move the conversation and change its follow state.
+    const nestedCanScroll = (target, deltaY) => {
+      for (; target && target !== el; target = target.parentElement) {
+        const overflow = window.getComputedStyle(target).overflowY
+        if (/(auto|scroll)/.test(overflow) && target.scrollHeight > target.clientHeight &&
+            (deltaY < 0 ? target.scrollTop > 0 : target.scrollTop + target.clientHeight < target.scrollHeight - 1)) return true
+      }
+      return false
+    }
+    const handleWheel = (event) => {
+      if (event.deltaY && !nestedCanScroll(event.target, event.deltaY)) noteIntent(event.deltaY < 0 ? 'up' : 'down')
+    }
+    const handleTouchStart = (event) => { touchY = event.touches[0]?.clientY }
+    const handleTouchMove = (event) => {
+      const y = event.touches[0]?.clientY
+      if (y != null && touchY != null && y !== touchY && !nestedCanScroll(event.target, touchY - y)) {
+        noteIntent(y > touchY ? 'up' : 'down')
+      }
+      touchY = y
+    }
+    const handleKeyDown = (event) => {
+      if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return
+      const up = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)
+      const down = ['ArrowDown', 'PageDown', 'End'].includes(event.key) || (event.key === ' ' && !event.shiftKey)
+      if ((up || down) && !nestedCanScroll(event.target, up ? -1 : 1)) noteIntent(up ? 'up' : 'down')
+    }
+    const handlePointerDown = (event) => {
+      const rect = el.getBoundingClientRect()
+      if (event.target === el && event.button === 0 &&
+          (event.clientX >= rect.right - 20 || event.clientX <= rect.left + 20)) {
+        scrollbarDrag = { id: event.pointerId, y: event.clientY }
+      }
+    }
+    const handlePointerMove = (event) => {
+      if (!scrollbarDrag || event.pointerId !== scrollbarDrag.id) return
+      if (event.clientY !== scrollbarDrag.y) noteIntent(event.clientY < scrollbarDrag.y ? 'up' : 'down')
+      scrollbarDrag.y = event.clientY
+    }
+    const handlePointerEnd = (event) => {
+      if (scrollbarDrag?.id === event.pointerId) scrollbarDrag = null
     }
     el.addEventListener('scroll', handleScroll, { passive: true })
-    return () => el.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  // Function to perform scroll to bottom respecting user scroll state.
-  // Use smooth=false during streaming to avoid animation fighting user scroll.
-  const scrollToBottom = useCallback((force = false, smooth = true) => {
-    const el = messagesRef.current
-    if (!el) return
-    if (userScrolledRef.current && !force) return
-    if (endRef.current && typeof endRef.current.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'end' })
-    } else {
-      el.scrollTop = el.scrollHeight
+    el.addEventListener('wheel', handleWheel, { passive: true })
+    el.addEventListener('touchstart', handleTouchStart, { passive: true })
+    el.addEventListener('touchmove', handleTouchMove, { passive: true })
+    el.addEventListener('keydown', handleKeyDown)
+    el.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerEnd)
+    window.addEventListener('pointercancel', handlePointerEnd)
+    return () => {
+      el.removeEventListener('scroll', handleScroll)
+      el.removeEventListener('wheel', handleWheel)
+      el.removeEventListener('touchstart', handleTouchStart)
+      el.removeEventListener('touchmove', handleTouchMove)
+      el.removeEventListener('keydown', handleKeyDown)
+      el.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerEnd)
+      window.removeEventListener('pointercancel', handlePointerEnd)
+      clearTimeout(intentTimer)
     }
-  }, [])
+  }, [rememberScrollGeometry])
 
-  // Scroll when messages list changes (initial render or new message)
-  // Only force-scroll when a genuinely new message appears (count increases).
-  // During streaming token updates (same message, content growing), respect
-  // the user's scroll position so they can read earlier output (#441).
-  useEffect(() => {
-    // The rule itself lives in utils/scrollDecision, so the tests exercise
-    // the expression this component actually ships rather than a copy of it.
-    const { force, isStreamingUpdate } = computeMessageChangeScroll(messages, prevMessageCountRef.current)
-    prevMessageCountRef.current = messages.length
-    // During streaming token updates, only scroll if user hasn't scrolled away.
-    // Use instant scroll (no smooth animation) so users can break out easily.
-    if (isStreamingUpdate) {
-      requestAnimationFrame(() => scrollToBottom(false, false))
+  // Write only to the conversation viewport, instantly. If a scroll has moved
+  // the viewport but its event is still queued, do not overwrite that movement.
+  const scrollToBottom = useCallback(() => {
+    const el = messagesRef.current
+    if (!el || !followBottomRef.current) return
+    const previous = scrollGeometryRef.current
+    if (previous && el.scrollTop < previous.top - 0.5 &&
+        el.scrollHeight === previous.height && el.clientHeight === previous.viewport) {
+      followBottomRef.current = false
+      rememberScrollGeometry(el)
       return
     }
-    requestAnimationFrame(() => {
-      scrollToBottom(force)
-      setTimeout(() => scrollToBottom(force), 80)
-      setTimeout(() => scrollToBottom(force), 250)
-    })
+    el.scrollTop = el.scrollHeight
+    rememberScrollGeometry(el)
+  }, [rememberScrollGeometry])
+
+  const resumeFollowing = useCallback(() => {
+    followBottomRef.current = true
+    scrollGeometryRef.current = null
+    scrollIntentRef.current = null
+    scrollToBottom()
+  }, [scrollToBottom])
+
+  const previousNavigationRef = useRef(conversationNavigationVersion)
+  useEffect(() => {
+    if (previousNavigationRef.current === conversationNavigationVersion) return
+    previousNavigationRef.current = conversationNavigationVersion
+    resumeFollowing()
+  }, [conversationNavigationVersion, resumeFollowing])
+
+  const handleRewind = useCallback((...args) => {
+    const sent = rewindAndResubmit(...args)
+    if (sent) resumeFollowing()
+    return sent
+  }, [rewindAndResubmit, resumeFollowing])
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(scrollToBottom)
+    return () => cancelAnimationFrame(frame)
   }, [messages, isThinking, isSynthesizing, scrollToBottom])
 
-  // Opening the mobile keyboard shrinks the shell (see visualViewportHeight),
-  // but scrollTop is preserved, which pushes the newest message below the fold.
-  // Re-anchor on a shrink unless the user deliberately scrolled up.
+  // Re-anchor on a mobile keyboard shrink only while following.
   useEffect(() => {
     const viewport = window.visualViewport
     if (!viewport) return
     let lastHeight = viewport.height
+    let frame
     const handleViewportResize = () => {
       const height = viewport.height
       const shrank = height < lastHeight - 1
       lastHeight = height
-      if (shrank) requestAnimationFrame(() => scrollToBottom(false, false))
+      if (shrank) {
+        cancelAnimationFrame(frame)
+        frame = requestAnimationFrame(scrollToBottom)
+      }
     }
     viewport.addEventListener('resize', handleViewportResize)
-    return () => viewport.removeEventListener('resize', handleViewportResize)
+    return () => {
+      viewport.removeEventListener('resize', handleViewportResize)
+      cancelAnimationFrame(frame)
+    }
   }, [scrollToBottom])
 
-  // Observe DOM mutations inside messages container (handles content expansion post-render).
-  // Never force-scroll from mutations — if the user scrolled away to read, respect that.
-  // Only the message-change effect above should force-scroll (on genuinely new messages).
+  // Markdown changes and late content (such as images) can resize the transcript
+  // without a message update. Neither may override a reader's scroll position.
   useEffect(() => {
     const el = messagesRef.current
     if (!el) return
-    const observer = new MutationObserver(() => {
-      scrollToBottom(false)
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scrollToBottom)
+    resizeObserver?.observe(el)
+    for (const child of el.children) resizeObserver?.observe(child)
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.target !== el) continue
+        for (const node of record.removedNodes) if (node.nodeType === 1) resizeObserver?.unobserve(node)
+        for (const node of record.addedNodes) if (node.nodeType === 1) resizeObserver?.observe(node)
+      }
+      scrollToBottom()
     })
     observer.observe(el, { childList: true, subtree: true })
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      resizeObserver?.disconnect()
+    }
   }, [scrollToBottom])
 
   const handleSubmit = async (e) => {
@@ -371,6 +495,7 @@ const ChatArea = () => {
       // Keep the user's text if the send was rejected (e.g. disconnected) so
       // they don't lose their message.
       if (!sendChatMessage(message, allFiles)) return
+      resumeFollowing()
       setInputValue('')
 
       // Reset textarea height through the shared helper so the send path
@@ -380,6 +505,7 @@ const ChatArea = () => {
       console.error('Error in handleSubmit:', error)
       // Still try to send the message without file processing
       if (!sendChatMessage(message, uploadedFiles)) return
+      resumeFollowing()
       setInputValue('')
 
       // Reset textarea height through the shared helper so the send path
@@ -949,12 +1075,12 @@ const ChatArea = () => {
             agent-loop answers that never enter ConversationHistory). The same
             implementation drives the truncation path so the two cannot drift.
             See utils/userMessageOrdinal and issue #142. */}
-        {messagesWithOrdinals.map(({ message, userIndex }, index) => (
+        {messagesWithOrdinals.map(({ message, userIndex }, index) => (message._seed && hideReplaySeed) ? null : (
           <Message
             key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
             message={message}
             userIndex={userIndex}
-            onRewind={userIndex !== null ? rewindAndResubmit : null}
+            onRewind={userIndex !== null ? handleRewind : null}
             onCorrect={correctionHandlers[index] || null}
           />
         ))}
@@ -1024,10 +1150,8 @@ const ChatArea = () => {
           activity={currentTurnIsSleeping(messages) ? 'sleeping' : undefined}
           appName={appName}
         />
-        {/* Sentinel for auto-scroll. On phones index.css gives it height so
-            scrolling to the end leaves the last message clear of the floating
-            feedback button (container padding is ignored by scrollIntoView). */}
-        <div ref={endRef} className="chat-scroll-sentinel" />
+        {/* On phones this space keeps the last message clear of the floating feedback button. */}
+        <div className="chat-scroll-sentinel" />
       </main>
 
       {/* Follow-up suggestion buttons */}
@@ -1038,8 +1162,10 @@ const ChatArea = () => {
               <button
                 key={`${idx}-${question.substring(0, 20)}`}
                 onClick={() => {
-                  setFollowUpSuggestions([])
-                  sendChatMessage(question)
+                  if (sendChatMessage(question)) {
+                    resumeFollowing()
+                    setFollowUpSuggestions([])
+                  }
                 }}
                 className="text-sm px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-600 hover:border-gray-500 rounded-full transition-colors whitespace-nowrap flex-shrink-0"
               >

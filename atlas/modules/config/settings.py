@@ -608,6 +608,18 @@ class AppSettings(BaseSettings):
         validation_alias="REDIS_TLS_CA_CERTS",
     )
 
+    # Run leases (issue #1128). With Redis configured, every run's
+    # cluster-wide claim is a lease the owning replica renews every third of
+    # this; when it lapses another replica marks the run interrupted (never
+    # replayed) and the old owner is fenced out of shared state.
+    run_lease_seconds: float = Field(
+        default=30.0,
+        ge=3,
+        le=600,
+        description="Seconds a run's claim (ownership lease) lasts without renewal (redis only)",
+        validation_alias="RUN_LEASE_SECONDS",
+    )
+
     # MCP Token Storage settings
     mcp_token_storage_dir: Optional[str] = Field(
         default=None,

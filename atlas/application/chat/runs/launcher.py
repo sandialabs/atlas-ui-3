@@ -37,11 +37,16 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from atlas.application.chat.runs.context import set_current_run, tag_event
-from atlas.application.chat.runs.registry import (
+from atlas.application.chat.runs.admission import admit_run
+from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
     RunRegistryError,
+)
+from atlas.application.chat.runs.context import set_current_run, tag_event
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.leases import ensure_current_run_may_act
+from atlas.application.chat.runs.registry import (
     RunStatus,
     get_run_registry,
 )
@@ -880,15 +885,22 @@ async def _start_child_run(
     # Admission is check-then-insert, and it must be atomic: several
     # ``atlas_launch`` calls in one agent step run concurrently, and a check
     # separated from the insert by an await would let all of them pass a cap of
-    # one. Everything from here to ``start`` is synchronous, which on a single
-    # event loop is exactly that atomicity -- so no await may be introduced
-    # between these two lines.
-    if not top_level:
-        _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
+    # one. ``admit_run`` runs the precheck and the local insert synchronously,
+    # after the cluster-wide claim (issue #1128), and releases the claim if
+    # either refuses.
+    def _precheck() -> None:
+        if not top_level:
+            _check_limits(registry, app_settings, parent_run_id, parent_depth, user_email)
+
+    # Fencing (#1128): resolving tools, sources and admission above awaited;
+    # a parent run this replica no longer owns must not admit a child.
+    await ensure_current_run_may_act()
     try:
-        record = registry.start(
+        record = await admit_run(
             conversation_id=conversation_id,
             user_email=user_email,
+            app_settings=app_settings,
+            precheck=_precheck,
             parent_run_id=parent_run_id,
             parent_conversation_id=getattr(run_context, "conversation_id", None),
             depth=parent_depth + 1,
@@ -898,6 +910,8 @@ async def _start_child_run(
         raise LaunchRefused(str(e), code="concurrency_limit") from e
     except ConversationBusyError as e:
         raise LaunchRefused(str(e), code="conversation_busy") from e
+    except RunCoordinationUnavailableError as e:
+        raise LaunchRefused(str(e), code="unavailable") from e
     except RunRegistryError as e:  # pragma: no cover - defensive
         raise LaunchRefused(f"The sub-conversation could not be started: {e}") from e
 

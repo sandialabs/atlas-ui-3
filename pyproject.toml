@@ -92,7 +92,7 @@ mcp-demos = [
 ]
 dev = [
     "alembic>=1.18.5,<2.0.0",
-    "fakeredis>=2.26.0,<3.0.0",
+    "fakeredis[lua]>=2.26.0,<3.0.0",
     "podman-compose>=1.0.0,<2.0.0",
     "pytest>=9.1.1,<10.0.0",
     "pytest-asyncio>=1.4.0,<2.0.0",
@@ -138,7 +138,7 @@ mcp-demos = [
 dev = [
     {include-group = "mcp-demos"},
     "alembic>=1.18.5,<2.0.0",
-    "fakeredis>=2.26.0,<3.0.0",
+    "fakeredis[lua]>=2.26.0,<3.0.0",
     "podman-compose>=1.0.0,<2.0.0",
     "pytest>=9.1.1,<10.0.0",
     "pytest-asyncio>=1.4.0,<2.0.0",

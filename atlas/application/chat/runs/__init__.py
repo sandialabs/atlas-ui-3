@@ -1,11 +1,13 @@
 """Conversation-scoped run tracking (issue #884)."""
 
-from atlas.application.chat.runs.registry import (
+from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
+    RunRegistryError,
+)
+from atlas.application.chat.runs.registry import (
     RunRecord,
     RunRegistry,
-    RunRegistryError,
     RunStatus,
     get_run_registry,
     reset_run_registry,

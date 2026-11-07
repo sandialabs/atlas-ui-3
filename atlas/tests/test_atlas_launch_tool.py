@@ -2376,3 +2376,31 @@ async def test_concurrent_follow_ups_to_one_child_admit_exactly_one():
     assert len(live) == 1
     for service in factory.services:
         service.release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_fenced_parent_cannot_admit_a_child():
+    """#1128: the parent's lease is re-checked right before the child is
+    admitted, after the awaited tool and source resolution."""
+    from atlas.application.chat.runs.leases import RunFencedError, set_lease_guard
+
+    class _FencedGuard:
+        async def ensure_may_act(self, run_id):
+            raise RunFencedError(run_id)
+
+    factory = _Factory(_ChatService)
+    registry = _install_registry()
+    parent = registry.start(conversation_id="conv-parent", user_email="user@example.com")
+    registry.set_status(parent.run_id, RunStatus.RUNNING)
+    set_current_run(parent.run_id, parent.conversation_id)
+    set_lease_guard(_FencedGuard())
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await launch_sub_conversation(
+                {"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+                {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)},
+                factory=factory,
+            )
+    finally:
+        set_lease_guard(None)
+    assert [r.run_id for r in registry.all_records()] == [parent.run_id]

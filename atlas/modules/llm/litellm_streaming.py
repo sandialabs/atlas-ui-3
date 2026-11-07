@@ -6,6 +6,7 @@ These methods are mixed into LiteLLMCaller via LiteLLMStreamingMixin.
 
 import asyncio
 import logging
+from contextlib import aclosing
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
@@ -16,7 +17,7 @@ from atlas.application.chat.capture.capture_context import record_llm_call
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.metrics_logger import log_metric
 from atlas.core.telemetry import set_attrs, start_span
-from atlas.domain.errors import LLMEmptyStreamError, LLMMalformedToolCallError
+from atlas.domain.errors import LLMBadRequestError, LLMEmptyStreamError, LLMMalformedToolCallError
 
 from .models import LLMResponse, split_provider
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
@@ -24,7 +25,7 @@ from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
     tool_call_function_field,
 )
-from .usage_tracking import record_response_usage
+from .usage_tracking import StreamUsageAccumulator
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,73 @@ class LiteLLMStreamingMixin:
       - _rag_service attribute
     """
 
+    def _stream_usage_kwargs(self, model_name: str, model_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Request usage only when the selected model explicitly opts in.
+
+        Static and gateway-discovered models share the same resolved
+        ModelConfig; gateway defaults and allowlist overrides are honored.
+        The provider must support OpenAI-compatible stream_options.
+        """
+        # The caller already resolves/authorizes the model. Avoid making this
+        # optional request flag a second required registry lookup: standalone
+        # callers and test doubles may supply resolved call kwargs directly.
+        registry = getattr(self, "llm_config", None)
+        get_model = getattr(registry, "get_model", None)
+        if callable(get_model):
+            config = get_model(model_name)
+        else:
+            models = getattr(registry, "models", {})
+            config = models.get(model_name) if isinstance(models, dict) else None
+        if not getattr(config, "request_stream_usage", False):
+            return model_kwargs
+        return {**model_kwargs, "stream_options": {"include_usage": True}}
+
+    @staticmethod
+    def _check_stream_usage_rejection(exc: Exception, model_name: str, requested: bool) -> None:
+        """Surface provider rejections of the optional stream usage parameter.
+
+        Attribute a rejection to the flag only when the provider actually
+        named the parameter. Otherwise preserve normal error classification.
+        """
+        if not requested:
+            return
+        message = str(exc).lower()
+        if "stream_options" in message or "include_usage" in message:
+            logger.warning(
+                "Provider rejected request_stream_usage (stream_options.include_usage) for model %s",
+                # This call-site CR/LF removal is intentional: the shared
+                # sanitizer already removes control characters, but CodeQL's
+                # log-injection analysis does not model that helper here.
+                sanitize_for_logging(model_name).replace("\r", "").replace("\n", ""),
+            )
+            raise LLMBadRequestError(
+                "The model provider rejected request_stream_usage "
+                "(stream_options.include_usage). Disable request_stream_usage "
+                "for this model or use a compatible endpoint."
+            ) from exc
+
+    @staticmethod
+    def _warn_missing_stream_usage(
+        model_name: str,
+        requested: bool,
+        exhausted: bool,
+        usage: StreamUsageAccumulator,
+    ) -> None:
+        """Report a completed opted-in stream with no usable token counts."""
+        if (
+            requested and exhausted
+            and usage.prompt_tokens is None
+            and usage.completion_tokens is None
+        ):
+            logger.warning(
+                "request_stream_usage is enabled for model %s, but the stream returned "
+                "no usage metadata; verify provider support for stream_options.include_usage",
+                # This call-site CR/LF removal is intentional: the shared
+                # sanitizer already removes control characters, but CodeQL's
+                # log-injection analysis does not model that helper here.
+                sanitize_for_logging(model_name).replace("\r", "").replace("\n", ""),
+            )
+
     async def stream_plain(
         self,
         model_name: str,
@@ -116,6 +184,9 @@ class LiteLLMStreamingMixin:
             if max_tokens is not None:
                 model_kwargs["max_tokens"] = max_tokens
 
+        model_kwargs = self._stream_usage_kwargs(model_name, model_kwargs)
+        stream_options = model_kwargs.get("stream_options")
+        requested_usage = isinstance(stream_options, dict) and stream_options.get("include_usage") is True
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
@@ -148,6 +219,8 @@ class LiteLLMStreamingMixin:
                     response = None
                     total_chunks_seen = 0
                     attempt_start_ns = time.monotonic_ns()
+                    usage = StreamUsageAccumulator()
+                    stream_exhausted = False
                     try:
                         response = await acompletion(
                             model=litellm_model,
@@ -158,7 +231,7 @@ class LiteLLMStreamingMixin:
 
                         async for chunk in response:
                             total_chunks_seen += 1
-                            record_response_usage(chunk)
+                            usage.observe(getattr(chunk, "usage", None))
                             delta = chunk.choices[0].delta if chunk.choices else None
                             if total_chunks_seen <= 3:
                                 logger.debug(
@@ -176,6 +249,7 @@ class LiteLLMStreamingMixin:
                                 if chunk_count % 50 == 0:
                                     await asyncio.sleep(0)
 
+                        stream_exhausted = True
                         _check_empty_stream(chunk_count, model_name, attempt_start_ns)
                         log_metric("llm_call", user_email, model=model_name, message_count=len(messages))
                         set_attrs(span, {
@@ -193,6 +267,7 @@ class LiteLLMStreamingMixin:
                         break
 
                     except Exception as exc:
+                        self._check_stream_usage_rejection(exc, model_name, requested_usage)
                         if response is not None:
                             await _close_stream_quietly(response)
                         if (
@@ -217,6 +292,11 @@ class LiteLLMStreamingMixin:
                         attempt += 1
                         waited += delay
                         await asyncio.sleep(delay)
+                    finally:
+                        # Includes empty responses, stream failures, retries,
+                        # and async-generator cancellation/close.
+                        self._warn_missing_stream_usage(model_name, requested_usage, stream_exhausted, usage)
+                        usage.record()
 
             except Exception as exc:
                 set_attrs(span, {
@@ -363,8 +443,10 @@ class LiteLLMStreamingMixin:
         Yields a final LLMResponse with accumulated tool_calls at the end.
         """
         if not tools_schema:
-            async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
-                yield chunk
+            stream = self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email)
+            async with aclosing(stream):
+                async for chunk in stream:
+                    yield chunk
             return
 
         litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
@@ -377,6 +459,9 @@ class LiteLLMStreamingMixin:
             )
             litellm_model, model_kwargs = await self._resolve_call_target(model_name, temperature, user_email)
 
+        model_kwargs = self._stream_usage_kwargs(model_name, model_kwargs)
+        stream_options = model_kwargs.get("stream_options")
+        requested_usage = isinstance(stream_options, dict) and stream_options.get("include_usage") is True
         provider, model_suffix = split_provider(litellm_model)
         span_attrs = {
             "model": litellm_model,
@@ -417,6 +502,8 @@ class LiteLLMStreamingMixin:
                 while True:
                     response = None
                     attempt_start_ns = time.monotonic_ns()
+                    usage = StreamUsageAccumulator()
+                    stream_exhausted = False
                     try:
                         response = await acompletion(
                             model=litellm_model,
@@ -428,8 +515,7 @@ class LiteLLMStreamingMixin:
                         )
 
                         async for chunk in response:
-                            # Some providers report usage on the final chunk.
-                            record_response_usage(chunk)
+                            usage.observe(getattr(chunk, "usage", None))
                             choice = chunk.choices[0] if chunk.choices else None
                             if choice is not None:
                                 # Providers send the reason on the final chunk; keep the
@@ -469,6 +555,7 @@ class LiteLLMStreamingMixin:
                                         if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
                                             entry["function"]["arguments"] += tc_delta.function.arguments
 
+                        stream_exhausted = True
                         _check_empty_stream(
                             chunk_count, model_name, attempt_start_ns,
                             has_tool_calls=bool(accumulated_tool_calls),
@@ -476,6 +563,7 @@ class LiteLLMStreamingMixin:
                         break
 
                     except Exception as exc:
+                        self._check_stream_usage_rejection(exc, model_name, requested_usage)
                         if response is not None:
                             await _close_stream_quietly(response)
                         if (
@@ -507,6 +595,9 @@ class LiteLLMStreamingMixin:
                         attempt += 1
                         waited += delay
                         await asyncio.sleep(delay)
+                    finally:
+                        self._warn_missing_stream_usage(model_name, requested_usage, stream_exhausted, usage)
+                        usage.record()
 
                 # Build final tool_calls list using litellm's own response type
                 # rather than SimpleNamespace. The objects are appended verbatim
@@ -611,8 +702,10 @@ class LiteLLMStreamingMixin:
         Runs RAG query (non-streaming), then streams the LLM call.
         """
         if not data_sources:
-            async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
-                yield chunk
+            stream = self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email)
+            async with aclosing(stream):
+                async for chunk in stream:
+                    yield chunk
             return
 
         if rag_service is None:
@@ -649,11 +742,15 @@ class LiteLLMStreamingMixin:
                         ),
                     },
                 )
-                async for chunk in self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email):
-                    yield chunk
+                stream = self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email)
+                async with aclosing(stream):
+                    async for chunk in stream:
+                        yield chunk
                 return
-            async for chunk in self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email):
-                yield chunk
+            stream = self.stream_plain(model_name, messages, temperature=temperature, user_email=user_email)
+            async with aclosing(stream):
+                async for chunk in stream:
+                    yield chunk
             return
 
         # Single source with direct completion
@@ -688,8 +785,10 @@ class LiteLLMStreamingMixin:
             ),
         })
 
-        async for chunk in self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email):
-            yield chunk
+        stream = self.stream_plain(model_name, messages_with_rag, temperature=temperature, user_email=user_email)
+        async with aclosing(stream):
+            async for chunk in stream:
+                yield chunk
 
         # Yield the references section as a final chunk
         if rag_metadata:

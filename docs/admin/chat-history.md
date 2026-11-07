@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-11-04
+Last updated: 2026-11-06
 
 ## Overview
 
@@ -424,8 +424,8 @@ Each `tool_call` row is stored with its detail in the message `metadata_json`
 column (tool name, server, arguments, result, status) and is **excluded from the
 LLM context** on a subsequent turn — these rows exist purely to re-render the
 transcript and are never replayed to the model. They are also included in the
-plain-text chat export. The canvas tool is intentionally not recorded
-as a transcript row (it renders into the canvas panel). This applies to both
+plain-text chat export. The canvas tool is still not a transcript row (it
+renders into the canvas panel; see below). This applies to both
 regular (tools-mode) chat and agent-mode runs: the agentic loop records the
 same `tool_start`/`tool_complete`/`tool_error` events its tool calls stream to
 the UI and flushes them into history after each agent step (always before the
@@ -440,6 +440,44 @@ the persisted arguments/result (for example a base64 file upload sent as a tool
 input, or a very large tool output) are truncated with a `…[truncated N chars]`
 marker before being written to `metadata_json`. The live UI event the user sees
 is unaffected — only the stored copy is capped.
+
+### Canvas documents
+
+The canvas tool writes into the canvas panel rather than the transcript, and
+the chat view does not show a tool-call bubble for it. The text itself is
+saved with the conversation as a display-only `canvas_artifact` row. That
+row stores the exact document: the large tool input/output cap above does
+not apply. Reloading or reopening the conversation restores the newest
+canvas into the panel.
+
+The row is not replayed to the model as its own turn. The exact text is
+folded into the later request, on the assistant reply that followed the
+write, so a follow-up can quote the original instead of rewriting it. When
+context compaction covers the row, older canvas writes may be summarized
+with the turns they belong to; the newest canvas stays in the request
+because the panel still shows it. The panel restores the exact newest text
+from the stored row, including after compaction.
+
+If the user edits the canvas text before the tool runs, the stored document
+is that edited text. The same flush that records other tools writes the
+canvas row, before the closing assistant message, in both tools-mode chat
+and agent-mode runs. A
+turn that is stopped before that flush has not saved the in-progress canvas
+yet, matching other tools. When several writes finish in a different order
+from the order they started, the saved order follows the order the panel
+showed them. A tracked run stamps each write with its invocation id, so a
+provider tool-call id reused on a later step stays a separate document.
+
+Only text that reached the panel is stored. A canvas call that is denied,
+blocked by a hook, or fails leaves no row, so it cannot replace the
+document the user saw. Canvas updates that other tools send while they run
+are shown in the panel but are not saved as canvas documents. A reconnect
+or a joined tab puts a stored document back only when this tab has not
+already shown it, so a file view the user switched to stays on screen.
+
+A browser-local save does not write the conversation on the server. The live
+canvas frames also append a hidden `canvas_artifact` message, and that
+message is what IndexedDB reloads into the panel.
 
 ## User Isolation
 

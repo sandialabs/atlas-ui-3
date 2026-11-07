@@ -55,8 +55,21 @@ from atlas.application.chat.runs import (
     RunStatus,
     get_run_registry,
 )
+from atlas.application.chat.runs.admission import (
+    admit_run,
+    apply_run_limit,
+    shut_down_live_runs,
+    stop_lease_heartbeat,
+)
 from atlas.application.chat.runs.context import set_current_run, tag_event
-from atlas.application.chat.runs.eligibility import turn_is_eligible_for_background_run
+from atlas.application.chat.runs.coordination import (
+    RunCoordinationUnavailableError,
+    drain_pending_releases,
+)
+from atlas.application.chat.runs.eligibility import (
+    turn_is_eligible_for_background_run,
+    turn_is_off_record,
+)
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.auth_mode import validate_auth_modes
@@ -1430,11 +1443,26 @@ async def lifespan(app: FastAPI):
     # sweeper is the wall-clock backstop, and it also reaps run records that
     # have aged past their retention window.
     run_reaper_task = asyncio.create_task(_run_limit_sweeper(config))
+    # Issue #1128: the cap applies from the first request, whatever transport
+    # it arrives on (admission re-applies it, so admin changes still land).
+    apply_run_limit(config.app_settings)
 
     yield
 
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
+    # Runs still live would die with this process anyway: refuse new ones,
+    # stop these, and only then free their conversations and slots, so no
+    # other replica admits a run while one of ours is still executing. The
+    # heartbeat keeps renewing until then.
+    await shut_down_live_runs()
+    await stop_lease_heartbeat()
+    # Releases scheduled by runs that just ended must reach Redis before the
+    # pool closes, or their slots stay held until the lease expires.
+    try:
+        await asyncio.wait_for(drain_pending_releases(), timeout=5)
+    except Exception:  # pragma: no cover - shutdown must not raise
+        logger.warning("Some run claim releases did not complete before shutdown")
     # Stop auto-reconnect task
     await mcp_manager.stop_auto_reconnect()
     # Cleanup MCP clients
@@ -1960,9 +1988,6 @@ async def websocket_endpoint(websocket: WebSocket):
     # listener below, which is what lets any open tab render the
     # "still running" indicator in conversation history.
     run_registry = get_run_registry()
-    run_registry.set_max_concurrent_runs_per_user(
-        config_manager.app_settings.max_concurrent_runs_per_user
-    )
     connection_run_ids: set = set()
     # Strong references to in-flight status sends: asyncio only holds weak
     # references to tasks, so without this a status frame can be garbage
@@ -2261,7 +2286,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 run_record = None
                 if turn_is_eligible_for_background_run(
                     chat_history_enabled=config_manager.app_settings.feature_chat_history_enabled,
-                    save_mode=data.get("save_mode"),
+                    save_mode=data.get("save_mode", "server"),
                     incognito=data.get("incognito", False),
                     agent_mode=is_agent_turn,
                     selected_tools=data.get("selected_tools"),
@@ -2289,9 +2314,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json(refusal)
                         continue
                     try:
-                        run_record = run_registry.start(
+                        # One admission path for every transport (#1128):
+                        # applies MAX_CONCURRENT_RUNS_PER_USER and claims the
+                        # conversation and a user slot cluster-wide.
+                        run_record = await admit_run(
                             conversation_id=turn_conversation_id,
                             user_email=user_email,
+                            app_settings=config_manager.app_settings,
                             steering=steering_channel,
                             # Multimodal turns carry a list as `content`; the
                             # title wants the first text part, never a crash
@@ -2316,9 +2345,34 @@ async def websocket_endpoint(websocket: WebSocket):
                             "conversation_id": data.get("conversation_id"),
                         })
                         continue
-                    except RunRegistryError as e:  # pragma: no cover - defensive
-                        logger.warning("Run could not be started: %s", e)
-                        run_record = None
+                    except RunCoordinationUnavailableError as e:
+                        # Fail closed: an untracked turn here would bypass the
+                        # cluster-wide cap for as long as Redis is down.
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "error_type": "run_coordination_unavailable",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
+                    except RunRegistryError as e:
+                        # Any other admission refusal (a future subclass)
+                        # refuses the turn too: running it untracked would
+                        # bypass the cluster-wide cap.
+                        # The details stay in the server log; the client gets
+                        # a fixed message that cannot leak internals.
+                        logger.warning(
+                            "Run could not be started: %s: %s",
+                            type(e).__name__,
+                            sanitize_for_logging(str(e)),
+                        )
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "The run could not be started. Try again in a moment.",
+                            "error_type": "run_not_admitted",
+                            "conversation_id": data.get("conversation_id"),
+                        })
+                        continue
 
                 if run_record is None:
                     # Untracked turn: keep the single-slot behaviour, including
@@ -2330,24 +2384,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     async def turn_update_callback(message):
                         await websocket_update_callback(websocket, message)
                 else:
-                    connection_run_ids.add(run_record.run_id)
                     # The run gets its own session id, so two conversations
                     # executing at once never share one Session/history object.
+                    # Its files are seeded below, inside the admission guard.
                     turn_session_id = run_record.session_id
-                    # Files attached via `attach_file` land on the *connection*
-                    # session's context, which the run's fresh session cannot
-                    # see -- the tool that needs them would report the file as
-                    # missing. Create the run session here (the same path
-                    # handle_chat_message would take lazily) and carry the file
-                    # map across. Copied, not shared, so the run and the
-                    # connection cannot mutate each other's state.
-                    await _seed_run_session_files(
-                        chat_service,
-                        session_id,
-                        turn_session_id,
-                        user_email,
-                        conversation_id=run_record.conversation_id,
-                    )
 
                     async def turn_update_callback(
                         message,
@@ -2418,7 +2458,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             custom_system_prompt=custom_system_prompt,
                             update_callback=turn_update_callback,
                             files=data.get("files"),
-                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
+                            incognito=turn_is_off_record(data),
                             conversation_id=data.get("conversation_id"),
                             rewind_to_user_index=data.get("rewind_to_user_index"),
                             capture_correction=data.get("capture_correction"),
@@ -2648,13 +2688,42 @@ async def websocket_endpoint(websocket: WebSocket):
                             except asyncio.CancelledError:
                                 pass
 
-                # Announce the run before its task can emit anything. The
-                # task's first frames are tagged with the run's conversation
-                # id, and a client that has not yet adopted that id (a new
-                # chat has none) would file them as background activity and
-                # drop them from the transcript it is showing.
-                if run_record is not None:
+                if run_record is None:
+                    chat_task = asyncio.create_task(handle_chat_guarded())
+                    active_chat_task["task"] = chat_task
+                    active_chat_task["kind"] = "chat"
+                else:
+                    # From a granted admission until the task is attached the
+                    # run holds a cluster-wide claim (its conversation lock and
+                    # one of the user's slots) that nothing would ever release:
+                    # no task exists to finish the run, and the lease heartbeat
+                    # keeps renewing a live record. Any exit from this window,
+                    # including the socket being cancelled, marks the run
+                    # failed, which releases the claim (#1128).
+                    chat_task = None
+                    started = False
                     try:
+                        # Files attached via `attach_file` land on the
+                        # *connection* session's context, which the run's fresh
+                        # session cannot see -- the tool that needs them would
+                        # report the file as missing. Create the run session
+                        # here (the same path handle_chat_message would take
+                        # lazily) and carry the file map across. Copied, not
+                        # shared, so the run and the connection cannot mutate
+                        # each other's state.
+                        await _seed_run_session_files(
+                            chat_service,
+                            session_id,
+                            turn_session_id,
+                            user_email,
+                            conversation_id=run_record.conversation_id,
+                        )
+                        # Announce the run before its task can emit anything.
+                        # The task's first frames are tagged with the run's
+                        # conversation id, and a client that has not yet
+                        # adopted that id (a new chat has none) would file them
+                        # as background activity and drop them from the
+                        # transcript it is showing.
                         await websocket.send_json({
                             "type": "run_started",
                             "run_id": run_record.run_id,
@@ -2668,27 +2737,23 @@ async def websocket_endpoint(websocket: WebSocket):
                             "parent_run_id": run_record.parent_run_id,
                             "parent_conversation_id": run_record.parent_conversation_id,
                         })
-                    except Exception:
-                        # The run was admitted but its task has not started:
-                        # nothing will ever execute it. Leaving the record
-                        # running would hold one of the user's concurrency
-                        # slots until the wall-clock sweeper reaps it, so
-                        # mark the failure now. Re-raise so the disconnect
-                        # path still tears the connection down normally; the
-                        # terminal record makes ``mark_detached`` a no-op.
-                        run_registry.set_status(
-                            run_record.run_id,
-                            RunStatus.FAILED,
-                            error="Connection closed before the run started",
-                        )
-                        raise
-                # Start chat handling in background
-                chat_task = asyncio.create_task(handle_chat_guarded())
-                if run_record is None:
-                    active_chat_task["task"] = chat_task
-                    active_chat_task["kind"] = "chat"
-                else:
-                    run_registry.attach_task(run_record.run_id, chat_task)
+                        chat_task = asyncio.create_task(handle_chat_guarded())
+                        run_registry.attach_task(run_record.run_id, chat_task)
+                        started = True
+                    finally:
+                        if not started:
+                            # Whatever ended the window (an error, a cancelled
+                            # socket) still propagates, so a disconnect tears
+                            # the connection down normally; the terminal record
+                            # makes ``mark_detached`` a no-op.
+                            if chat_task is not None and not chat_task.done():
+                                chat_task.cancel()
+                            run_registry.set_status(
+                                run_record.run_id,
+                                RunStatus.FAILED,
+                                error="The run could not be started",
+                            )
+                    connection_run_ids.add(run_record.run_id)
 
             elif message_type == "context_usage_request":
                 # Issue #877: the context meter's estimate for a conversation
@@ -2777,7 +2842,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             auto_compact=data.get("auto_compact"),
                             compliance_level=data.get("compliance_level_filter"),
                             update_callback=lambda message: websocket_update_callback(websocket, message),
-                            incognito=data.get("save_mode", "server") != "server" or data.get("incognito", False),
+                            incognito=turn_is_off_record(data),
                             conversation_id=conversation_id,
                         )
                     except asyncio.CancelledError:

@@ -996,6 +996,15 @@ class ChatService:
         shorter than it was (rewind / edit-and-resubmit); every other turn is
         held to the repository's no-shrink guard.
         """
+        from atlas.application.chat.runs.leases import current_run_is_fenced
+
+        if current_run_is_fenced():
+            # Another replica took this run over (#1128). The conversation may
+            # have a newer turn saved since, and a save replaces the stored
+            # message set, so this stale partial turn is not written. Its
+            # finished tool calls stay in the execution projection.
+            logger.warning("Not saving the turn of a run another replica took over")
+            return
         # Messages accumulated while the session was incognito must never
         # be persisted, even after the user later opts in to saving. Track
         # the high-water mark of the leading incognito messages and freeze

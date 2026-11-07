@@ -436,6 +436,29 @@ async def test_concurrent_launches_cannot_overrun_the_cap(factory):
     assert len(get_run_registry().active_for_user(USER)) == 2
 
 
+async def test_a_coordinator_outage_fails_closed_with_503(factory):
+    """Redis unreachable: refused as ``unavailable``, never run untracked (#1128)."""
+    from atlas.application.chat.runs.coordination import (
+        InProcessRunCoordinator,
+        RunCoordinationUnavailableError,
+        set_run_coordinator,
+    )
+
+    class _Down(InProcessRunCoordinator):
+        async def claim(self, **_kwargs):
+            raise RunCoordinationUnavailableError("ConnectionError")
+
+    set_run_coordinator(_Down())
+    try:
+        async with _client(factory) as client:
+            response = await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)
+    finally:
+        set_run_coordinator(None)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert get_run_registry().records_for_user(USER) == []
+
+
 # ---------------------------------------------------------------------------
 # Idempotency
 # ---------------------------------------------------------------------------
