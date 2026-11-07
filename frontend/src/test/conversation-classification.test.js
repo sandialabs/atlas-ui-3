@@ -276,3 +276,21 @@ describe('a refused steer frame', () => {
     expect(deps.setIsThinking).toHaveBeenCalledWith(false)
   })
 })
+
+describe('a run-control frame for a run on another server', () => {
+  it('keeps the running turn when the named run could not be reached', async () => {
+    const { createWebSocketHandler } = await import('../handlers/chat/websocketHandlers')
+    const deps = {
+      addMessage: vi.fn(), mapMessages: vi.fn(), setIsThinking: vi.fn(),
+      setCurrentAgentStep: vi.fn(), streamToken: vi.fn(), streamEnd: vi.fn(),
+    }
+    const handler = createWebSocketHandler(deps)
+    handler({ type: 'error', error_type: 'run_control_unavailable', run_id: 'r1', message: 'did not answer' })
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+    expect(deps.setIsThinking).not.toHaveBeenCalled()
+
+    // Without a run id nothing is known to be running: the turn ends.
+    handler({ type: 'error', error_type: 'run_control_unavailable', message: 'could not check' })
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+  })
+})

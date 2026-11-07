@@ -127,7 +127,7 @@ vi.mock('../hooks/chat/useFiles', () => ({
     setCustomUIContent: h.setCustomUIContent,
     setSessionFiles: h.setSessionFiles,
     getFileType: vi.fn(),
-    canvasContent: null,
+    canvasContent: h.canvasContent,
     sessionFiles: { files: [], total_files: 0, categories: {} },
   }),
 }))
@@ -223,6 +223,7 @@ beforeEach(() => {
   h.workspacesEnabled = false
   h.isConnected = true
   h.saveMode = 'server'
+  h.canvasContent = null
   h.saveLocalConv.mockImplementation(() => Promise.resolve())
   vi.stubGlobal('fetch', h.fetchMock)
   h.fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) })
@@ -955,5 +956,176 @@ describe('mid-run live refresh of a joined conversation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('canvas rehydration (issue #1157)', () => {
+  const script = "print('hello')\nkeep this exact\n"
+  const storedCanvas = (content) => ({
+    role: 'system',
+    content: 'Canvas artifact',
+    timestamp: '2026-01-01T00:00:02Z',
+    message_type: 'canvas_artifact',
+    metadata: {
+      message_type: 'canvas_artifact',
+      artifact_id: 'c1',
+      tool_call_id: 'c1',
+      tool_name: 'atlas_canvas',
+      canvas_content: content,
+      status: 'completed',
+    },
+  })
+
+  const setConnected = async (rerender, connected) => {
+    await act(async () => {
+      h.isConnected = connected
+      rerender()
+    })
+  }
+
+  it('puts the saved canvas back in the panel and sends it on restore', async () => {
+    const { result, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [
+          storedChat('user', 'write a script'),
+          storedCanvas(script),
+          storedChat('assistant', 'Wrote it.'),
+        ],
+      })
+    })
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    const restore = h.sendMessage.mock.calls.map(c => c[0]).find(c => c?.type === 'restore_conversation')
+    expect(restore.messages.map(m => m.role)).toEqual(['user', 'system', 'assistant'])
+    expect(restore.messages[1].metadata.canvas_content).toBe(script)
+    // The row is in history for association, and it is not a visible bubble.
+    expect(result.current.messages.some(m => m.type === 'canvas_artifact' && m.canvas_content === script)).toBe(true)
+    unmount()
+  })
+
+  it('fills the panel from a canvas saved while the socket was down', async () => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original'), storedChat('assistant', 'Done')],
+      })
+    })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: false,
+        metadata: {},
+        messages: [
+          storedChat('user', 'Original'),
+          storedCanvas(script),
+          storedChat('assistant', 'Done'),
+        ],
+      }),
+    })
+    h.setCanvasContent.mockClear()
+    h.setCustomUIContent.mockClear()
+    h.setSessionFiles.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(h.setCanvasContent).toHaveBeenCalledWith(script)
+    // The blip must not wipe the rest of the workspace the way an open does.
+    expect(h.setCustomUIContent).not.toHaveBeenCalled()
+    expect(h.setSessionFiles).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('does not replace a newer live canvas with an older in-flight snapshot', async () => {
+    h.canvasContent = 'newer live document'
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+      })
+    })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: true,
+        metadata: {},
+        messages: [
+          storedChat('user', 'Original'),
+          storedCanvas('older saved document'),
+          storedChat('assistant', 'Missed answer'),
+        ],
+      }),
+    })
+    h.setCanvasContent.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(result.current.messages.some(m => m.content === 'Missed answer')).toBe(true)
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('does not put a shown canvas back over a later file view on an idle reconnect', async () => {
+    const { result, rerender, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1',
+        messages: [storedChat('user', 'Original')],
+      })
+    })
+    // A live canvas write reaches the panel, then a tool's file output
+    // replaces it with a file view, which clears the canvas text.
+    await act(async () => { h.canvasContent = 'live document'; rerender() })
+    await act(async () => { h.canvasContent = ''; rerender() })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'conv-1',
+        in_flight: false,
+        metadata: {},
+        messages: [
+          storedChat('user', 'Original'),
+          storedCanvas('live document'),
+          storedChat('assistant', 'Missed answer'),
+        ],
+      }),
+    })
+    h.setCanvasContent.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(result.current.messages.some(m => m.content === 'Missed answer')).toBe(true)
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('does not resync an idle reconnect only because a file view cleared the panel', async () => {
+    const { result, rerender, unmount } = renderChat()
+    const stored = [
+      storedChat('user', 'Original'),
+      storedCanvas(script),
+      storedChat('assistant', 'Done'),
+    ]
+    await act(async () => {
+      await result.current.loadSavedConversation({ id: 'conv-1', messages: stored })
+    })
+    await act(async () => { h.canvasContent = ''; rerender() })
+    await setConnected(rerender, false)
+    h.fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'conv-1', in_flight: false, metadata: {}, messages: stored }),
+    })
+    h.setCanvasContent.mockClear()
+    h.sendMessage.mockClear()
+    await setConnected(rerender, true)
+    await act(async () => {})
+    expect(h.setCanvasContent).not.toHaveBeenCalled()
+    const restores = h.sendMessage.mock.calls.map(c => c[0]).filter(c => c?.type === 'restore_conversation')
+    expect(restores).toHaveLength(0)
+    unmount()
   })
 })

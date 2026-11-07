@@ -1,10 +1,14 @@
-"""Stdio MCP server with one tool whose executions the harness can count.
+"""Stdio MCP server with tools whose executions the harness can count.
 
 ``side_effect(key, seconds)`` appends one line to ``<HARNESS_SIDE_EFFECT_DIR>/<key>.log``
 recording which replica ran it, then waits ``seconds``. Every replica runs its
 own copy of this server, but they all share the directory, so a test can prove
 how many times a tool really executed across the cluster -- for example that a
 run interrupted by a replica crash is never replayed.
+
+``approved_write`` records the same way but needs the user's approval first
+(``require_approval`` in the harness mcp.json), so a test can prove that an
+approval answered twice, or on two replicas, runs the tool once.
 """
 
 import json
@@ -25,6 +29,21 @@ def side_effect(key: str, seconds: float = 0.0) -> str:
         key: Name of the counter to record the execution under.
         seconds: How long to wait after recording, to keep the run busy.
     """
+    return _record(key, seconds)
+
+
+@mcp.tool
+def approved_write(key: str, seconds: float = 0.0) -> str:
+    """Same as side_effect, but mcp.json requires approval before it runs.
+
+    Args:
+        key: Name of the counter to record the execution under.
+        seconds: How long to wait after recording, to keep the run busy.
+    """
+    return _record(key, seconds)
+
+
+def _record(key: str, seconds: float) -> str:
     directory = os.environ["HARNESS_SIDE_EFFECT_DIR"]
     path = os.path.join(directory, log_name(key))
     line = json.dumps({"replica": os.environ.get("HARNESS_REPLICA", "?"), "pid": os.getpid(), "t": time.time()})

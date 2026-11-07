@@ -11,6 +11,7 @@ built live under [design-notes/](design-notes/README.md).
 - [Architecture Overview](architecture.md) - Backend clean-architecture layers and frontend context model
 - [Development Conventions](conventions.md) - Coding standards and project conventions
 - [Test Isolation](test-isolation.md) - What the test suite guarantees about shared state, and the rules that keep it order-independent
+- [Load and Scale Profiles](load-testing.md) - Reproducible multi-replica load profiles (WebSocket, reconnect storms, OIDC + token exchange, agent runs) with latency, error, connection and resource reports
 
 ## MCP Tool Development
 
@@ -36,6 +37,7 @@ built live under [design-notes/](design-notes/README.md).
 - [Interrupted Turns](interrupted-turns.md) - What is persisted when a turn is stopped, and how a later turn sees the tool work
 - [Execution State](execution-state.md) - The shared snapshot a reopened conversation uses for in-progress tools, approvals, and sleep
 - [Run Coordination](run-coordination.md) - Cluster-wide run admission through Redis and the shared run-coordination key contract (#1128)
+- [Cross-Replica Run Control](run-control.md) - How stop, steer and approval reach the replica that owns a run over Redis Streams
 
 ## Error Handling
 

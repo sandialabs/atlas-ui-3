@@ -72,6 +72,9 @@ COPY test_e2e/ ./test_e2e/
 COPY mocks/ ./mocks/
 COPY prompts/ ./prompts/
 COPY scripts/ ./scripts/
+# Migration scripts: atlas/tests/test_schema_migration.py upgrades real databases with them.
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
 
 # Workflow files are only read at test runtime, so copy them after the heavy
 # dependency installs: a workflow edit then only invalidates this layer instead

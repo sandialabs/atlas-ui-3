@@ -1,6 +1,7 @@
 """Shared helper for streaming the final answer in agent loops."""
 
 import logging
+from contextlib import aclosing
 
 from atlas.application.chat.utilities.error_handler import classify_llm_error
 from atlas.domain.errors import (
@@ -34,14 +35,16 @@ async def stream_final_answer(
     accumulated = ""
     is_first = True
     try:
-        async for token in llm.stream_plain(
+        stream = llm.stream_plain(
             model, messages, temperature=temperature, user_email=user_email,
-        ):
-            await event_publisher.publish_token_stream(
-                token=token, is_first=is_first, is_last=False,
-            )
-            accumulated += token
-            is_first = False
+        )
+        async with aclosing(stream):
+            async for token in stream:
+                await event_publisher.publish_token_stream(
+                    token=token, is_first=is_first, is_last=False,
+                )
+                accumulated += token
+                is_first = False
 
         if accumulated:
             await event_publisher.publish_token_stream(

@@ -29,9 +29,12 @@ is documented in ``docs/developer/run-coordination.md``:
 ``<p>:runs-live`` (sorted set)
     Every claimed, unreleased run id, scored by lease expiry (epoch ms), so
     the orphan sweep reads only runs whose lease may have lapsed.
-``<p>:run-cmd:<run_id>`` (stream) and ``<p>:replica:<replica_id>``
-    Reserved for command routing and replica liveness (later #1128 work);
-    nothing writes them yet.
+``<p>:ctl:<replica_id>`` (stream), ``<p>:ctl-reply:<scope>`` (stream),
+``<p>:ctl-done:<scope>`` (string)
+    Run control (stop, steer, approval routed to the owner); see
+    ``atlas/application/chat/runs/control_bus.py``.
+``<p>:replica:<replica_id>``
+    Reserved for replica liveness (later #1128 work); nothing writes it yet.
 
 All timestamps come from the Redis server's clock (``TIME``), so replicas
 with skewed clocks still agree on whether a lease has expired.
@@ -199,9 +202,18 @@ class RunCoordinationKeys:
         """Unreleased runs scored by lease expiry, for the orphan sweep."""
         return self._redis.key("runs-live")
 
-    def commands(self, run_id: str) -> str:
-        """Reserved: per-run command stream for cross-replica routing."""
-        return self._redis.key("run-cmd", key_part(run_id))
+
+    def control_inbox(self, replica_id: str) -> str:
+        """Run-control inbox stream of one replica (stop, steer, approval)."""
+        return self._redis.key("ctl", key_part(replica_id))
+
+    def control_reply(self, scope: str) -> str:
+        """Reply stream for one run-control request (``scope`` hashes actor + request id)."""
+        return self._redis.key("ctl-reply", key_part(scope))
+
+    def control_done(self, scope: str) -> str:
+        """Deduplication record for one run-control request."""
+        return self._redis.key("ctl-done", key_part(scope))
 
     def replica(self, replica_id: str) -> str:
         """Reserved: replica liveness record."""

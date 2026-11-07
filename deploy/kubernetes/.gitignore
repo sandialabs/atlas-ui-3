@@ -1,0 +1,2 @@
+# Throwaway kustomizations staging.sh layers over an overlay.
+.build-*/

@@ -1144,6 +1144,41 @@ async def _poll_resolution(request_key: str, timeout: Optional[float]) -> dict:
             delay = min(delay * 1.5, 2.0)
 
 
+def _with_invocation_identity(payload, identity: dict):
+    """Copy run identity onto one frame. Existing fields win.
+
+    ``user_email`` stays off the client payload. Callers that publish add it
+    on the projection copy.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    merged = dict(payload)
+    for key, value in identity.items():
+        if key == "user_email" or value is None:
+            continue
+        merged.setdefault(key, value)
+    return merged
+
+
+def stamp_callback_identity(inner, identity: dict):
+    """Attach invocation identity to frames without publishing them.
+
+    Canvas writes are not execution-projection rows (a projection row would
+    reload as a phantom tool call). They still need the same run and step
+    identity, or a provider id reused across steps collapses two documents
+    into one artifact. No-op when this call has no run identity.
+    """
+    if not identity.get("invocation_id"):
+        return inner
+
+    async def tagged(payload):
+        payload = _with_invocation_identity(payload, identity)
+        if inner is not None:
+            await inner(payload)
+
+    return tagged
+
+
 def observe_tool_callback(inner, identity: dict):
     """Publish tool frames into the projection, then forward them.
 
@@ -1155,11 +1190,7 @@ def observe_tool_callback(inner, identity: dict):
 
     async def tagged(payload):
         if isinstance(payload, dict):
-            merged = dict(payload)
-            for key, value in identity.items():
-                if key == "user_email" or value is None:
-                    continue
-                merged.setdefault(key, value)
+            merged = _with_invocation_identity(payload, identity)
             event = dict(merged)
             event["user_email"] = identity.get("user_email")
             projection = await publish_execution_event(event)

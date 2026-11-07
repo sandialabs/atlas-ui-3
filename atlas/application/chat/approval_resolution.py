@@ -138,7 +138,7 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
 
     ``accepted`` means this response woke a local future. ``recorded`` means
     it only wrote the shared outcome for the executor replica to observe, so
-    nothing local resumes. ``duplicate`` carries the
+    nothing local resumes; it carries that outcome. ``duplicate`` carries the
     settled frame and must not resume the run. ``unknown`` carries the error
     frame.
     """
@@ -253,4 +253,6 @@ async def decide_tool_approval(data: Dict[str, Any], user_email: str) -> Tuple[K
         return "unknown", _unknown(data)
     if stored.get("already_resolved"):
         return "duplicate", _frame(stored, data)
-    return "recorded", None
+    # The recorded outcome names the run and invocation, so the caller can
+    # wake the executor replica (issue #1128) instead of leaving it to poll.
+    return "recorded", stored

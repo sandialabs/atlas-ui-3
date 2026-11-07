@@ -1,0 +1,107 @@
+# Staging S3 (MinIO) for attachments and tool artifacts. Files must live in
+# shared object storage: USE_MOCK_S3 is per-process and would hide a file
+# uploaded through one replica from the others. The bucket is created by
+# the atlas-minio-bucket Job (minio-bucket-job.yaml), not by Atlas.
+#
+# A StatefulSet, like PostgreSQL, so its volume has the same lifecycle:
+# `staging.sh teardown` keeps both claims and `teardown --purge` deletes both.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: atlas-minio
+  labels:
+    app.kubernetes.io/name: atlas-minio
+    app.kubernetes.io/component: object-storage
+spec:
+  serviceName: atlas-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-minio
+        app.kubernetes.io/component: object-storage
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's user. The OpenShift overlay removes these so the
+        # restricted SCC can assign the namespace's UID range instead.
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          # Same pinned image as docker-compose.minio.yml.
+          image: docker.io/bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+          command: ["/opt/bitnami/minio/bin/minio"]
+          args: ["server", "/bitnami/minio/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_ACCESS_KEY}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_SECRET_KEY}
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: s3
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /bitnami/minio/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    # Creates the claim data-atlas-minio-0.
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-minio
+  labels:
+    app.kubernetes.io/name: atlas-minio
+    app.kubernetes.io/component: object-storage
+spec:
+  selector:
+    app.kubernetes.io/name: atlas-minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3

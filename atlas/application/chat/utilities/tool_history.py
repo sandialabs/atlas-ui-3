@@ -23,6 +23,12 @@ rows are the source for the capped, explicitly-delimited tool digest built by
 :mod:`atlas.application.chat.utilities.agent_digest`, which quotes their
 arguments and results as untrusted data on the turn's closing assistant
 message. Nothing here is replayed verbatim as a ``tool`` message.
+
+The canvas tool is the exception that is still not a transcript row (issue
+#1157). Its text is the user's document, so it is stored separately as a
+display-only ``canvas_artifact`` and folded into later requests by
+:mod:`atlas.domain.messages.canvas_context`. The 8000-character tool I/O cap
+does not apply to that text.
 """
 
 import asyncio
@@ -31,6 +37,10 @@ from collections import OrderedDict
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.application.chat.runs.context import get_current_run
+from atlas.application.chat.utilities.canvas_history import (
+    canvas_artifact_messages,
+    canvas_text,
+)
 from atlas.domain.messages.models import ConversationHistory, Message, MessageRole
 from atlas.modules.mcp_tools.atlas_server import CANVAS_TOOL_NAME, SLEEP_TOOL_NAME, normalize_tool_name
 
@@ -98,6 +108,9 @@ class ToolCallRecorder:
         # Keyed by tool_call_id, insertion-ordered so persisted rows match the
         # order the tools were invoked in this turn.
         self._calls: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        # Canvas writes this turn, keyed by invocation_id or tool_call_id.
+        # Kept off ``_calls`` so they never become transcript tool rows.
+        self._canvas: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         # Payloads queued by a mark_incomplete flush, drained by
         # notify_incomplete() once the history write is done.
         self._interrupted_notices: List[Dict[str, Any]] = []
@@ -126,6 +139,13 @@ class ToolCallRecorder:
             # Another run's event passing through this turn's callback (#925).
             return
         event_type = payload.get("type")
+        # The panel's own frame. It carries the exact text that was shown and
+        # overwrites the arguments captured at tool_start. Progress updates
+        # from other tools emit the same event type with no tool_call_id;
+        # those are not conversation artifacts and are ignored.
+        if event_type == "canvas_content":
+            self._note_displayed_canvas(payload)
+            return
         tool_call_id = payload.get("tool_call_id")
         if not tool_call_id or event_type not in (
             "tool_start", "tool_complete", "tool_error", "auth_required",
@@ -136,9 +156,11 @@ class ToolCallRecorder:
             # its own result. Recording it here would save the row as expired,
             # and a later Stop could not close it as interrupted.
             return
-        # The canvas tool renders into the canvas panel, not the transcript; the
-        # UI suppresses it as a chat row, so it must not be persisted as one.
+        # The canvas tool renders into the canvas panel, not the transcript.
+        # The text is saved as a canvas artifact instead of a tool_call row.
         if normalize_tool_name(payload.get("tool_name")) == CANVAS_TOOL_NAME:
+            if event_type in ("tool_start", "tool_complete", "tool_error"):
+                self._record_canvas(payload)
             return
 
         # invocation_id keeps a later step's reused tool_call_id from
@@ -175,6 +197,75 @@ class ToolCallRecorder:
             # reload as a forever-in-progress tool.
             entry["result"] = payload.get("message") or "Authentication required"
             entry["status"] = "failed"
+
+    def _canvas_entry(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """The canvas write this event belongs to, created on first sight."""
+        tool_call_id = payload.get("tool_call_id")
+        storage_key = payload.get("invocation_id") or tool_call_id
+        entry = self._canvas.setdefault(storage_key, {
+            "tool_call_id": tool_call_id,
+            "artifact_id": storage_key,
+        })
+        if payload.get("tool_name"):
+            entry["tool_name"] = payload["tool_name"]
+        for field in ("invocation_id", "run_id", "step", "conversation_id"):
+            if payload.get(field) is not None:
+                entry[field] = payload[field]
+        return entry
+
+    def _record_canvas(self, payload: Dict[str, Any]) -> None:
+        """Remember one canvas-tool event. The result text is not the document.
+
+        The text itself comes only from the ``canvas_content`` frame. The
+        tool_start arguments are a draft: an approval may edit them, and a
+        denied or hook-blocked call never reaches the panel, so storing them
+        would put an undisplayed draft over the document the user saw.
+        """
+        entry = self._canvas_entry(payload)
+        event_type = payload.get("type")
+        if event_type == "tool_start":
+            entry.setdefault("status", "calling")
+        elif event_type == "tool_complete":
+            # ``result`` is the short "Canvas content displayed: ..." echo.
+            # Replacing the document with it is the bug this row exists to fix.
+            entry["status"] = "completed" if payload.get("success") else "failed"
+        elif event_type == "tool_error":
+            entry["status"] = "failed"
+
+    def _note_displayed_canvas(self, payload: Dict[str, Any]) -> None:
+        """Store the shown text on its canvas write and move it to the end.
+
+        Only a frame named for the canvas tool counts. A tracked tool's
+        callback stamps its own id and name on the canvas updates it emits,
+        and those must not become documents or overwrite an earlier write
+        that reused the same provider id.
+        """
+        tool_call_id = payload.get("tool_call_id")
+        if not tool_call_id:
+            return
+        if normalize_tool_name(payload.get("tool_name")) != CANVAS_TOOL_NAME:
+            return
+        text = canvas_text(payload.get("content"))
+        if not text:
+            return
+        invocation = payload.get("invocation_id")
+        key = invocation or tool_call_id
+        entry = self._canvas.get(key)
+        if entry is None and not invocation:
+            # An untracked frame matches the open write with this id. A
+            # tracked frame never falls back across invocation ids.
+            for candidate_key, candidate in self._canvas.items():
+                if candidate.get("tool_call_id") == tool_call_id and not candidate.get("invocation_id"):
+                    key = candidate_key
+                    entry = candidate
+                    break
+        if entry is None:
+            return
+        entry["canvas_content"] = text
+        for field in ("invocation_id", "run_id", "step", "conversation_id"):
+            if payload.get(field) is not None and entry.get(field) is None:
+                entry[field] = payload[field]
+        self._canvas.move_to_end(key)
 
     def messages(self) -> List[Message]:
         """Build display-only ``tool_call`` messages from recorded events."""
@@ -308,6 +399,14 @@ class ToolCallRecorder:
                     # differently.
                     entry["status"] = "interrupted"
                     entry.setdefault("result", _INTERRUPTED_RESULT)
+            for entry in self._canvas.values():
+                # Keep the text. A Stop must not drop the document, and the
+                # canvas row is not a transcript bubble, so it is not announced.
+                if entry.get("status") in _OPEN_STATUSES:
+                    entry["status"] = "interrupted"
         for message in self.messages():
             history.add_message(message)
+        for message in canvas_artifact_messages(list(self._canvas.values())):
+            history.add_message(message)
         self._calls.clear()
+        self._canvas.clear()

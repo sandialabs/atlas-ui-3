@@ -843,3 +843,111 @@ async def test_websocket_publisher_token_stream():
     assert sent["token"] == "chunk"
     assert sent["is_first"] is True
     assert sent["is_last"] is False
+
+
+@pytest.mark.asyncio
+async def test_stream_and_accumulate_closes_on_publisher_cancellation():
+    """Stop during publish must close the underlying generator immediately."""
+    import asyncio
+
+    from atlas.modules.llm.usage_tracking import record_usage, usage_scope
+
+    pub = _make_publisher()
+    pub.publish_token_stream.side_effect = asyncio.CancelledError
+    closed = []
+
+    async def token_source():
+        try:
+            record_usage({"prompt_tokens": 11, "completion_tokens": 2})
+            yield "partial"
+            yield "not seen"
+        finally:
+            closed.append(True)
+
+    with usage_scope() as sink:
+        with pytest.raises(asyncio.CancelledError):
+            await stream_and_accumulate(token_source(), pub)
+        assert closed == [True]
+        assert (sink.prompt_tokens, sink.completion_tokens, sink.calls) == (11, 2, 1)
+
+
+@pytest.mark.asyncio
+async def test_agent_final_answer_closes_on_publisher_cancellation():
+    """The agent's final response path owns and closes its stream."""
+    import asyncio
+
+    pub = _make_publisher()
+    pub.publish_token_stream.side_effect = asyncio.CancelledError
+    closed = []
+    llm = MagicMock()
+
+    async def tokens(*_args, **_kwargs):
+        try:
+            yield "partial"
+            yield "not seen"
+        finally:
+            closed.append(True)
+
+    llm.stream_plain = tokens
+    with pytest.raises(asyncio.CancelledError):
+        await stream_final_answer(llm, pub, "test", [], 0.7, None)
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_tools_continuation_closes_on_publisher_cancellation():
+    """Tools continuation must finalize a suspended provider stream on Stop."""
+    import asyncio
+
+    from atlas.application.chat.modes.tools import ToolsModeRunner
+
+    pub = _make_publisher()
+    pub.publish_token_stream.side_effect = asyncio.CancelledError
+    closed = []
+    llm = MagicMock()
+
+    async def tokens(*_args, **_kwargs):
+        try:
+            yield "partial"
+            yield "not seen"
+        finally:
+            closed.append(True)
+
+    llm.stream_with_tools = tokens
+    runner = object.__new__(ToolsModeRunner)
+    runner.llm = llm
+    runner.event_publisher = pub
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner._stream_tools_round("test", [], [{"type": "function"}], None, 0.7)
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_stream_closes_on_publisher_cancellation():
+    """Agentic tool-consumption path must release an interrupted stream."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from atlas.application.chat.agent.agentic_loop import AgenticLoop
+
+    pub = _make_publisher()
+    pub.publish_token_stream.side_effect = asyncio.CancelledError
+    closed = []
+    llm = MagicMock()
+
+    async def tokens(*_args, **_kwargs):
+        try:
+            yield "partial"
+            yield "not seen"
+        finally:
+            closed.append(True)
+
+    llm.stream_with_tools = tokens
+    loop = object.__new__(AgenticLoop)
+    loop.llm = llm
+    context = SimpleNamespace(user_email=None)
+
+    with pytest.raises(asyncio.CancelledError):
+        await loop._call_llm_streaming("test", [], [{"type": "function"}], context, 0.7, pub)
+    assert closed == [True]

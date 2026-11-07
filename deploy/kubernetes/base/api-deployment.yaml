@@ -1,0 +1,192 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-api
+  labels:
+    app.kubernetes.io/name: atlas-api
+    app.kubernetes.io/component: api
+spec:
+  # Overlays set the replica count (staging: 3).
+  replicas: 1
+  revisionHistoryLimit: 5
+  # A rollout that cannot finish (for example a migration refused by the init
+  # container) is reported as failed instead of waiting forever.
+  progressDeadlineSeconds: 900
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the requested replica count; add one new pod at a
+      # time. Budget one extra replica's connections for the surge.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-api
+        app.kubernetes.io/component: api
+    spec:
+      # Deliberately no affinity, anti-affinity, topology spread or node
+      # selector, and no session affinity on the Service: any replica must
+      # serve any user on any node (issue #1129). Spreading for availability
+      # is a production decision for a later overlay.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # Long enough for preStop + uvicorn closing sockets and committing
+      # interrupted turns; see docs/admin/kubernetes-staging.md.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Brings the chat-history schema to this image's Alembic head before
+        # the API starts. Every pod runs it; a PostgreSQL advisory lock makes
+        # exactly one apply a pending migration while the others wait and then
+        # find nothing to do. A database it will not touch (tables without
+        # alembic_version) stops the pod in Init, so a rollout stalls with the
+        # old replicas still serving.
+        - name: migrate
+          image: atlas-ui-3
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "atlas.modules.chat_history.schema_migration"]
+          env:
+            - name: ATLAS_ALEMBIC_INI
+              value: /app/alembic.ini
+            - name: ATLAS_MIGRATION_WAIT_SECONDS
+              value: "300"
+            - name: CHAT_HISTORY_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: atlas-secrets
+                  key: CHAT_HISTORY_DB_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: api
+          image: atlas-ui-3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: atlas-api-env
+          env:
+            # Secrets, one key each, so nothing else in the Secret leaks into
+            # the process environment (and from there into MCP children).
+            - name: PROXY_SECRET
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: PROXY_SECRET}
+            - name: MCP_TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: MCP_TOKEN_ENCRYPTION_KEY}
+            - name: CAPABILITY_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: CAPABILITY_TOKEN_SECRET}
+            - name: CHAT_HISTORY_DB_URL
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: CHAT_HISTORY_DB_URL}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: REDIS_URL}
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_ENDPOINT}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_ACCESS_KEY}
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: atlas-secrets, key: S3_SECRET_KEY}
+          # Startup: only a replica whose chat history initialized and whose
+          # Redis session store answers may join. /api/health always returns
+          # HTTP 200 (a degraded feature must not pull every replica during a
+          # shared outage), so this reads its body. A replica that failed
+          # either check is restarted instead of serving without history.
+          startupProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import json, os, sys, urllib.request
+                  url = "http://127.0.0.1:%s/api/health" % os.environ.get("PORT", "8000")
+                  report = json.load(urllib.request.urlopen(url, timeout=4))
+                  ok = (report.get("status") == "healthy"
+                        and report.get("checks", {}).get("chat_history") == "ok"
+                        and report.get("session_store", {}).get("status") == "ok")
+                  sys.exit(0 if ok else 1)
+            periodSeconds: 5
+            timeoutSeconds: 5
+            # 5s x 36 = 3 minutes for MCP discovery and backend connections.
+            failureThreshold: 36
+          # Readiness and liveness use the cheap heartbeat: once started, a
+          # replica stays in rotation through a Redis or PostgreSQL blip (it
+          # reports "degraded" on /api/health for alerting instead).
+          readinessProbe:
+            httpGet:
+              path: /api/heartbeat
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /api/heartbeat
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            # Keep serving while endpoint removal propagates to the Service
+            # and ingress, then let uvicorn close sockets so clients reconnect
+            # (and resume) on another replica.
+            preStop:
+              exec:
+                command: ["sleep", "10"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /app/logs
+            - name: runtime
+              mountPath: /app/runtime
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: logs
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: runtime
+          emptyDir:
+            sizeLimit: 1Gi

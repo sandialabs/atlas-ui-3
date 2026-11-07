@@ -1,0 +1,40 @@
+# Staging: three Atlas API replicas sharing one Redis, one PostgreSQL and one
+# S3 store (MinIO), all in one namespace (issue #1129).
+#
+# Staging only. The bundled Redis, PostgreSQL and MinIO are single-instance,
+# unreplicated services sized for validation, not production. Deploy with
+# deploy/kubernetes/staging.sh, which pins the image (ATLAS_IMAGE), the
+# replica count and the kube context; see docs/admin/kubernetes-staging.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: atlas-staging
+
+labels:
+  - pairs:
+      app.kubernetes.io/instance: atlas-staging
+    includeSelectors: false
+
+resources:
+  - ../../base
+  - redis.yaml
+  - postgres.yaml
+  - minio.yaml
+  - minio-bucket-job.yaml
+
+replicas:
+  - name: atlas-api
+    count: 3
+
+configMapGenerator:
+  - name: atlas-api-env
+    behavior: merge
+    envs:
+      - staging.env
+
+secretGenerator:
+  # Created by `staging.sh init-secrets` (never committed; see .gitignore).
+  # Rendering fails while it is missing, so no default credential can ship.
+  - name: atlas-secrets
+    envs:
+      - secrets.env

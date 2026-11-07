@@ -1,0 +1,68 @@
+{
+  "description": "Representative concurrent agent work: 60 WebSocket agent turns (3 tool steps of 2s each, approvals answered) alongside 40 REST agent-runs API runs, spread over users so the per-user cap is not the limit. Records active runs over time.",
+  "seed": 1129,
+  "replicas": 2,
+  "auth": "header",
+  "users": 60,
+  "phases": [
+    {
+      "name": "connect",
+      "kind": "connect",
+      "connections": 60,
+      "ramp_seconds": 3,
+      "concurrency": 60
+    },
+    {
+      "name": "agent-load",
+      "kind": "parallel",
+      "phases": [
+        {
+          "name": "agent-burst",
+          "kind": "chat",
+          "agent": true,
+          "turns": 2,
+          "concurrency": 60,
+          "timeout": 180,
+          "directive": {
+            "tool": "sleep",
+            "sleep": 2,
+            "steps": 3,
+            "words": 40,
+            "stream_ms": 10
+          }
+        },
+        {
+          "name": "api-runs",
+          "kind": "api_runs",
+          "runs": 40,
+          "users": 20,
+          "concurrency": 40,
+          "timeout": 180,
+          "directive": {
+            "tool": "sleep",
+            "sleep": 2,
+            "steps": 3,
+            "words": 40,
+            "stream_ms": 10
+          }
+        }
+      ]
+    },
+    {
+      "name": "disconnect",
+      "kind": "disconnect"
+    }
+  ],
+  "slo": {
+    "max_error_rate": {
+      "*": 0
+    },
+    "min_count": {
+      "chat_turn": 120,
+      "api_run_total": 40
+    },
+    "counters_max": {
+      "connections_closed_by_server": 0
+    }
+  }
+}
