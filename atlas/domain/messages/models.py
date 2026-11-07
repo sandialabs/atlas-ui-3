@@ -7,6 +7,12 @@ from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
 
 from atlas.domain.chat.citation_register import CITATIONS_METADATA_KEY
+from atlas.domain.messages.canvas_context import (
+    CANVAS_ARTIFACT_MESSAGE_TYPE,
+    append_canvas_block,
+    canvas_folds,
+    latest_canvas_supplement,
+)
 
 # A compaction record (issue #877). The row marks where in the transcript the
 # context was compacted and carries the checkpoint itself in its metadata; the
@@ -23,7 +29,10 @@ CHECKPOINT_SCOPE_RUN = "run"
 # conversation. They are persisted (issue #684) but must never be replayed
 # back to the LLM as conversation turns.
 DISPLAY_ONLY_MESSAGE_TYPES = frozenset({
-    "tool_call", "agent_intermediate", CONTEXT_CHECKPOINT_MESSAGE_TYPE,
+    "tool_call",
+    "agent_intermediate",
+    CONTEXT_CHECKPOINT_MESSAGE_TYPE,
+    CANVAS_ARTIFACT_MESSAGE_TYPE,
 })
 
 # Metadata key holding a compact, model-visible summary of the tool calls an
@@ -230,6 +239,11 @@ class ConversationHistory:
         would grow the prompt without limit. The recent turns are the ones a
         follow-up is about, so older digests are dropped first.
 
+        Canvas writes (issue #1157) are display-only too, but the text is the
+        document the user asked about. Each uncovered write is folded onto the
+        assistant reply that followed it. The newest write is folded even when
+        a checkpoint covers its row, because the panel still shows that text.
+
         When the conversation has been compacted (issue #877), the messages the
         latest conversation checkpoint covers are left out and its summary is
         folded into the first message after them instead -- or, when nothing
@@ -272,6 +286,14 @@ class ConversationHistory:
             # mean the same documents, so they ride on the checkpoint instead.
             checkpoint_block = f"{checkpoint_block}\n\n{citation_line}"
 
+        canvas_by_index, canvas_trailing, canvas_ids = canvas_folds(
+            self.messages, covered_through, DISPLAY_ONLY_MESSAGE_TYPES,
+        )
+        # The document on screen is the newest canvas write. A checkpoint may
+        # have covered its row; put that text back on the request so a later
+        # turn can quote it. Uncovered writes are already in canvas_by_index.
+        canvas_latest = latest_canvas_supplement(self.messages, canvas_ids)
+
         out: List[Dict[str, str]] = []
         pending_block = checkpoint_block
         for index, msg in enumerate(self.messages):
@@ -291,9 +313,19 @@ class ConversationHistory:
                 content = f"{content}\n\n{digest}" if content else digest
             if citation_line and index == citation_index:
                 content = f"{content}\n\n{citation_line}" if content else citation_line
+            content = append_canvas_block(content, canvas_by_index.get(index))
             out.append({"role": msg.role.value, "content": content})
         if pending_block:
             out.append({"role": MessageRole.USER.value, "content": pending_block})
+        # A canvas write with no assistant reply after it, plus the newest
+        # canvas when its own row was compacted away. Fold into the last
+        # message so the role sequence stays what the provider already accepts.
+        canvas_tail = append_canvas_block(canvas_trailing, canvas_latest)
+        if canvas_tail:
+            if out:
+                out[-1]["content"] = append_canvas_block(out[-1]["content"], canvas_tail)
+            else:
+                out.append({"role": MessageRole.USER.value, "content": canvas_tail})
         return out
 
     def active_checkpoint(self) -> tuple[int, Optional[str]]:

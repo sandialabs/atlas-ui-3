@@ -25,6 +25,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.core.log_sanitizer import sanitize_for_logging
+from atlas.domain.messages.canvas_context import (
+    append_canvas_block,
+    canvas_folds,
+)
 from atlas.domain.messages.models import (
     AGENT_TOOL_DIGEST_KEY,
     CHECKPOINT_SCOPE_CONVERSATION,
@@ -295,6 +299,23 @@ class ContextCompactor:
             if rows[i].metadata.get("message_type") not in DISPLAY_ONLY_MESSAGE_TYPES
         ]
         as_dicts = {i: _llm_view(rows[i]) for i in visible}
+        # Canvas rows are display-only, so this view would otherwise budget
+        # and summarize a stretch that wrote a document without ever seeing
+        # it. Fold each uncovered write onto the assistant reply that
+        # followed it before the keep budget is chosen: a short turn that
+        # carries a large canvas has to count as large, or every turn fits
+        # and compaction reports there is nothing to summarize.
+        folds, trailing, _included = canvas_folds(rows, covered, DISPLAY_ONLY_MESSAGE_TYPES)
+        for index, block in folds.items():
+            if index in as_dicts:
+                as_dicts[index]["content"] = append_canvas_block(
+                    as_dicts[index].get("content") or "", block,
+                )
+        if trailing and visible:
+            last = visible[-1]
+            as_dicts[last]["content"] = append_canvas_block(
+                as_dicts[last].get("content") or "", trailing,
+            )
         user_positions = [p for p, i in enumerate(visible) if rows[i].role == MessageRole.USER]
         if not user_positions:
             raise NothingToCompact("the conversation has no completed turn yet")
