@@ -54,7 +54,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // config fetch), but unmounting it on a tab switch throws away the save-result
   // notifications its cards raise.
   const [adminTabVisited, setAdminTabVisited] = useState(false)
-  const { theme, toggleTheme } = useTheme()
+  const { toggleTheme, themeDefinition } = useTheme()
+  const darkBaseTheme = themeDefinition.mode === 'dark'
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
@@ -560,15 +561,15 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               <button
                 onClick={toggleTheme}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
-                title={reduceHelpText ? undefined : (theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode')}
+                title={reduceHelpText ? undefined : (darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode')}
               >
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                {darkBaseTheme ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode'}
               </button>
             </div>
             {!reduceHelpText && (
               <p className="text-sm text-gray-400">
-                Currently using {theme === 'dark' || theme === 'light' ? theme : theme === 'win95' ? 'Windows 95' : theme === 'mac7' ? 'Mac System 7' : theme === 'bbs-ansi' ? 'BBS ANSI Art' : 'CRT Phosphor'} mode.
+                Currently using {themeDefinition.name} theme.
               </p>
             )}
           </div>

@@ -143,6 +143,10 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     expect(bbs).toBeChecked()
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'bbs-ansi')
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light mode' }))
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'light')
+    expect(screen.getByText('Currently using Light theme.')).toBeInTheDocument()
   })
 
   it('passes a prompt intent through to the prompt manager', () => {

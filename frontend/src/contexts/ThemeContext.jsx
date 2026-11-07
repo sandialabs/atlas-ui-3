@@ -35,7 +35,10 @@ export function ThemeProvider({ children }) {
 
   // Atlas intentionally defaults to dark, not the OS color-scheme preference.
   // Keep the legacy toggle API while the new gallery supports every preset.
-  const toggleTheme = () => setSelectedTheme(current => current === 'dark' ? 'light' : 'dark')
+  const toggleTheme = () => setSelectedTheme(current => {
+    const currentMode = getRegisteredTheme(resolveThemeId(current)).mode
+    return currentMode === 'dark' ? 'light' : 'dark'
+  })
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme: setSelectedTheme, toggleTheme, themeDefinition: definition }}>

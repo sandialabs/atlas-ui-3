@@ -34,6 +34,29 @@ incremental migration, **not** a promise of pixel-perfect OS emulation.
 The radio gallery also links to its MIT-licensed upstream source; the theme
 selection never dynamically fetches JavaScript, CSS, images or fonts.
 
+### Reusable controls and live preview
+
+`frontend/src/themes/RetroControls.jsx` implements `RetroWindow`,
+`RetroButton`, and `RetroInput`. They are regular semantic HTML elements
+(a region, native button, and explicitly labeled text input). Decorative
+window glyphs are not clickable or announced as buttons. An optional
+onClose callback instead renders a real labeled close button; windows with
+no close behavior never show a misleading close affordance. Modal behavior,
+focus trapping, and dialog semantics remain the responsibility of their
+callers; the reusable window does not impose a modal.
+
+The collapsed **Try live retro controls** section in Settings → General
+instantiates these components as an interactive workbench. It echoes an
+80-character maximum sample label as ordinary React text; it neither executes
+commands nor sends data to an API. Border treatments and control surfaces
+use only the registered Retro Design System token adapters. It is an
+integration example for future feature components, not the full BBS runtime.
+
+The legacy Light/Dark quick toggle switches the **base light/dark mode**,
+even if a non-default registered theme is active; the gallery controls exact
+theme identity. This avoids a CRT/BBS theme reporting it is already in
+light mode when it is actually dark.
+
 The root element exposes:
 - `data-theme="dark|light"` for existing selectors
 - `data-atlas-theme="<registered id>"` for the actual design

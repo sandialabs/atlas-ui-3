@@ -1,5 +1,6 @@
 import { useTheme } from '../contexts/ThemeContext'
 import { THEME_REGISTRY } from './themeRegistry'
+import { RetroWorkbench } from './RetroControls'
 
 /** Native radio controls preserve arrow-key navigation and screen-reader state. */
 export default function ThemePicker() {
@@ -58,6 +59,10 @@ export default function ThemePicker() {
         </a>{' '}
         (MIT). Themes are bundled by Atlas developers, not installed by users.
       </p>
+      <details className="atlas-retro-workbench-details">
+        <summary>Try live retro controls</summary>
+        <RetroWorkbench />
+      </details>
     </fieldset>
   )
 }
