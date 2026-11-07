@@ -15,6 +15,7 @@ This file describes today's behaviour and changes no production code.
 
 # ruff: noqa: F811
 import asyncio
+import contextlib
 import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -31,9 +32,11 @@ from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
 from atlas.application.chat.agent.steering import SteeringChannel
 from atlas.application.chat.runs import run_control
 from atlas.application.chat.runs.commands import (
+    cancel_api_run_addressed,
     steer_addressed_run,
     stop_addressed_run,
 )
+from atlas.application.chat.runs.launcher import LaunchRefused
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "developer" / "run-addressing.md"
@@ -392,15 +395,15 @@ async def test_S33_neither_stops_only_the_untracked_turn(local):
 
 
 # ---------------------------------------------------------------------------
-# REST cancel (route_api_cancel is the sender half; the local half is
-# cancel_api_run, covered by test_agent_runs_api.py)
+# REST cancel (cancel_api_run_addressed; the local half is cancel_api_run,
+# covered by test_agent_runs_api.py)
 # ---------------------------------------------------------------------------
 
 
 async def test_R01_api_run_remote_live(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.live_on_a("conv-api")
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] and answer["payload"]["status"]["cancelled"] is True
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
@@ -408,7 +411,7 @@ async def test_R01_api_run_remote_live(cluster, monkeypatch):
 async def test_R02_api_run_remote_terminal(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.finished_on_a()
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] and answer["payload"]["status"]["cancelled"] is False
 
 
@@ -416,27 +419,29 @@ async def test_R03_api_run_unreadable(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.live_on_a("conv-api")
     await _unreadable(cluster)
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] is False and answer["code"] == "owner_unavailable"
 
 
 async def test_R04_run_not_started_by_the_api_is_not_found(cluster, monkeypatch):
     _ApiReplicas(cluster, monkeypatch)
     run = await cluster.run()
-    answer = await run_control.route_api_cancel(run.run_id)
+    answer = await cancel_api_run_addressed(run.run_id)
     assert answer["ok"] is False and answer["code"] == "run_not_found"
     assert not cluster.registry.get(run.run_id).is_terminal
 
 
 async def test_R05_unknown_id_is_nobodys(cluster, monkeypatch):
     _ApiReplicas(cluster, monkeypatch)
-    assert await run_control.route_api_cancel("nobody") is None
+    with pytest.raises(LaunchRefused) as refused:
+        await cancel_api_run_addressed("nobody")
+    assert refused.value.code == "run_not_found"
 
 
 async def test_R06_unknown_id_unreadable(cluster, monkeypatch):
     _ApiReplicas(cluster, monkeypatch)
     await _unreadable(cluster)
-    answer = await run_control.route_api_cancel("nobody")
+    answer = await cancel_api_run_addressed("nobody")
     assert answer["ok"] is False and answer["code"] == "owner_unavailable"
 
 
@@ -450,7 +455,8 @@ async def test_R07_api_run_finished_record_expired(cluster, monkeypatch):
     cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
     await cluster.a.claim(child.run_id, child.conversation_id)
     await cluster.b.bus._client().delete(cluster.b.coordinator.keys.run(run.run_id))
-    await run_control.route_api_cancel(run.run_id)
+    with contextlib.suppress(LaunchRefused):
+        await cancel_api_run_addressed(run.run_id)
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 

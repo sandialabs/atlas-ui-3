@@ -9,8 +9,9 @@ Who may act on the run is still decided on the owner's side.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
+from atlas.application.chat.runs import external_runs
 from atlas.application.chat.runs.control_bus import OWNER_UNAVAILABLE, reply
 from atlas.application.chat.runs.eligibility import turn_is_off_record
 from atlas.application.chat.runs.remote_run_frames import (
@@ -20,6 +21,9 @@ from atlas.application.chat.runs.remote_run_frames import (
 )
 from atlas.application.chat.runs.resolve import Address, Local, Remote, Unknown, resolve
 from atlas.application.chat.runs.run_control import (
+    SERVICE_ACTOR,
+    route_api_cancel,
+    route_api_follow_up_cancel,
     route_steer,
     route_stop,
     user_actor,
@@ -121,3 +125,30 @@ async def steer_addressed_run(websocket, registry, user_email: str, data: dict) 
         return False
     await websocket.send_json(frame)
     return True
+
+
+async def cancel_api_run_addressed(run_id: str) -> Dict[str, Any]:
+    """The agent-runs API's cancel: a run-control reply carrying the run's status.
+
+    Any replica accepts the request. A run another replica is executing is
+    stopped there. Raises :class:`LaunchRefused` for an id nobody holds (or one
+    that was not started through the API) and for refusals the local cancel
+    raises; an owner that did not answer, or an unreadable directory, is a
+    failed reply the caller maps to a retryable error.
+    """
+    registry = external_runs.get_run_registry()
+    registry.reap_terminal()
+    resolution = await resolve(registry, SERVICE_ACTOR, Address(run_id, None), include_terminal=True)
+    if isinstance(resolution, Remote):
+        return await route_api_cancel(resolution.entry)
+    if isinstance(resolution, Unknown):
+        return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
+    # Nothing is not found: cancel_api_run raises the refusal.
+    named = resolution.record if isinstance(resolution, Local) else None
+    status = external_runs.cancel_api_run(run_id)
+    if named is None or not named.is_terminal or status.get("run_id") != run_id:
+        return reply(True, status=status)
+    # The named run had finished here and no follow-up of it is live here; one
+    # may be executing on another replica.
+    later = await route_api_follow_up_cancel(run_id, named.conversation_id, named.user_email, status)
+    return later if later is not None else reply(True, status=status)

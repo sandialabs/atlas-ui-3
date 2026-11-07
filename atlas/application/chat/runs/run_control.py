@@ -293,8 +293,8 @@ async def route_stop(entry: Dict[str, Any], user_email: str) -> Dict[str, Any]:
     return {**answer, "run_id": entry["run_id"]}
 
 
-async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
-    """The agent-runs API's cancel, on the owner. None when nobody owns it.
+async def route_api_cancel(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """The agent-runs API's cancel, on the owner of ``entry``.
 
     As ``cancel_api_run`` does on one replica, a finished run is stopped
     first (on its last owner, which cascades to the sub-conversations it
@@ -303,12 +303,6 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     """
     from atlas.application.chat.runs.external_runs import API_SOURCE
 
-    try:
-        entry = await remote_entry(run_id, include_terminal=True)
-    except RunDirectoryUnavailable:
-        return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
-    if entry is None:
-        return None
     answer = await _send(entry, STOP, SERVICE_ACTOR)
     if entry.get("source") != API_SOURCE:
         # Not an API run: the owner refuses it like an unknown id.

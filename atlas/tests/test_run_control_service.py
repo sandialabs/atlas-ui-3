@@ -121,6 +121,14 @@ async def _route_stop(user_email, run_id, conversation_id):
     return await run_control.route_stop(entry, user_email)
 
 
+async def _route_api_cancel(run_id):
+    try:
+        entry = await _located(run_control.SERVICE_ACTOR, run_id, None, include_terminal=True)
+    except run_control.RunDirectoryUnavailable:
+        return _unavailable()
+    return None if entry is None else await run_control.route_api_cancel(entry)
+
+
 async def test_route_stop_cancels_the_run_on_its_owner(cluster):
     record = await cluster.run()
     answer = await _route_stop(OWNER, record.run_id, None)
@@ -154,7 +162,7 @@ async def test_another_user_cannot_stop_the_run(cluster):
 
 async def test_service_actor_may_only_stop_api_runs(cluster):
     record = await cluster.run()
-    answer = await run_control.route_api_cancel(record.run_id)
+    answer = await _route_api_cancel(record.run_id)
     assert answer["ok"] is False and answer["code"] == "run_not_found"
     assert not cluster.registry.get(record.run_id).is_terminal
 
@@ -319,14 +327,12 @@ class _ApiReplicas:
 
     def __init__(self, cluster, monkeypatch):
         from atlas.application.chat.runs import external_runs
-        from atlas.routes import agent_run_routes
 
         self.cluster = cluster
         self.api_source = external_runs.API_SOURCE
         self.registry_b = RunRegistry()
         self.acting = {"registry": self.registry_b}
         monkeypatch.setattr(external_runs, "get_run_registry", self._acting_registry)
-        monkeypatch.setattr(agent_run_routes, "get_run_registry", self._registry_b)
         cluster.a.bus._handler = self._handle_on_a
 
     def _acting_registry(self):
@@ -377,7 +383,7 @@ async def test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere(cluste
     api = _ApiReplicas(cluster, monkeypatch)
     original = await api.finished_on_a()
     follow_up = await api.live_on_b(original.conversation_id)
-    answer = await run_control.route_api_cancel(original.run_id)
+    answer = await _route_api_cancel(original.run_id)
     assert answer["ok"] is True, answer
     status = answer["payload"]["status"]
     assert status["run_id"] == follow_up.run_id and status["cancelled"] is True
@@ -410,7 +416,7 @@ async def test_api_cancel_reports_a_follow_up_it_could_not_stop(cluster, monkeyp
         return run_control.reply(False, "command_timeout", "no answer")
 
     monkeypatch.setattr(run_control, "_send", follow_up_unreachable)
-    answer = await run_control.route_api_cancel(original.run_id)
+    answer = await _route_api_cancel(original.run_id)
     assert answer["ok"] is False and answer["code"] == "command_timeout"
 
 
@@ -429,7 +435,7 @@ async def test_api_cancel_reports_a_named_run_it_could_not_stop(cluster, monkeyp
         return await real_send(entry, command, actor, args, request_id)
 
     monkeypatch.setattr(run_control, "_send", named_run_unreachable)
-    answer = await run_control.route_api_cancel(original.run_id)
+    answer = await _route_api_cancel(original.run_id)
     assert answer["ok"] is False and answer["code"] == "command_timeout"
     assert cluster.registry.get(follow_up.run_id).is_terminal
 
@@ -440,7 +446,7 @@ async def test_api_cancel_never_cascades_from_a_run_the_api_did_not_start(cluste
     cluster.registry.set_status(browser_run.run_id, RunStatus.COMPLETED)
     await _release(cluster, browser_run)
     follow_up = await api.live_on_b(browser_run.conversation_id)
-    answer = await run_control.route_api_cancel(browser_run.run_id)
+    answer = await _route_api_cancel(browser_run.run_id)
     assert answer["ok"] is False and answer["code"] == "run_not_found"
     assert not api.registry_b.get(follow_up.run_id).is_terminal
 
@@ -458,7 +464,7 @@ async def test_unreadable_directory_is_not_taken_for_no_owner(cluster):
     for answer in (
         await _route_stop(OWNER, record.run_id, None),
         await _route_stop(OWNER, None, record.conversation_id),
-        await run_control.route_api_cancel(record.run_id),
+        await _route_api_cancel(record.run_id),
     ):
         assert answer["ok"] is False and answer["code"] == "owner_unavailable", answer
     # The approval nudge is best effort: the executor polls the outcome anyway.
@@ -519,7 +525,7 @@ async def test_api_cancel_of_a_run_that_finishes_in_flight_stops_its_new_follow_
         return await real_send(entry, command, actor, args, request_id=request_id, off_record=off_record)
 
     monkeypatch.setattr(run_control, "_send", finish_then_send)
-    await run_control.route_api_cancel(original.run_id)
+    await _route_api_cancel(original.run_id)
     assert api.registry_b.get(started["follow_up"].run_id).status is RunStatus.CANCELLED
 
 
