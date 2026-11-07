@@ -293,6 +293,9 @@ mcp-demos = [
     { name = "scipy" },
     { name = "seaborn" },
 ]
+migrations = [
+    { name = "alembic" },
+]
 pptx = [
     { name = "pillow" },
     { name = "python-pptx" },
@@ -347,6 +350,7 @@ pptx = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", marker = "extra == 'dev'", specifier = ">=1.18.5,<2.0.0" },
+    { name = "alembic", marker = "extra == 'migrations'", specifier = ">=1.18.5,<2.0.0" },
     { name = "beautifulsoup4", marker = "extra == 'mcp-demos'", specifier = ">=4.12.0,<5.0.0" },
     { name = "boto3", specifier = ">=1.43.40,<2.0.0" },
     { name = "cryptography", specifier = ">=44.0.0,<51.0.0" },
@@ -398,7 +402,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1.0.0" },
     { name = "websockets", specifier = ">=13.0,<18.0.0" },
 ]
-provides-extras = ["pptx", "mcp-demos", "dev"]
+provides-extras = ["pptx", "migrations", "mcp-demos", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

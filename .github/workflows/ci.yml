@@ -50,6 +50,13 @@ jobs:
       # skips cleanly when pwsh is unavailable).
       run: bash test/launcher_helpers_test.sh
 
+    - name: Validate Kubernetes staging manifests
+      # Renders deploy/kubernetes with `kubectl kustomize` (offline, no
+      # cluster) and checks replicas, probes, limits, the migration init
+      # container, shared state and connection budgets (issue #1129). On the
+      # host because the hermetic test image has no kubectl.
+      run: bash test/k8s_render_checks.sh
+
     - name: Build test Docker image
       uses: docker/build-push-action@v7
       with:

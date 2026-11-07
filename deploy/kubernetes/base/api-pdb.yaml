@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: atlas-api
+  labels:
+    app.kubernetes.io/name: atlas-api
+    app.kubernetes.io/component: api
+spec:
+  # Node drains take one replica at a time, like the rolling update.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-api

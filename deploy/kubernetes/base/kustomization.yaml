@@ -1,0 +1,24 @@
+# Atlas API on Kubernetes/OpenShift: the replica-agnostic building blocks.
+#
+# Not deployable on its own: it expects a Secret named `atlas-secrets` and
+# the shared Redis, PostgreSQL and S3 services an overlay provides. Use
+# overlays/staging (through deploy/kubernetes/staging.sh) and see
+# docs/admin/kubernetes-staging.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: atlas
+    includeSelectors: false
+
+resources:
+  - api-deployment.yaml
+  - api-service.yaml
+  - api-pdb.yaml
+
+configMapGenerator:
+  # Hash-suffixed, so a configuration change rolls the replicas.
+  - name: atlas-api-env
+    envs:
+      - api.env

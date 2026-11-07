@@ -68,6 +68,12 @@ pptx = [
     "Pillow>=12.3.0,<14.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
+# Schema migrations (`alembic upgrade head`). The container image installs
+# it for the per-pod migration init container, which serializes upgrades with
+# a PostgreSQL advisory lock (docs/admin/kubernetes-staging.md).
+migrations = [
+    "alembic>=1.18.5,<2.0.0",
+]
 # Keep in sync with [dependency-groups] mcp-demos below
 mcp-demos = [
     "beautifulsoup4>=4.12.0,<5.0.0",
