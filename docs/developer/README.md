@@ -38,6 +38,7 @@ built live under [design-notes/](design-notes/README.md).
 - [Execution State](execution-state.md) - The shared snapshot a reopened conversation uses for in-progress tools, approvals, and sleep
 - [Run Coordination](run-coordination.md) - Cluster-wide run admission through Redis and the shared run-coordination key contract (#1128)
 - [Cross-Replica Run Control](run-control.md) - How stop, steer and approval reach the replica that owns a run over Redis Streams
+- [Run Addressing Table](run-addressing.md) - Which run a stop, steer or approval reaches for each entry point, address, run kind and location, with the known gaps
 
 ## Error Handling
 
