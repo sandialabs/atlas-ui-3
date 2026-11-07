@@ -614,3 +614,27 @@ async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone():
     finally:
         compacting.cancel()
         await asyncio.wait([compacting])
+
+
+@pytest.mark.asyncio
+async def test_superseded_turn_cancel_is_bounded(monkeypatch):
+    import atlas.main as main_module
+
+    monkeypatch.setattr(main_module, "SUPERSEDED_TURN_CANCEL_TIMEOUT", 0.05)
+
+    async def _resists_cancel():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            await asyncio.sleep(3600)
+
+    stubborn = asyncio.create_task(_resists_cancel())
+    await asyncio.sleep(0)
+    try:
+        started = asyncio.get_running_loop().time()
+        assert await main_module._cancel_superseded_untracked_turn({"task": stubborn, "kind": "chat"}) is True
+        assert asyncio.get_running_loop().time() - started < 1.0
+    finally:
+        stubborn.cancel()
+        stubborn.cancel()
+        await asyncio.wait([stubborn], timeout=1.0)

@@ -683,6 +683,10 @@ async def _release_finished_run(
         logger.debug("Error releasing MCP sessions for run %s: %s", run_id, e)
 
 
+# Seconds to wait for a superseded untracked turn to unwind after cancel.
+SUPERSEDED_TURN_CANCEL_TIMEOUT = 5.0
+
+
 async def _cancel_superseded_untracked_turn(active_chat_task: dict) -> bool:
     """Cancel the untracked turn this connection is still running, and wait.
 
@@ -702,8 +706,15 @@ async def _cancel_superseded_untracked_turn(active_chat_task: dict) -> bool:
         return False
     previous.cancel()
     # ``wait`` reports completion without re-raising the task's own
-    # CancelledError into this coroutine.
-    await asyncio.wait([previous])
+    # CancelledError into this coroutine. Bounded: a tool that resists
+    # cancellation must not hold this connection's receive loop, and with
+    # it every later chat, Stop and approval frame.
+    _done, pending = await asyncio.wait([previous], timeout=SUPERSEDED_TURN_CANCEL_TIMEOUT)
+    if pending:
+        logger.warning(
+            "Superseded untracked turn did not unwind within %ss; continuing",
+            SUPERSEDED_TURN_CANCEL_TIMEOUT,
+        )
     return True
 
 
@@ -2759,6 +2770,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     active_chat_task["task"] = chat_task
                     active_chat_task["kind"] = "chat"
                 else:
+                    # The same supersession applies before a tracked run: an
+                    # untracked turn left running here would sit outside the
+                    # new run's Stop control.
+                    if await _cancel_superseded_untracked_turn(active_chat_task):
+                        logger.info(
+                            "Cancelled the previous untracked turn on this "
+                            "connection before starting a tracked run"
+                        )
                     # From a granted admission until the task is attached the
                     # run holds a cluster-wide claim (its conversation lock and
                     # one of the user's slots) that nothing would ever release:
