@@ -251,7 +251,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   }, [agentModeAvailable, agentModeEnabled, setAgentModeEnabled, toast])
 
   return (
-    <header ref={headerRef} className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
+    <header ref={headerRef} className="atlas-theme-header flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
       {/* Left section. Deliberately not min-w-0: these are fixed-size icon
           buttons with nothing to truncate, so letting the section shrink below
           them only makes it paint over the right-hand group. The right section

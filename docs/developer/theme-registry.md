@@ -1,5 +1,7 @@
 # Retro Design System integration (issue #1119)
 
+Last updated: 2026-11-06
+
 The source of the historical aesthetics is **NovusGFX Retro Design System**
 (<https://github.com/NovusGFX/retro-design-system>, MIT, reviewed at commit
 `8988f50`). Atlas vendors only four token sets initially:
@@ -23,6 +25,14 @@ Users may select only registered IDs in Settings → General; unknown saved
 values fall back to Dark. No arbitrary runtime stylesheet injection is
 allowed. A developer can add more from the 53-theme catalog by explicitly
 registering a scoped token file and a tested Atlas adapter.
+
+Atlas initially styles its header border, settings chrome/title bar, theme
+choice cards, and focus rings with semantic tokens. Ordinary chat content and
+security labels continue using the established component classes; this is an
+incremental migration, **not** a promise of pixel-perfect OS emulation.
+
+The radio gallery also links to its MIT-licensed upstream source; the theme
+selection never dynamically fetches JavaScript, CSS, images or fonts.
 
 The root element exposes:
 - `data-theme="dark|light"` for existing selectors

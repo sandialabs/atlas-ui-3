@@ -27,6 +27,8 @@ import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
 import { watchAppViewportHeight } from './utils/visualViewportHeight'
 import { OPEN_SETTINGS_EVENT, parseOpenSettingsDetail } from './utils/settingsPanelEvents'
 import { useCanvasLayout } from './hooks/useCanvasLayout'
+import './themes/vendor/retro-design-system/tokens.css'
+import './themes/theme-presets.css'
 
 // Log build info to browser console on startup
 console.info(

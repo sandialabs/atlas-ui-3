@@ -10,6 +10,7 @@ built live under [design-notes/](design-notes/README.md).
 
 - [Architecture Overview](architecture.md) - Backend clean-architecture layers and frontend context model
 - [Development Conventions](conventions.md) - Coding standards and project conventions
+- [Retro Design System Theme Registry](theme-registry.md) - Build-time theme registration, MIT attribution, and accessibility
 - [Test Isolation](test-isolation.md) - What the test suite guarantees about shared state, and the rules that keep it order-independent
 
 ## MCP Tool Development

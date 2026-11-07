@@ -102,5 +102,9 @@ describe('build-time theme registry', () => {
       expect(screen.getByRole('radio', { name: entry.name })).toHaveAttribute('value', entry.id)
     }
     expect(screen.getByRole('radiogroup', { name: 'Interface theme' })).toBeInTheDocument()
+    const source = screen.getByRole('link', { name: 'NovusGFX Retro Design System' })
+    expect(source).toHaveAttribute('href', 'https://github.com/NovusGFX/retro-design-system')
+    expect(source).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(source).toHaveAttribute('target', '_blank')
   })
 })

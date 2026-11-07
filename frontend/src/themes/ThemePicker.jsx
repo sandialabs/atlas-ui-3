@@ -12,7 +12,7 @@ export default function ThemePicker() {
         {THEME_REGISTRY.map(entry => (
           <label
             key={entry.id}
-            className="atlas-theme-option atlas-theme-chrome flex cursor-pointer items-center gap-3 rounded-lg border border-gray-600 bg-gray-800 p-3 text-gray-100 focus-within:ring-2 focus-within:ring-blue-400"
+            className="atlas-theme-option atlas-theme-chrome flex cursor-pointer items-center gap-3 rounded-lg border border-gray-600 bg-gray-800 p-3 text-gray-100"
           >
             <input
               type="radio"
@@ -21,10 +21,11 @@ export default function ThemePicker() {
               checked={theme === entry.id}
               onChange={() => setTheme(entry.id)}
               aria-label={entry.name}
-              className="shrink-0 accent-blue-500"
+              className="atlas-theme-radio shrink-0"
             />
             <span
               className="atlas-theme-preview shrink-0"
+              data-preview={entry.id}
               aria-hidden="true"
               style={{
                 '--preview-bg': entry.preview.background,
@@ -45,6 +46,18 @@ export default function ThemePicker() {
           </label>
         ))}
       </div>
+      <p className="text-xs text-gray-400">
+        Retro palettes from{' '}
+        <a
+          href="https://github.com/NovusGFX/retro-design-system"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="atlas-theme-source-link underline"
+        >
+          NovusGFX Retro Design System
+        </a>{' '}
+        (MIT). Themes are bundled by Atlas developers, not installed by users.
+      </p>
     </fieldset>
   )
 }
