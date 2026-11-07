@@ -1,0 +1,181 @@
+/*
+ * Atlas adapter for NovusGFX Retro Design System (MIT).
+ * These scoped semantic aliases adapt the vendored upstream design tokens
+ * without copying global demo CSS, fonts, logos, or historic artwork.
+ * Original token files: vendor/retro-design-system/tokens.css
+ */
+:root {
+  --atlas-font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --atlas-surface: rgb(var(--gray-800));
+  --atlas-border: rgb(var(--gray-600));
+  --atlas-accent: #60a5fa;
+  --atlas-radius: 0.5rem;
+}
+
+/* CRT Phosphor — from RDS 09 tokens --bg, --ink, --ink-dim. */
+[data-atlas-theme="crt-phosphor"] {
+  --gray-50: 170 255 170;
+  --gray-100: 94 255 94;
+  --gray-200: 51 255 51;
+  --gray-300: 43 215 43;
+  --gray-400: 30 170 30;
+  --gray-500: 26 138 26;
+  --gray-600: 20 95 20;
+  --gray-700: 0 70 0;
+  --gray-800: 0 45 0;
+  --gray-900: 0 26 0;
+  --atlas-font-ui: var(--font);
+  --atlas-accent: var(--ink);
+  --atlas-radius: 0;
+  color-scheme: dark;
+}
+
+/* BBS ANSI — from RDS 30's canonical 16-color ANSI palette. */
+[data-atlas-theme="bbs-ansi"] {
+  --gray-50: 255 255 255;
+  --gray-100: 224 224 224;
+  --gray-200: 170 170 170;
+  --gray-300: 145 145 145;
+  --gray-400: 115 115 115;
+  --gray-500: 90 90 90;
+  --gray-600: 65 65 65;
+  --gray-700: 35 35 35;
+  --gray-800: 15 15 15;
+  --gray-900: 0 0 0;
+  --atlas-font-ui: var(--font);
+  --atlas-accent: var(--cyan-hi);
+  --atlas-radius: 0;
+  color-scheme: dark;
+}
+
+/* Windows 95 — RDS 02 --chrome / --title / --font. */
+[data-atlas-theme="win95"] {
+  --gray-50: 0 0 0;
+  --gray-100: 15 15 15;
+  --gray-200: 34 34 34;
+  --gray-300: 55 55 55;
+  --gray-400: 78 78 78;
+  --gray-500: 112 112 112;
+  --gray-600: 138 138 138;
+  --gray-700: 175 175 175;
+  --gray-800: 223 223 223;
+  --gray-900: 192 192 192;
+  --atlas-font-ui: var(--font);
+  --atlas-accent: var(--title);
+  --atlas-radius: 0;
+  color-scheme: light;
+}
+
+/* Mac System 7 — RDS 01 --bg / --chrome / --font-sys. */
+[data-atlas-theme="mac7"] {
+  --gray-50: 0 0 0;
+  --gray-100: 17 17 17;
+  --gray-200: 34 34 34;
+  --gray-300: 55 55 55;
+  --gray-400: 75 75 75;
+  --gray-500: 105 105 105;
+  --gray-600: 135 135 135;
+  --gray-700: 168 168 168;
+  --gray-800: 221 221 221;
+  --gray-900: 245 245 245;
+  --atlas-font-ui: var(--font-sys);
+  --atlas-accent: var(--ink);
+  --atlas-radius: 0;
+  color-scheme: light;
+}
+
+body { font-family: var(--atlas-font-ui); }
+
+/* Reusable chrome, deliberately isolated from compliance/status indicators. */
+.atlas-theme-chrome {
+  background: var(--atlas-surface);
+  border: 1px solid var(--atlas-border);
+  border-radius: var(--atlas-radius);
+}
+[data-atlas-theme="bbs-ansi"] .atlas-theme-chrome {
+  border: 2px solid var(--cyan-hi);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-theme-chrome {
+  border: 1px solid var(--ink);
+}
+[data-atlas-theme="win95"] .atlas-theme-chrome {
+  border: 2px solid;
+  border-color: var(--chrome-lighter) var(--chrome-dark) var(--chrome-dark) var(--chrome-lighter);
+  box-shadow: inset 1px 1px var(--chrome-light);
+}
+[data-atlas-theme="mac7"] .atlas-theme-chrome {
+  border: 1px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--shadow);
+}
+
+[data-atlas-theme="bbs-ansi"] button,
+[data-atlas-theme="crt-phosphor"] button,
+[data-atlas-theme="win95"] button,
+[data-atlas-theme="mac7"] button,
+[data-atlas-theme="bbs-ansi"] [role="dialog"],
+[data-atlas-theme="crt-phosphor"] [role="dialog"],
+[data-atlas-theme="win95"] [role="dialog"],
+[data-atlas-theme="mac7"] [role="dialog"] {
+  border-radius: var(--atlas-radius);
+}
+[data-atlas-theme="win95"] [role="dialog"] {
+  border: 2px solid;
+  border-color: var(--chrome-lighter) var(--chrome-dark) var(--chrome-dark) var(--chrome-lighter);
+}
+[data-atlas-theme="mac7"] [role="dialog"] {
+  border: 1px solid var(--ink);
+  box-shadow: 2px 2px var(--shadow);
+}
+[data-atlas-theme="crt-phosphor"] [role="dialog"] { border: 1px solid var(--ink); }
+[data-atlas-theme="bbs-ansi"] [role="dialog"] { border: 2px solid var(--cyan-hi); }
+
+/* Original desktop title-bar conventions, scoped to the one Settings dialog. */
+[data-atlas-theme="win95"] .atlas-theme-titlebar {
+  background: var(--title);
+  border-bottom: 2px solid var(--chrome-dark);
+}
+[data-atlas-theme="win95"] .atlas-theme-titlebar h2 {
+  color: var(--title-text);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--chrome) 0 2px,
+    var(--ink) 2px 3px,
+    var(--chrome) 3px 5px
+  );
+  border-bottom: 1px solid var(--ink);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar h2 {
+  background: var(--chrome);
+  padding-inline: 0.5rem;
+}
+[data-atlas-theme="crt-phosphor"] .atlas-theme-titlebar {
+  border-bottom: 1px solid var(--ink);
+}
+[data-atlas-theme="bbs-ansi"] .atlas-theme-titlebar {
+  border-bottom: 2px solid var(--cyan-hi);
+}
+
+/* Theme choices use native radio inputs; previews are strictly decorative. */
+.atlas-theme-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 66px;
+  height: 48px;
+  padding: 6px;
+  border: 2px solid var(--preview-fg);
+  background: var(--preview-bg);
+}
+.atlas-theme-preview-bar { height: 8px; background: var(--preview-accent); }
+.atlas-theme-preview-line {
+  height: 4px;
+  width: 84%;
+  background: var(--preview-fg);
+  opacity: 0.9;
+}
+.atlas-theme-preview-line-short { width: 60%; background: var(--preview-surface); opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .atlas-theme-preview, .atlas-theme-option { transition: none; }
+}

@@ -126,6 +126,25 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     expect(screen.getByRole('button', { name: /Switch to dark mode/ })).toBeInTheDocument()
   })
 
+  it('lets a user choose an MIT Retro Design System theme from General settings', () => {
+    renderPanel({ initialTab: 'general' })
+
+    const windows = screen.getByRole('radio', { name: 'Windows 95' })
+    const bbs = screen.getByRole('radio', { name: 'BBS ANSI Art' })
+    expect(windows).not.toBeChecked()
+
+    fireEvent.click(windows)
+    expect(windows).toBeChecked()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'win95')
+    expect(localStorage.getItem('atlas-theme')).toBe('win95')
+
+    fireEvent.click(bbs)
+    expect(bbs).toBeChecked()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'bbs-ansi')
+  })
+
   it('passes a prompt intent through to the prompt manager', () => {
     renderPanel({ initialTab: 'prompts', promptIntent: { type: 'edit', id: 'p1' } })
     expect(screen.getByText('prompt manager intent: edit')).toBeInTheDocument()

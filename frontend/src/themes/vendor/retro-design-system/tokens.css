@@ -1,0 +1,77 @@
+/*
+ * Vendored original design tokens from NovusGFX/retro-design-system (MIT).
+
+ * Source: https://github.com/NovusGFX/retro-design-system
+ * Exact upstream reference: 8988f50; license: vendor/retro-design-system/LICENSE
+ * The :root selectors are scoped to the corresponding Atlas theme IDs.
+ * No fonts, artwork, logos, or externally loaded resources are included.
+ */
+
+/* Mac System 7 — design tokens
+   Extracted from styles/01-mac-system-7/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="mac7"] {
+  --bg: #a8a8a8;
+  --desktop: #888;
+  --paper: #ffffff;
+  --ink: #000000;
+  --chrome: #dddddd;
+  --shadow: #000;
+  --font-sys: "Chicago", "Charcoal", "Geneva", Tahoma, sans-serif;
+  --font-body: "Geneva", "Helvetica", sans-serif;
+}
+
+
+/* Windows 95 — design tokens
+   Extracted from styles/02-windows-95/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="win95"] {
+  --bg: #008080;
+  --chrome: #c0c0c0;
+  --chrome-light: #dfdfdf;
+  --chrome-lighter: #ffffff;
+  --chrome-dark: #808080;
+  --chrome-darker: #000000;
+  --ink: #000;
+  --title: #000080;
+  --title-text: #fff;
+  --select: #000080;
+  --font: "MS Sans Serif", "Pixelated MS Sans Serif", Tahoma, sans-serif;
+}
+
+
+/* CRT Phosphor Terminal — design tokens
+   Extracted from styles/09-crt-phosphor/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="crt-phosphor"] {
+  --bg: #001a00;
+  --ink: #33ff33;
+  --ink-dim: #1a8a1a;
+  --ink-bright: #aaffaa;
+  --amber: #ffb400;
+  --font: "VT323", "IBM Plex Mono", "Courier New", monospace;
+}
+
+
+/* BBS ANSI Art — design tokens
+   Extracted from styles/30-bbs-ansi/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="bbs-ansi"] {
+  --bg: #000000;
+  --black: #000000;
+  --red: #aa0000;
+  --red-hi: #ff5555;
+  --green: #00aa00;
+  --green-hi: #55ff55;
+  --yellow: #aa5500;
+  --yellow-hi: #ffff55;
+  --blue: #0000aa;
+  --blue-hi: #5555ff;
+  --magenta: #aa00aa;
+  --magenta-hi: #ff55ff;
+  --cyan: #00aaaa;
+  --cyan-hi: #55ffff;
+  --white: #aaaaaa;
+  --white-hi: #ffffff;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}
