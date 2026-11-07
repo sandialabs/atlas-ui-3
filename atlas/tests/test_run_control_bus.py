@@ -432,3 +432,35 @@ async def test_reply_that_lands_as_the_sender_gives_up_is_still_read(pair):
         client.xread = real_xread
     assert answer["ok"] is True and answer["payload"] == {"echoed": 3}
     assert len(calls) == 1
+
+
+async def test_a_failed_done_write_is_retried_so_a_retry_does_not_act_twice(pair, monkeypatch):
+    owner, sender = pair
+    await owner.admit()
+    calls = []
+    owner.bus.start(_counting_handler(calls))
+    monkeypatch.setattr(asyncio, "sleep", _fast_sleep(asyncio.sleep))
+    client = owner.bus._client()
+    real_set = client.set
+    failures = {"left": 2}
+
+    async def flaky_set(key, value, *args, **kwargs):
+        if '"state": "done"' in str(value) and failures["left"]:
+            failures["left"] -= 1
+            raise ConnectionError("redis blipped")
+        return await real_set(key, value, *args, **kwargs)
+
+    client.set = flaky_set
+    try:
+        first = await _send(sender, "steer", {"n": 1}, request_id="flaky")
+    finally:
+        client.set = real_set
+    second = await _send(sender, "steer", {"n": 1}, request_id="flaky")
+    assert first["ok"] and second["ok"] and second.get("duplicate") is True
+    assert failures["left"] == 0 and len(calls) == 1
+
+
+def _fast_sleep(real_sleep):
+    async def sleep(delay, *args, **kwargs):
+        return await real_sleep(min(delay, 0.01), *args, **kwargs)
+    return sleep

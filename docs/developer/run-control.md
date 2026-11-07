@@ -53,7 +53,13 @@ earlier delivery.
   executing. A second delivery of the same request id (a client retry, a
   re-sent envelope) gets the first reply back and executes nothing. A
   refusal changed nothing, so it is not remembered and a retry runs again
-  (for example once a full steering queue has drained).
+  (for example once a full steering queue has drained). Once a command has
+  acted, writing its reply to the dedup record is retried for as long as
+  the pending marker holds the request (`DONE_WRITE_ATTEMPTS`). The dedup
+  covers routed commands only: a steer a replica queues for a run it holds
+  itself does not consult `ctl-done`, so a client that retries one
+  `request_id` against two replicas can queue it twice. The browser client
+  sends no `request_id`.
 - **Correlated.** A sender reads only the reply carrying its own attempt id,
   so a retry never picks up an answer an earlier attempt left in the stream.
 - **Fenced.** Before anything is recorded or executed, the owner reads the

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from main import app
+from main import _stop_remote_run, app
 
 from atlas.application.chat.runs import reset_run_registry
 from atlas.application.chat.runs.control_bus import set_run_control_bus
@@ -151,8 +151,6 @@ class _Registry:
 
 
 async def _stop(registry, data, answers):
-    import main as atlas_main
-
     calls = []
 
     async def fake_route_stop(user_email, run_id, conversation_id):
@@ -162,7 +160,7 @@ async def _stop(registry, data, answers):
     ws = MagicMock()
     ws.send_json = AsyncMock()
     with patch("atlas.application.chat.runs.run_control.route_stop", fake_route_stop):
-        handled = await atlas_main._stop_remote_run(ws, registry, USER, data)
+        handled = await _stop_remote_run(ws, registry, USER, data)
     return handled, calls, ws
 
 

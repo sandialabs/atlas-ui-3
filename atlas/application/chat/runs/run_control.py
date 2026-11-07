@@ -139,14 +139,17 @@ class RunControlService:
             refusal = await self._refusal_check(record.session_id, args.get("compliance_level_filter"))
             if refusal:
                 return reply(False, "classification_refused", refusal)
-        if record.is_terminal or record.steering is not steering:
-            # The run ended while the classification check was awaited.
-            return reply(False, "run_not_found", "The run has finished.")
         if deadline is not None and await _shared_now() > float(deadline):
             # The check outlasted the sender's wait: it has already reported a
             # timeout, and a client retry without a request id would queue a
             # second copy.
             return reply(False, COMMAND_EXPIRED, "The command arrived after its deadline.")
+        # Re-checked after the last await, right before queueing: the run may
+        # have ended, or its loop stopped draining, while the classification
+        # check or the clock read was awaited, and a message queued then would
+        # be acknowledged but never consumed.
+        if record.is_terminal or record.steering is not steering or not steering.active:
+            return reply(False, "run_not_found", "The run has finished.")
         try:
             steering.queue.put_nowait(args.get("content", ""))
         except asyncio.QueueFull:
@@ -339,10 +342,13 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     if entry is None:
         return None
     answer = await _send(entry, STOP, SERVICE_ACTOR)
-    if not entry.get("terminal") or entry.get("source") != API_SOURCE:
-        # Live: the owner's cancel_api_run already handles its conversation.
+    if entry.get("source") != API_SOURCE:
         # Not an API run: the owner refuses it like an unknown id.
         return answer
+    # Looked up after the owner answered, live or not: a run that was live
+    # when routed may have finished while the stop was in flight, and its
+    # follow-up may already be executing on another replica. The lookup skips
+    # the named run itself.
     earlier = ((answer.get("payload") or {}).get("status") or {}) if answer.get("ok") else None
     later = await route_api_follow_up_cancel(
         str(entry.get("run_id")), entry.get("conversation_id"), entry.get("user_email"), earlier,

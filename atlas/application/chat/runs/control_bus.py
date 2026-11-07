@@ -71,6 +71,8 @@ REPLY_TTL_SECONDS = 120
 # mid-execution does not block a retry for the full window.
 DONE_TTL_SECONDS = 60 * 60
 PENDING_TTL_SECONDS = 30
+# Retries of the "done" write after a command acted, within the pending TTL.
+DONE_WRITE_ATTEMPTS = 6
 # Kept below the pool's socket timeout so a blocking read never trips it.
 BLOCK_MS = 1000
 DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -440,16 +442,35 @@ class RedisRunControlBus:
             raise
         if answer.get("ok"):
             # Remembered: a retry gets this reply instead of acting again.
-            await client.set(
-                done_key,
-                json.dumps({"state": "done", **identity, "reply": answer}),
-                ex=DONE_TTL_SECONDS,
-            )
+            await self._remember_done(done_key, json.dumps({"state": "done", **identity, "reply": answer}))
         else:
             # Handlers refuse before acting, so a refusal changed nothing and
             # a retry (once the queue drained, say) must be allowed to run.
             await client.delete(done_key)
         return answer
+
+    async def _remember_done(self, done_key: str, record: str) -> None:
+        """Persist an applied command's reply, retrying a transient failure.
+
+        The command has already acted. If the write never lands, only the
+        short pending marker is left, and once it expires a retry with the
+        same request id would act a second time, so the write is retried for
+        as long as the marker still holds the request.
+        """
+        delay = 0.2
+        for attempt in range(DONE_WRITE_ATTEMPTS):
+            try:
+                await self._client().set(done_key, record, ex=DONE_TTL_SECONDS)
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if attempt == DONE_WRITE_ATTEMPTS - 1:
+                    logger.warning("run-control result could not be recorded; a retry may repeat it",
+                                   exc_info=True)
+                    return
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 5.0)
 
     async def _send_reply(self, scope: str, request_id: str, attempt: Any, answer: Dict[str, Any]) -> None:
         key = self.keys.control_reply(scope)

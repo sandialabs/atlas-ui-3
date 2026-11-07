@@ -463,3 +463,39 @@ def test_stop_failure_by_conversation_names_the_resolved_run():
     assert frame["run_id"] == "run-9" and frame["conversation_id"] == "conv-9"
     # The run id the client addressed wins.
     assert stop_frame(answer, {"run_id": "run-1"})["run_id"] == "run-1"
+
+
+async def test_api_cancel_of_a_run_that_finishes_in_flight_stops_its_new_follow_up(cluster, monkeypatch):
+    # Live when routed, finished while the stop was in flight, and a follow-up
+    # already started on B: the follow-up lookup runs after the owner answers.
+    api = _ApiReplicas(cluster, monkeypatch)
+    original = await api.live_on_a("conv-race")
+    real_send = run_control._send
+    started = {}
+
+    async def finish_then_send(entry, command, actor, args=None, request_id=None, off_record=False):
+        if entry["run_id"] == original.run_id and "follow_up" not in started:
+            cluster.registry.set_status(original.run_id, RunStatus.COMPLETED)
+            await _release(cluster, original)
+            started["follow_up"] = await api.live_on_b("conv-race")
+        return await real_send(entry, command, actor, args, request_id=request_id, off_record=off_record)
+
+    monkeypatch.setattr(run_control, "_send", finish_then_send)
+    await run_control.route_api_cancel(original.run_id)
+    assert api.registry_b.get(started["follow_up"].run_id).status is RunStatus.CANCELLED
+
+
+async def test_steer_is_refused_when_the_loop_stops_draining_during_the_check(cluster):
+    channel = SteeringChannel()
+    channel.activate()
+    record = await cluster.run(steering=channel)
+    entry = await run_control.remote_run_for_conversation(record.conversation_id)
+
+    async def deactivating_check(_session_id, _level):
+        channel.active = False
+        return None
+
+    cluster.service._refusal_check = deactivating_check
+    answer = await run_control.route_steer(entry, OWNER, "late", None)
+    assert answer["ok"] is False and answer["code"] == "run_not_found"
+    assert channel.queue.qsize() == 0
