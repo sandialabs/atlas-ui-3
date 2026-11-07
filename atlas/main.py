@@ -62,6 +62,7 @@ from atlas.application.chat.runs.admission import (
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.commands import (
+    steer_addressed_run,
     stop_addressed_run,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
@@ -2149,55 +2150,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 # another replica. Steer it there; never start a second turn
                 # beside it.
                 if tracked_run is None and frame_conversation_id:
-                    from atlas.application.chat.runs.remote_run_frames import (
-                        directory_unavailable_frame,
-                        steer_frame,
-                    )
-                    from atlas.application.chat.runs.run_control import (
-                        RunDirectoryUnavailable,
-                        remote_run_for_conversation,
-                        route_steer,
-                    )
-
-                    try:
-                        remote_run = await remote_run_for_conversation(frame_conversation_id)
-                    except RunDirectoryUnavailable:
-                        # Unknown is not "nobody": the conversation may be
-                        # executing elsewhere, and a turn admitted here would
-                        # run beside it (or under another user's run).
-                        await websocket.send_json(directory_unavailable_frame(frame_conversation_id))
+                    if await steer_addressed_run(websocket, run_registry, user_email, data):
                         continue
-                    if remote_run is not None and remote_run.get("user_email") != normalize_user_email(
-                        user_email
-                    ):
-                        # The cross-replica form of the guard above.
-                        logger.warning(
-                            "WS refused a turn naming conversation=%s while another "
-                            "user's run is executing under it on another replica",
-                            sanitize_for_logging(frame_conversation_id),
-                        )
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": "Conversation not found",
-                            "error_type": "authorization",
-                            "conversation_id": frame_conversation_id,
-                        })
-                        continue
-                    if remote_run is not None:
-                        answer = await route_steer(
-                            remote_run,
-                            user_email,
-                            data.get("content", ""),
-                            data.get("compliance_level_filter"),
-                            request_id=data.get("request_id"),
-                            # Incognito / not-saved content never goes to
-                            # the shared inbox; the steer is refused instead.
-                            off_record=turn_is_off_record(data),
-                        )
-                        frame = steer_frame(answer, remote_run)
-                        if frame is not None:
-                            await websocket.send_json(frame)
-                            continue
 
                 if should_steer(active_chat_task, data.get("conversation_id")):
                     refusal = await chat_service.steering_classification_refusal(

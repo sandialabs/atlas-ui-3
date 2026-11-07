@@ -247,21 +247,6 @@ async def conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[st
         raise RunDirectoryUnavailable(str(exc)) from exc
 
 
-async def remote_run_for_conversation(conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """The run another replica is executing for a conversation, any owner.
-
-    The caller compares ``user_email``: a conversation another user's run
-    holds is refused like the local guard refuses it. Raises
-    :class:`RunDirectoryUnavailable` when the directory cannot be read; the
-    caller must then refuse rather than start a turn.
-    """
-    entry = await conversation_entry(conversation_id)
-    bus = get_run_control_bus()
-    if entry is None or bus is None or entry.get("replica") == bus.replica_id:
-        return None
-    return entry
-
-
 async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args=None, request_id=None,
                 off_record: bool = False):
     """Send to the entry's owner, carrying the generation it was routed by.

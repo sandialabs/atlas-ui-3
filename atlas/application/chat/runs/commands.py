@@ -12,14 +12,19 @@ import logging
 from typing import Optional
 
 from atlas.application.chat.runs.control_bus import OWNER_UNAVAILABLE, reply
+from atlas.application.chat.runs.eligibility import turn_is_off_record
 from atlas.application.chat.runs.remote_run_frames import (
+    directory_unavailable_frame,
+    steer_frame,
     stop_frame,
 )
 from atlas.application.chat.runs.resolve import Address, Local, Remote, Unknown, resolve
 from atlas.application.chat.runs.run_control import (
+    route_steer,
     route_stop,
     user_actor,
 )
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
@@ -68,3 +73,51 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
     if task_live:
         logger.info("Cancelling active chat task (stop frame)")
         task.cancel()
+
+
+async def steer_addressed_run(websocket, registry, user_email: str, data: dict) -> bool:
+    """Steer the run another replica executes for a chat frame's conversation.
+
+    Returns whether the frame was fully answered. ``False`` means no live run
+    holds the conversation anywhere (or the one that did has just finished),
+    so the caller handles the message as a new turn here. An unreadable
+    directory and another user's run both refuse the turn rather than start
+    one beside a run that may be executing elsewhere.
+    """
+    conversation_id = data.get("conversation_id")
+    resolution = await resolve(registry, user_actor(user_email), Address(None, conversation_id))
+    if isinstance(resolution, Unknown):
+        await websocket.send_json(directory_unavailable_frame(conversation_id))
+        return True
+    if not isinstance(resolution, Remote):
+        return False
+    entry = resolution.entry
+    if entry.get("user_email") != normalize_user_email(user_email):
+        # The cross-replica form of the local guard against another user's run.
+        logger.warning(
+            "WS refused a turn naming conversation=%s while another "
+            "user's run is executing under it on another replica",
+            sanitize_for_logging(conversation_id),
+        )
+        await websocket.send_json({
+            "type": "error",
+            "message": "Conversation not found",
+            "error_type": "authorization",
+            "conversation_id": conversation_id,
+        })
+        return True
+    answer = await route_steer(
+        entry,
+        user_email,
+        data.get("content", ""),
+        data.get("compliance_level_filter"),
+        request_id=data.get("request_id"),
+        # Incognito / not-saved content never goes to the shared inbox; the
+        # steer is refused instead.
+        off_record=turn_is_off_record(data),
+    )
+    frame = steer_frame(answer, entry)
+    if frame is None:
+        return False
+    await websocket.send_json(frame)
+    return True

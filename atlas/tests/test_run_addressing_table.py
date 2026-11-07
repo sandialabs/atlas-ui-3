@@ -31,6 +31,7 @@ from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
 from atlas.application.chat.agent.steering import SteeringChannel
 from atlas.application.chat.runs import run_control
 from atlas.application.chat.runs.commands import (
+    steer_addressed_run,
     stop_addressed_run,
 )
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus
@@ -464,39 +465,48 @@ def _active_channel():
     return channel
 
 
+async def _steer(conversation_id, **extra):
+    """The remote-steer step of the ``chat`` branch: (handled, frames sent)."""
+    ws = MagicMock()
+    ws.send_json = AsyncMock()
+    data = {"conversation_id": conversation_id, "content": "go left", **extra}
+    handled = await steer_addressed_run(ws, RunRegistry(), OWNER, data)
+    return handled, [c.args[0] for c in ws.send_json.await_args_list]
+
+
 async def test_C01_remote_live_steer_is_queued_on_the_owner(cluster):
     channel = _active_channel()
     run = await cluster.run(steering=channel)
-    entry = await run_control.remote_run_for_conversation(run.conversation_id)
-    answer = await run_control.route_steer(entry, OWNER, "go left", None, request_id="r1")
-    assert answer["ok"] is True and channel.queue.get_nowait() == "go left"
+    handled, frames = await _steer(run.conversation_id, request_id="r1")
+    assert handled and [f["update_type"] for f in frames] == ["steering_queued"]
+    assert channel.queue.get_nowait() == "go left"
 
 
 async def test_C02_remote_live_run_not_draining_refuses_the_steer(cluster):
     run = await cluster.run()
-    entry = await run_control.remote_run_for_conversation(run.conversation_id)
-    answer = await run_control.route_steer(entry, OWNER, "go left", None)
-    assert answer["ok"] is False and answer["code"] == "conversation_busy"
+    handled, frames = await _steer(run.conversation_id)
+    assert handled and frames[0]["error_type"] == "conversation_busy" and frames[0]["steering"] is True
 
 
 async def test_C03_remote_terminal_run_is_not_steered(cluster):
     run = await cluster.run(steering=_active_channel())
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    assert await run_control.remote_run_for_conversation(run.conversation_id) is None
+    # Not handled: the message starts a new turn.
+    assert await _steer(run.conversation_id) == (False, [])
 
 
 async def test_C04_unreadable_directory_refuses_instead_of_starting_a_turn(cluster):
     run = await cluster.run(steering=_active_channel())
     await _unreadable(cluster)
-    with pytest.raises(run_control.RunDirectoryUnavailable):
-        await run_control.remote_run_for_conversation(run.conversation_id)
+    handled, frames = await _steer(run.conversation_id)
+    assert handled and [f["error_type"] for f in frames] == ["run_control_unavailable"]
 
 
 async def test_C05_finished_parent_conversation_is_not_a_steer_target(cluster):
     parent, _child = await _finished_parent_with_live_child_on_a(cluster)
     # The parent's conversation key is released: the message starts a new turn.
-    assert await run_control.remote_run_for_conversation(parent.conversation_id) is None
+    assert await _steer(parent.conversation_id) == (False, [])
 
 
 async def test_C06_remote_api_follow_up_is_steered_like_any_tracked_run(cluster):
@@ -508,16 +518,15 @@ async def test_C06_remote_api_follow_up_is_steered_like_any_tracked_run(cluster)
                                        steering=channel)
     cluster.registry.attach_task(follow_up.run_id, asyncio.create_task(asyncio.sleep(30)))
     await cluster.a.claim(follow_up.run_id, first.conversation_id)
-    entry = await run_control.remote_run_for_conversation(first.conversation_id)
-    assert entry["run_id"] == follow_up.run_id
-    assert (await run_control.route_steer(entry, OWNER, "x", None))["ok"] is True
+    handled, frames = await _steer(first.conversation_id)
+    assert handled and frames[0]["run_id"] == follow_up.run_id
+    assert frames[0]["update_type"] == "steering_queued"
 
 
 async def test_C07_remote_off_record_steer_is_refused_before_it_is_written(cluster):
     run = await cluster.run(steering=_active_channel())
-    entry = await run_control.remote_run_for_conversation(run.conversation_id)
-    answer = await run_control.route_steer(entry, OWNER, "private", None, off_record=True)
-    assert answer["ok"] is False and answer["code"] == "off_record"
+    handled, frames = await _steer(run.conversation_id, incognito=True)
+    assert handled and frames[0]["error_type"] == "off_record"
     assert cluster.registry.get(run.run_id).steering.queue.empty()
 
 

@@ -103,6 +103,10 @@ async def _located(actor, run_id, conversation_id, include_terminal=False):
     return resolution.entry if isinstance(resolution, Remote) else None
 
 
+async def _remote_run_for_conversation(conversation_id):
+    return await _located(user_actor(OWNER), None, conversation_id)
+
+
 def _unavailable():
     return reply(False, OWNER_UNAVAILABLE, "The shared run directory could not be read.")
 
@@ -166,7 +170,7 @@ async def test_steer_is_queued_once_per_request_id(cluster):
     channel = SteeringChannel()
     channel.activate()
     record = await cluster.run(steering=channel)
-    entry = await run_control.remote_run_for_conversation(record.conversation_id)
+    entry = await _remote_run_for_conversation(record.conversation_id)
     first = await run_control.route_steer(entry, OWNER, "go left", None, request_id="s1")
     second = await run_control.route_steer(entry, OWNER, "go left", None, request_id="s1")
     assert first["ok"] and second["ok"] and second.get("duplicate") is True
@@ -175,13 +179,13 @@ async def test_steer_is_queued_once_per_request_id(cluster):
 
 async def test_steer_refusals(cluster):
     idle = await cluster.run(steering=SteeringChannel())  # loop not draining yet
-    entry = await run_control.remote_run_for_conversation(idle.conversation_id)
+    entry = await _remote_run_for_conversation(idle.conversation_id)
     assert (await run_control.route_steer(entry, OWNER, "x", None))["code"] == "conversation_busy"
 
     channel = SteeringChannel()
     channel.activate()
     active = await cluster.run(steering=channel)
-    entry = await run_control.remote_run_for_conversation(active.conversation_id)
+    entry = await _remote_run_for_conversation(active.conversation_id)
     cluster.refusal = "level changed"
     refused = await run_control.route_steer(entry, OWNER, "x", "Secret")
     assert refused["code"] == "classification_refused" and refused["message"] == "level changed"
@@ -263,11 +267,11 @@ async def test_released_run_only_routes_a_stop(cluster):
     channel = SteeringChannel()
     channel.activate()
     record = await cluster.run(steering=channel)
-    assert await run_control.remote_run_for_conversation(record.conversation_id) is not None
+    assert await _remote_run_for_conversation(record.conversation_id) is not None
     cluster.registry.set_status(record.run_id, RunStatus.COMPLETED)
     await _release(cluster, record)
     # Nothing is steered into, or blocks, a conversation whose run finished.
-    assert await run_control.remote_run_for_conversation(record.conversation_id) is None
+    assert await _remote_run_for_conversation(record.conversation_id) is None
     # A stop naming it still reaches its last owner, and changes nothing there.
     answer = await _route_stop(OWNER, record.run_id, None)
     assert answer["ok"] is True and answer["payload"]["cancelled"] is False
@@ -450,7 +454,7 @@ async def test_unreadable_directory_is_not_taken_for_no_owner(cluster):
     cluster.b.bus.owner_of = fail
     cluster.b.bus.run_for_conversation = fail
     with pytest.raises(run_control.RunDirectoryUnavailable):
-        await run_control.remote_run_for_conversation(record.conversation_id)
+        await _remote_run_for_conversation(record.conversation_id)
     for answer in (
         await _route_stop(OWNER, record.run_id, None),
         await _route_stop(OWNER, None, record.conversation_id),
@@ -523,7 +527,7 @@ async def test_steer_is_refused_when_the_loop_stops_draining_during_the_check(cl
     channel = SteeringChannel()
     channel.activate()
     record = await cluster.run(steering=channel)
-    entry = await run_control.remote_run_for_conversation(record.conversation_id)
+    entry = await _remote_run_for_conversation(record.conversation_id)
 
     async def deactivating_check(_session_id, _level):
         channel.active = False
