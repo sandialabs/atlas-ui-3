@@ -1,0 +1,23 @@
+/* Midnight Commander — design tokens
+   Extracted from styles/31-midnight-commander/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0000aa;
+  --panel: #0000aa;
+  --panel-border: #aaaaaa;
+  --text: #aaaaaa;
+  --text-hi: #ffffff;
+  --yellow: #ffff55;
+  --cyan: #55ffff;
+  --selected-bg: #00aaaa;
+  --selected-fg: #000000;
+  --dir-fg: #ffffff;
+  --exec-fg: #55ff55;
+  --link-fg: #ff55ff;
+  --statusbar-bg: #aaaaaa;
+  --statusbar-fg: #000000;
+  --funcbar-bg: #00aaaa;
+  --funcbar-fg: #000000;
+  --funcbar-num: #ffffff;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}

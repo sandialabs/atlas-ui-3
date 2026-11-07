@@ -13,6 +13,13 @@ const adapter = readFileSync(
   resolve(process.cwd(), 'src/themes/theme-presets.css'), 'utf8',
 )
 
+const catalogAdapter = readFileSync(
+  resolve(process.cwd(), 'src/themes/retroCatalog.generated.css'), 'utf8',
+)
+const manifest = JSON.parse(readFileSync(
+  resolve(process.cwd(), 'src/themes/vendor/retro-design-system/manifest.json'), 'utf8',
+))
+
 // WCAG relative luminance: check the dim utility text on themed panel surfaces.
 function luminance([r, g, b]) {
   const linear = [r, g, b].map(v => {
@@ -29,7 +36,8 @@ function contrast(a, b) {
 }
 
 function themeGray(id, weight) {
-  const rule = adapter.match(new RegExp(`\\[data-atlas-theme="${id}"\\]\\s*\\{([^}]+)\\}`))
+  const source = ['win95','mac7','crt-phosphor'].includes(id) ? adapter : catalogAdapter
+  const rule = source.match(new RegExp(`\\[data-atlas-theme="${id}"\\]\\s*\\{([^}]+)\\}`))
   if (!rule) throw new Error(`Missing adapter for ${id}`)
   const rgb = rule[1].match(new RegExp(`--gray-${weight}:\\s*(\\d+)\\s+(\\d+)\\s+(\\d+);`))
   if (!rgb) throw new Error(`Missing gray ${weight} for ${id}`)
@@ -40,12 +48,14 @@ describe('Retro Design System attribution and CSS isolation', () => {
   it('keeps the original MIT notice and authentic scoped tokens', () => {
     expect(license).toContain('MIT License')
     expect(license).toContain('NovusGFX')
+    expect(manifest.count).toBe(53)
+    expect(THEME_REGISTRY.filter(t => t.reference)).toHaveLength(53)
     for (const entry of THEME_REGISTRY.filter(t => t.reference)) {
       expect(tokenStylesheet).toContain(`[data-atlas-theme="${entry.id}"]`)
       expect(tokenStylesheet).toContain(
         `Extracted from styles/${entry.reference}/index.html`,
       )
-      expect(adapter).toContain(`[data-atlas-theme="${entry.id}"]`)
+      expect(adapter + catalogAdapter).toContain(`[data-atlas-theme="${entry.id}"]`)
     }
     expect(tokenStylesheet).toContain('--ink: #33ff33;')
     expect(tokenStylesheet).toContain('--title: #000080;')
@@ -62,9 +72,21 @@ describe('Retro Design System attribution and CSS isolation', () => {
     }
   })
 
+  it('includes styles for empty-token designs without inventing original source tokens', () => {
+    for (const [id, sourceSlug] of [
+      ['brutalist-web', '40-brutalist-web'],
+      ['default-browser', '47-default-browser'],
+    ]) {
+      expect(THEME_REGISTRY.find(t => t.id === id)?.reference).toBe(sourceSlug)
+      expect(tokenStylesheet).toContain(`[data-atlas-theme="${id}"]`)
+      expect(catalogAdapter).toContain(`[data-atlas-theme="${id}"]`)
+    }
+  })
+
   it('does not import global demo styles or external proprietary assets', () => {
     expect(tokenStylesheet).not.toMatch(/\b:root\s*\{/)
     expect(tokenStylesheet).not.toMatch(/@import|@font-face|url\s*\(/)
     expect(adapter).not.toMatch(/@import|@font-face|url\s*\(/)
+    expect(catalogAdapter).not.toMatch(/@import|@font-face|url\s*\(/)
   })
 })

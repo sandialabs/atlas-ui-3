@@ -1,0 +1,15 @@
+/* PS1 Tech — design tokens
+   Extracted from styles/18-ps1-tech/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0a0a10;
+  --chrome: #c0c0c0;
+  --chrome-dark: #606068;
+  --chrome-darker: #2a2a32;
+  --neon-cyan: #00ffff;
+  --neon-purple: #9d4edd;
+  --neon-green: #39ff14;
+  --ink: #e8e8f0;
+  --font: "Eurostile", "Rajdhani", "Share Tech Mono", sans-serif;
+  --font-wide: "Orbitron", "Eurostile Extended", sans-serif;
+}

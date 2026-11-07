@@ -130,11 +130,11 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     renderPanel({ initialTab: 'general' })
 
     const windows = screen.getByRole('radio', { name: 'Windows 95' })
-    const crt = screen.getByRole('radio', { name: 'CRT Phosphor' })
+    const crt = screen.getByRole('radio', { name: 'CRT Phosphor Terminal' })
     const appearance = screen.getByRole('region', { name: 'Appearance' })
     expect(appearance.querySelector('.atlas-retro-window-titlebar')).toBeInTheDocument()
     expect(appearance.querySelector('.atlas-retro-button')).toBeInTheDocument()
-    expect(screen.queryByRole('radio', { name: 'BBS ANSI Art' })).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'BBS ANSI Art' })).toBeInTheDocument()
     expect(windows).not.toBeChecked()
 
     fireEvent.click(windows)
@@ -154,12 +154,12 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
 
     // The live filter is part of the real General settings panel, not a mock.
     const themeFilter = screen.getByRole('searchbox', { name: 'Find a theme' })
-    fireEvent.change(themeFilter, { target: { value: 'Mac' } })
+    fireEvent.change(themeFilter, { target: { value: 'System 7' } })
     expect(screen.getAllByRole('radio')).toHaveLength(1)
     fireEvent.click(screen.getByRole('radio', { name: 'Mac System 7' }))
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
     fireEvent.click(screen.getByRole('button', { name: 'Clear theme filter' }))
-    expect(screen.getAllByRole('radio')).toHaveLength(5)
+    expect(screen.getAllByRole('radio')).toHaveLength(55)
     expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
   })
 

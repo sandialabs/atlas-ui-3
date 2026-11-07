@@ -1,0 +1,17 @@
+/* Game Boy DMG — design tokens
+   Extracted from styles/22-gameboy-dmg/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --shell: #b8b0a4;
+  --shell-dark: #8a8478;
+  --shell-shadow: #6a6458;
+  --screen-bezel: #2a3028;
+  --lcd-0: #0f380f;
+  --lcd-1: #306230;
+  --lcd-2: #8bac0f;
+  --lcd-3: #9bbc0f;
+  --red-led: #d42020;
+  --btn-purple: #6a1b7a;
+  --font-pixel: "Press Start 2P", "VT323", "Courier New", monospace;
+  --font-lcd: "VT323", "Courier New", monospace;
+}

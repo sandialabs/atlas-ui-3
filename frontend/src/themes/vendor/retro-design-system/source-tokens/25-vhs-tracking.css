@@ -1,0 +1,19 @@
+/* VHS Tracking — design tokens
+   Extracted from styles/25-vhs-tracking/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0a0a0a;
+  --tape: #141014;
+  --rec-red: #ff1a1a;
+  --osd-white: #f4f4f4;
+  --osd-yellow: #ffe84a;
+  --osd-cyan: #4ae2ff;
+  --smpte-red: #ff2a2a;
+  --smpte-green: #2aff2a;
+  --smpte-blue: #2a2aff;
+  --smpte-yellow: #ffff2a;
+  --smpte-cyan: #2affff;
+  --smpte-magenta: #ff2aff;
+  --font: "VT323", "Courier New", monospace;
+  --font-osd: "VCR OSD Mono", "VT323", "Courier New", monospace;
+}

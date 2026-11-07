@@ -1,84 +1,98 @@
-# Retro Design System integration (issue #1119)
+# Retro Design System in Atlas (issue #1119)
 
-Last updated: 2026-11-06
+Atlas's developer-controlled theme registry includes the **complete
+53-design Retro Design System catalog**, plus the existing Light and Dark
+modes (**55 selectable themes**).
 
-The source of the historical aesthetics is **NovusGFX Retro Design System**
-(<https://github.com/NovusGFX/retro-design-system>, MIT, reviewed at commit
-`8988f50`). Atlas vendors three token sets initially:
+Source: [NovusGFX/retro-design-system](https://github.com/NovusGFX/retro-design-system),
+MIT license, pinned at commit
+`8988f50a514e7f845dbe5ad190faa2afd926f0b4`.
 
-- `01-mac-system-7` → `mac7`
-- `02-windows-95` → `win95`
-- `09-crt-phosphor` → `crt-phosphor`
+## Source, regeneration, and attribution
 
-These are **not** invented substitutes: `src/themes/vendor/retro-design-system/tokens.css`
-contains the upstream design tokens with only `:root` selectors replaced by
-scoped `[data-atlas-theme="..."]` selectors. The MIT license text is stored
-alongside the tokens at `src/themes/vendor/retro-design-system/LICENSE`.
-The small Atlas adapter `src/themes/theme-presets.css` maps them onto Atlas's
-existing Tailwind color scale and reusable semantic chrome properties. The
-upstream demos themselves are not imported because their global body, input,
-and reset selectors would break the existing Atlas UI.
+All 53 original upstream token files, the complete `manifest.json`, and the
+MIT license are vendored under
+`frontend/src/themes/vendor/retro-design-system/`. The offline generator:
 
-The frontend's `src/themes/themeRegistry.js` is the build-time allowlist.
-Users may select only registered IDs in Settings → General; unknown saved
-values fall back to Dark. No arbitrary runtime stylesheet injection is
-allowed. A developer can add more from the 53-theme catalog by explicitly
-registering a scoped token file and a tested Atlas adapter.
+```bash
+python3 frontend/scripts/build-retro-catalog.py
+python3 frontend/scripts/build-retro-catalog.py --check
+```
 
-Atlas initially styles its header border, settings chrome/title bar, theme
-choice cards, and focus rings with semantic tokens. Ordinary chat content and
-security labels continue using the established component classes; this is an
-incremental migration, **not** a promise of pixel-perfect OS emulation.
+produces three deterministic assets:
 
-The radio gallery also links to its MIT-licensed upstream source; the theme
-selection never dynamically fetches JavaScript, CSS, images or fonts.
+- `vendor/retro-design-system/tokens.css`: all 53 source token sets, with
+  **only their root selectors scoped to their registered theme ID**.
+- `retroCatalog.generated.js`: names, eras, years, tags, palette previews,
+  source identifiers, and base light/dark modes from the upstream manifest.
+- `retroCatalog.generated.css`: safe semantic Atlas color/control adapters
+  for designs not already covered by the initial three hand-reviewed adapters.
 
-### Reusable controls and live preview
+The three previously shipped theme IDs (`mac7`, `win95`,
+`crt-phosphor`) and their explicit adapters remain compatible with saved
+preferences. All other IDs derive deterministically from their upstream
+manifest slugs. For example, `03-windows-xp-luna` becomes
+`windows-xp-luna`.
 
-`frontend/src/themes/RetroControls.jsx` implements `RetroWindow`,
-`RetroButton`, and `RetroInput`. They are regular semantic HTML elements
-(a region, native button, and explicitly labeled text input). Decorative
-window glyphs are not clickable or announced as buttons. An optional
-onClose callback instead renders a real labeled close button; windows with
-no close behavior never show a misleading close affordance. Modal behavior,
-focus trapping, and dialog semantics remain the responsibility of their
-callers; the reusable window does not impose a modal.
+The generated assets are static: **no network fetch, remotely installed CSS,
+arbitrary script, external font, logo, bitmap or historical art**. The source
+token parser rejects additional selectors, non-token CSS, and external
+resource imports. The original token files and license remain inspectable
+and attributed. CI verifies the generated output is up to date.
 
-The collapsed **Try live retro controls** section in Settings → General
-instantiates these components as an interactive workbench. It echoes an
-80-character maximum sample label as ordinary React text; it neither executes
-commands nor sends data to an API. Border treatments and control surfaces
-use only the registered Retro Design System token adapters. It is an integration example for future feature components.
+Two upstream designs, **Brutalist Web (#40)** and **Default Browser (#47)**,
+intentionally have *empty token sets*: they derive their appearance from
+regular browser semantics and standalone examples. The generator retains
+their exact empty source tokens, while using the source manifest's palette
+(or the browser white-background fallback) to provide an Atlas control theme.
 
-The same `RetroWindow` and `RetroButton` now power the real General
-Settings appearance toggle. The gallery uses `RetroInput` for its real,
-client-side theme filter. These preserve their labels, existing settings
-callbacks, and modal close guards. This is an incremental migration,
-not a replacement of workflow logic.
+## What does "import the whole collection" mean?
 
-The legacy Light/Dark quick toggle switches the **base light/dark mode**,
-even if a non-default registered theme is active; the gallery controls exact
-theme identity. This avoids a dark phosphor preset incorrectly reporting
-that it is already light.
+All 53 design identities are selectable and have scoped source tokens, a
+catalog entry, preview colors, semantic surface/text colors, a source-driven
+font stack, and real interactive window/button/input styling. The 53 original
+standalone HTML demo pages **are not embedded or run inside Atlas**.
+They have global `body`/form/reset rules and document-specific layouts that
+cannot safely be loaded over a production chat interface. The adapters are
+conservative, **not pixel-perfect reproduction** of each standalone page.
+The first three hand-reviewed designs retain additional style-specific
+window treatments.
 
-The root element exposes:
-- `data-theme="dark|light"` for existing selectors
-- `data-atlas-theme="<registered id>"` for the actual design
+The catalog includes #30, **BBS ANSI Art**, because that is one of the 53
+upstream designs. Here it is **only CSS color tokens and semantic styling**:
+there are no `.ans` files, ANSI escape-sequence interpreters, CP437
+renderers, artpack assets, or terminal emulators.
 
-New UI chrome should prefer the semantic `--atlas-font-ui`,
-`--atlas-surface`, `--atlas-border`, `--atlas-accent`,
-and `--atlas-radius` properties; existing Tailwind grays remain a
-compatibility bridge during incremental migration.
+## Theme selection
 
-## Asset rights and accessibility
+`ThemeContext` preserves legacy `data-theme="dark|light"` selectors and
+stores exact registered IDs in `atlas-theme` local storage; unknown IDs
+fall back to Dark. `data-atlas-theme` identifies the selected design.
+The General Settings gallery provides accessible native radio controls,
+search over names/tags/eras, a category filter, and a source attribution link.
 
-This PR contains only styles for classic desktop and phosphor-terminal
-interfaces. It contains no historic artwork, proprietary fonts, icons, or
-terminal-art rendering pipeline. Asset collections are a separate project;
-redistribution would require independent provenance and rights review.
-All text must remain accessible DOM content, and classification labels must
-remain recognizable in every theme.
+The Light/Dark shortcut still changes the **base mode**, even when a retro
+preset is selected. It does not mutate the user's configuration for
+models, tools, or conversation settings.
 
-Theme previews are decorative; native HTML radio controls provide keyboard
-and screen-reader selection. CRT animation and scanline effects have been
-intentionally left out of the baseline (including for reduced-motion users).
+## Live components and accessibility
+
+`frontend/src/themes/RetroControls.jsx` exports semantic `RetroWindow`,
+`RetroButton`, and `RetroInput`. The General Appearance setting uses
+real retro components, not a visual mock. The collapsed **Try live retro
+controls** section contains a local, bounded interactive workbench that
+neither executes commands nor makes API requests.
+
+`RetroWindow` renders a labeled section (not an implicit modal); optional
+`onClose` renders a real labeled button. Native inputs and radio controls
+remain keyboard and screen-reader accessible. Accent outlines retain
+visible focus. The generator constrains small gray utility text to a
+WCAG AA minimum 4.5:1 contrast ratio against the themed panel surface,
+with automated regression tests. This is a *specific contrast check*,
+not a claim of full-page accessibility certification.
+
+Theme-specific colors must not silently recolor compliance or security
+classification indicators. Optional scanlines, animations, and CRT effects
+are excluded from this integration. No new sound, motion, or shader runtime
+is added. The registry is an incremental UI theming layer, not a replacement
+for Atlas application behavior.

@@ -7,11 +7,15 @@ import { RetroWorkbench, RetroInput, RetroButton } from './RetroControls'
 export default function ThemePicker() {
   const { theme, setTheme } = useTheme()
   const [filter, setFilter] = useState('')
+  const [category, setCategory] = useState('all')
   const query = filter.trim().toLowerCase()
-  const visibleThemes = query
-    ? THEME_REGISTRY.filter(entry =>
-      [entry.name, entry.era, entry.description].join(' ').toLowerCase().includes(query))
-    : THEME_REGISTRY
+  const categories = Array.from(new Set(THEME_REGISTRY.map(entry => entry.era.split(' · ')[0]))).sort()
+  const visibleThemes = THEME_REGISTRY.filter(entry =>
+    (category === 'all' || entry.era.split(' · ')[0] === category) &&
+    (!query || [entry.name, entry.era, entry.description, ...(entry.tags || [])]
+      .join(' ').toLowerCase().includes(query)),
+  )
+  const resetFilter = () => { setFilter(''); setCategory('all') }
 
   return (
     <fieldset className="space-y-3" aria-label="Registered interface themes">
@@ -23,11 +27,18 @@ export default function ThemePicker() {
           maxLength={80}
           value={filter}
           onChange={event => setFilter(event.target.value)}
-          placeholder="Filter by name or era"
+          placeholder="Search designs, tags, and eras"
           autoComplete="off"
         />
-        {filter && (
-          <RetroButton onClick={() => setFilter('')}>Clear theme filter</RetroButton>
+        <label className="atlas-theme-category">
+          <span>Design category</span>
+          <select value={category} onChange={event => setCategory(event.target.value)}>
+            <option value="all">All categories</option>
+            {categories.map(era => <option value={era} key={era}>{era}</option>)}
+          </select>
+        </label>
+        {(filter || category !== 'all') && (
+          <RetroButton onClick={resetFilter}>Clear theme filter</RetroButton>
         )}
       </div>
       <p className="text-xs text-gray-400" aria-live="polite">

@@ -1,0 +1,17 @@
+/* Commodore 64 BASIC — design tokens
+   Extracted from styles/34-c64-basic/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --border: #9692d9;
+  --bg: #443ec4;
+  --bg-dark: #2e2898;
+  --text: #a8a0ff;
+  --text-hi: #c8c0ff;
+  --white: #ffffff;
+  --red: #e04040;
+  --green: #4aff4a;
+  --yellow: #fff84a;
+  --cyan: #4afaff;
+  --orange: #ff9a3a;
+  --font: "C64 Pro", "Commodore 64", "Px437 PETSCII", "Press Start 2P", monospace;
+}

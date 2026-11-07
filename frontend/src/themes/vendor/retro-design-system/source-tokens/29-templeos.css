@@ -1,0 +1,15 @@
+/* TempleOS — design tokens
+   Extracted from styles/29-templeos/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0000aa;
+  --text: #ffffff;
+  --red: #ff0000;
+  --yellow: #ffff00;
+  --green: #00ff00;
+  --cyan: #00ffff;
+  --magenta: #ff00ff;
+  --orange: #ffaa00;
+  --black: #000000;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}

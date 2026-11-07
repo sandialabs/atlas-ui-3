@@ -1,0 +1,16 @@
+/* Hypnagogic / Liminal — design tokens
+   Extracted from styles/45-hypnagogic/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --wall: #dcc89a;
+  --carpet: #c89050;
+  --ceiling: #e8d8b0;
+  --fluor: #fff4c8;
+  --shadow: #6a5530;
+  --ink: #2a2418;
+  --faded: #8a7a54;
+  --sign: #3d5a80;
+  --exit: #c44536;
+  --font: "Times New Roman", "Georgia", serif;
+  --font-hand: "Comic Sans MS", cursive;
+}

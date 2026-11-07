@@ -6,6 +6,8 @@
  * Light/dark specify the existing base stylesheet so older selectors continue
  * to work while we migrate to fully semantic component tokens.
  */
+import { RETRO_CATALOG } from './retroCatalog.generated'
+
 export const THEME_REGISTRY = Object.freeze([
   Object.freeze({
     id: 'dark', name: 'Dark', era: 'Atlas',
@@ -17,24 +19,7 @@ export const THEME_REGISTRY = Object.freeze([
     description: 'Original light interface', mode: 'light',
     preview: Object.freeze({ background: '#f9fafb', surface: '#e5e7eb', foreground: '#111827', accent: '#2563eb' }),
   }),
-  Object.freeze({
-    id: 'crt-phosphor', name: 'CRT Phosphor', era: 'Retro Design System · 09',
-    description: 'Green phosphor terminal', mode: 'dark',
-    reference: '09-crt-phosphor',
-    preview: Object.freeze({ background: '#001a00', surface: '#003300', foreground: '#aaffaa', accent: '#33ff33' }),
-  }),
-  Object.freeze({
-    id: 'win95', name: 'Windows 95', era: 'Retro Design System · 02',
-    description: 'Silver bevels and navy title bars', mode: 'light',
-    reference: '02-windows-95',
-    preview: Object.freeze({ background: '#c0c0c0', surface: '#dfdfdf', foreground: '#000000', accent: '#000080' }),
-  }),
-  Object.freeze({
-    id: 'mac7', name: 'Mac System 7', era: 'Retro Design System · 01',
-    description: 'Chicago typography and monochrome borders', mode: 'light',
-    reference: '01-mac-system-7',
-    preview: Object.freeze({ background: '#a8a8a8', surface: '#dddddd', foreground: '#000000', accent: '#000000' }),
-  }),
+  ...RETRO_CATALOG,
 ])
 
 export const DEFAULT_THEME_ID = 'dark'

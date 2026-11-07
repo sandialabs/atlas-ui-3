@@ -66,7 +66,7 @@
   color-scheme: light;
 }
 
-body { font-family: var(--atlas-font-ui); }
+body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--gray-100))); }
 
 /* Reusable chrome, deliberately isolated from compliance/status indicators. */
 .atlas-theme-chrome {
@@ -245,7 +245,7 @@ body { font-family: var(--atlas-font-ui); }
 }
 .atlas-retro-window {
   background: var(--atlas-retro-window-bg);
-  color: var(--atlas-retro-control-fg);
+  color: var(--atlas-retro-window-fg, var(--atlas-retro-control-fg));
   border: 2px solid var(--atlas-retro-control-border);
   border-radius: var(--atlas-radius);
   overflow: hidden;
@@ -336,7 +336,8 @@ body { font-family: var(--atlas-font-ui); }
 }
 [data-atlas-theme="mac7"] .atlas-retro-window { box-shadow: 2px 2px 0 var(--shadow); }
 [data-atlas-theme="mac7"] .atlas-retro-window-titlebar {
-  background: repeating-linear-gradient(to bottom, var(--chrome) 0 2px, var(--ink) 2px 3px, var(--chrome) 3px 5px);
+  background-color: var(--chrome);
+  background-image: repeating-linear-gradient(to bottom, var(--chrome) 0 2px, var(--ink) 2px 3px, var(--chrome) 3px 5px);
 }
 [data-atlas-theme="mac7"] .atlas-retro-window-title {
   background: var(--chrome);
@@ -357,3 +358,25 @@ body { font-family: var(--atlas-font-ui); }
 }
 
 .atlas-theme-filter .atlas-retro-field { flex: 1 1 240px; }
+
+.atlas-theme-category {
+  flex: 1 1 160px;
+  display: grid;
+  gap: 0.35rem;
+  color: rgb(var(--gray-100));
+}
+.atlas-theme-category > span { font-size: 0.825rem; font-weight: 600; }
+.atlas-theme-category > select {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.55rem 0.65rem;
+  min-height: 2.6rem;
+  border: 2px solid var(--atlas-retro-control-border);
+  border-radius: var(--atlas-radius);
+  background: var(--atlas-retro-input-bg);
+  color: var(--atlas-retro-input-fg);
+}
+.atlas-theme-category > select:focus-visible {
+  outline: 3px solid var(--atlas-accent);
+  outline-offset: 3px;
+}

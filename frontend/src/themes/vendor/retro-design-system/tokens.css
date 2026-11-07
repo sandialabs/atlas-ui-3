@@ -1,10 +1,9 @@
-/*
- * Vendored original design tokens from NovusGFX/retro-design-system (MIT).
+/* Vendored source tokens, scoped to registered IDs, generated offline.
 
- * Source: https://github.com/NovusGFX/retro-design-system
- * Exact upstream reference: 8988f50; license: vendor/retro-design-system/LICENSE
- * The :root selectors are scoped to the corresponding Atlas theme IDs.
- * No fonts, artwork, logos, or externally loaded resources are included.
+ * Retro Design System / NovusGFX, MIT, upstream 8988f50a514e7f845dbe5ad190faa2afd926f0b4
+
+ * See vendor/retro-design-system/LICENSE. No scripts or external assets.
+
  */
 
 /* Mac System 7 — design tokens
@@ -20,7 +19,6 @@
   --font-sys: "Chicago", "Charcoal", "Geneva", Tahoma, sans-serif;
   --font-body: "Geneva", "Helvetica", sans-serif;
 }
-
 
 /* Windows 95 — design tokens
    Extracted from styles/02-windows-95/index.html. Generated; do not edit by hand.
@@ -39,6 +37,99 @@
   --font: "MS Sans Serif", "Pixelated MS Sans Serif", Tahoma, sans-serif;
 }
 
+/* Windows XP Luna — design tokens
+   Extracted from styles/03-windows-xp-luna/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="windows-xp-luna"] {
+  --bg-top: #5a7edb;
+  --bg-bot: #99c6ff;
+  --luna-blue: #2a5fd7;
+  --luna-blue-2: #5893df;
+  --luna-blue-3: #0c3aa2;
+  --chrome: #ece9d8;
+  --chrome-2: #d6d3c2;
+  --title-gradient: linear-gradient(to bottom, #0a246a 0%, #3a6ea5 10%, #2754b5 60%, #0a246a 100%);
+  --taskbar: linear-gradient(to bottom, #3c92f0 0%, #1747a4 10%, #245edb 40%, #2561d2 100%);
+  --start-green: linear-gradient(to bottom, #389238, #3cb83c 30%, #2b9033 60%, #276f2f 100%);
+  --font: "Trebuchet MS", "Tahoma", "Franklin Gothic Medium", sans-serif;
+}
+
+/* Mac OS X Aqua — design tokens
+   Extracted from styles/04-aqua-osx/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="aqua-osx"] {
+  --bg: #b8c9e0;
+  --chrome: linear-gradient(to bottom, #e8e8e8, #c8c8c8);
+  --pinstripe: repeating-linear-gradient(to bottom, rgba(255,255,255,0.7) 0 1px, rgba(220,220,230,0.7) 1px 2px);
+  --aqua-blue: #4d90fe;
+  --aqua-blue-deep: #2057c2;
+  --jelly-red: radial-gradient(circle at 30% 30%, #ff9a8a, #ff4b2b 40%, #b21808);
+  --jelly-yellow: radial-gradient(circle at 30% 30%, #ffee8a, #ffbe2b 40%, #b28008);
+  --jelly-green: radial-gradient(circle at 30% 30%, #b5f28a, #59c42b 40%, #1f7008);
+  --ink: #1a1a1a;
+  --font: "Lucida Grande", "Helvetica Neue", sans-serif;
+}
+
+/* Amiga Workbench — design tokens
+   Extracted from styles/05-amiga-workbench/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="amiga-workbench"] {
+  --wb-blue: #0055aa;
+  --wb-orange: #ff8800;
+  --wb-white: #ffffff;
+  --wb-black: #000000;
+  --wb-gray: #a0a0a0;
+  --ink: #000;
+  --font: "Topaz", "Courier New", "Consolas", monospace;
+}
+
+/* NeXTSTEP — design tokens
+   Extracted from styles/06-nextstep/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="nextstep"] {
+  --bg: #555561;
+  --chrome: #a8a8b0;
+  --chrome-dark: #606068;
+  --chrome-darker: #2c2c30;
+  --chrome-light: #d0d0d4;
+  --chrome-lighter: #f0f0f4;
+  --accent: #3c3c40;
+  --ink: #000;
+  --font: "Helvetica Neue", "Helvetica", "Liberation Sans", sans-serif;
+}
+
+/* BeOS — design tokens
+   Extracted from styles/07-beos/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="beos"] {
+  --bg: #2a5556;
+  --chrome: #cfcfcf;
+  --chrome-light: #e8e8e8;
+  --chrome-lighter: #ffffff;
+  --chrome-dark: #888888;
+  --chrome-darker: #404040;
+  --yellow: #ffcc00;
+  --yellow-dark: #cc9900;
+  --red-dot: #e04040;
+  --teal: #006666;
+  --ink: #000;
+  --font: "Swiss 721", "Helvetica", "Swis721 BT", sans-serif;
+}
+
+/* Teletext / Ceefax — design tokens
+   Extracted from styles/08-teletext/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="teletext"] {
+  --tt-black: #000000;
+  --tt-red: #ff0000;
+  --tt-green: #00ff00;
+  --tt-yellow: #ffff00;
+  --tt-blue: #0000ff;
+  --tt-magenta: #ff00ff;
+  --tt-cyan: #00ffff;
+  --tt-white: #ffffff;
+  --font: "VT323", "Courier New", "Consolas", monospace;
+}
 
 /* CRT Phosphor Terminal — design tokens
    Extracted from styles/09-crt-phosphor/index.html. Generated; do not edit by hand.
@@ -50,4 +141,695 @@
   --ink-bright: #aaffaa;
   --amber: #ffb400;
   --font: "VT323", "IBM Plex Mono", "Courier New", monospace;
+}
+
+/* MS-DOS CGA — design tokens
+   Extracted from styles/10-dos-cga/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="dos-cga"] {
+  --c-black: #000000;
+  --c-blue: #0000aa;
+  --c-blue-bright: #5555ff;
+  --c-green: #00aa00;
+  --c-cyan: #00aaaa;
+  --c-cyan-bright: #55ffff;
+  --c-red: #aa0000;
+  --c-magenta: #aa00aa;
+  --c-brown: #aa5500;
+  --c-gray: #aaaaaa;
+  --c-dgray: #555555;
+  --c-yellow: #ffff55;
+  --c-white: #ffffff;
+  --font: "Perfect DOS VGA 437", "IBM Plex Mono", "Courier New", monospace;
+}
+
+/* 8-Bit Arcade — design tokens
+   Extracted from styles/11-8bit-arcade/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="8bit-arcade"] {
+  --bg: #0b0b1e;
+  --pink: #ff2d95;
+  --cyan: #00e5ff;
+  --yellow: #ffd300;
+  --green: #2bff88;
+  --red: #ff3b3b;
+  --purple: #7c1dfd;
+  --white: #ffffff;
+  --ink: #e9e9ff;
+  --font: "Press Start 2P", "VT323", monospace;
+}
+
+/* Frutiger Aero — design tokens
+   Extracted from styles/12-frutiger-aero/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="frutiger-aero"] {
+  --sky-top: #7fcfff;
+  --sky-bot: #c7f0ff;
+  --grass: #6ec86e;
+  --aero-blue: #0ea5ff;
+  --aero-green: #3dd36b;
+  --glass: rgba(255,255,255,0.35);
+  --ink: #0b2a3c;
+  --font: "Frutiger", "Segoe UI", "Myriad Pro", "Helvetica Neue", sans-serif;
+}
+
+/* Winamp Skin — design tokens
+   Extracted from styles/13-winamp-skin/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="winamp-skin"] {
+  --chrome: #3c3c3c;
+  --chrome-light: #5a5a5a;
+  --chrome-lighter: #8a8a8a;
+  --chrome-dark: #1a1a1a;
+  --chrome-darker: #000;
+  --lcd-bg: #000;
+  --lcd: #00ff33;
+  --lcd-dim: #004d11;
+  --accent: #ffb400;
+  --accent-red: #ff3b3b;
+  --font: "Helvetica Neue", Arial, sans-serif;
+  --font-lcd: "VT323", "DS-Digital", monospace;
+}
+
+/* GeoCities Web 1.0 — design tokens
+   Extracted from styles/14-geocities-web10/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="geocities-web10"] {
+  --ink: #000;
+  --link: #0000ee;
+  --visited: #551a8b;
+  --hotpink: #ff3399;
+  --lime: #00ff00;
+  --yellow: #ffff00;
+  --red: #ff0000;
+  --cyan: #00ffff;
+  --font: "Comic Sans MS", "Times New Roman", serif;
+}
+
+/* Cassette Futurism — design tokens
+   Extracted from styles/15-cassette-futurism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="cassette-futurism"] {
+  --bg: #0a0704;
+  --panel: #1a1510;
+  --panel-2: #241d15;
+  --bezel: #3a2f22;
+  --amber: #ffb000;
+  --amber-dim: #8a5c00;
+  --amber-bright: #ffd470;
+  --ink: #d9a85e;
+  --red-warn: #ff4422;
+  --green-ok: #5aff8a;
+  --font: "Orbitron", "Share Tech Mono", "Courier New", monospace;
+  --font-lcd: "VT323", "DS-Digital", monospace;
+}
+
+/* Vaporwave — design tokens
+   Extracted from styles/16-vaporwave/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="vaporwave"] {
+  --pink: #ff71ce;
+  --cyan: #01cdfe;
+  --purple: #b967ff;
+  --green: #05ffa1;
+  --yellow: #fffb96;
+  --bg: #1a0b2e;
+  --grid: #ff00e5;
+  --ink: #f8f8ff;
+  --font-jp: "MS PGothic", "Noto Serif JP", serif;
+  --font: "Times New Roman", "Hiragino Mincho Pro", serif;
+}
+
+/* Memphis Pop — design tokens
+   Extracted from styles/17-memphis/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="memphis"] {
+  --black: #000;
+  --white: #fff;
+  --pink: #ff4fa3;
+  --teal: #12c3ce;
+  --yellow: #ffe034;
+  --red: #ff2e2e;
+  --blue: #2e4bff;
+  --font: "Helvetica Neue", Helvetica, Impact, sans-serif;
+}
+
+/* PS1 Tech — design tokens
+   Extracted from styles/18-ps1-tech/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="ps1-tech"] {
+  --bg: #0a0a10;
+  --chrome: #c0c0c0;
+  --chrome-dark: #606068;
+  --chrome-darker: #2a2a32;
+  --neon-cyan: #00ffff;
+  --neon-purple: #9d4edd;
+  --neon-green: #39ff14;
+  --ink: #e8e8f0;
+  --font: "Eurostile", "Rajdhani", "Share Tech Mono", sans-serif;
+  --font-wide: "Orbitron", "Eurostile Extended", sans-serif;
+}
+
+/* OS/2 Warp — design tokens
+   Extracted from styles/19-os2-warp/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="os2-warp"] {
+  --desktop: #2d7a7a;
+  --chrome: #c0c0c0;
+  --chrome-light: #dfdfdf;
+  --chrome-dark: #808080;
+  --chrome-darker: #404040;
+  --titlebar: #00007f;
+  --titlebar-2: #1084d0;
+  --ink: #000000;
+  --warp-red: #c41e3a;
+  --warp-blue: #003d99;
+  --font: "Helvetica", "WarpSans", "Arial", sans-serif;
+  --font-mono: "System Monospaced", "Courier New", monospace;
+}
+
+/* Mac OS 9 Platinum — design tokens
+   Extracted from styles/20-macos9-platinum/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="macos9-platinum"] {
+  --desktop: #808080;
+  --platinum: #dddddd;
+  --platinum-light: #f5f5f5;
+  --platinum-mid: #c5c5c5;
+  --platinum-dark: #858585;
+  --platinum-darker: #555555;
+  --stripe: #a0a0a0;
+  --accent: #3a62ab;
+  --ink: #000;
+  --font: "Charcoal", "Geneva", "Lucida Grande", sans-serif;
+  --font-body: "Geneva", "Lucida Grande", sans-serif;
+}
+
+/* Web 2.0 Glossy — design tokens
+   Extracted from styles/21-web20-glossy/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="web20-glossy"] {
+  --bg: #e8f0f7;
+  --panel: #ffffff;
+  --sky-1: #a8d0f0;
+  --sky-2: #d4e8f7;
+  --blue: #2a7ac9;
+  --blue-light: #62a8e8;
+  --blue-dark: #1e5a9c;
+  --orange: #ff8c1a;
+  --orange-dark: #d96f00;
+  --green: #7ab800;
+  --ink: #2a2a2a;
+  --muted: #6a7a8a;
+  --font: "Lucida Grande", "Trebuchet MS", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Game Boy DMG — design tokens
+   Extracted from styles/22-gameboy-dmg/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="gameboy-dmg"] {
+  --shell: #b8b0a4;
+  --shell-dark: #8a8478;
+  --shell-shadow: #6a6458;
+  --screen-bezel: #2a3028;
+  --lcd-0: #0f380f;
+  --lcd-1: #306230;
+  --lcd-2: #8bac0f;
+  --lcd-3: #9bbc0f;
+  --red-led: #d42020;
+  --btn-purple: #6a1b7a;
+  --font-pixel: "Press Start 2P", "VT323", "Courier New", monospace;
+  --font-lcd: "VT323", "Courier New", monospace;
+}
+
+/* Braun / Dieter Rams — design tokens
+   Extracted from styles/23-braun-rams/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="braun-rams"] {
+  --paper: #f4f3f0;
+  --white: #ffffff;
+  --ink: #1a1a1a;
+  --gray-1: #e4e3e0;
+  --gray-2: #b8b7b3;
+  --gray-3: #6a6965;
+  --gray-4: #2a2a28;
+  --orange: #f2642a;
+  --green: #3a7a5a;
+  --font: "Akzidenz-Grotesk", "Helvetica Neue", Helvetica, "Arial", sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+}
+
+/* Tron Vector — design tokens
+   Extracted from styles/24-tron-vector/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="tron-vector"] {
+  --bg: #000008;
+  --grid: #0a1a3a;
+  --cyan: #00e4ff;
+  --cyan-dim: #007a8a;
+  --cyan-bright: #a0f4ff;
+  --orange: #ff7a00;
+  --red: #ff2040;
+  --ink: #00e4ff;
+  --font: "Orbitron", "Eurostile", "Share Tech Mono", monospace;
+  --font-mono: "Share Tech Mono", "Courier New", monospace;
+}
+
+/* VHS Tracking — design tokens
+   Extracted from styles/25-vhs-tracking/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="vhs-tracking"] {
+  --bg: #0a0a0a;
+  --tape: #141014;
+  --rec-red: #ff1a1a;
+  --osd-white: #f4f4f4;
+  --osd-yellow: #ffe84a;
+  --osd-cyan: #4ae2ff;
+  --smpte-red: #ff2a2a;
+  --smpte-green: #2aff2a;
+  --smpte-blue: #2a2aff;
+  --smpte-yellow: #ffff2a;
+  --smpte-cyan: #2affff;
+  --smpte-magenta: #ff2aff;
+  --font: "VT323", "Courier New", monospace;
+  --font-osd: "VCR OSD Mono", "VT323", "Courier New", monospace;
+}
+
+/* Risograph Print — design tokens
+   Extracted from styles/26-risograph/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="risograph"] {
+  --paper: #f3efe4;
+  --paper-dark: #e6dfcb;
+  --fluoro-pink: #ff4fa5;
+  --fluoro-pink-light: #ffb8db;
+  --riso-blue: #0078b4;
+  --riso-blue-light: #6ca8d4;
+  --riso-yellow: #f6d800;
+  --riso-green: #00a03c;
+  --ink: #1a1a1a;
+  --font: "Helvetica Neue", "Akzidenz-Grotesk", "Arial", sans-serif;
+  --font-serif: "Times New Roman", "Garamond", serif;
+}
+
+/* IBM 3270 Mainframe — design tokens
+   Extracted from styles/27-ibm-3270/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="ibm-3270"] {
+  --bg: #000000;
+  --turquoise: #00d4d4;
+  --green: #00d400;
+  --white: #e4e4e4;
+  --red: #ff3030;
+  --yellow: #ffe84a;
+  --blue: #4a9cff;
+  --pink: #ff7aa8;
+  --dim: #005a5a;
+  --font: "IBM 3270", "PxPlus 3270", "VT323", "Courier New", monospace;
+}
+
+/* NetHack ASCII — design tokens
+   Extracted from styles/28-nethack-ascii/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="nethack-ascii"] {
+  --bg: #000000;
+  --wall: #a0a0a0;
+  --floor: #707070;
+  --player: #ffff00;
+  --monster-red: #ff4040;
+  --monster-green: #40ff40;
+  --monster-blue: #6080ff;
+  --monster-magenta: #ff40ff;
+  --item-cyan: #40e4e4;
+  --gold: #ffd700;
+  --door: #a05020;
+  --stairs: #c0c0c0;
+  --ink: #e4e4e4;
+  --dim: #606060;
+  --font: "Px437 IBM VGA", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}
+
+/* TempleOS — design tokens
+   Extracted from styles/29-templeos/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="templeos"] {
+  --bg: #0000aa;
+  --text: #ffffff;
+  --red: #ff0000;
+  --yellow: #ffff00;
+  --green: #00ff00;
+  --cyan: #00ffff;
+  --magenta: #ff00ff;
+  --orange: #ffaa00;
+  --black: #000000;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}
+
+/* BBS ANSI Art — design tokens
+   Extracted from styles/30-bbs-ansi/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="bbs-ansi"] {
+  --bg: #000000;
+  --black: #000000;
+  --red: #aa0000;
+  --red-hi: #ff5555;
+  --green: #00aa00;
+  --green-hi: #55ff55;
+  --yellow: #aa5500;
+  --yellow-hi: #ffff55;
+  --blue: #0000aa;
+  --blue-hi: #5555ff;
+  --magenta: #aa00aa;
+  --magenta-hi: #ff55ff;
+  --cyan: #00aaaa;
+  --cyan-hi: #55ffff;
+  --white: #aaaaaa;
+  --white-hi: #ffffff;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}
+
+/* Midnight Commander — design tokens
+   Extracted from styles/31-midnight-commander/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="midnight-commander"] {
+  --bg: #0000aa;
+  --panel: #0000aa;
+  --panel-border: #aaaaaa;
+  --text: #aaaaaa;
+  --text-hi: #ffffff;
+  --yellow: #ffff55;
+  --cyan: #55ffff;
+  --selected-bg: #00aaaa;
+  --selected-fg: #000000;
+  --dir-fg: #ffffff;
+  --exec-fg: #55ff55;
+  --link-fg: #ff55ff;
+  --statusbar-bg: #aaaaaa;
+  --statusbar-fg: #000000;
+  --funcbar-bg: #00aaaa;
+  --funcbar-fg: #000000;
+  --funcbar-num: #ffffff;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}
+
+/* Matrix Rain — design tokens
+   Extracted from styles/32-matrix-rain/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="matrix-rain"] {
+  --bg: #000000;
+  --mx-dim: #003b00;
+  --mx: #00a830;
+  --mx-hi: #62ff9d;
+  --mx-white: #ccffcc;
+  --warn: #ff3860;
+  --font: "Matrix Code NFI", "MS Mincho", "MS Gothic", "Courier New", monospace;
+}
+
+/* btop / System Monitor — design tokens
+   Extracted from styles/33-btop-meters/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="btop-meters"] {
+  --bg: #131424;
+  --panel-bg: #1a1c30;
+  --panel-border: #3b3e5e;
+  --ink: #e8ecff;
+  --muted: #7a82b0;
+  --accent: #00e4ff;
+  --cpu-1: #6de37a;
+  --cpu-2: #e5e56a;
+  --cpu-3: #ff9a44;
+  --cpu-4: #ff4a6a;
+  --mem: #a073ff;
+  --net-up: #6de37a;
+  --net-dn: #ff9a44;
+  --proc-hi: #00e4ff;
+  --font: "Hack", "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+}
+
+/* Commodore 64 BASIC — design tokens
+   Extracted from styles/34-c64-basic/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="c64-basic"] {
+  --border: #9692d9;
+  --bg: #443ec4;
+  --bg-dark: #2e2898;
+  --text: #a8a0ff;
+  --text-hi: #c8c0ff;
+  --white: #ffffff;
+  --red: #e04040;
+  --green: #4aff4a;
+  --yellow: #fff84a;
+  --cyan: #4afaff;
+  --orange: #ff9a3a;
+  --font: "C64 Pro", "Commodore 64", "Px437 PETSCII", "Press Start 2P", monospace;
+}
+
+/* Flat Design 2013 — design tokens
+   Extracted from styles/35-flat-2013/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="flat-2013"] {
+  --bg: #ecf0f1;
+  --turq: #1abc9c;
+  --green: #2ecc71;
+  --blue: #3498db;
+  --purple: #9b59b6;
+  --dark: #34495e;
+  --yellow: #f1c40f;
+  --orange: #e67e22;
+  --red: #e74c3c;
+  --silver: #bdc3c7;
+  --gray: #95a5a6;
+  --font: "Helvetica Neue Light", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* Glassmorphism — design tokens
+   Extracted from styles/36-glassmorphism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="glassmorphism"] {
+  --ink: #ffffff;
+  --muted: rgba(255,255,255,0.7);
+  --glass-bg: rgba(255,255,255,0.15);
+  --glass-border: rgba(255,255,255,0.3);
+  --accent: #ff6ec4;
+  --accent-2: #7873f5;
+  --font: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Neumorphism — design tokens
+   Extracted from styles/37-neumorphism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="neumorphism"] {
+  --bg: #e0e5ec;
+  --ink: #4a5568;
+  --muted: #8a94a6;
+  --accent: #6c8cff;
+  --shadow-dark: #a3b1c6;
+  --shadow-light: #ffffff;
+  --font: "Inter", "SF Pro", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Blueprint / CAD — design tokens
+   Extracted from styles/38-blueprint-cad/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="blueprint-cad"] {
+  --bg: #0d3a6b;
+  --bg-dark: #082852;
+  --line: #c0daf4;
+  --line-dim: #6892c4;
+  --ink: #eaf2fb;
+  --red: #ff6b6b;
+  --yellow: #ffe066;
+  --font: "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+}
+
+/* Claymorphism — design tokens
+   Extracted from styles/39-claymorphism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="claymorphism"] {
+  --bg: #f0e9ff;
+  --ink: #3a2e5c;
+  --muted: #7c6ba8;
+  --pink: #ffb3d1;
+  --purple: #c9a8ff;
+  --blue: #9ec8ff;
+  --mint: #a8f0d0;
+  --yellow: #ffe58a;
+  --orange: #ffb38a;
+  --font: "Nunito", "SF Pro Rounded", "Helvetica Neue", system-ui, sans-serif;
+}
+
+/* Brutalist Web — design tokens
+   Extracted from styles/40-brutalist-web/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="brutalist-web"] {
+}
+
+/* Swiss Style — design tokens
+   Extracted from styles/41-swiss-intl/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="swiss-intl"] {
+  --paper: #f4f3ee;
+  --ink: #0a0a0a;
+  --red: #e63946;
+  --muted: #6a6a6a;
+  --line: #0a0a0a;
+  --font: "Helvetica Neue", "Akzidenz-Grotesk", Helvetica, Arial, sans-serif;
+}
+
+/* Bauhaus — design tokens
+   Extracted from styles/42-bauhaus/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="bauhaus"] {
+  --paper: #f0ebe0;
+  --ink: #0a0a0a;
+  --red: #d32027;
+  --yellow: #f5c518;
+  --blue: #1c4fb5;
+  --font: "Futura", "Futura PT", "Century Gothic", "Avenir Next", sans-serif;
+}
+
+/* Pop Art / Lichtenstein — design tokens
+   Extracted from styles/43-pop-art-lichtenstein/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="pop-art-lichtenstein"] {
+  --paper: #fffef8;
+  --ink: #0a0a0a;
+  --red: #ed1c24;
+  --yellow: #ffde00;
+  --blue: #1b4ea0;
+  --skin: #ffd6c7;
+  --font: "Bungee", "Impact", "Arial Black", sans-serif;
+  --font-serif: "Courier New", monospace;
+}
+
+/* Op Art / Vasarely — design tokens
+   Extracted from styles/44-op-art/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="op-art"] {
+  --black: #0a0a0a;
+  --white: #f5f5f5;
+  --red: #ec1e23;
+  --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* Hypnagogic / Liminal — design tokens
+   Extracted from styles/45-hypnagogic/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="hypnagogic"] {
+  --wall: #dcc89a;
+  --carpet: #c89050;
+  --ceiling: #e8d8b0;
+  --fluor: #fff4c8;
+  --shadow: #6a5530;
+  --ink: #2a2418;
+  --faded: #8a7a54;
+  --sign: #3d5a80;
+  --exit: #c44536;
+  --font: "Times New Roman", "Georgia", serif;
+  --font-hand: "Comic Sans MS", cursive;
+}
+
+/* Monochrome Zen — design tokens
+   Extracted from styles/46-monochrome-zen/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="monochrome-zen"] {
+  --paper: #fafaf7;
+  --ink: #0a0a0a;
+  --rule: rgba(10,10,10,0.15);
+  --font: "Söhne", "Inter", "Helvetica Neue", sans-serif;
+  --font-serif: "Lyon", "Times New Roman", Garamond, serif;
+}
+
+/* Default Browser (Mosaic / Netscape 1993) — design tokens
+   Extracted from styles/47-default-browser/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="default-browser"] {
+}
+
+/* Wireframe / Balsamiq Sketch — design tokens
+   Extracted from styles/48-wireframe-sketch/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="wireframe-sketch"] {
+  --paper: #fbfaf4;
+  --ink: #2a2a2a;
+  --light: #b0b0b0;
+  --muted: #8a8a8a;
+  --hi: #d4d1c4;
+  --font-hand: "Kalam", "Comic Sans MS", "Marker Felt", cursive;
+  --font: "Kalam", "Comic Sans MS", cursive;
+}
+
+/* Glitch / Databend — design tokens
+   Extracted from styles/49-glitch-databend/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="glitch-databend"] {
+  --bg: #0a0a0a;
+  --ink: #f0f0f0;
+  --red: #ff004d;
+  --cyan: #00f4ff;
+  --green: #00ff8c;
+  --yellow: #ffe600;
+  --magenta: #ff00ae;
+  --font: "Space Mono", "JetBrains Mono", "IBM Plex Mono", "Courier New", monospace;
+  --font-heading: "Space Grotesk", "Helvetica Neue", Impact, sans-serif;
+}
+
+/* Y2K Chrome Bubble — design tokens
+   Extracted from styles/50-y2k-chrome/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="y2k-chrome"] {
+  --bg-1: #d7f0ff;
+  --bg-2: #ffccee;
+  --bg-3: #e8d9ff;
+  --ink: #202030;
+  --chrome-hi: #ffffff;
+  --chrome-mid: #b8c4d8;
+  --chrome-low: #5a6478;
+  --pink: #ff6ab8;
+  --blue: #5ab8ff;
+  --green: #7aff9a;
+  --purple: #9a7aff;
+  --font: "Neue Haas Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Eurostile", "Bank Gothic", "Helvetica Neue", sans-serif;
+}
+
+/* Duotone Poster — design tokens
+   Extracted from styles/51-duotone-poster/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="duotone-poster"] {
+  --paper: #f4ead3;
+  --spot-1: #ff3a38;
+  --spot-2: #1a1a3a;
+  --font: "Futura", "Helvetica Neue", "Akzidenz-Grotesk", sans-serif;
+  --font-display: "Futura", "Impact", "Helvetica Neue", sans-serif;
+}
+
+/* Grid Paper Notebook — design tokens
+   Extracted from styles/52-grid-paper/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="grid-paper"] {
+  --paper: #fafaf0;
+  --grid: rgba(64, 100, 160, 0.15);
+  --grid-major: rgba(64, 100, 160, 0.3);
+  --margin-red: rgba(200, 80, 80, 0.5);
+  --ink: #1a2847;
+  --pencil: #4a5a6e;
+  --red-ink: #c83030;
+  --green-ink: #2a7a3a;
+  --highlighter: rgba(255, 230, 100, 0.5);
+  --font: "Shadows Into Light", "Architects Daughter", "Comic Sans MS", cursive;
+  --font-neat: "Patrick Hand", "Kalam", cursive;
+}
+
+/* Maximalist 90s Banner — design tokens
+   Extracted from styles/53-maximalist-banners/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+[data-atlas-theme="maximalist-banners"] {
+  --bg: #ff00ff;
+  --bg-2: #00ffff;
+  --bg-3: #ffff00;
+  --ink: #000;
+  --font: "Comic Sans MS", "Trebuchet MS", Verdana, sans-serif;
+  --font-impact: "Impact", "Arial Black", sans-serif;
 }
