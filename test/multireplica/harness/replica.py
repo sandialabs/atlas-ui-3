@@ -257,6 +257,8 @@ def write_config(config_dir: Path, mock_llm_url: str) -> None:
                 "HARNESS_REPLICA": "${HARNESS_REPLICA}",
             },
             "groups": ["users"],
+            # Only the gated twin: the tools the REST runs' workspace selects never need approval.
+            "require_approval": ["approved_write"],
             "description": "Multi-replica harness side-effect counter",
             "compliance_level": "Public",
         }

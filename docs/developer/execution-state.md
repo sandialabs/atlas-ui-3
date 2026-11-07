@@ -1,6 +1,6 @@
 # Execution State
 
-Last updated: 2026-10-30
+Last updated: 2026-11-04
 
 How a reopened conversation reconstructs an in-progress run (issue #1122).
 Related: [Interrupted Turns](interrupted-turns.md), [Interactive Tool Elicitation](elicitation.md).
@@ -69,7 +69,10 @@ is written only for a pending request the caller owns, under that request's
 own invocation id.
 
 A response that only writes the shared outcome, because the executor is on
-another replica, resumes nothing locally. A response that names a run or
+another replica, resumes nothing locally. It sends that replica an `approval`
+command so the waiting tool wakes at once instead of at its next poll; the
+outcome is already settled, so the command cannot change it (see
+[cross-replica run control](run-control.md)). A response that names a run or
 conversation this replica does not hold does not fall back to guessing the
 user's single waiting run.
 

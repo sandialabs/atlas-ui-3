@@ -2,8 +2,9 @@
 
 The ones main does not meet yet are ``xfail(strict=True, raises=GapNotClosed)``
 (``@gap``). The cross-replica admission criteria were closed by the Redis run
-coordinator, and inspection, owner loss and fencing by the run leases; those
-are plain tests now. Preconditions use a plain ``assert`` (a broken precondition is a real failure); only the final
+coordinator, inspection, owner loss and fencing by the run leases, and stop
+routing by cross-replica run control; those are plain tests now, and no gap
+is open. ``gap`` stays for the next criterion that is not met yet. Preconditions use a plain ``assert`` (a broken precondition is a real failure); only the final
 criterion uses ``expect(...)``, which raises ``GapNotClosed``. When a #1128 PR
 closes a gap the test XPASSes, strict mode fails the run, and that PR removes
 the marker -- the test then guards the behavior from then on.
@@ -29,7 +30,6 @@ def test_non_owner_can_inspect_an_active_run(cluster):
         cluster.cancel_everywhere(handle["run_id"])
 
 
-@gap
 def test_stop_sent_to_non_owner_reaches_the_owner(cluster):
     user = cluster.new_user()
     handle = cluster.launch_ok(cluster.a, user, directive("stop", sleep=8))
