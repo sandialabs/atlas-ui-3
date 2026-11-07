@@ -27,6 +27,10 @@ produces three deterministic assets:
   source identifiers, and base light/dark modes from the upstream manifest.
 - `retroCatalog.generated.css`: safe semantic Atlas color/control adapters
   for designs not already covered by the initial three hand-reviewed adapters.
+- `retroChrome.generated.css`: scoped, motif-specific window, titlebar,
+  button and input styling for 45 additional themes. The other eight themes
+  have handcrafted styles in `theme-presets.css` and `retroChrome.css`.
+  Every design therefore has distinct component chrome, not merely tokens.
 
 The three previously shipped theme IDs (`mac7`, `win95`,
 `crt-phosphor`) and their explicit adapters remain compatible with saved
@@ -50,8 +54,7 @@ its button and surrounding window (at least 3:1), focus visibility, and
 matching dark/light color-scheme. The Build Artifacts GitHub workflow runs
 this check on the built frontend using the runner's installed Chrome. This
 is a targeted theme contrast test, not a blanket accessibility certification.
- The source
-token parser rejects additional selectors, non-token CSS, and external
+The source token parser rejects additional selectors, non-token CSS, and external
 resource imports. The original token files and license remain inspectable
 and attributed. CI verifies the generated output is up to date.
 
@@ -70,8 +73,13 @@ standalone HTML demo pages **are not embedded or run inside Atlas**.
 They have global `body`/form/reset rules and document-specific layouts that
 cannot safely be loaded over a production chat interface. The adapters are
 conservative, **not pixel-perfect reproduction** of each standalone page.
-The first three hand-reviewed designs retain additional style-specific
-window treatments.
+Eight hand-reviewed designs (Mac System 7, Windows 95, CRT Phosphor,
+Windows XP Luna, Mac OS X Aqua, Amiga Workbench, NeXTSTEP, and BeOS)
+retain distinctive window chrome. The other 45 use source-derived
+visual motifs (terminal borders, glossy highlights, pixel edges, print
+rules, geometric details, and more). These are real, accessible React
+components with theme-aware CSS; they are not literal re-creations of
+53 entire desktop environments.
 
 The catalog includes #30, **BBS ANSI Art**, because that is one of the 53
 upstream designs. Here it is **only CSS color tokens and semantic styling**:

@@ -100,6 +100,172 @@ def entry_id(item):
     return LEGACY_IDS.get(item['id'], item['slug'][3:])
 
 
+# All 53 source designs have a chrome treatment. These eight already have
+# hand-reviewed adapters in theme-presets.css / retroChrome.css, whereas the
+# other 45 are generated from the pinned manifest and original palette.
+HANDCRAFTED_CHROME = frozenset((1, 2, 3, 4, 5, 6, 7, 9))
+CHROME_MOTIFS = {
+    8: 'broadcast', 10: 'terminal', 11: 'pixel', 12: 'glass',
+    13: 'industrial', 14: 'web', 15: 'science', 16: 'neon',
+    17: 'graphic', 18: 'pixel', 19: 'bevel', 20: 'bevel',
+    21: 'gloss', 22: 'lcd', 23: 'industrial', 24: 'science',
+    25: 'glitch', 26: 'paper', 27: 'terminal', 28: 'terminal',
+    29: 'terminal', 30: 'terminal', 31: 'tui', 32: 'science',
+    33: 'tui', 34: 'pixel', 35: 'minimal', 36: 'glass',
+    37: 'soft', 38: 'grid', 39: 'soft', 40: 'brutalist',
+    41: 'minimal', 42: 'graphic', 43: 'comic', 44: 'optical',
+    45: 'dream', 46: 'minimal', 47: 'web', 48: 'paper',
+    49: 'glitch', 50: 'gloss', 51: 'poster', 52: 'grid',
+    53: 'web',
+}
+
+# Four semantic properties for each architectural design family: window,
+# titlebar, button and input. All selectors are scoped to RetroControls.
+# No page-wide reset, injected third-party demo layout, or animation.
+CHROME_MOTIF_RULES = {
+    'broadcast': (
+        'border: 3px solid var(--atlas-retro-control-border); border-radius: 0;',
+        'border-bottom: 3px solid var(--atlas-retro-control-border);',
+        'border-radius: 0; border-width: 3px;',
+        'border-radius: 0; border-width: 2px;'),
+    'terminal': (
+        'border: 4px double var(--atlas-retro-control-border); border-radius: 0;',
+        'border-bottom: 1px dotted var(--atlas-retro-control-border);',
+        'border-radius: 0; border-style: solid;',
+        'border-radius: 0; border-width: 1px;'),
+    'pixel': (
+        'border-width: 3px; border-radius: 0; box-shadow: 5px 5px 0 #0006;',
+        'border-bottom-width: 3px;',
+        'border-radius: 0; border-width: 3px; box-shadow: 2px 2px 0 #0005;',
+        'border-radius: 0; border-width: 2px;'),
+    'glass': (
+        'border-radius: 12px; box-shadow: 0 8px 24px #0003, inset 0 1px 0 #fff5;',
+        'background-image: linear-gradient(to bottom, #fff3, #fff0 65%, #0001);',
+        'border-radius: 9px; box-shadow: inset 0 1px 0 #fff5, 0 2px 5px #0002;',
+        'border-radius: 8px; box-shadow: inset 0 1px 2px #0002;'),
+    'industrial': (
+        'border-width: 2px; border-radius: 2px; box-shadow: inset 2px 2px 0 #fff5, inset -2px -2px 0 #0003;',
+        'border-bottom-width: 2px;',
+        'border-width: 2px; box-shadow: inset 1px 1px 0 #fff5, inset -1px -1px 0 #0003;',
+        'border-width: 2px; box-shadow: inset 1px 1px 0 #0003;'),
+    'web': (
+        'border-style: dashed; border-width: 2px; border-radius: 0;',
+        'border-bottom-style: dotted; border-bottom-width: 2px;',
+        'border-radius: 0; text-decoration: underline; text-underline-offset: 3px;',
+        'border-radius: 0;'),
+    'science': (
+        'border-width: 1px; border-radius: 0; box-shadow: inset 0 0 0 2px #fff2;',
+        'background-image: repeating-linear-gradient(to right, #fff0 0 22px, #fff2 22px 23px);',
+        'border-radius: 0; letter-spacing: .06em;',
+        'border-radius: 0;'),
+    'neon': (
+        'border-radius: 4px; border-width: 2px; box-shadow: 0 0 12px #ffffff23;',
+        'border-bottom-width: 2px; text-transform: uppercase;',
+        'border-radius: 3px; box-shadow: 0 0 5px #ffffff26;',
+        'border-radius: 2px;'),
+    'graphic': (
+        'border-left-width: 7px; border-radius: 0; box-shadow: 5px 5px 0 #0004;',
+        'border-bottom-width: 4px;',
+        'border-radius: 0; font-weight: 800; text-transform: uppercase;',
+        'border-radius: 0; border-width: 2px;'),
+    'bevel': (
+        'border-width: 3px; border-radius: 0; box-shadow: inset 1px 1px 0 #fff5, inset -1px -1px 0 #0004;',
+        'border-bottom-width: 2px;',
+        'border-width: 2px; border-radius: 0; box-shadow: inset 1px 1px 0 #fff5, inset -1px -1px 0 #0003;',
+        'border-width: 2px; border-radius: 0;'),
+    'gloss': (
+        'border-radius: 10px; box-shadow: 0 4px 12px #0004;',
+        'background-image: linear-gradient(to bottom, #fff5, #fff0 52%, #0002);',
+        'border-radius: 14px; background-image: linear-gradient(to bottom, #fff4, #fff0 55%, #0002);',
+        'border-radius: 7px;'),
+    'lcd': (
+        'border: 5px solid var(--atlas-retro-control-border); border-radius: 11px; box-shadow: inset 0 0 0 2px #0002;',
+        'border-bottom-width: 3px;',
+        'border-radius: 4px; border-width: 2px;',
+        'border-radius: 0; border-width: 2px;'),
+    'glitch': (
+        'border-radius: 0; border-width: 2px; box-shadow: -3px 0 #ff00664d, 3px 0 #00ffff4d;',
+        'border-bottom-width: 3px;',
+        'border-radius: 0; box-shadow: 2px 1px 0 #ff006633;',
+        'border-radius: 0;'),
+    'paper': (
+        'border: 1px solid var(--atlas-retro-control-border); border-radius: 0; box-shadow: 4px 4px 0 #0003;',
+        'background-image: repeating-linear-gradient(to bottom, #fff0 0 10px, #0001 10px 11px);',
+        'border-radius: 0; border-width: 1px;',
+        'border-radius: 0; border-bottom-width: 2px;'),
+    'tui': (
+        'border: 3px double var(--atlas-retro-control-border); border-radius: 0;',
+        'border-bottom: 3px double var(--atlas-retro-control-border);',
+        'border-radius: 0; font-family: monospace;',
+        'border-radius: 0; font-family: monospace;'),
+    'minimal': (
+        'border-width: 1px; border-radius: 0; box-shadow: none;',
+        'border-bottom-width: 1px; text-transform: uppercase; letter-spacing: .05em;',
+        'border-radius: 0; border-width: 1px; box-shadow: none;',
+        'border-radius: 0; border-width: 1px;'),
+    'soft': (
+        'border-width: 1px; border-radius: 18px; box-shadow: 6px 6px 15px #0002, -2px -2px 8px #fff2;',
+        'border-bottom-width: 0;',
+        'border-radius: 16px; box-shadow: 2px 3px 8px #0002;',
+        'border-radius: 10px;'),
+    'grid': (
+        'border-width: 2px; border-radius: 0; box-shadow: inset 0 0 0 1px #fff2;',
+        'background-image: repeating-linear-gradient(to right, #fff0 0 15px, #fff2 15px 16px);',
+        'border-radius: 0; letter-spacing: .04em;',
+        'border-radius: 0;'),
+    'brutalist': (
+        'border: 5px solid var(--atlas-retro-control-border); border-radius: 0; box-shadow: 8px 8px 0 #0009;',
+        'border-bottom-width: 4px; text-transform: uppercase;',
+        'border: 3px solid var(--atlas-retro-control-border); border-radius: 0; box-shadow: 4px 4px 0 #0007;',
+        'border-width: 3px; border-radius: 0;'),
+    'comic': (
+        'border: 3px solid var(--atlas-retro-control-border); border-radius: 16px; box-shadow: 6px 6px 0 #0007;',
+        'background-image: radial-gradient(#fff4 1px, transparent 1px); background-size: 6px 6px;',
+        'border-width: 3px; border-radius: 14px; box-shadow: 2px 3px 0 #0005;',
+        'border-width: 2px; border-radius: 4px;'),
+    'optical': (
+        'border: 3px double var(--atlas-retro-control-border); border-radius: 0;',
+        'background-image: repeating-linear-gradient(120deg, #fff0 0 6px, #fff2 6px 7px);',
+        'border-radius: 0; border-width: 2px;',
+        'border-radius: 0;'),
+    'dream': (
+        'border-radius: 24px; box-shadow: 0 8px 20px #0002;',
+        'background-image: linear-gradient(135deg, #fff3, #fff0 70%);',
+        'border-radius: 30px; box-shadow: 0 2px 8px #0002;',
+        'border-radius: 16px;'),
+    'poster': (
+        'border-left-width: 9px; border-radius: 0; box-shadow: 3px 4px 0 #0005;',
+        'border-bottom-width: 4px; text-transform: uppercase;',
+        'border-radius: 0; font-weight: 900;',
+        'border-radius: 0; border-width: 2px;'),
+}
+assert set(CHROME_MOTIFS) == set(range(1, 54)) - set(HANDCRAFTED_CHROME)
+
+
+def generate_chrome(systems):
+    parts = ['/* Generated by build-retro-catalog.py; do not edit.',
+             ' * All 53 RDS identities receive chrome: eight have handcrafted',
+             ' * adapters and 45 get scoped source-derived visual grammar.',
+             ' * No JavaScript, bitmap assets, runtime artwork, or remote CSS.',
+             ' */']
+    for item in systems:
+        number = item['id']
+        if number in HANDCRAFTED_CHROME:
+            continue
+        ident = entry_id(item)
+        motif = CHROME_MOTIFS[number]
+        window, title, button, field = CHROME_MOTIF_RULES[motif]
+        parts.append(
+            f'/* #{number:02} — {item["name"]} · {motif} */\n'
+            f'[data-atlas-theme="{ident}"] .atlas-retro-window {{ {window} }}\n'
+            f'[data-atlas-theme="{ident}"] .atlas-retro-window-titlebar {{ {title} }}\n'
+            f'[data-atlas-theme="{ident}"] .atlas-retro-button {{ {button} }}\n'
+            f'[data-atlas-theme="{ident}"] .atlas-retro-input {{ {field} }}'
+        )
+    return '\n\n'.join(parts)+'\n'
+
+
+
 def build():
     doc = json.loads((VENDOR/'manifest.json').read_text())
     systems = doc['systems']
@@ -213,6 +379,7 @@ def build():
         catalog_file: catalog_js,
         VENDOR/'tokens.css': '\n\n'.join(scopes).rstrip()+'\n',
         ROOT/'retroCatalog.generated.css': '\n\n'.join(adapters).rstrip()+'\n',
+        ROOT/'retroChrome.generated.css': generate_chrome(systems),
     }
 
 

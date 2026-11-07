@@ -325,6 +325,11 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
 .atlas-retro-button:disabled { cursor: not-allowed; opacity: 0.65; }
 
 /* Windows 95: classic raised buttons, inset fields, squared title bars. */
+[data-atlas-theme="win95"] .atlas-retro-window-titlebar {
+  background: var(--title);
+  color: var(--title-text);
+  border-bottom: 2px solid var(--chrome-dark);
+}
 [data-atlas-theme="win95"] .atlas-retro-window {
   border-color: var(--chrome-lighter) var(--chrome-darker) var(--chrome-darker) var(--chrome-lighter);
   box-shadow: inset 1px 1px var(--chrome-light);
@@ -350,9 +355,20 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   padding-inline: 0.4rem;
   text-align: center;
 }
+[data-atlas-theme="mac7"] .atlas-retro-input {
+  border: 1px solid var(--ink);
+  box-shadow: inset 1px 1px 0 var(--shadow);
+}
 [data-atlas-theme="mac7"] .atlas-retro-button {
   border-color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--paper), inset 0 0 0 2px var(--ink);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-retro-window-titlebar {
+  border-bottom: 1px solid var(--ink);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-retro-input {
+  border: 1px solid var(--ink);
+  border-radius: 0;
 }
 [data-atlas-theme="crt-phosphor"] .atlas-retro-window { font-family: var(--atlas-font-ui); }
 [data-atlas-theme="crt-phosphor"] .atlas-retro-button:hover {
