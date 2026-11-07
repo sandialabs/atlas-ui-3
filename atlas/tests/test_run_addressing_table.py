@@ -30,8 +30,8 @@ from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
 )
 
 from atlas.application.chat.agent.steering import SteeringChannel
-from atlas.application.chat.runs import run_control
 from atlas.application.chat.runs.commands import (
+    approval_nudge,
     cancel_api_run_addressed,
     steer_addressed_run,
     stop_addressed_run,
@@ -579,9 +579,14 @@ def test_C10_local_off_record_steer_is_refused(chat_service, off_record):
 
 
 # ---------------------------------------------------------------------------
-# ws tool_approval_response (route_approval is the owner nudge; the shared
+# ws tool_approval_response (approval_nudge is the owner nudge; the shared
 # outcome write is decide_tool_approval, covered by test_approval_resolution)
 # ---------------------------------------------------------------------------
+
+
+async def _nudge(run_id, invocation_id):
+    outcome = {"run_id": run_id, "invocation_id": invocation_id, "tool_call_id": "call_0"}
+    return await approval_nudge(RunRegistry(), OWNER, outcome)
 
 
 async def test_P01_remote_live_approval_nudges_the_owner(cluster):
@@ -591,7 +596,7 @@ async def test_P01_remote_live_approval_nudges_the_owner(cluster):
 
     await cluster.store.put_resolution(approval_storage_key(request.invocation_id, "call_0", OWNER),
                                        {"approved": True})
-    answer = await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0")
+    answer = await _nudge(run.run_id, request.invocation_id)
     assert answer["ok"] and answer["payload"]["applied"] is True and request.future.done()
 
 
@@ -599,7 +604,7 @@ async def test_P02_approval_naming_no_run_sends_no_nudge(cluster):
     run = await cluster.run()
     request = await _pending_approval(cluster, run)
     # The executor still polls the shared outcome; only the wake-up is skipped.
-    assert await run_control.route_approval(OWNER, None, request.invocation_id, "call_0") is None
+    assert await _nudge(None, request.invocation_id) is None
     assert not request.future.done()
 
 
@@ -608,14 +613,14 @@ async def test_P03_remote_terminal_run_gets_no_nudge(cluster):
     request = await _pending_approval(cluster, run)
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    assert await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0") is None
+    assert await _nudge(run.run_id, request.invocation_id) is None
 
 
 async def test_P04_unreadable_directory_is_best_effort(cluster):
     run = await cluster.run()
     request = await _pending_approval(cluster, run)
     await _unreadable(cluster)
-    assert await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0") is None
+    assert await _nudge(run.run_id, request.invocation_id) is None
 
 
 def _two_pending_call_zero():

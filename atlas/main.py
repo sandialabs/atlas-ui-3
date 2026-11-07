@@ -62,6 +62,7 @@ from atlas.application.chat.runs.admission import (
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.commands import (
+    nudge_approval,
     steer_addressed_run,
     stop_addressed_run,
 )
@@ -3123,9 +3124,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # this request. Wake the executor rather than leave it to
                     # its next poll (issue #1128); the outcome is already
                     # settled, so a repeated nudge cannot settle it again.
-                    from atlas.application.chat.runs.remote_run_frames import nudge_approval_owner
-
-                    nudge_approval_owner(user_email, frame)
+                    nudge_approval(run_registry, user_email, frame)
                 elif frame is not None:
                     # Duplicate: the settled outcome, not an error that ends
                     # the turn. Unknown: the error frame, which names the

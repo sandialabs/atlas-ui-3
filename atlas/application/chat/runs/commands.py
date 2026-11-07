@@ -8,6 +8,7 @@ Who may act on the run is still decided on the owner's side.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -24,6 +25,7 @@ from atlas.application.chat.runs.run_control import (
     SERVICE_ACTOR,
     route_api_cancel,
     route_api_follow_up_cancel,
+    route_approval,
     route_steer,
     route_stop,
     user_actor,
@@ -34,6 +36,7 @@ from atlas.core.user_identity import normalize_user_email
 logger = logging.getLogger(__name__)
 
 _DIRECTORY_UNAVAILABLE_MESSAGE = "The shared run directory could not be read."
+_APPROVAL_NUDGES: "set[asyncio.Task]" = set()
 
 
 async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
@@ -152,3 +155,42 @@ async def cancel_api_run_addressed(run_id: str) -> Dict[str, Any]:
     # may be executing on another replica.
     later = await route_api_follow_up_cancel(run_id, named.conversation_id, named.user_email, status)
     return later if later is not None else reply(True, status=status)
+
+
+async def approval_nudge(registry, user_email: str, outcome: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Wake the executor of an approval this replica just recorded.
+
+    Returns the owner's answer, or None when there is nobody to wake (no run
+    named, finished, on this replica, not the user's, or the directory
+    unreadable): the executor also polls the shared outcome, so a missing wake
+    only delays the tool by one poll interval.
+    """
+    if not isinstance(outcome, dict) or not outcome.get("run_id"):
+        return None
+    resolution = await resolve(registry, user_actor(user_email), Address(outcome.get("run_id"), None))
+    if not isinstance(resolution, Remote):
+        return None
+    return await route_approval(
+        resolution.entry, user_email, outcome.get("invocation_id"), outcome.get("tool_call_id"),
+    )
+
+
+def nudge_approval(registry, user_email: str, outcome: Optional[Dict[str, Any]]) -> None:
+    """Fire and forget :func:`approval_nudge`; a lost nudge only delays the tool."""
+    if not isinstance(outcome, dict) or not outcome.get("run_id"):
+        return
+
+    async def _nudge() -> None:
+        try:
+            answer = await approval_nudge(registry, user_email, outcome)
+            if answer is not None and not answer.get("ok"):
+                logger.info("approval nudge not applied: %s", answer.get("code"))
+        except Exception:
+            logger.warning("approval nudge failed", exc_info=True)
+
+    try:
+        task = asyncio.get_running_loop().create_task(_nudge())
+    except RuntimeError:
+        return
+    _APPROVAL_NUDGES.add(task)
+    task.add_done_callback(_APPROVAL_NUDGES.discard)

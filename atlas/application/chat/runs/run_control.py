@@ -382,20 +382,13 @@ async def route_steer(
                        off_record=off_record)
 
 
-async def route_approval(user_email: str, run_id: Optional[str], invocation_id: Optional[str],
-                         tool_call_id: Optional[str]) -> Optional[Dict[str, Any]]:
+async def route_approval(entry: Dict[str, Any], user_email: str, invocation_id: Optional[str],
+                         tool_call_id: Optional[str]) -> Dict[str, Any]:
     """Wake the owner's waiting tool after this replica recorded the outcome.
 
     The request id is derived from the invocation, so every replica that
     records or re-sends the same answer sends the same command.
     """
-    try:
-        entry = await remote_entry(run_id)
-    except RunDirectoryUnavailable:
-        # Best effort: the executor also polls the shared outcome.
-        return None
-    if entry is None or entry.get("user_email") != normalize_user_email(user_email):
-        return None
     args = {"invocation_id": invocation_id, "tool_call_id": tool_call_id}
     request_id = f"approval:{invocation_id or tool_call_id}"
     return await _send(entry, APPROVAL, user_actor(user_email), args, request_id=request_id)

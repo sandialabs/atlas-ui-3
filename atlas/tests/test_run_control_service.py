@@ -129,6 +129,16 @@ async def _route_api_cancel(run_id):
     return None if entry is None else await run_control.route_api_cancel(entry)
 
 
+async def _route_approval(user_email, run_id, invocation_id, tool_call_id):
+    try:
+        entry = await _located(user_actor(user_email), run_id, None)
+    except run_control.RunDirectoryUnavailable:
+        return None
+    if entry is None:
+        return None
+    return await run_control.route_approval(entry, user_email, invocation_id, tool_call_id)
+
+
 async def test_route_stop_cancels_the_run_on_its_owner(cluster):
     record = await cluster.run()
     answer = await _route_stop(OWNER, record.run_id, None)
@@ -223,7 +233,7 @@ async def test_approval_needs_the_recorded_outcome_and_wakes_the_tool_once(clust
     request = await _pending_approval(cluster, record)
     invocation = request.invocation_id
 
-    answer = await run_control.route_approval(OWNER, record.run_id, invocation, "call_0")
+    answer = await _route_approval(OWNER, record.run_id, invocation, "call_0")
     assert answer["ok"] is False and answer["code"] == "no_outcome"
     assert not request.future.done()
 
@@ -231,14 +241,14 @@ async def test_approval_needs_the_recorded_outcome_and_wakes_the_tool_once(clust
     await cluster.store.put_resolution(key, {"approved": True, "arguments": None, "reason": None})
     # Same derived request id as the refused attempt: a refusal is not
     # remembered, so this one runs.
-    applied = await run_control.route_approval(OWNER, record.run_id, invocation, "call_0")
+    applied = await _route_approval(OWNER, record.run_id, invocation, "call_0")
     assert applied["ok"] is True and applied["payload"]["applied"] is True
     assert not applied.get("duplicate")
     assert (await request.future)["approved"] is True
     assert cluster.registry.get(record.run_id).status is RunStatus.RUNNING
 
     # A repeated nudge gets the first reply back and wakes nothing.
-    repeat = await run_control.route_approval(OWNER, record.run_id, invocation, "call_0")
+    repeat = await _route_approval(OWNER, record.run_id, invocation, "call_0")
     assert repeat["ok"] is True and repeat.get("duplicate") is True
     direct = await cluster.service.handle({
         "command": "approval", "run_id": record.run_id, "actor": user_actor(OWNER),
@@ -252,7 +262,7 @@ async def test_approval_from_another_user_is_refused(cluster):
     request = await _pending_approval(cluster, record)
     key = approval_storage_key(request.invocation_id, "call_0", OWNER)
     await cluster.store.put_resolution(key, {"approved": True})
-    assert await run_control.route_approval(OTHER, record.run_id, request.invocation_id, "call_0") is None
+    assert await _route_approval(OTHER, record.run_id, request.invocation_id, "call_0") is None
     answer = await cluster.service.handle({
         "command": "approval", "run_id": record.run_id, "actor": user_actor(OTHER),
         "args": {"invocation_id": request.invocation_id, "tool_call_id": "call_0"},
@@ -468,7 +478,7 @@ async def test_unreadable_directory_is_not_taken_for_no_owner(cluster):
     ):
         assert answer["ok"] is False and answer["code"] == "owner_unavailable", answer
     # The approval nudge is best effort: the executor polls the outcome anyway.
-    assert await run_control.route_approval(OWNER, record.run_id, "inv", "call") is None
+    assert await _route_approval(OWNER, record.run_id, "inv", "call") is None
     assert not cluster.registry.get(record.run_id).is_terminal
 
 
