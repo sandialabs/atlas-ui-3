@@ -229,3 +229,31 @@ async def test_local_run_named_by_id_is_not_routed():
     registry = _Registry()
     await _stop(registry, {"run_id": "follow-up", "conversation_id": CONV}, bus)
     assert bus.lookups == [] and registry.cancelled == ["follow-up"]
+
+
+async def test_stop_to_an_owner_that_does_not_answer_still_stops_the_local_follow_up():
+    unreachable = {"ok": False, "code": "owner_unavailable", "message": "", "payload": {}}
+    bus = _StopBus(by_run={"parent": _entry("parent")}, answer=unreachable)
+    registry = _Registry()
+    ws = await _stop(registry, {"run_id": "parent", "conversation_id": CONV}, bus)
+    # The parent's owner never answered: the conversation's run held here is
+    # stopped rather than nothing, and the client is not told of an outage.
+    assert bus.sent == [("replica-a", "stop", "parent")]
+    assert registry.cancelled == ["follow-up"] and ws.send_json.await_count == 0
+
+
+async def test_conversation_stop_to_an_owner_that_does_not_answer_stops_the_untracked_turn():
+    unreachable = {"ok": False, "code": "owner_unavailable", "message": "", "payload": {}}
+    bus = _StopBus(by_conversation=_entry("r9"), answer=unreachable)
+    task = MagicMock()
+    task.done.return_value = False
+    set_run_control_bus(bus)
+    try:
+        ws = MagicMock()
+        ws.send_json = AsyncMock()
+        await stop_addressed_run(ws, _Registry(follow_up=False), USER, {"conversation_id": CONV},
+                                 {"task": task})
+    finally:
+        set_run_control_bus(None)
+    task.cancel.assert_called_once()
+    assert ws.send_json.await_count == 0

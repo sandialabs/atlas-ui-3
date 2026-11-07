@@ -48,7 +48,7 @@ run id, so the client ends the turn it started (rows `S15`, `S18`, `C04`).
   and `both` do not exist (row `R12`). The conversation is looked up from the record.
 - `REST cancel` is API-runs only: a run the UI started, an untracked turn and an
   off-record turn all answer `run_not_found` (`external_runs.py:460-476`).
-- `ws chat` reads `conversation_id` only (`main.py:2209`); a `run_id` on a chat
+- `ws chat` reads `conversation_id` only (the `chat` branch of `websocket_endpoint`); a `run_id` on a chat
   frame is ignored. `run id only` equals `neither`, `both` equals `conversation
   only`. With no conversation a chat frame never looks anything up: it starts a
   turn, or steers the connection's own untracked agent loop when that has no
@@ -147,18 +147,18 @@ connection's untracked turn (`should_steer`), then a new turn.
 | `C05` ws chat | conversation | finished parent | remote terminal | starts a new turn (children keep running) | conversation key released | `atlas/tests/test_run_addressing_table.py` |
 | `C06` ws chat | conversation | API follow-up | remote live | steered like any tracked run | `route_steer` | `atlas/tests/test_run_addressing_table.py` |
 | `C07` ws chat | conversation | off-record turn | remote live | refused `off_record`, nothing written | off-record guard in `RedisRunControlBus.send` | `atlas/tests/test_run_addressing_table.py` |
-| `C08` ws chat | conversation | tracked | local, loop draining | message queued, `steering_queued` | `main.py:2177-2214` | `atlas/tests/test_run_addressing_table.py` |
-| `C09` ws chat | conversation | tracked | local, loop not draining | refused `conversation_busy`; unlike the routed refusal (`steer_frame`) the local frame carries no `steering: true` | `main.py:2215-2231` | `atlas/tests/test_run_addressing_table.py` |
-| `C10` ws chat | conversation | off-record turn | local | refused `off_record`, as the remote path does | GAP: the local branch (`main.py:2177-2214`) never reads `turn_is_off_record`, so incognito text is queued into a recorded run | `atlas/tests/test_run_addressing_table.py` |
+| `C08` ws chat | conversation | tracked | local, loop draining | message queued, `steering_queued` | the local tracked-run branch of `chat` | `atlas/tests/test_run_addressing_table.py` |
+| `C09` ws chat | conversation | tracked | local, loop not draining | refused `conversation_busy`; unlike the routed refusal (`steer_frame`) the local frame carries no `steering: true` | the local not-draining branch of `chat` | `atlas/tests/test_run_addressing_table.py` |
+| `C10` ws chat | conversation | off-record turn | local | refused `off_record`, as the remote path does | GAP: the local branch (the local tracked-run branch of `chat`) never reads `turn_is_off_record`, so incognito text is queued into a recorded run | `atlas/tests/test_run_addressing_table.py` |
 | `C11` ws chat | conversation | untracked turn | local | queued into the connection's loop when the conversation matches, else a new turn | `should_steer` (`agent/steering.py:84-110`) | `test_agent_steering_through_chat_service` |
-| `C12` ws chat | conversation | untracked turn | on another replica | busy refusal | GAP: the directory cannot see an untracked turn (`main.py:2237-2290`), so a second turn starts beside it | n/a: needs two real processes, none exists yet (step E retires the untracked turn) |
-| `C13` ws chat | run_id only, neither | any | any | starts a new turn, except that a frame naming no conversation is steered into the connection's own untracked agent loop that also has none (a chat frame names its conversation, never a run) | `main.py:2209`, no lookup when the conversation is None, then `should_steer` | `test_both_none_conversation_ids_steer` for the steer; the new-turn case is not exercised here |
+| `C12` ws chat | conversation | untracked turn | on another replica | busy refusal | GAP: the directory cannot see an untracked turn (`steer_addressed_run`), so a second turn starts beside it | n/a: needs two real processes, none exists yet (step E retires the untracked turn) |
+| `C13` ws chat | run_id only, neither | any | any | starts a new turn, except that a frame naming no conversation is steered into the connection's own untracked agent loop that also has none (a chat frame names its conversation, never a run) | the `chat` branch, no lookup when the conversation is None, then `should_steer` | `test_both_none_conversation_ids_steer` for the steer; the new-turn case is not exercised here |
 | `C14` ws chat | conversation | tracked | remote live, two real replicas | steer reaches the loop once | via `route_steer` | `test_steer_via_non_owner_reaches_the_loop_once` |
 
 ## ws tool_approval_response
 
 Code path: `decide_tool_approval` (`approval_resolution.py:136-250`) settles the
-write-once outcome, `_resume_waiting_run` (`main.py:1167`) resumes a local run,
+write-once outcome, `_resume_waiting_run` (`main.py`) resumes a local run,
 and `nudge_approval` resolves the run and calls `route_approval` to wake a remote owner.
 
 | entry point | address given | run kind | location | expected outcome | today's code path | test |

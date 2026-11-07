@@ -553,3 +553,23 @@ async def test_steer_is_refused_when_the_loop_stops_draining_during_the_check(cl
     answer = await run_control.route_steer(entry, OWNER, "late", None)
     assert answer["ok"] is False and answer["code"] == "run_not_found"
     assert channel.queue.qsize() == 0
+
+
+async def test_api_cancel_of_a_live_run_held_here_needs_no_directory(cluster, monkeypatch):
+    from atlas.application.chat.runs.commands import cancel_api_run_addressed
+
+    api = _ApiReplicas(cluster, monkeypatch)
+    record = api.registry_b.start(conversation_id="conv-here", user_email=OWNER)
+    record.launch_spec = {"source": api.api_source}
+    api.registry_b.attach_task(record.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await asyncio.sleep(0.05)
+
+    async def fail(*_a, **_k):
+        raise TimeoutError("redis timed out")
+
+    cluster.b.bus.owner_of = fail
+    cluster.b.bus.run_for_conversation = fail
+    # The run was live when cancelled: no follow-up is looked up, so the
+    # unreadable directory cannot turn a cancel that took effect into a 503.
+    answer = await cancel_api_run_addressed(record.run_id)
+    assert answer["ok"] is True and answer["payload"]["status"]["cancelled"] is True

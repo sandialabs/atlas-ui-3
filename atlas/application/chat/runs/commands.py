@@ -56,22 +56,34 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
         logger.info("Cancelling run %s on user request", resolution.record.run_id)
         registry.cancel(resolution.record.run_id, user_email)
         return
+    unavailable: Optional[Dict[str, Any]] = None
     if isinstance(resolution, Remote) and resolution.entry.get("user_email") == normalize_user_email(user_email):
         # Another replica owns it; the client sees the frames a local stop sends.
         answer = await route_stop(resolution.entry, user_email)
-        frame = stop_frame(answer, data)
-        if frame is not None:
-            await websocket.send_json(frame)
-        return
+        if answer.get("code") != OWNER_UNAVAILABLE:
+            frame = stop_frame(answer, data)
+            if frame is not None:
+                await websocket.send_json(frame)
+            return
+        # The owner did not answer: the same as an unreadable directory, except
+        # that the run named is known to be elsewhere. A frame that named it
+        # still stops the conversation's run held here rather than nothing.
+        local = registry.active_for_conversation(address.conversation_id, user_email) if address.run_id else None
+        if local is not None:
+            logger.info("Cancelling run %s on user request (owner unavailable)", local.run_id)
+            registry.cancel(local.run_id, user_email)
+            return
+        unavailable = answer
+    elif isinstance(resolution, Unknown):
+        unavailable = reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
 
     task = (active_chat_task or {}).get("task")
     task_live = task is not None and not task.done()
-    if isinstance(resolution, Unknown):
+    if unavailable is not None:
         # The owner is unknown. A frame naming a run id is told so; a
         # conversation-only frame still stops the untracked turn it may mean.
         if address.run_id or not task_live:
-            frame = stop_frame(reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE), data)
-            await websocket.send_json(frame)
+            await websocket.send_json(stop_frame(unavailable, data))
             return
     elif address.run_id:
         # Addressed a run that is finished, reaped, or not the user's.
@@ -148,8 +160,10 @@ async def cancel_api_run_addressed(run_id: str) -> Dict[str, Any]:
         return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
     # Nothing is not found: cancel_api_run raises the refusal.
     named = resolution.record if isinstance(resolution, Local) else None
+    # Read before cancelling: the cancel marks a live record terminal.
+    finished = named is not None and named.is_terminal
     status = external_runs.cancel_api_run(run_id)
-    if named is None or not named.is_terminal or status.get("run_id") != run_id:
+    if not finished or status.get("run_id") != run_id:
         return reply(True, status=status)
     # The named run had finished here and no follow-up of it is live here; one
     # may be executing on another replica.
