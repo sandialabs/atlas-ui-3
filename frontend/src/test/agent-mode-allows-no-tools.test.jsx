@@ -106,6 +106,7 @@ vi.mock('../hooks/useSettings', () => ({
     settings: { autoApproveTools: h.autoApprove },
     updateSettings: h.updateSettings,
     isLoaded: h.settingsLoaded,
+    readLatestSettings: () => h.latest || { autoApproveTools: h.autoApprove },
   }),
 }))
 
@@ -126,6 +127,7 @@ beforeEach(() => {
   h.connected = true
   h.settingsLoaded = false
   h.autoApprove = false
+  h.latest = null
 })
 
 describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
@@ -196,6 +198,60 @@ describe('auto-approve is announced when the socket connects', () => {
       expect(announces[0][0]).toEqual({ type: 'auto_approve_tools', enabled: false })
     })
     expect(attempts).toBeGreaterThan(1)
+  })
+
+  it('announces the latest persisted value rather than render state', async () => {
+    h.connected = true
+    h.settingsLoaded = true
+    h.autoApprove = true
+    h.latest = { autoApproveTools: false }
+    renderChat()
+    await waitFor(() => {
+      const announces = h.sendMessage.mock.calls.filter(
+        (call) => call[0]?.type === 'auto_approve_tools',
+      )
+      expect(announces[0][0]).toEqual({ type: 'auto_approve_tools', enabled: false })
+    })
+  })
+
+  it('forwards a change another tab made on this socket', async () => {
+    h.connected = true
+    h.settingsLoaded = true
+    h.autoApprove = true
+    const { rerender } = renderChat()
+    await waitFor(() => {
+      expect(h.sendMessage).toHaveBeenCalledWith({ type: 'auto_approve_tools', enabled: true })
+    })
+    h.sendMessage.mockClear()
+
+    // useSettings adopted another tab's write (storage event).
+    h.autoApprove = false
+    rerender()
+
+    await waitFor(() => {
+      expect(h.sendMessage).toHaveBeenCalledWith({ type: 'auto_approve_tools', enabled: false })
+    })
+    // Re-rendering with the same value sends nothing more.
+    h.sendMessage.mockClear()
+    rerender()
+    expect(h.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'auto_approve_tools' }))
+  })
+
+  it('stops retrying a failing announcement after a bounded number of tries', async () => {
+    vi.useFakeTimers()
+    try {
+      h.connected = true
+      h.settingsLoaded = true
+      h.sendMessage.mockImplementation(() => false)
+      renderChat()
+      await vi.advanceTimersByTimeAsync(120000)
+      const announces = h.sendMessage.mock.calls.filter(
+        (call) => call[0]?.type === 'auto_approve_tools',
+      )
+      expect(announces.length).toBe(8)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

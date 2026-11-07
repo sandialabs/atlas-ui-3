@@ -235,7 +235,9 @@ def user_switch_covers_turn() -> bool:
         return True
     record = get_run_registry().get(run.run_id)
     if record is None:
-        return True
+        # A run id with no record here cannot be checked for lineage, so it
+        # is not the user's switch to answer.
+        return False
     return record.follows_user_auto_approve()
 
 
@@ -259,10 +261,13 @@ def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) ->
     run = get_current_run()
     if run is not None:
         record = get_run_registry().get(run.run_id)
-        if record is not None:
-            if not record.follows_user_auto_approve():
-                return False
-            return record.auto_approve_user_tools is True
+        if record is None:
+            # Bound to a run this process has no record of: do not fall back
+            # to the session bit, which belongs to untracked turns.
+            return False
+        if not record.follows_user_auto_approve():
+            return False
+        return record.auto_approve_user_tools is True
     if not session_context:
         return False
     live = session_auto_approve(session_context.get("session_id"))

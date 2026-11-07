@@ -543,3 +543,25 @@ async def test_approval_frame_tells_the_browser_whether_it_may_auto_answer(
     await _run("call_frame_admin", {"user_email": USER, "session_id": "s-frame"}, frames)
     request = next(f for f in frames if f.get("type") == "tool_approval_request")
     assert request["auto_approvable"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_without_a_record_is_not_auto_approved(
+    registry, approval_manager, monkeypatch
+):
+    """A bound run id the registry does not know is not covered by the switch."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    set_current_run("run-unknown", "conv-unknown")
+    begin_untracked_turn("s-unknown", True)
+    frames = []
+
+    result = await _run(
+        "call_unknown_run",
+        {"user_email": USER, "session_id": "s-unknown", "auto_approve_tools": True},
+        frames,
+    )
+
+    assert result.success is False
+    assert result.error == "Approval timeout"
+    request = next(f for f in frames if f.get("type") == "tool_approval_request")
+    assert request["auto_approvable"] is False

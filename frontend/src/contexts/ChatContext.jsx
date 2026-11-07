@@ -117,6 +117,10 @@ const MUTATING_SELECTION_ACTIONS = [
 	'setRagEnabled', 'toggleRagEnabled',
 ]
 
+// Reconnect announcements of the auto-approve switch retry with backoff up to
+// this many sends; the next connection owes the announcement again.
+const AUTO_APPROVE_ANNOUNCE_MAX_TRIES = 8
+
 export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
@@ -720,6 +724,9 @@ export const ChatProvider = ({ children }) => {
 	const readLatestSettingsRef = useRef(readLatestSettings)
 	readLatestSettingsRef.current = readLatestSettings
 	const autoApproveNeedsAnnounceRef = useRef(true)
+	// The value this connection last delivered, so a change that arrives from
+	// another tab (a storage event) is forwarded on this tab's socket too.
+	const lastPublishedAutoApproveRef = useRef(null)
 
 	// The run a joined conversation was opened under has ended. Its save
 	// normally arrives first (see onConversationSaved); this is the fallback
@@ -2331,6 +2338,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			enabled: enabled === true,
 		}) === true
 		pendingAutoApproveRef.current = sent ? null : enabled === true
+		if (sent) lastPublishedAutoApproveRef.current = enabled === true
 		return sent
 	}, [])
 	const updateSettingsAndPublish = useCallback((patch) => {
@@ -2350,6 +2358,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (!settingsLoaded || !autoApproveNeedsAnnounceRef.current) return undefined
 		let cancelled = false
 		let timer = null
+		let tries = 0
 		const attempt = () => {
 			if (cancelled) return
 			// The latest persisted choice, not this tab's state: another tab
@@ -2361,7 +2370,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				autoApproveNeedsAnnounceRef.current = false
 				return
 			}
-			timer = window.setTimeout(attempt, 250)
+			// Exponential backoff with jitter, capped. After the last try the
+			// announcement stays owed and the next reconnect sends it.
+			tries += 1
+			if (tries >= AUTO_APPROVE_ANNOUNCE_MAX_TRIES) return
+			const base = Math.min(250 * 2 ** (tries - 1), 10000)
+			timer = window.setTimeout(attempt, base / 2 + Math.random() * (base / 2))
 		}
 		attempt()
 		return () => {
@@ -2369,6 +2383,17 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			if (timer != null) window.clearTimeout(timer)
 		}
 	}, [isConnected, settingsLoaded, publishAutoApprove])
+	// Another tab changed the switch: useSettings adopted it from the storage
+	// event, but only that tab's socket was told. Forward it on this socket so
+	// an untracked turn on this connection's session follows it too. A change
+	// made in this tab was already sent, so it matches and nothing goes out.
+	const autoApproveSetting = settings?.autoApproveTools === true
+	useEffect(() => {
+		if (!isConnected || !settingsLoaded || autoApproveNeedsAnnounceRef.current) return
+		if (lastPublishedAutoApproveRef.current === null) return
+		if (lastPublishedAutoApproveRef.current === autoApproveSetting) return
+		publishAutoApprove(autoApproveSetting)
+	}, [autoApproveSetting, isConnected, settingsLoaded, publishAutoApprove])
 
 	const value = {
 		// Context meter and compaction controls (issue #877).
