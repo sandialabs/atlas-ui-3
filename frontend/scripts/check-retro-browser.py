@@ -24,11 +24,31 @@ window.onload = () => {
   const entries = __ENTRIES__;
   const results = [];
   const el = id => document.getElementById(id);
-  const rgb = value => {
-    const match = value.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
-    return match ? match.slice(1).map(Number) : null;
+  const rgba = value => {
+    const match = value.match(/^rgba?\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/);
+    if (!match) throw new Error('Unsupported computed color: '+value);
+    return [...match.slice(1, 4).map(Number), match[4] === undefined ? 1 : Number(match[4])];
   };
-  const lightness = c => c.reduce(
+  const over = (front, back) => {
+    const alpha = front[3] + back[3] * (1-front[3]);
+    return [...front.slice(0, 3).map((v, i) => alpha === 0 ? 0 :
+      (v * front[3] + back[i] * back[3] * (1-front[3])) / alpha), alpha];
+  };
+  const background = node => {
+    if (!node) return [255, 255, 255, 1]; // opaque browser canvas
+    const color = rgba(getComputedStyle(node).backgroundColor);
+    return color[3] === 1 ? color : over(color, background(node.parentElement));
+  };
+  const textContrast = node => {
+    const bg = background(node);
+    return contrast(bg, over(rgba(getComputedStyle(node).color), bg));
+  };
+  // Guard against the old alpha-blind parser: transparent black is not black.
+  if (over(rgba('rgba(0, 0, 0, 0)'), [255, 255, 255, 1])[0] !== 255 ||
+      over(rgba('rgba(0, 0, 0, 0.5)'), [255, 255, 255, 1])[0] !== 127.5) {
+    throw new Error('Alpha compositing regression');
+  }
+  const lightness = c => c.slice(0, 3).reduce(
     (sum, v, i) => {
       const x = v / 255;
       return sum + [0.2126, 0.7152, 0.0722][i] *
@@ -48,20 +68,30 @@ window.onload = () => {
     button.focus();
     const b = getComputedStyle(document.body);
     const w = getComputedStyle(el('window'));
-    const t = getComputedStyle(el('titlebar'));
     const a = getComputedStyle(button);
-    const i = getComputedStyle(el('input'));
     const s = getComputedStyle(root);
     const checks = {
-      body: contrast(rgb(b.backgroundColor), rgb(b.color)),
-      window: contrast(rgb(w.backgroundColor), rgb(w.color)),
-      title: contrast(rgb(t.backgroundColor), rgb(t.color)),
-      button: contrast(rgb(a.backgroundColor), rgb(a.color)),
-      input: contrast(rgb(i.backgroundColor), rgb(i.color)),
-      focusButton: contrast(rgb(a.backgroundColor), rgb(a.outlineColor)),
-      focusSurface: contrast(rgb(w.backgroundColor), rgb(a.outlineColor)),
+      body: textContrast(document.body),
+      window: textContrast(el('window')),
+      title: textContrast(el('titlebar')),
+      button: textContrast(button),
+      input: textContrast(el('input')),
+      focusButton: contrast(background(button), rgba(a.outlineColor)),
+      focusSurface: contrast(background(el('window')), rgba(a.outlineColor)),
     };
+    for (const node of document.querySelectorAll('[data-content-check]')) {
+      checks[node.id] = textContrast(node);
+    }
+    const badgePairs = {};
+    for (const node of document.querySelectorAll('[data-status-check]')) {
+      const style = getComputedStyle(node);
+      badgePairs[node.id] = [style.backgroundColor, style.color];
+    }
+    const invariantBadges = results.length === 0 ||
+      JSON.stringify(badgePairs) === JSON.stringify(results[0].badgePairs);
     const result = {
+      badgePairs,
+      invariantBadges,
       id: item.id,
       mode: item.mode,
       actualMode: s.colorScheme,
@@ -71,7 +101,7 @@ window.onload = () => {
       surface: w.backgroundColor,
       font: b.fontFamily,
     };
-    result.pass = result.actualMode === result.mode &&
+    result.pass = invariantBadges && result.actualMode === result.mode &&
       Object.entries(checks).every(([key, ratio]) =>
         ratio >= (key.startsWith('focus') ? 3 : 4.5)) &&
       result.focusWidth === '3px';
@@ -112,15 +142,52 @@ def run(chrome, timeout):
     entries = expected_themes()
     assert len(entries) == 55
     script = SCRIPT.replace('__ENTRIES__', json.dumps(entries, separators=(',', ':')))
+    # Use production CSS, including its hover rules. The additional selector
+    # permits deterministic hovered-state checks in headless --dump-dom.
+    css = css_files[0].read_text().replace(':hover', ':is(:hover, [data-contrast-hover])')
+    badges = ''.join(
+        f'<span id="badge-{color}" class="atlas-status-{color}" '
+        f'data-content-check data-status-check>{color}</span>'
+        for color in ('red', 'yellow', 'green', 'neutral', 'orange', 'blue'))
+    syntax_extras = ''.join(
+        f'<span id="syntax-extra-{name}" class="hljs-{name}" data-content-check>{name}</span>'
+        for name in ('built_in', 'attribute', 'operator', 'subst', 'addition', 'deletion',
+                     'selector-attr', 'selector-class', 'selector-id', 'code', 'formula',
+                     'selector-pseudo', 'template-tag', 'params', 'punctuation'))
     page = ('<!doctype html><html data-theme="dark" data-atlas-theme="dark"><head>'
-            '<meta charset="utf-8"><link rel="stylesheet" href="'+
-            html.escape(css_files[0].resolve().as_uri(), quote=True)+'"></head>'
+            '<meta charset="utf-8"><style>'+css+'</style></head>'
             '<body><section id="window" class="atlas-retro-window">'
             '<div id="titlebar" class="atlas-retro-window-titlebar">Theme test</div>'
             '<div class="atlas-retro-window-content">'
             '<input id="input" class="atlas-retro-input" aria-label="Example">'
             '<button id="button" class="atlas-retro-button" type="button">Test</button>'
-            '</div></section><pre id="results"></pre><script>'+script+'</script></body></html>')
+            '</div></section>'
+            # Message.jsx assistant markup, with transparent prose/link backgrounds.
+            '<section class="bg-gray-800"><div class="prose prose-invert selectable-markdown">'
+            '<p><a id="assistant-link" href="#" data-content-check>Assistant link</a>'
+            '<a id="assistant-link-hover" href="#" data-contrast-hover data-content-check>Hovered link</a></p>'
+            '<div class="code-block-container"><pre><code class="hljs">'
+            '<span id="syntax-keyword" class="hljs-keyword" data-content-check>const</span>'
+            '<span id="syntax-string" class="hljs-string" data-content-check>hello</span>'
+            '<span id="syntax-number" class="hljs-number" data-content-check>42</span>'
+            '<span id="syntax-comment" class="hljs-comment" data-content-check>comment</span>'
+            +syntax_extras+'</code></pre></div></div>'+badges+'</section>'
+            '<header class="bg-gray-800">'
+            '<button id="header-control" class="bg-gray-700 text-gray-200" data-content-check>Header</button>'
+            '<button id="header-accent" class="bg-gray-700 atlas-header-accent" data-content-check>Help</button>'
+            '<button id="header-accent-hover" class="bg-gray-700 hover:bg-gray-600 atlas-header-accent" '
+            'data-contrast-hover data-content-check>Help hovered</button>'
+            '<div class="bg-gray-800">'
+            '<button id="header-menu" class="atlas-header-menu-accent hover:bg-gray-700" data-content-check>Transcript</button>'
+            '<button id="header-menu-hover" class="atlas-header-menu-accent hover:bg-gray-700" '
+            'data-contrast-hover data-content-check>Transcript hovered</button></div></header>'
+            '<div class="user-message-bubble"><span id="user-message" class="text-gray-200 whitespace-pre-wrap break-words" data-content-check>User message</span>'
+            '<span id="user-caption" class="text-gray-300" data-content-check>You</span></div>'
+            '<button id="suggestion-hover" class="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-gray-50" '
+            'data-contrast-hover data-content-check>Follow up</button>'
+            '<button id="source-disabled" disabled class="bg-green-700 disabled:bg-gray-600 text-white disabled:text-gray-50" '
+            'data-content-check>Select all</button>'
+            '<pre id="results"></pre><script>'+script+'</script></body></html>')
     with tempfile.TemporaryDirectory(prefix='atlas-retro-check-') as tmp:
         file = Path(tmp)/'index.html'
         file.write_text(page)
@@ -143,7 +210,7 @@ def run(chrome, timeout):
             print('FAIL', json.dumps(row, ensure_ascii=False))
         if marker.group(1) != 'PASS' or failures:
             raise RuntimeError(str(len(failures))+' theme(s) failed browser checks')
-        print('Chrome browser smoke: 55/55 themes passed 5 text contrasts >=4.5:1, 2 focus contrasts >=3:1, color mode, and focus width')
+        print('Chrome browser smoke: 55/55 themes passed chrome + real content contrasts >=4.5:1, invariant status pairs, 2 focus contrasts >=3:1, color mode, and focus width')
         return rows
 
 

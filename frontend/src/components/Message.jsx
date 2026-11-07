@@ -604,29 +604,29 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           case 'error':
           case 'critical':
           case 'emergency':
-            badgeColor = 'bg-red-500 text-white'
+            badgeColor = 'atlas-status-red'
             textColor = 'text-red-300'
             break
           case 'warning':
           case 'warn':
-            badgeColor = 'bg-yellow-500 text-black'
+            badgeColor = 'atlas-status-yellow'
             textColor = 'text-yellow-300'
             break
           case 'alert':
-            badgeColor = 'bg-orange-500 text-white'
+            badgeColor = 'atlas-status-orange'
             textColor = 'text-orange-300'
             break
           case 'info':
           case 'notice':
-            badgeColor = 'bg-blue-500 text-white'
+            badgeColor = 'atlas-status-blue'
             textColor = 'text-blue-300'
             break
           case 'debug':
-            badgeColor = 'bg-gray-500 text-gray-50'
+            badgeColor = 'atlas-status-neutral'
             textColor = 'text-gray-400'
             break
           default:
-            badgeColor = 'bg-blue-500 text-white'
+            badgeColor = 'atlas-status-blue'
             textColor = 'text-gray-200'
         }
 

@@ -13,6 +13,8 @@
   --atlas-radius: 0.5rem;
 }
 
+[data-theme="light"] { --atlas-focus-ring: #1d4ed8; }
+
 /* CRT Phosphor — from RDS 09 tokens --bg, --ink, --ink-dim. */
 [data-atlas-theme="crt-phosphor"] {
   --gray-50: 170 255 170;
@@ -69,8 +71,6 @@
   --atlas-radius: 0;
   color-scheme: light;
 }
-
-[data-theme="light"] { --atlas-focus-ring: #1d4ed8; }
 
 body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--gray-100))); }
 

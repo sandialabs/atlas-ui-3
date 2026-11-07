@@ -1167,7 +1167,7 @@ const ChatArea = () => {
                     setFollowUpSuggestions([])
                   }
                 }}
-                className="text-sm px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-600 hover:border-gray-500 rounded-full transition-colors whitespace-nowrap flex-shrink-0"
+                className="text-sm px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-gray-50 border border-gray-600 hover:border-gray-500 rounded-full transition-colors whitespace-nowrap flex-shrink-0"
               >
                 {question}
               </button>

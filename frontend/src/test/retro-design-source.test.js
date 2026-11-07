@@ -72,6 +72,28 @@ describe('Retro Design System attribution and CSS isolation', () => {
     }
   })
 
+  it('derives content accents against their real conversation and control states', () => {
+    const index = readFileSync('src/index.css', 'utf8')
+    for (const { id, mode, reference } of THEME_REGISTRY) {
+      const blocks = [...catalogAdapter.matchAll(new RegExp(`\\[data-atlas-theme="${id}"\\]\\s*\\{([^}]+)\\}`, 'g'))]
+      const tokens = blocks.at(-1)[1]
+      const gray = weight => reference ? themeGray(id, weight) :
+        index.match(new RegExp(`\\[data-theme="${mode}"\\]\\s*\\{([^}]+)\\}`))[1]
+          .match(new RegExp(`--gray-${weight}:\\s*(\\d+)\\s+(\\d+)\\s+(\\d+);`)).slice(1).map(Number)
+      for (const [name, weight] of Object.entries({
+        link: 800, 'syntax-keyword': 900, 'syntax-string': 900,
+        'syntax-number': 900, 'syntax-comment': 900, 'header-menu-accent': 800,
+        'header-accent': 700, 'header-hover-accent': 600,
+      })) {
+        const hex = tokens.match(new RegExp(`--atlas-${name}: #([0-9a-f]{6});`))[1]
+        const fg = [0, 2, 4].map(n => parseInt(hex.slice(n, n+2), 16))
+        expect(contrast(fg, gray(weight)), `${id} ${name}`).toBeGreaterThanOrEqual(4.5)
+      }
+      expect(contrast(gray(200), gray(700)), `${id} header control`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(gray(50), gray(600)), `${id} disabled source`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
   it('includes styles for empty-token designs without inventing original source tokens', () => {
     for (const [id, sourceSlug] of [
       ['brutalist-web', '40-brutalist-web'],

@@ -705,7 +705,10 @@
 /* User message bubble: blue in dark mode, lighter blue in light mode */
 .user-message-bubble {
   background-color: #2563eb;
+  color: #ffffff;
 }
+.user-message-bubble .text-gray-300 { color: #ffffff; }
+.user-message-bubble .text-gray-200 { color: inherit; }
 [data-theme="light"] .user-message-bubble {
   background-color: #dbeafe;
   color: #1e3a5f;
@@ -714,11 +717,28 @@
   color: #374151;
 }
 
+/* Fixed status pairs intentionally bypass ALL theme gray/accent bridges. */
+.atlas-status-red { background-color: #b91c1c; color: #ffffff; }
+.atlas-status-yellow { background-color: #eab308; color: #111827; }
+.atlas-status-green { background-color: #15803d; color: #ffffff; }
+.atlas-status-neutral { background-color: #4b5563; color: #ffffff; }
+.atlas-status-orange { background-color: #9a3412; color: #ffffff; }
+.atlas-status-blue { background-color: #1d4ed8; color: #ffffff; }
+
+/* Each alias is generated against the surface of its actual content state. */
+.atlas-header-accent { color: var(--atlas-header-accent); }
+.atlas-header-accent:hover { color: var(--atlas-header-hover-accent); }
+.atlas-header-menu-accent { color: var(--atlas-header-menu-accent); }
+.atlas-header-menu-accent:hover { color: var(--atlas-header-accent); }
+.prose-invert { --tw-prose-invert-links: var(--atlas-link); }
+.prose a, .message-content a { color: var(--atlas-link); }
+.prose a:hover, .message-content a:hover { color: var(--atlas-link); }
+
 /* Light mode: fix prose-invert typography colors for light backgrounds */
 [data-theme="light"] .prose-invert {
   --tw-prose-invert-body: rgb(var(--gray-300));
   --tw-prose-invert-headings: rgb(var(--gray-100));
-  --tw-prose-invert-links: #2563eb;
+  --tw-prose-invert-links: var(--atlas-link);
   --tw-prose-invert-bold: rgb(var(--gray-100));
   --tw-prose-invert-counters: rgb(var(--gray-400));
   --tw-prose-invert-bullets: rgb(var(--gray-500));
@@ -733,47 +753,47 @@
   --tw-prose-invert-td-borders: rgb(var(--gray-600));
 }
 
-/* Light mode: boost accent colors for better contrast on white backgrounds */
-[data-theme="light"] .hljs-keyword,
-[data-theme="light"] .hljs-selector-tag,
-[data-theme="light"] .hljs-literal,
-[data-theme="light"] .hljs-title,
-[data-theme="light"] .hljs-section,
-[data-theme="light"] .hljs-doctag,
-[data-theme="light"] .hljs-type,
-[data-theme="light"] .hljs-name,
-[data-theme="light"] .hljs-strong {
-  color: #2563eb; /* blue-600 */
+/* Syntax colors validated against the gray-900 code surface in every theme. */
+/* Outrank the bundled highlight.js palette, including less-common languages. */
+.code-block-container .hljs,
+.code-block-container .hljs [class*="hljs-"] {
+  color: var(--atlas-syntax-comment);
+}
+.code-block-container .hljs .hljs-addition,
+.code-block-container .hljs .hljs-deletion { background-color: transparent; }
+.code-block-container .hljs .hljs-keyword,
+.code-block-container .hljs .hljs-selector-tag,
+.code-block-container .hljs .hljs-literal,
+.code-block-container .hljs .hljs-title,
+.code-block-container .hljs .hljs-section,
+.code-block-container .hljs .hljs-doctag,
+.code-block-container .hljs .hljs-type,
+.code-block-container .hljs .hljs-name,
+.code-block-container .hljs .hljs-strong {
+  color: var(--atlas-syntax-keyword);
 }
 
-[data-theme="light"] .hljs-string,
-[data-theme="light"] .hljs-title.class_,
-[data-theme="light"] .hljs-title.class_.inherited__,
-[data-theme="light"] .hljs-title.function_,
-[data-theme="light"] .hljs-attr,
-[data-theme="light"] .hljs-symbol,
-[data-theme="light"] .hljs-bullet,
-[data-theme="light"] .hljs-link,
-[data-theme="light"] .hljs-emphasis,
-[data-theme="light"] .hljs-quote {
-  color: #16a34a; /* green-600 */
+.code-block-container .hljs .hljs-string,
+.code-block-container .hljs .hljs-title.class_,
+.code-block-container .hljs .hljs-title.class_.inherited__,
+.code-block-container .hljs .hljs-title.function_,
+.code-block-container .hljs .hljs-attr,
+.code-block-container .hljs .hljs-symbol,
+.code-block-container .hljs .hljs-bullet,
+.code-block-container .hljs .hljs-link,
+.code-block-container .hljs .hljs-emphasis,
+.code-block-container .hljs .hljs-quote {
+  color: var(--atlas-syntax-string);
 }
 
-[data-theme="light"] .hljs-number,
-[data-theme="light"] .hljs-regexp,
-[data-theme="light"] .hljs-variable,
-[data-theme="light"] .hljs-template-variable {
-  color: #ca8a04; /* yellow-600 */
+.code-block-container .hljs .hljs-number,
+.code-block-container .hljs .hljs-regexp,
+.code-block-container .hljs .hljs-variable,
+.code-block-container .hljs .hljs-template-variable {
+  color: var(--atlas-syntax-number);
 }
 
-/* Light mode: adjust link colors for better contrast */
-[data-theme="light"] .message-content a {
-  color: #2563eb; /* blue-600 */
-}
-
-[data-theme="light"] .message-content a:hover {
-  color: #1d4ed8; /* blue-700 */
-}
+.code-block-container .hljs .hljs-comment, .code-block-container .hljs .hljs-deletion, .code-block-container .hljs .hljs-meta { color: var(--atlas-syntax-comment); }
 
 /* ── Viewport containment for chat content (#747) ──
    A long unbroken string -- a tool name like basic_memory_discover_topics, a

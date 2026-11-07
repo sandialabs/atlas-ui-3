@@ -19,18 +19,21 @@ python3 frontend/scripts/build-retro-catalog.py
 python3 frontend/scripts/build-retro-catalog.py --check
 ```
 
-produces three deterministic assets:
+produces five deterministic assets:
 
 - `vendor/retro-design-system/tokens.css`: all 53 source token sets, with
   **only their root selectors scoped to their registered theme ID**.
 - `retroCatalog.generated.js`: names, eras, years, tags, palette previews,
   source identifiers, and base light/dark modes from the upstream manifest.
 - `retroCatalog.generated.css`: safe semantic Atlas color/control adapters
-  for designs not already covered by the initial three hand-reviewed adapters.
+  for designs not already covered by the initial three hand-reviewed adapters,
+  plus surface-validated link, syntax, and header foregrounds for all 55 themes.
 - `retroChrome.generated.css`: scoped, motif-specific window, titlebar,
   button and input styling for 45 additional themes. The other eight themes
   have handcrafted styles in `theme-presets.css` and `retroChrome.css`.
   Every design therefore has distinct component chrome, not merely tokens.
+- `frontend/public/theme-bootstrap.js`: a synchronous, registry-derived theme
+  ID/base-mode map applied before first paint, with the same Dark fallback as React.
 
 The three previously shipped theme IDs (`mac7`, `win95`,
 `crt-phosphor`) and their explicit adapters remain compatible with saved
@@ -49,7 +52,11 @@ python3 frontend/scripts/check-retro-browser.py --chrome /path/to/chrome
 ```
 
 The headless browser checks computed body, window, title, button and input
-text contrast (at least 4.5:1), the keyboard-focus outline against both
+text contrast, assistant links, highlighted syntax, fixed classification/log
+badges, header controls (including hover), user bubbles, and hovered/disabled
+labels (at least 4.5:1). Transparent surfaces are composited through their
+ancestors, and badge colors must remain identical across the catalog. It also
+checks the keyboard-focus outline against both
 its button and surrounding window (at least 3:1), focus visibility, and
 matching dark/light color-scheme. The Build Artifacts GitHub workflow runs
 this check on the built frontend using the runner's installed Chrome. This
@@ -106,9 +113,9 @@ filters and returns keyboard focus to the selected native radio. This avoids
 losing the active selection within a large filtered collection.
 
 
-The Light/Dark shortcut still changes the **base mode**, even when a retro
-preset is selected. It does not mutate the user's configuration for
-models, tools, or conversation settings.
+The Light/Dark shortcut replaces the selected retro preset with the opposite
+classic **Light** or **Dark** theme (based on the preset’s base mode). It does
+not mutate the user's configuration for models, tools, or conversation settings.
 
 ## Live components and accessibility
 

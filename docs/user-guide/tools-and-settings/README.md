@@ -20,7 +20,7 @@ picker's tool-support icon -- so the header button no longer reads as
 | Tools & Integrations | The former tools panel: installed MCP servers, tool and prompt selection, marketplace link | `FEATURE_TOOLS_ENABLED` |
 | Data Sources | Data sources available to search | `FEATURE_RAG_ENABLED` |
 | Prompts | Your custom prompt library ([details](../custom-prompts/README.md)) | `FEATURE_CUSTOM_PROMPTS_ENABLED` |
-| General | LLM temperature, agent iterations, tool approval, compact messages, debug, Globus, and the light/dark toggle | always |
+| General | LLM temperature, agent iterations, tool approval, compact messages, debug, Globus, and the theme gallery | always |
 | User Info | Reserved stub (issue #595) | always |
 | Admin | The most-used admin controls, plus a link to the full dashboard | user is in an admin group |
 
@@ -36,7 +36,9 @@ selections still raises the save/discard prompt.
 ## Light and dark mode
 
 The theme toggle moved off the top bar into **General → Appearance**. The
-choice is still saved per browser.
+choice is still saved per browser. The Light/Dark shortcut replaces a selected
+retro preset with the opposite classic Light or Dark theme; it does not keep
+the retro preset and only change its base mode.
 
 ![General tab with the Appearance toggle](screenshots/836-03-general-tab.png)
 

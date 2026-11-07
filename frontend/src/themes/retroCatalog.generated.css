@@ -24,8 +24,8 @@
   --atlas-retro-control-border: #2e4070;
   --gray-900: 90 126 219;
   --gray-800: 84 117 204;
-  --gray-700: 78 109 190;
-  --gray-600: 66 91 159;
+  --gray-700: 82 115 200;
+  --gray-600: 82 115 200;
   --gray-500: 4 6 10;
   --gray-400: 0 0 0;
   --gray-300: 0 0 0;
@@ -81,7 +81,7 @@
   --gray-900: 0 85 170;
   --gray-800: 31 105 180;
   --gray-700: 47 116 185;
-  --gray-600: 80 138 196;
+  --gray-600: 53 120 188;
   --gray-500: 224 234 244;
   --gray-400: 244 248 251;
   --gray-300: 255 255 255;
@@ -109,7 +109,7 @@
   --gray-900: 85 85 97;
   --gray-800: 105 105 116;
   --gray-700: 116 116 126;
-  --gray-600: 138 138 147;
+  --gray-600: 117 117 127;
   --gray-500: 237 237 238;
   --gray-400: 252 252 252;
   --gray-300: 255 255 255;
@@ -137,7 +137,7 @@
   --gray-900: 42 85 86;
   --gray-800: 68 105 106;
   --gray-700: 81 116 116;
-  --gray-600: 109 138 139;
+  --gray-600: 90 123 124;
   --gray-500: 219 226 227;
   --gray-400: 234 239 239;
   --gray-300: 255 255 255;
@@ -277,7 +277,7 @@
   --gray-900: 60 60 60;
   --gray-800: 83 83 83;
   --gray-700: 95 95 95;
-  --gray-600: 121 121 121;
+  --gray-600: 117 117 117;
   --gray-500: 202 202 202;
   --gray-400: 214 214 214;
   --gray-300: 236 236 236;
@@ -445,7 +445,7 @@
   --gray-900: 45 122 122;
   --gray-800: 70 138 138;
   --gray-700: 65 128 128;
-  --gray-600: 55 108 108;
+  --gray-600: 64 127 127;
   --gray-500: 11 22 22;
   --gray-400: 1 1 1;
   --gray-300: 0 0 0;
@@ -472,8 +472,8 @@
   --atlas-retro-control-border: #414141;
   --gray-900: 128 128 128;
   --gray-800: 119 119 119;
-  --gray-700: 111 111 111;
-  --gray-600: 93 93 93;
+  --gray-700: 117 117 117;
+  --gray-600: 117 117 117;
   --gray-500: 2 2 2;
   --gray-400: 0 0 0;
   --gray-300: 0 0 0;
@@ -865,7 +865,7 @@
   --gray-900: 68 62 196;
   --gray-800: 90 85 203;
   --gray-700: 102 97 207;
-  --gray-600: 126 122 214;
+  --gray-600: 110 105 209;
   --gray-500: 229 228 247;
   --gray-400: 242 241 251;
   --gray-300: 255 255 255;
@@ -1397,11 +1397,618 @@
   --gray-900: 255 0 255;
   --gray-800: 237 0 237;
   --gray-700: 220 0 220;
-  --gray-600: 185 0 185;
+  --gray-600: 209 0 209;
   --gray-500: 59 0 59;
   --gray-400: 38 0 38;
   --gray-300: 0 0 0;
   --gray-200: 0 0 0;
   --gray-100: 0 0 0;
   --gray-50: 0 0 0;
+}
+
+/* AA content aliases against real conversation and header surfaces. */
+
+[data-atlas-theme="dark"] {
+  --atlas-link: #608df0;
+  --atlas-syntax-keyword: #487cee;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #7b828e;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #73b0fb;
+  --atlas-header-hover-accent: #a6cdfc;
+}
+
+[data-atlas-theme="light"] {
+  --atlas-link: #2563eb;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12873d;
+  --atlas-syntax-number: #9e6c03;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #4170aa;
+  --atlas-header-accent: #3c689e;
+  --atlas-header-hover-accent: #365c8c;
+}
+
+[data-atlas-theme="mac7"] {
+  --atlas-link: #2158d1;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #11813a;
+  --atlas-syntax-number: #956603;
+  --atlas-syntax-comment: #69707d;
+  --atlas-header-menu-accent: #396194;
+  --atlas-header-accent: #243d5c;
+  --atlas-header-hover-accent: #121f2f;
+}
+
+[data-atlas-theme="win95"] {
+  --atlas-link: #2159d4;
+  --atlas-syntax-keyword: #1b47a9;
+  --atlas-syntax-string: #0c5a29;
+  --atlas-syntax-number: #694802;
+  --atlas-syntax-comment: #494e57;
+  --atlas-header-menu-accent: #3a6396;
+  --atlas-header-accent: #264264;
+  --atlas-header-hover-accent: #142334;
+}
+
+[data-atlas-theme="windows-xp-luna"] {
+  --atlas-link: #030813;
+  --atlas-syntax-keyword: #091736;
+  --atlas-syntax-string: #041d0d;
+  --atlas-syntax-number: #221701;
+  --atlas-syntax-comment: #18191c;
+  --atlas-header-menu-accent: #05080d;
+  --atlas-header-accent: #020305;
+  --atlas-header-hover-accent: #020305;
+}
+
+[data-atlas-theme="aqua-osx"] {
+  --atlas-link: #1943a0;
+  --atlas-syntax-keyword: #1c4bb3;
+  --atlas-syntax-string: #0d602c;
+  --atlas-syntax-number: #6f4c02;
+  --atlas-syntax-comment: #4e535d;
+  --atlas-header-menu-accent: #2b4a70;
+  --atlas-header-accent: #254062;
+  --atlas-header-hover-accent: #18293e;
+}
+
+[data-atlas-theme="amiga-workbench"] {
+  --atlas-link: #dee8fc;
+  --atlas-syntax-keyword: #b9cdf9;
+  --atlas-syntax-string: #a2dab7;
+  --atlas-syntax-number: #e7c98c;
+  --atlas-syntax-comment: #cbced3;
+  --atlas-header-menu-accent: #d9e9fe;
+  --atlas-header-accent: #f4f9ff;
+  --atlas-header-hover-accent: #fdfeff;
+}
+
+[data-atlas-theme="nextstep"] {
+  --atlas-link: #e5ecfd;
+  --atlas-syntax-keyword: #b7ccf8;
+  --atlas-syntax-string: #9fd9b5;
+  --atlas-syntax-number: #e7c98c;
+  --atlas-syntax-comment: #caccd1;
+  --atlas-header-menu-accent: #dfedfe;
+  --atlas-header-accent: #fdfeff;
+  --atlas-header-hover-accent: #ffffff;
+}
+
+[data-atlas-theme="beos"] {
+  --atlas-link: #d3e0fb;
+  --atlas-syntax-keyword: #a8c1f7;
+  --atlas-syntax-string: #88d0a3;
+  --atlas-syntax-number: #e1bc70;
+  --atlas-syntax-comment: #bec1c7;
+  --atlas-header-menu-accent: #cce2fd;
+  --atlas-header-accent: #eaf3fe;
+  --atlas-header-hover-accent: #fdfeff;
+}
+
+[data-atlas-theme="teletext"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="crt-phosphor"] {
+  --atlas-link: #5c8af0;
+  --atlas-syntax-keyword: #467aee;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #7a808d;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #66a9fa;
+  --atlas-header-hover-accent: #a0c9fc;
+}
+
+[data-atlas-theme="dos-cga"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="8bit-arcade"] {
+  --atlas-link: #628ff1;
+  --atlas-syntax-keyword: #3d74ed;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #757c89;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #b0d2fc;
+}
+
+[data-atlas-theme="frutiger-aero"] {
+  --atlas-link: #19429d;
+  --atlas-syntax-keyword: #1c4ab0;
+  --atlas-syntax-string: #0d5f2b;
+  --atlas-syntax-number: #6d4b02;
+  --atlas-syntax-comment: #4d525c;
+  --atlas-header-menu-accent: #2b4a70;
+  --atlas-header-accent: #254062;
+  --atlas-header-hover-accent: #18293e;
+}
+
+[data-atlas-theme="winamp-skin"] {
+  --atlas-link: #b3c8f8;
+  --atlas-syntax-keyword: #83a6f4;
+  --atlas-syntax-string: #53bb79;
+  --atlas-syntax-number: #d39e2f;
+  --atlas-syntax-comment: #a3a8b0;
+  --atlas-header-menu-accent: #a3cbfc;
+  --atlas-header-accent: #c3ddfd;
+  --atlas-header-hover-accent: #fdfeff;
+}
+
+[data-atlas-theme="geocities-web10"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="cassette-futurism"] {
+  --atlas-link: #5c8af0;
+  --atlas-syntax-keyword: #3971ed;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #727986;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #a8cefc;
+}
+
+[data-atlas-theme="vaporwave"] {
+  --atlas-link: #6993f1;
+  --atlas-syntax-keyword: #4479ee;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #787f8b;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #68aafa;
+  --atlas-header-hover-accent: #b9d7fd;
+}
+
+[data-atlas-theme="memphis"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="ps1-tech"] {
+  --atlas-link: #5e8cf0;
+  --atlas-syntax-keyword: #3b73ed;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #747a88;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #aed1fc;
+}
+
+[data-atlas-theme="os2-warp"] {
+  --atlas-link: #07142f;
+  --atlas-syntax-keyword: #f0f4fe;
+  --atlas-syntax-string: #eaf7ef;
+  --atlas-syntax-number: #faf3e6;
+  --atlas-syntax-comment: #f3f4f5;
+  --atlas-header-menu-accent: #0c1520;
+  --atlas-header-accent: #010203;
+  --atlas-header-hover-accent: #fdfeff;
+}
+
+[data-atlas-theme="macos9-platinum"] {
+  --atlas-link: #02050c;
+  --atlas-syntax-keyword: #081531;
+  --atlas-syntax-string: #041a0c;
+  --atlas-syntax-number: #1e1501;
+  --atlas-syntax-comment: #141618;
+  --atlas-header-menu-accent: #030508;
+  --atlas-header-accent: #fdfeff;
+  --atlas-header-hover-accent: #fdfeff;
+}
+
+[data-atlas-theme="web20-glossy"] {
+  --atlas-link: #2158d1;
+  --atlas-syntax-keyword: #2562e9;
+  --atlas-syntax-string: #117c38;
+  --atlas-syntax-number: #916303;
+  --atlas-syntax-comment: #666c7a;
+  --atlas-header-menu-accent: #3a6396;
+  --atlas-header-accent: #345987;
+  --atlas-header-hover-accent: #264264;
+}
+
+[data-atlas-theme="gameboy-dmg"] {
+  --atlas-link: #14357f;
+  --atlas-syntax-keyword: #173d92;
+  --atlas-syntax-string: #0b4e24;
+  --atlas-syntax-number: #5b3e02;
+  --atlas-syntax-comment: #3f434c;
+  --atlas-header-menu-accent: #233b5a;
+  --atlas-header-accent: #1d324b;
+  --atlas-header-hover-accent: #0d1723;
+}
+
+[data-atlas-theme="braun-rams"] {
+  --atlas-link: #225bd8;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #117f3a;
+  --atlas-syntax-number: #936503;
+  --atlas-syntax-comment: #686f7c;
+  --atlas-header-menu-accent: #3b6598;
+  --atlas-header-accent: #355b8a;
+  --atlas-header-hover-accent: #274467;
+}
+
+[data-atlas-theme="tron-vector"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9cc7fc;
+}
+
+[data-atlas-theme="vhs-tracking"] {
+  --atlas-link: #5e8cf0;
+  --atlas-syntax-keyword: #3b73ed;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #747a88;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #aed1fc;
+}
+
+[data-atlas-theme="risograph"] {
+  --atlas-link: #2158d1;
+  --atlas-syntax-keyword: #2562e9;
+  --atlas-syntax-string: #117c38;
+  --atlas-syntax-number: #916303;
+  --atlas-syntax-comment: #666c7a;
+  --atlas-header-menu-accent: #3a6396;
+  --atlas-header-accent: #345987;
+  --atlas-header-hover-accent: #264264;
+}
+
+[data-atlas-theme="ibm-3270"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="nethack-ascii"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="templeos"] {
+  --atlas-link: #83a6f4;
+  --atlas-syntax-keyword: #6b95f1;
+  --atlas-syntax-string: #30ad5e;
+  --atlas-syntax-number: #cb8b07;
+  --atlas-syntax-comment: #9398a2;
+  --atlas-header-menu-accent: #68aafa;
+  --atlas-header-accent: #81b8fb;
+  --atlas-header-hover-accent: #c3ddfd;
+}
+
+[data-atlas-theme="bbs-ansi"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="midnight-commander"] {
+  --atlas-link: #83a6f4;
+  --atlas-syntax-keyword: #6b95f1;
+  --atlas-syntax-string: #30ad5e;
+  --atlas-syntax-number: #cb8b07;
+  --atlas-syntax-comment: #9398a2;
+  --atlas-header-menu-accent: #68aafa;
+  --atlas-header-accent: #81b8fb;
+  --atlas-header-hover-accent: #c3ddfd;
+}
+
+[data-atlas-theme="matrix-rain"] {
+  --atlas-link: #5384ef;
+  --atlas-syntax-keyword: #346eec;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #6f7684;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #9bc6fc;
+}
+
+[data-atlas-theme="btop-meters"] {
+  --atlas-link: #6f98f2;
+  --atlas-syntax-keyword: #467aee;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #7a808d;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #70aefa;
+  --atlas-header-hover-accent: #c1dcfd;
+}
+
+[data-atlas-theme="c64-basic"] {
+  --atlas-link: #dae4fc;
+  --atlas-syntax-keyword: #b3c8f8;
+  --atlas-syntax-string: #96d6ae;
+  --atlas-syntax-number: #e4c482;
+  --atlas-syntax-comment: #c5c8cd;
+  --atlas-header-menu-accent: #d2e6fe;
+  --atlas-header-accent: #eef5fe;
+  --atlas-header-hover-accent: #ffffff;
+}
+
+[data-atlas-theme="flat-2013"] {
+  --atlas-link: #2158d1;
+  --atlas-syntax-keyword: #2562e9;
+  --atlas-syntax-string: #117c38;
+  --atlas-syntax-number: #916303;
+  --atlas-syntax-comment: #666c7a;
+  --atlas-header-menu-accent: #3a6396;
+  --atlas-header-accent: #345987;
+  --atlas-header-hover-accent: #264264;
+}
+
+[data-atlas-theme="glassmorphism"] {
+  --atlas-link: #2461e6;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12873d;
+  --atlas-syntax-number: #9e6c03;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3f6da5;
+  --atlas-header-accent: #396194;
+  --atlas-header-hover-accent: #2b4a70;
+}
+
+[data-atlas-theme="neumorphism"] {
+  --atlas-link: #1f53c5;
+  --atlas-syntax-keyword: #225cdb;
+  --atlas-syntax-string: #107535;
+  --atlas-syntax-number: #875c03;
+  --atlas-syntax-comment: #5f6572;
+  --atlas-header-menu-accent: #365c8c;
+  --atlas-header-accent: #30527d;
+  --atlas-header-hover-accent: #233b5a;
+}
+
+[data-atlas-theme="blueprint-cad"] {
+  --atlas-link: #acc4f7;
+  --atlas-syntax-keyword: #7ea3f3;
+  --atlas-syntax-string: #4cb874;
+  --atlas-syntax-number: #d19a27;
+  --atlas-syntax-comment: #a0a5ae;
+  --atlas-header-menu-accent: #9bc6fc;
+  --atlas-header-accent: #b9d7fd;
+  --atlas-header-hover-accent: #ffffff;
+}
+
+[data-atlas-theme="claymorphism"] {
+  --atlas-link: #2157cf;
+  --atlas-syntax-keyword: #2460e4;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8d6103;
+  --atlas-syntax-comment: #646a77;
+  --atlas-header-menu-accent: #396194;
+  --atlas-header-accent: #335784;
+  --atlas-header-hover-accent: #254062;
+}
+
+[data-atlas-theme="brutalist-web"] {
+  --atlas-link: #2461e6;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12873d;
+  --atlas-syntax-number: #9e6c03;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3f6da5;
+  --atlas-header-accent: #396194;
+  --atlas-header-hover-accent: #2b4a70;
+}
+
+[data-atlas-theme="swiss-intl"] {
+  --atlas-link: #225bd8;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #117f3a;
+  --atlas-syntax-number: #936503;
+  --atlas-syntax-comment: #686f7c;
+  --atlas-header-menu-accent: #3b6598;
+  --atlas-header-accent: #355b8a;
+  --atlas-header-hover-accent: #274467;
+}
+
+[data-atlas-theme="bauhaus"] {
+  --atlas-link: #2157cf;
+  --atlas-syntax-keyword: #2460e4;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8d6103;
+  --atlas-syntax-comment: #646a77;
+  --atlas-header-menu-accent: #396194;
+  --atlas-header-accent: #335784;
+  --atlas-header-hover-accent: #254062;
+}
+
+[data-atlas-theme="pop-art-lichtenstein"] {
+  --atlas-link: #2460e4;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12873d;
+  --atlas-syntax-number: #9c6a03;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3e6ba2;
+  --atlas-header-accent: #396194;
+  --atlas-header-hover-accent: #2b4a70;
+}
+
+[data-atlas-theme="op-art"] {
+  --atlas-link: #5e8cf0;
+  --atlas-syntax-keyword: #3b73ed;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #747a88;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #aed1fc;
+}
+
+[data-atlas-theme="hypnagogic"] {
+  --atlas-link: #1a44a2;
+  --atlas-syntax-keyword: #1d4db7;
+  --atlas-syntax-string: #0d622c;
+  --atlas-syntax-number: #714d02;
+  --atlas-syntax-comment: #4f545f;
+  --atlas-header-menu-accent: #2c4c73;
+  --atlas-header-accent: #264264;
+  --atlas-header-hover-accent: #192b41;
+}
+
+[data-atlas-theme="monochrome-zen"] {
+  --atlas-link: #235edf;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12843c;
+  --atlas-syntax-number: #9a6903;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3c689e;
+  --atlas-header-accent: #375e8f;
+  --atlas-header-hover-accent: #29476c;
+}
+
+[data-atlas-theme="default-browser"] {
+  --atlas-link: #2461e6;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12873d;
+  --atlas-syntax-number: #9e6c03;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3f6da5;
+  --atlas-header-accent: #396194;
+  --atlas-header-hover-accent: #2b4a70;
+}
+
+[data-atlas-theme="wireframe-sketch"] {
+  --atlas-link: #235edf;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12843c;
+  --atlas-syntax-number: #9a6903;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3c689e;
+  --atlas-header-accent: #375e8f;
+  --atlas-header-hover-accent: #29476c;
+}
+
+[data-atlas-theme="glitch-databend"] {
+  --atlas-link: #5e8cf0;
+  --atlas-syntax-keyword: #3b73ed;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #747a88;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #aed1fc;
+}
+
+[data-atlas-theme="y2k-chrome"] {
+  --atlas-link: #2157cf;
+  --atlas-syntax-keyword: #2460e4;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8d6103;
+  --atlas-syntax-comment: #646a77;
+  --atlas-header-menu-accent: #396194;
+  --atlas-header-accent: #335784;
+  --atlas-header-hover-accent: #254062;
+}
+
+[data-atlas-theme="duotone-poster"] {
+  --atlas-link: #2056cc;
+  --atlas-syntax-keyword: #245fe2;
+  --atlas-syntax-string: #107937;
+  --atlas-syntax-number: #8d6103;
+  --atlas-syntax-comment: #626976;
+  --atlas-header-menu-accent: #396194;
+  --atlas-header-accent: #335784;
+  --atlas-header-hover-accent: #254062;
+}
+
+[data-atlas-theme="grid-paper"] {
+  --atlas-link: #235edf;
+  --atlas-syntax-keyword: #2563eb;
+  --atlas-syntax-string: #12843c;
+  --atlas-syntax-number: #986803;
+  --atlas-syntax-comment: #6b7280;
+  --atlas-header-menu-accent: #3c689e;
+  --atlas-header-accent: #375e8f;
+  --atlas-header-hover-accent: #29476c;
+}
+
+[data-atlas-theme="maximalist-banners"] {
+  --atlas-link: #0b1d44;
+  --atlas-syntax-keyword: #0e275c;
+  --atlas-syntax-string: #073116;
+  --atlas-syntax-number: #392701;
+  --atlas-syntax-comment: #282a2f;
+  --atlas-header-menu-accent: #121f2f;
+  --atlas-header-accent: #0a1019;
+  --atlas-header-hover-accent: #020305;
 }
