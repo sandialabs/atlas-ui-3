@@ -129,7 +129,10 @@ earlier delivery.
 
 A stop, from the WebSocket or the agent-runs API, resolves like the local
 stop: the named run first, even when it has finished, then the conversation's
-live run. A failure frame for a stop that named only the conversation
+live run. The named run is looked up on this replica and then in the shared
+directory before any conversation fallback, so a stop naming a finished
+parent on another replica reaches it even when this replica holds the
+conversation's follow-up. A failure frame for a stop that named only the conversation
 carries the run id the stop resolved to, so the client keeps its running
 state and Stop control while the run executes on its owner. A finished run's retained record (kept 300 s after release) still
 names its last owner, and the stop goes there: stopping a finished parent
@@ -140,6 +143,14 @@ when the finished run is held by the replica the cancel reached. Only an
 API-started run cascades to a follow-up. A last owner or follow-up owner that
 does not answer is reported (`command_timeout`, HTTP 504), never taken for
 "nothing to stop": a retry is safe.
+
+Known limit: the parent's shared record is retained for a fixed 300 s after
+release (`RUN_RECORD_RETENTION_SECONDS`), while the owner's registry keeps a
+parent with live descendants for as long as they run. A stop or API cancel of
+such a parent through another replica more than 300 s after it finished
+finds no record (WS: nothing happens; REST: 404); the same stop on the owner
+still cascades. Keeping the record alive while descendants run is a
+coordinator change left to later #1128 work.
 
 Approvals keep the write-once outcome of [execution state](execution-state.md)
 as the only settle point: the replica that receives the answer writes it with

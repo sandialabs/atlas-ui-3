@@ -135,3 +135,59 @@ def test_saved_steer_to_another_replica_is_sent(chat_service):
         while frame.get("update_type") != "steering_queued":
             frame = ws.receive_json()
     assert bus.sent[0]["off_record"] is False and bus.sent[0]["args"]["content"] == "go left"
+
+
+class _Registry:
+    """This replica holds only the conversation's follow-up run."""
+
+    def __init__(self, follow_up=True):
+        self.follow_up = MagicMock(run_id="follow-up") if follow_up else None
+
+    def get_for_user(self, run_id, user_email):
+        return self.follow_up if run_id == "follow-up" else None
+
+    def active_for_conversation(self, conversation_id, user_email):
+        return self.follow_up if conversation_id == CONV else None
+
+
+async def _stop(registry, data, answers):
+    import main as atlas_main
+
+    calls = []
+
+    async def fake_route_stop(user_email, run_id, conversation_id):
+        calls.append((run_id, conversation_id))
+        return answers.get((run_id, conversation_id))
+
+    ws = MagicMock()
+    ws.send_json = AsyncMock()
+    with patch("atlas.application.chat.runs.run_control.route_stop", fake_route_stop):
+        handled = await atlas_main._stop_remote_run(ws, registry, USER, data)
+    return handled, calls, ws
+
+
+async def test_stop_naming_a_remote_parent_reaches_it_before_the_local_follow_up():
+    ok = {"ok": True, "code": "ok", "message": "", "payload": {"run": {"run_id": "parent"}}, "run_id": "parent"}
+    handled, calls, ws = await _stop(_Registry(), {"run_id": "parent", "conversation_id": CONV},
+                                     {("parent", None): ok})
+    assert handled is True and calls == [("parent", None)]
+    ws.send_json.assert_awaited_once_with({"type": "run_status", "run": {"run_id": "parent"}})
+
+
+async def test_stop_naming_an_unknown_run_falls_back_to_the_local_follow_up():
+    handled, calls, _ws = await _stop(_Registry(), {"run_id": "gone", "conversation_id": CONV}, {})
+    # Nobody owns "gone": the conversation's run here is stopped locally.
+    assert handled is False and calls == [("gone", None)]
+
+
+async def test_stop_by_conversation_only_is_routed_when_nothing_is_local():
+    answer = {"ok": False, "code": "command_timeout", "message": "", "payload": {}, "run_id": "r9"}
+    handled, calls, ws = await _stop(_Registry(follow_up=False), {"conversation_id": CONV},
+                                     {(None, CONV): answer})
+    assert handled is True and calls == [(None, CONV)]
+    assert ws.send_json.await_args.args[0]["run_id"] == "r9"
+
+
+async def test_local_run_named_by_id_is_not_routed():
+    handled, calls, _ws = await _stop(_Registry(), {"run_id": "follow-up", "conversation_id": CONV}, {})
+    assert handled is False and calls == []

@@ -732,17 +732,35 @@ async def _stop_remote_run(websocket, run_registry, user_email: str, data: dict,
     is told so, except for a frame naming no run id while this socket has an
     untracked turn of its own in flight, which the local fallback still stops.
     """
-    if _find_addressed_run(run_registry, user_email, data) is not None:
+    run_id = data.get("run_id")
+    conversation_id = data.get("conversation_id")
+    if run_id and run_registry.get_for_user(run_id, user_email) is not None:
         return False
-    if not data.get("run_id") and not data.get("conversation_id"):
+    if not run_id and not conversation_id:
         return False
     from atlas.application.chat.runs.remote_run_frames import stop_frame
     from atlas.application.chat.runs.run_control import route_stop
 
-    answer = await route_stop(user_email, data.get("run_id"), data.get("conversation_id"))
+    local_conversation_run = run_registry.active_for_conversation(conversation_id, user_email)
+    answer = None
+    if run_id:
+        # The named run first, wherever it lives: a finished parent on another
+        # replica is stopped there (cascading to the children it launched)
+        # even when this replica holds the conversation's follow-up.
+        answer = await route_stop(user_email, run_id, None)
+        if answer is not None and answer.get("code") == "owner_unavailable" and local_conversation_run:
+            # Owner unknown: stop the conversation's run held here rather
+            # than nothing.
+            return False
+    if answer is None:
+        if local_conversation_run is not None:
+            return False
+        if not conversation_id:
+            return False
+        answer = await route_stop(user_email, None, conversation_id)
     if answer is None:
         return False
-    if answer.get("code") == "owner_unavailable" and not data.get("run_id"):
+    if answer.get("code") == "owner_unavailable" and not run_id:
         local_task = (active_chat_task or {}).get("task")
         if local_task is not None and not local_task.done():
             return False
