@@ -2387,12 +2387,17 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// event, but only that tab's socket was told. Forward it on this socket so
 	// an untracked turn on this connection's session follows it too. A change
 	// made in this tab was already sent, so it matches and nothing goes out.
+	// The value sent is the latest persisted one, as for the announcement,
+	// so a render that lags behind another tab's off-toggle cannot send the
+	// older bit back.
 	const autoApproveSetting = settings?.autoApproveTools === true
 	useEffect(() => {
 		if (!isConnected || !settingsLoaded || autoApproveNeedsAnnounceRef.current) return
 		if (lastPublishedAutoApproveRef.current === null) return
-		if (lastPublishedAutoApproveRef.current === autoApproveSetting) return
-		publishAutoApprove(autoApproveSetting)
+		const latest = readLatestSettingsRef.current?.() || settingsRef.current
+		const enabled = latest?.autoApproveTools === true
+		if (lastPublishedAutoApproveRef.current === enabled) return
+		publishAutoApprove(enabled)
 	}, [autoApproveSetting, isConnected, settingsLoaded, publishAutoApprove])
 
 	const value = {

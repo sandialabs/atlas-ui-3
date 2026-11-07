@@ -711,11 +711,27 @@ async def _cancel_superseded_untracked_turn(active_chat_task: dict) -> bool:
     # it every later chat, Stop and approval frame.
     _done, pending = await asyncio.wait([previous], timeout=SUPERSEDED_TURN_CANCEL_TIMEOUT)
     if pending:
+        # Keep it reachable: Stop, reset and the disconnect cleanup cancel
+        # it again, so a late unwinding is still driven by this connection.
         logger.warning(
             "Superseded untracked turn did not unwind within %ss; continuing",
             SUPERSEDED_TURN_CANCEL_TIMEOUT,
         )
+        active_chat_task.setdefault("superseded", []).append(previous)
     return True
+
+
+def _cancel_superseded_leftovers(active_chat_task: dict) -> int:
+    """Cancel superseded turns that outlived their bounded wait; drop done ones.
+
+    Returns how many were still running.
+    """
+    leftovers = [t for t in active_chat_task.get("superseded", ()) if not t.done()]
+    for task in leftovers:
+        task.cancel()
+    if "superseded" in active_chat_task:
+        active_chat_task["superseded"] = leftovers
+    return len(leftovers)
 
 
 def _cancel_addressed_run(run_registry, user_email: str, data: dict) -> bool:
@@ -1219,6 +1235,7 @@ async def cleanup_disconnected_session(
             len(surviving),
         )
 
+    _cancel_superseded_leftovers(active_chat_task)
     task = active_chat_task.get("task")
     if task and not task.done():
         logger.info("Cancelling active chat task (client disconnected)")
@@ -3118,6 +3135,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # session (defense-in-depth; the frontend also sends
                 # stop_streaming before reset_session when it knows generation
                 # is in progress).
+                _cancel_superseded_leftovers(active_chat_task)
                 task = active_chat_task.get("task")
                 if task and not task.done():
                     logger.info("Cancelling active chat task (reset_session)")
@@ -3239,6 +3257,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # A frame with neither falls back to the untracked slot, which
                 # is what an older client sends.
                 if not _cancel_addressed_run(run_registry, user_email, data):
+                    _cancel_superseded_leftovers(active_chat_task)
                     task = active_chat_task.get("task")
                     if task and not task.done():
                         logger.info("Cancelling active chat task (stop_streaming)")
@@ -3251,6 +3270,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 action = data.get("action")
                 if action == "stop":
                     if not _cancel_addressed_run(run_registry, user_email, data):
+                        _cancel_superseded_leftovers(active_chat_task)
                         task = active_chat_task.get("task")
                         if task and not task.done():
                             logger.info("Cancelling active chat task (agent_control stop)")

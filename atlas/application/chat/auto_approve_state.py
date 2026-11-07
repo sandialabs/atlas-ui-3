@@ -25,11 +25,19 @@ _by_session: Dict[str, List] = {}
 
 
 def begin_untracked_turn(session_id, enabled: bool) -> None:
-    """Hold the session's entry for one turn and record the admission value."""
+    """Hold the session's entry for one turn.
+
+    A fresh entry records the admission value. An entry another turn still
+    holds keeps its live value: a toggle that arrived while that turn ran is
+    newer than the bit the new chat frame carries, which a stale tab can send.
+    """
     if session_id is None:
         return
-    entry = _by_session.setdefault(str(session_id), [False, 0])
-    entry[0] = enabled is True
+    key = str(session_id)
+    entry = _by_session.get(key)
+    if entry is None:
+        _by_session[key] = [enabled is True, 1]
+        return
     entry[1] += 1
 
 

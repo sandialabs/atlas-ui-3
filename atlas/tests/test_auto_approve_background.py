@@ -630,11 +630,29 @@ async def test_superseded_turn_cancel_is_bounded(monkeypatch):
 
     stubborn = asyncio.create_task(_resists_cancel())
     await asyncio.sleep(0)
+    slot = {"task": stubborn, "kind": "chat"}
     try:
         started = asyncio.get_running_loop().time()
-        assert await main_module._cancel_superseded_untracked_turn({"task": stubborn, "kind": "chat"}) is True
+        assert await main_module._cancel_superseded_untracked_turn(slot) is True
         assert asyncio.get_running_loop().time() - started < 1.0
+        # Still reachable: Stop, reset and the disconnect cleanup cancel it again.
+        assert slot["superseded"] == [stubborn]
+        assert main_module._cancel_superseded_leftovers(slot) == 1
+        assert not stubborn.done()
+        slot["superseded"] = []
+        assert main_module._cancel_superseded_leftovers(slot) == 0
     finally:
         stubborn.cancel()
         stubborn.cancel()
         await asyncio.wait([stubborn], timeout=1.0)
+
+
+def test_overlapping_admission_keeps_the_live_toggle():
+    """A chat frame from a stale tab must not undo an off-toggle mid-turn."""
+    begin_untracked_turn("s-stale", True)
+    set_session_auto_approve("s-stale", False)
+    begin_untracked_turn("s-stale", True)  # overlapping turn, older bit
+    assert session_auto_approve("s-stale") is False
+    end_untracked_turn("s-stale")
+    end_untracked_turn("s-stale")
+    assert session_auto_approve("s-stale") is None
