@@ -35,6 +35,8 @@ from atlas.application.chat.runs.external_runs import (
     list_api_runs,
 )
 from atlas.application.chat.runs.launcher import LaunchRefused
+from atlas.application.chat.runs.registry import get_run_registry
+from atlas.application.chat.runs.run_control import route_api_cancel, route_api_follow_up_cancel
 from atlas.core.agent_runs_paths import AGENT_RUNS_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,12 @@ _STATUS_FOR_CODE = {
     "idempotency_conflict": 409,
     "idempotency_in_progress": 409,
     "concurrency_limit": 429,
+    # Run control routed to another replica (issue #1128).
+    "owner_unavailable": 503,
+    "command_expired": 503,
+    "command_in_progress": 409,
+    "command_timeout": 504,
+    "stale_generation": 503,
     "persistence_unavailable": 503,
     "unavailable": 503,
 }
@@ -390,10 +398,44 @@ async def follow_up_run(
     return _respond_handle(handle, response)
 
 
-@router.post("/{run_id}/cancel", response_model=RunStatusModel, responses=_ERRORS)
+@router.post(
+    "/{run_id}/cancel",
+    response_model=RunStatusModel,
+    responses={**_ERRORS, 504: {"model": ErrorResponse}},
+)
 async def cancel_run(run_id: str):
-    """Stop an API-started run and any sub-conversations it launched."""
+    """Stop an API-started run and any sub-conversations it launched.
+
+    Any replica accepts the request. A run another replica is executing is
+    stopped there (issue #1128) and the response is that replica's answer. A
+    504 means the owner did not confirm in time; repeating the cancel is safe.
+    """
+    named = get_run_registry().get(run_id)
+    finished = named is not None and named.is_terminal
     try:
-        return cancel_api_run(run_id)
+        status = cancel_api_run(run_id)
     except LaunchRefused as e:
-        raise _refused(e)
+        if getattr(e, "code", None) != "run_not_found":
+            raise _refused(e)
+        local_refusal = e
+    else:
+        if not finished or status.get("run_id") != run_id:
+            return status
+        # The named run had finished here and no follow-up of it is live
+        # here; one may be executing on another replica.
+        later = await route_api_follow_up_cancel(run_id, named.conversation_id, named.user_email, status)
+        if later is None:
+            return status
+        return _routed_status(later)
+    answer = await route_api_cancel(run_id)
+    if answer is None:
+        raise _refused(local_refusal)
+    return _routed_status(answer)
+
+
+def _routed_status(answer: dict):
+    """A run-control reply as the cancel response, or the HTTP error it maps to."""
+    if answer.get("ok"):
+        return (answer.get("payload") or {}).get("status")
+    code = answer.get("code") or "unavailable"
+    raise _error(_STATUS_FOR_CODE.get(code, 503), code, answer.get("message") or "Run control failed.")

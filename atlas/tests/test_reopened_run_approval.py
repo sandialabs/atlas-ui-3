@@ -351,7 +351,7 @@ async def test_decide_on_a_replica_without_the_future_writes_the_outcome(store):
     kind, frame = await decide_tool_approval(data, EMAIL)
     # Recorded, not accepted: nothing on this replica was waiting, so the
     # websocket handler must not resume a local run for it.
-    assert kind == "recorded" and frame is None
+    assert kind == "recorded" and frame["already_resolved"] is False
     stored = await store.read_resolution(approval_storage_key(invocation, "call_9", EMAIL))
     assert stored["approved"] is False
     kind, frame = await decide_tool_approval(data, EMAIL)
