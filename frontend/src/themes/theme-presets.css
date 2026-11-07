@@ -345,23 +345,117 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
 [data-atlas-theme="win95"] .atlas-retro-input {
   border-color: var(--chrome-dark) var(--chrome-lighter) var(--chrome-lighter) var(--chrome-dark);
 }
-[data-atlas-theme="mac7"] .atlas-retro-window { box-shadow: 2px 2px 0 var(--shadow); }
+/* Mac System 7: active document-window racing stripes, a centered Chicago
+ * caption and a left-hand close box (only when a real onClose exists).
+ * CSS-only primitives: no imported fonts, artwork, or nonfunctional buttons. */
+[data-atlas-theme="mac7"] .atlas-retro-window {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--shadow);
+}
 [data-atlas-theme="mac7"] .atlas-retro-window-titlebar {
-  background-color: var(--chrome);
-  background-image: repeating-linear-gradient(to bottom, var(--chrome) 0 2px, var(--ink) 2px 3px, var(--chrome) 3px 5px);
+  position: relative;
+  justify-content: center;
+  min-height: 23px;
+  padding: 2px 28px;
+  background-color: var(--paper);
+  background-image: repeating-linear-gradient(to bottom,
+    var(--paper) 0 2px, var(--ink) 2px 3px, var(--paper) 3px 5px);
+  color: var(--ink);
+  border-bottom: 1px solid var(--ink);
 }
 [data-atlas-theme="mac7"] .atlas-retro-window-title {
-  background: var(--chrome);
-  padding-inline: 0.4rem;
+  position: relative;
+  z-index: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: var(--paper);
+  padding: 0 9px;
+  color: var(--ink);
+  font-family: var(--font-sys);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
   text-align: center;
 }
-[data-atlas-theme="mac7"] .atlas-retro-input {
+[data-atlas-theme="mac7"] .atlas-retro-window-symbol,
+[data-atlas-theme="mac7"] .atlas-retro-window-glyphs {
+  display: none;
+}
+[data-atlas-theme="mac7"] .atlas-retro-window-close {
+  position: absolute;
+  z-index: 2;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 13px;
+  min-height: 13px;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  overflow: hidden;
+  font-size: 0;
+  background: var(--paper);
+  color: var(--ink);
   border: 1px solid var(--ink);
-  box-shadow: inset 1px 1px 0 var(--shadow);
+  border-radius: 0;
+  box-shadow: 0 0 0 2px var(--paper);
+}
+[data-atlas-theme="mac7"] .atlas-retro-window-close:active {
+  background: var(--ink);
+}
+[data-atlas-theme="mac7"] .atlas-retro-window-content {
+  background: var(--paper);
+  padding: 12px;
+}
+[data-atlas-theme="mac7"] .atlas-retro-window-footer {
+  background: var(--paper);
+  border-top: 1px solid var(--ink);
+}
+[data-atlas-theme="mac7"] .atlas-retro-input {
+  min-height: 30px;
+  padding: 5px 7px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #777;
+  font-family: var(--font-body);
+  font-size: 13px;
 }
 [data-atlas-theme="mac7"] .atlas-retro-button {
-  border-color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--paper), inset 0 0 0 2px var(--ink);
+  min-height: 30px;
+  padding: 5px 12px;
+  color: var(--ink);
+  background: var(--chrome);
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  box-shadow: inset 1px 1px 0 var(--paper), inset -1px -1px 0 #888, 0 1px 0 var(--ink);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+}
+[data-atlas-theme="mac7"] .atlas-retro-button:active {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: inset 1px 1px 0 #555;
+}
+/* Make System 7 recognizable in the gallery even before it is selected. */
+.atlas-theme-preview[data-preview="mac7"] {
+  border: 1px solid #000;
+  box-shadow: 2px 2px 0 #000;
+}
+.atlas-theme-preview[data-preview="mac7"] .atlas-theme-preview-bar {
+  height: 10px;
+  flex-shrink: 0;
+  background: repeating-linear-gradient(to bottom,
+    #fff 0 2px, #000 2px 3px, #fff 3px 5px);
+  border-bottom: 1px solid #000;
 }
 [data-atlas-theme="crt-phosphor"] .atlas-retro-window-titlebar {
   border-bottom: 1px solid var(--ink);
