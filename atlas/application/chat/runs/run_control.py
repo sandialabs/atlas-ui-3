@@ -8,13 +8,12 @@ Two halves share this module:
   agent-runs service, for an API-started run), and the run must still be
   live here. The directory entry that routed the command is never trusted
   for authorization.
-* **Sender side.** ``route_*`` find a run that is not in this replica's
-  registry in the shared directory and send the command to its owner. They
-  return ``None`` when nothing in the directory matches, so the caller keeps
-  its single-instance answer. A directory that cannot be read is never taken
-  for "nothing matches": the lookups raise :class:`RunDirectoryUnavailable`
-  and the routes answer ``owner_unavailable``, so a Redis outage cannot start
-  a second turn beside a run another replica is executing.
+* **Sender side.** ``route_*`` send a command to the owner of a run that
+  ``resolve`` found in the shared directory (see ``resolve`` and ``commands``);
+  they do no lookup of their own. A directory that cannot be read is never
+  taken for "nothing matches": ``resolve`` answers ``Unknown`` and the callers
+  report ``owner_unavailable``, so a Redis outage cannot start a second turn
+  beside a run another replica is executing.
 
 Commands are idempotent. Stop is (terminal is sticky). A steer is queued once
 per request id. An approval is settled once by the shared write-once outcome
@@ -295,29 +294,13 @@ async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args
         return reply(False, OWNER_UNAVAILABLE, "The run's server could not be reached.")
 
 
-async def route_stop(user_email: str, run_id: Optional[str], conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Stop the user's run on its owner. None when no other replica owns it.
+async def route_stop(entry: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+    """Stop the user's run on its owner (``entry`` is where ``resolve`` found it).
 
-    Resolution mirrors the local stop: the named run first, even when it has
-    finished (stopping a finished parent stops the sub-conversations it
-    launched, on its owner), then the conversation's live run. An owner that
-    does not answer is reported (``command_timeout``), never taken for "no
-    run": its live children may still be running, and a retry is safe.
+    An owner that does not answer is reported (``command_timeout``), never
+    taken for "no run": its live children may still be running, and a retry is
+    safe. Stopping a finished parent stops the sub-conversations it launched.
     """
-    email = normalize_user_email(user_email)
-    try:
-        entry = await remote_entry(run_id, include_terminal=True)
-        if entry is not None and entry.get("user_email") != email:
-            # Another user's run answers like one that does not exist.
-            entry = None
-        if entry is None:
-            entry = await remote_run_for_conversation(conversation_id)
-            if entry is not None and entry.get("user_email") != email:
-                entry = None
-    except RunDirectoryUnavailable:
-        return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
-    if entry is None:
-        return None
     answer = await _send(entry, STOP, user_actor(user_email))
     # The run the stop resolved to, so a failure frame for a stop addressed
     # only by conversation still names the run (the client keeps its running

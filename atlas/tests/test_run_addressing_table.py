@@ -20,7 +20,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from main import _cancel_addressed_run, _stop_remote_run
 from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
     OWNER,
     _ApiReplicas,
@@ -31,6 +30,9 @@ from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
 
 from atlas.application.chat.agent.steering import SteeringChannel
 from atlas.application.chat.runs import run_control
+from atlas.application.chat.runs.commands import (
+    stop_addressed_run,
+)
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "developer" / "run-addressing.md"
@@ -63,18 +65,13 @@ class _Untracked:
 # Rows with no ``cluster`` argument run with no run-control bus bound, as a
 # single-instance deployment does: nothing is read from a directory.
 async def ws_stop(local, data, untracked=None):
-    """The stop branch of ``websocket_endpoint`` (main.py, ``stop_streaming`` and
-    ``agent_control`` stop are the same code): returns (frames sent, untracked
-    turn cancelled)."""
+    """The stop branch of ``websocket_endpoint`` (``stop_streaming`` and
+    ``agent_control`` stop both call ``stop_addressed_run``): returns (frames
+    sent, untracked turn cancelled)."""
     untracked = untracked or _Untracked(live=False)
     ws = MagicMock()
     ws.send_json = AsyncMock()
-    if await _stop_remote_run(ws, local, OWNER, data, untracked.slot):
-        pass
-    elif not _cancel_addressed_run(local, OWNER, data):
-        task = untracked.slot.get("task")
-        if task and not task.done():
-            task.cancel()
+    await stop_addressed_run(ws, local, OWNER, data, untracked.slot)
     return [c.args[0] for c in ws.send_json.await_args_list], untracked.cancelled
 
 
