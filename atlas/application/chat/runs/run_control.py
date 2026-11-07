@@ -217,7 +217,7 @@ def start_run_control(refusal_check: Optional[RefusalCheck] = None) -> Optional[
 # ---------------------------------------------------------------------------
 
 
-async def _remote_entry(run_id: Optional[str], *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
+async def remote_entry(run_id: Optional[str], *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
     """Another replica's directory entry for ``run_id``, or None.
 
     Raises :class:`RunDirectoryUnavailable` when the directory cannot be read.
@@ -236,7 +236,7 @@ async def _remote_entry(run_id: Optional[str], *, include_terminal: bool = False
     return entry
 
 
-async def _conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
+async def conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """The live run holding ``conversation_id``, on any replica (this one included)."""
     bus = get_run_control_bus()
     if bus is None or not conversation_id:
@@ -256,7 +256,7 @@ async def remote_run_for_conversation(conversation_id: Optional[str]) -> Optiona
     :class:`RunDirectoryUnavailable` when the directory cannot be read; the
     caller must then refuse rather than start a turn.
     """
-    entry = await _conversation_entry(conversation_id)
+    entry = await conversation_entry(conversation_id)
     bus = get_run_control_bus()
     if entry is None or bus is None or entry.get("replica") == bus.replica_id:
         return None
@@ -280,7 +280,7 @@ async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args
         if answer.get("code") != STALE_GENERATION:
             return answer
         try:
-            fresh = await _remote_entry(entry["run_id"], include_terminal=bool(entry.get("terminal")))
+            fresh = await remote_entry(entry["run_id"], include_terminal=bool(entry.get("terminal")))
         except RunDirectoryUnavailable:
             return answer
         moved = fresh is not None and (fresh["replica"], fresh.get("generation")) != (
@@ -306,7 +306,7 @@ async def route_stop(user_email: str, run_id: Optional[str], conversation_id: Op
     """
     email = normalize_user_email(user_email)
     try:
-        entry = await _remote_entry(run_id, include_terminal=True)
+        entry = await remote_entry(run_id, include_terminal=True)
         if entry is not None and entry.get("user_email") != email:
             # Another user's run answers like one that does not exist.
             entry = None
@@ -336,7 +336,7 @@ async def route_api_cancel(run_id: str) -> Optional[Dict[str, Any]]:
     from atlas.application.chat.runs.external_runs import API_SOURCE
 
     try:
-        entry = await _remote_entry(run_id, include_terminal=True)
+        entry = await remote_entry(run_id, include_terminal=True)
     except RunDirectoryUnavailable:
         return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
     if entry is None:
@@ -384,7 +384,7 @@ async def route_api_follow_up_cancel(
     if bus is None:
         return None
     try:
-        follow_up = await _conversation_entry(conversation_id)
+        follow_up = await conversation_entry(conversation_id)
     except RunDirectoryUnavailable:
         return reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
     if (
@@ -428,7 +428,7 @@ async def route_approval(user_email: str, run_id: Optional[str], invocation_id: 
     records or re-sends the same answer sends the same command.
     """
     try:
-        entry = await _remote_entry(run_id)
+        entry = await remote_entry(run_id)
     except RunDirectoryUnavailable:
         # Best effort: the executor also polls the shared outcome.
         return None
