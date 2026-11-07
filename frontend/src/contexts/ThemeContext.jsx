@@ -1,13 +1,13 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { DEFAULT_THEME_ID, getRegisteredTheme, resolveThemeId } from '../themes/themeRegistry'
 
 const ThemeContext = createContext()
 
 function getInitialTheme() {
   try {
-    const stored = localStorage.getItem('atlas-theme')
-    if (stored === 'light' || stored === 'dark') return stored
-  } catch { /* ignore */ }
-  return 'dark'
+    return resolveThemeId(localStorage.getItem('atlas-theme'))
+  } catch { /* Storage may be unavailable in privacy modes. */ }
+  return DEFAULT_THEME_ID
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -18,23 +18,30 @@ export function useTheme() {
 }
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(getInitialTheme)
+  const [selectedTheme, setSelectedTheme] = useState(getInitialTheme)
+  const theme = resolveThemeId(selectedTheme)
+  const definition = getRegisteredTheme(theme)
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
+    const root = document.documentElement
+    // data-theme remains dark/light for compatibility with existing Atlas CSS.
+    // data-atlas-theme names the exact registered visual identity.
+    root.setAttribute('data-theme', definition.mode)
+    root.setAttribute('data-atlas-theme', theme)
     try {
       localStorage.setItem('atlas-theme', theme)
     } catch { /* ignore */ }
-  }, [theme])
+  }, [theme, definition.mode])
 
-  // Note: Atlas deliberately defaults first-run users to dark mode and does not
-  // follow the OS `prefers-color-scheme` setting. Explicit user choices (saved in
-  // localStorage) are always preserved.
-
-  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+  // Atlas intentionally defaults to dark, not the OS color-scheme preference.
+  // Keep the legacy toggle API while the new gallery supports every preset.
+  const toggleTheme = () => setSelectedTheme(current => {
+    const currentMode = getRegisteredTheme(resolveThemeId(current)).mode
+    return currentMode === 'dark' ? 'light' : 'dark'
+  })
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme: setSelectedTheme, toggleTheme, themeDefinition: definition }}>
       {children}
     </ThemeContext.Provider>
   )

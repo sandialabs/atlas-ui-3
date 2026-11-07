@@ -1,0 +1,20 @@
+/* NetHack ASCII — design tokens
+   Extracted from styles/28-nethack-ascii/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #000000;
+  --wall: #a0a0a0;
+  --floor: #707070;
+  --player: #ffff00;
+  --monster-red: #ff4040;
+  --monster-green: #40ff40;
+  --monster-blue: #6080ff;
+  --monster-magenta: #ff40ff;
+  --item-cyan: #40e4e4;
+  --gold: #ffd700;
+  --door: #a05020;
+  --stairs: #c0c0c0;
+  --ink: #e4e4e4;
+  --dim: #606060;
+  --font: "Px437 IBM VGA", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}

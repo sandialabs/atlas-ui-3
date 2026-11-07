@@ -1,0 +1,1407 @@
+/* Generated semantic Atlas adapters from the complete RDS manifest.
+
+ * Upstream 8988f50a514e7f845dbe5ad190faa2afd926f0b4 (MIT). No demo CSS, images or fonts imported.
+
+ * Explicit legacy adapters (Win95, Mac7, CRT) live in theme-presets.css.
+
+ */
+
+[data-atlas-theme="windows-xp-luna"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #0a246a;
+  --atlas-focus-ring: #091f5c;
+  --atlas-retro-window-bg: #5475cc;
+  --atlas-retro-header-bg: #0a246a;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #4e6dbe;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #5a7edb;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #2e4070;
+  --gray-900: 90 126 219;
+  --gray-800: 84 117 204;
+  --gray-700: 78 109 190;
+  --gray-600: 66 91 159;
+  --gray-500: 4 6 10;
+  --gray-400: 0 0 0;
+  --gray-300: 0 0 0;
+  --gray-200: 0 0 0;
+  --gray-100: 0 0 0;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="aqua-osx"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #b21808;
+  --atlas-focus-ring: #b01808;
+  --atlas-retro-window-bg: #abbbd0;
+  --atlas-retro-header-bg: #b21808;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #9faec1;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #b8c9e0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #5e6772;
+  --gray-900: 184 201 224;
+  --gray-800: 171 187 208;
+  --gray-700: 159 174 193;
+  --gray-600: 133 146 162;
+  --gray-500: 67 73 81;
+  --gray-400: 60 65 73;
+  --gray-300: 48 52 58;
+  --gray-200: 38 41 46;
+  --gray-100: 22 24 27;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="amiga-workbench"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffffff;
+  --atlas-focus-ring: #ffffff;
+  --atlas-retro-window-bg: #1f69b4;
+  --atlas-retro-header-bg: #ffffff;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f74b9;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0055aa;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #84acd6;
+  --gray-900: 0 85 170;
+  --gray-800: 31 105 180;
+  --gray-700: 47 116 185;
+  --gray-600: 80 138 196;
+  --gray-500: 224 234 244;
+  --gray-400: 244 248 251;
+  --gray-300: 255 255 255;
+  --gray-200: 255 255 255;
+  --gray-100: 255 255 255;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="nextstep"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #f0f0f4;
+  --atlas-focus-ring: #f0f0f4;
+  --atlas-retro-window-bg: #696974;
+  --atlas-retro-header-bg: #f0f0f4;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #74747e;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #555561;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #acacb3;
+  --gray-900: 85 85 97;
+  --gray-800: 105 105 116;
+  --gray-700: 116 116 126;
+  --gray-600: 138 138 147;
+  --gray-500: 237 237 238;
+  --gray-400: 252 252 252;
+  --gray-300: 255 255 255;
+  --gray-200: 255 255 255;
+  --gray-100: 255 255 255;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="beos"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffcc00;
+  --atlas-focus-ring: #ffcc00;
+  --atlas-retro-window-bg: #44696a;
+  --atlas-retro-header-bg: #ffcc00;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #517474;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #2a5556;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #98acad;
+  --gray-900: 42 85 86;
+  --gray-800: 68 105 106;
+  --gray-700: 81 116 116;
+  --gray-600: 109 138 139;
+  --gray-500: 219 226 227;
+  --gray-400: 234 239 239;
+  --gray-300: 255 255 255;
+  --gray-200: 255 255 255;
+  --gray-100: 255 255 255;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="teletext"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #ffff00;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="dos-cga"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #55ffff;
+  --atlas-focus-ring: #55ffff;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #55ffff;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="8bit-arcade"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ffd300;
+  --atlas-focus-ring: #ffd300;
+  --atlas-retro-window-bg: #282839;
+  --atlas-retro-header-bg: #ffd300;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #373747;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0b0b1e;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #898992;
+  --gray-900: 11 11 30;
+  --gray-800: 40 40 57;
+  --gray-700: 55 55 71;
+  --gray-600: 87 87 101;
+  --gray-500: 145 145 154;
+  --gray-400: 156 156 164;
+  --gray-300: 173 173 180;
+  --gray-200: 186 186 192;
+  --gray-100: 206 206 209;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="frutiger-aero"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .7rem;
+  --atlas-accent: #0b2a3c;
+  --atlas-focus-ring: #0b2a3c;
+  --atlas-retro-window-bg: #76c1ed;
+  --atlas-retro-header-bg: #0b2a3c;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #6eb3dc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #7fcfff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #416a82;
+  --gray-900: 127 207 255;
+  --gray-800: 118 193 237;
+  --gray-700: 110 179 220;
+  --gray-600: 92 151 185;
+  --gray-500: 46 75 92;
+  --gray-400: 40 66 81;
+  --gray-300: 32 52 64;
+  --gray-200: 26 42 52;
+  --gray-100: 14 23 28;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="winamp-skin"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #00ff33;
+  --atlas-focus-ring: #00ff33;
+  --atlas-retro-window-bg: #535353;
+  --atlas-retro-header-bg: #00ff33;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #5f5f5f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #3c3c3c;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #a0a0a0;
+  --gray-900: 60 60 60;
+  --gray-800: 83 83 83;
+  --gray-700: 95 95 95;
+  --gray-600: 121 121 121;
+  --gray-500: 202 202 202;
+  --gray-400: 214 214 214;
+  --gray-300: 236 236 236;
+  --gray-200: 252 252 252;
+  --gray-100: 255 255 255;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="geocities-web10"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #ffff00;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="cassette-futurism"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ffb000;
+  --atlas-focus-ring: #ffb000;
+  --atlas-retro-window-bg: #272522;
+  --atlas-retro-header-bg: #ffb000;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #363431;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0a0704;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #888785;
+  --gray-900: 10 7 4;
+  --gray-800: 39 37 34;
+  --gray-700: 54 52 49;
+  --gray-600: 87 85 83;
+  --gray-500: 143 142 140;
+  --gray-400: 153 153 151;
+  --gray-300: 169 168 167;
+  --gray-200: 182 181 180;
+  --gray-100: 201 200 200;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="vaporwave"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ff00e5;
+  --atlas-focus-ring: #ff00e5;
+  --atlas-retro-window-bg: #352847;
+  --atlas-retro-header-bg: #ff00e5;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #433754;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #1a0b2e;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #90899a;
+  --gray-900: 26 11 46;
+  --gray-800: 53 40 71;
+  --gray-700: 67 55 84;
+  --gray-600: 97 87 111;
+  --gray-500: 154 148 163;
+  --gray-400: 164 158 172;
+  --gray-300: 182 178 189;
+  --gray-200: 194 190 200;
+  --gray-100: 215 212 218;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="memphis"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ff2e2e;
+  --atlas-focus-ring: #ff2e2e;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #ff2e2e;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="ps1-tech"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #00ffff;
+  --atlas-focus-ring: #00ffff;
+  --atlas-retro-window-bg: #27272d;
+  --atlas-retro-header-bg: #00ffff;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #36363c;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0a0a10;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #88888c;
+  --gray-900: 10 10 16;
+  --gray-800: 39 39 45;
+  --gray-700: 54 54 60;
+  --gray-600: 87 87 91;
+  --gray-500: 143 143 146;
+  --gray-400: 153 153 156;
+  --gray-300: 171 171 173;
+  --gray-200: 184 184 186;
+  --gray-100: 203 203 205;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="os2-warp"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #00007f;
+  --atlas-focus-ring: #00007f;
+  --atlas-retro-window-bg: #468a8a;
+  --atlas-retro-header-bg: #00007f;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #418080;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #2d7a7a;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #264c4c;
+  --gray-900: 45 122 122;
+  --gray-800: 70 138 138;
+  --gray-700: 65 128 128;
+  --gray-600: 55 108 108;
+  --gray-500: 11 22 22;
+  --gray-400: 1 1 1;
+  --gray-300: 0 0 0;
+  --gray-200: 0 0 0;
+  --gray-100: 0 0 0;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="macos9-platinum"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #f5f5f5;
+  --atlas-focus-ring: #f5f5f5;
+  --atlas-retro-window-bg: #777777;
+  --atlas-retro-header-bg: #f5f5f5;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #6f6f6f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #808080;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #414141;
+  --gray-900: 128 128 128;
+  --gray-800: 119 119 119;
+  --gray-700: 111 111 111;
+  --gray-600: 93 93 93;
+  --gray-500: 2 2 2;
+  --gray-400: 0 0 0;
+  --gray-300: 0 0 0;
+  --gray-200: 0 0 0;
+  --gray-100: 0 0 0;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="web20-glossy"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #2a7ac9;
+  --atlas-focus-ring: #2773bd;
+  --atlas-retro-window-bg: #d8dfe6;
+  --atlas-retro-header-bg: #2a7ac9;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #c9cfd6;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #e8f0f7;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #777b7f;
+  --gray-900: 232 240 247;
+  --gray-800: 216 223 230;
+  --gray-700: 201 207 214;
+  --gray-600: 168 174 179;
+  --gray-500: 93 96 99;
+  --gray-400: 86 89 92;
+  --gray-300: 73 76 78;
+  --gray-200: 63 65 67;
+  --gray-100: 50 51 53;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="gameboy-dmg"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #0f380f;
+  --atlas-focus-ring: #0f380f;
+  --atlas-retro-window-bg: #aba499;
+  --atlas-retro-header-bg: #0f380f;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #9f998e;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #b8b0a4;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #5e5a54;
+  --gray-900: 184 176 164;
+  --gray-800: 171 164 153;
+  --gray-700: 159 153 142;
+  --gray-600: 133 128 119;
+  --gray-500: 60 57 54;
+  --gray-400: 51 49 46;
+  --gray-300: 36 34 32;
+  --gray-200: 21 20 18;
+  --gray-100: 0 0 0;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="braun-rams"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #6a6965;
+  --atlas-focus-ring: #6a6965;
+  --atlas-retro-window-bg: #e3e2df;
+  --atlas-retro-header-bg: #6a6965;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #d3d2cf;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #f4f3f0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #7d7c7b;
+  --gray-900: 244 243 240;
+  --gray-800: 227 226 223;
+  --gray-700: 211 210 207;
+  --gray-600: 177 176 174;
+  --gray-500: 100 99 98;
+  --gray-400: 91 90 89;
+  --gray-300: 77 77 76;
+  --gray-200: 68 68 67;
+  --gray-100: 54 54 54;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="tron-vector"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #00e4ff;
+  --atlas-focus-ring: #00e4ff;
+  --atlas-retro-window-bg: #1f1f26;
+  --atlas-retro-header-bg: #00e4ff;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f35;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000008;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848488;
+  --gray-900: 0 0 8;
+  --gray-800: 31 31 38;
+  --gray-700: 47 47 53;
+  --gray-600: 80 80 86;
+  --gray-500: 136 136 140;
+  --gray-400: 145 145 149;
+  --gray-300: 163 163 166;
+  --gray-200: 174 174 177;
+  --gray-100: 195 195 196;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="vhs-tracking"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ff1a1a;
+  --atlas-focus-ring: #ff1a1a;
+  --atlas-retro-window-bg: #272727;
+  --atlas-retro-header-bg: #ff1a1a;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #363636;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0a0a0a;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #888888;
+  --gray-900: 10 10 10;
+  --gray-800: 39 39 39;
+  --gray-700: 54 54 54;
+  --gray-600: 87 87 87;
+  --gray-500: 143 143 143;
+  --gray-400: 153 153 153;
+  --gray-300: 171 171 171;
+  --gray-200: 184 184 184;
+  --gray-100: 203 203 203;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="risograph"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #0078b4;
+  --atlas-focus-ring: #0077b2;
+  --atlas-retro-window-bg: #e2ded4;
+  --atlas-retro-header-bg: #0078b4;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #d2cec5;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #f3efe4;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #7c7a75;
+  --gray-900: 243 239 228;
+  --gray-800: 226 222 212;
+  --gray-700: 210 206 197;
+  --gray-600: 176 173 165;
+  --gray-500: 97 95 91;
+  --gray-400: 90 89 85;
+  --gray-300: 77 75 72;
+  --gray-200: 66 64 61;
+  --gray-100: 54 53 51;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="ibm-3270"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #00d4d4;
+  --atlas-focus-ring: #00d4d4;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #00d4d4;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="nethack-ascii"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #ffff00;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="templeos"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
+  --atlas-retro-window-bg: #1f1fb4;
+  --atlas-retro-header-bg: #ffff00;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2fb9;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0000aa;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #8484d6;
+  --gray-900: 0 0 170;
+  --gray-800: 31 31 180;
+  --gray-700: 47 47 185;
+  --gray-600: 80 80 196;
+  --gray-500: 163 163 224;
+  --gray-400: 174 174 228;
+  --gray-300: 195 195 235;
+  --gray-200: 210 210 240;
+  --gray-100: 233 233 248;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="bbs-ansi"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffff55;
+  --atlas-focus-ring: #ffff55;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #ffff55;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="midnight-commander"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffff55;
+  --atlas-focus-ring: #ffff55;
+  --atlas-retro-window-bg: #1f1fb4;
+  --atlas-retro-header-bg: #ffff55;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2fb9;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0000aa;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #8484d6;
+  --gray-900: 0 0 170;
+  --gray-800: 31 31 180;
+  --gray-700: 47 47 185;
+  --gray-600: 80 80 196;
+  --gray-500: 163 163 224;
+  --gray-400: 174 174 228;
+  --gray-300: 195 195 235;
+  --gray-200: 210 210 240;
+  --gray-100: 233 233 248;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="matrix-rain"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ff3860;
+  --atlas-focus-ring: #ff3860;
+  --atlas-retro-window-bg: #1f1f1f;
+  --atlas-retro-header-bg: #ff3860;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #2f2f2f;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #848484;
+  --gray-900: 0 0 0;
+  --gray-800: 31 31 31;
+  --gray-700: 47 47 47;
+  --gray-600: 80 80 80;
+  --gray-500: 136 136 136;
+  --gray-400: 145 145 145;
+  --gray-300: 163 163 163;
+  --gray-200: 174 174 174;
+  --gray-100: 195 195 195;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="btop-meters"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #00e4ff;
+  --atlas-focus-ring: #00e4ff;
+  --atlas-retro-window-bg: #2f303e;
+  --atlas-retro-header-bg: #00e4ff;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #3e3e4c;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #131424;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #8d8d95;
+  --gray-900: 19 20 36;
+  --gray-800: 47 48 62;
+  --gray-700: 62 62 76;
+  --gray-600: 93 94 104;
+  --gray-500: 153 154 160;
+  --gray-400: 163 164 170;
+  --gray-300: 182 183 187;
+  --gray-200: 195 195 199;
+  --gray-100: 215 216 218;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="c64-basic"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #4aff4a;
+  --atlas-focus-ring: #4aff4a;
+  --atlas-retro-window-bg: #5a55cb;
+  --atlas-retro-header-bg: #4aff4a;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #6661cf;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #443ec4;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #a4a2e2;
+  --gray-900: 68 62 196;
+  --gray-800: 90 85 203;
+  --gray-700: 102 97 207;
+  --gray-600: 126 122 214;
+  --gray-500: 229 228 247;
+  --gray-400: 242 241 251;
+  --gray-300: 255 255 255;
+  --gray-200: 255 255 255;
+  --gray-100: 255 255 255;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="flat-2013"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #9b59b6;
+  --atlas-focus-ring: #9656b1;
+  --atlas-retro-window-bg: #dbdfe0;
+  --atlas-retro-header-bg: #9b59b6;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #cccfd0;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ecf0f1;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #787b7b;
+  --gray-900: 236 240 241;
+  --gray-800: 219 223 224;
+  --gray-700: 204 207 208;
+  --gray-600: 171 174 175;
+  --gray-500: 94 96 96;
+  --gray-400: 88 89 90;
+  --gray-300: 74 76 76;
+  --gray-200: 64 65 65;
+  --gray-100: 50 51 52;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="glassmorphism"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .7rem;
+  --atlas-accent: #7873f5;
+  --atlas-focus-ring: #706be4;
+  --atlas-retro-window-bg: #ededed;
+  --atlas-retro-header-bg: #7873f5;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #dcdcdc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #828282;
+  --gray-900: 255 255 255;
+  --gray-800: 237 237 237;
+  --gray-700: 220 220 220;
+  --gray-600: 185 185 185;
+  --gray-500: 104 104 104;
+  --gray-400: 97 97 97;
+  --gray-300: 83 83 83;
+  --gray-200: 73 73 73;
+  --gray-100: 62 62 62;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="neumorphism"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #4a5568;
+  --atlas-focus-ring: #4a5568;
+  --atlas-retro-window-bg: #d0d5db;
+  --atlas-retro-header-bg: #4a5568;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #c1c6cc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #e0e5ec;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #727578;
+  --gray-900: 224 229 236;
+  --gray-800: 208 213 219;
+  --gray-700: 193 198 204;
+  --gray-600: 162 166 171;
+  --gray-500: 87 89 92;
+  --gray-400: 81 83 85;
+  --gray-300: 67 68 70;
+  --gray-200: 58 60 61;
+  --gray-100: 44 45 46;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="blueprint-cad"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: 0;
+  --atlas-accent: #ffe066;
+  --atlas-focus-ring: #ffe066;
+  --atlas-retro-window-bg: #2a527d;
+  --atlas-retro-header-bg: #ffe066;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #395e86;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0d3a6b;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #8aa0b8;
+  --gray-900: 13 58 107;
+  --gray-800: 42 82 125;
+  --gray-700: 57 94 134;
+  --gray-600: 89 120 154;
+  --gray-500: 185 198 212;
+  --gray-400: 200 210 221;
+  --gray-300: 225 231 237;
+  --gray-200: 244 246 248;
+  --gray-100: 255 255 255;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="claymorphism"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .7rem;
+  --atlas-accent: #7c6ba8;
+  --atlas-focus-ring: #7666a0;
+  --atlas-retro-window-bg: #dfd9ed;
+  --atlas-retro-header-bg: #7c6ba8;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #cfcadc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #f0e9ff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #7b7782;
+  --gray-900: 240 233 255;
+  --gray-800: 223 217 237;
+  --gray-700: 207 202 220;
+  --gray-600: 174 169 185;
+  --gray-500: 96 93 102;
+  --gray-400: 87 85 92;
+  --gray-300: 74 72 78;
+  --gray-200: 65 63 69;
+  --gray-100: 51 50 55;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="brutalist-web"] {
+  color-scheme: light;
+  --atlas-font-ui: "Times New Roman", Times, serif;
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #ff0000;
+  --atlas-focus-ring: #f50000;
+  --atlas-retro-window-bg: #ededed;
+  --atlas-retro-header-bg: #ff0000;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #dcdcdc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #828282;
+  --gray-900: 255 255 255;
+  --gray-800: 237 237 237;
+  --gray-700: 220 220 220;
+  --gray-600: 185 185 185;
+  --gray-500: 104 104 104;
+  --gray-400: 97 97 97;
+  --gray-300: 83 83 83;
+  --gray-200: 73 73 73;
+  --gray-100: 62 62 62;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="swiss-intl"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #e63946;
+  --atlas-focus-ring: #d63541;
+  --atlas-retro-window-bg: #e3e2dd;
+  --atlas-retro-header-bg: #e63946;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #d3d2ce;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #f4f3ee;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #7d7c7a;
+  --gray-900: 244 243 238;
+  --gray-800: 227 226 221;
+  --gray-700: 211 210 206;
+  --gray-600: 177 176 172;
+  --gray-500: 100 99 97;
+  --gray-400: 91 90 88;
+  --gray-300: 77 77 75;
+  --gray-200: 68 68 66;
+  --gray-100: 54 54 53;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="bauhaus"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #d32027;
+  --atlas-focus-ring: #d32027;
+  --atlas-retro-window-bg: #dfdbd0;
+  --atlas-retro-header-bg: #d32027;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #cfccc1;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #f0ebe0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #7b7872;
+  --gray-900: 240 235 224;
+  --gray-800: 223 219 208;
+  --gray-700: 207 204 193;
+  --gray-600: 174 171 162;
+  --gray-500: 96 94 89;
+  --gray-400: 87 85 81;
+  --gray-300: 74 72 69;
+  --gray-200: 65 64 60;
+  --gray-100: 51 50 48;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="pop-art-lichtenstein"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ed1c24;
+  --atlas-focus-ring: #ed1c24;
+  --atlas-retro-window-bg: #edece7;
+  --atlas-retro-header-bg: #ed1c24;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #dcdbd7;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #fffef8;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #82827f;
+  --gray-900: 255 254 248;
+  --gray-800: 237 236 231;
+  --gray-700: 220 219 215;
+  --gray-600: 185 184 180;
+  --gray-500: 104 104 102;
+  --gray-400: 97 97 95;
+  --gray-300: 83 83 81;
+  --gray-200: 73 73 72;
+  --gray-100: 62 61 60;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="op-art"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ec1e23;
+  --atlas-focus-ring: #ef3e42;
+  --atlas-retro-window-bg: #272727;
+  --atlas-retro-header-bg: #ec1e23;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #363636;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0a0a0a;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #888888;
+  --gray-900: 10 10 10;
+  --gray-800: 39 39 39;
+  --gray-700: 54 54 54;
+  --gray-600: 87 87 87;
+  --gray-500: 143 143 143;
+  --gray-400: 153 153 153;
+  --gray-300: 171 171 171;
+  --gray-200: 184 184 184;
+  --gray-100: 203 203 203;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="hypnagogic"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #3d5a80;
+  --atlas-focus-ring: #3d5a80;
+  --atlas-retro-window-bg: #cdba8f;
+  --atlas-retro-header-bg: #3d5a80;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #bfad85;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #dcc89a;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #71664f;
+  --gray-900: 220 200 154;
+  --gray-800: 205 186 143;
+  --gray-700: 191 173 133;
+  --gray-600: 160 145 112;
+  --gray-500: 80 73 56;
+  --gray-400: 72 65 50;
+  --gray-300: 57 52 40;
+  --gray-200: 47 43 33;
+  --gray-100: 29 26 20;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="monochrome-zen"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #0a0a0a;
+  --atlas-focus-ring: #0a0a0a;
+  --atlas-retro-window-bg: #e8e8e6;
+  --atlas-retro-header-bg: #0a0a0a;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #d8d8d6;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #fafaf7;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #80807f;
+  --gray-900: 250 250 247;
+  --gray-800: 232 232 230;
+  --gray-700: 216 216 214;
+  --gray-600: 181 181 179;
+  --gray-500: 102 102 101;
+  --gray-400: 95 95 94;
+  --gray-300: 81 81 80;
+  --gray-200: 72 72 71;
+  --gray-100: 58 58 58;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="default-browser"] {
+  color-scheme: light;
+  --atlas-font-ui: "Times New Roman", Times, serif;
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
+  --atlas-retro-window-bg: #ededed;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #dcdcdc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #828282;
+  --gray-900: 255 255 255;
+  --gray-800: 237 237 237;
+  --gray-700: 220 220 220;
+  --gray-600: 185 185 185;
+  --gray-500: 104 104 104;
+  --gray-400: 97 97 97;
+  --gray-300: 83 83 83;
+  --gray-200: 73 73 73;
+  --gray-100: 62 62 62;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="wireframe-sketch"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #2a2a2a;
+  --atlas-focus-ring: #2a2a2a;
+  --atlas-retro-window-bg: #e9e8e3;
+  --atlas-retro-header-bg: #2a2a2a;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #d9d8d3;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #fbfaf4;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #80807d;
+  --gray-900: 251 250 244;
+  --gray-800: 233 232 227;
+  --gray-700: 217 216 211;
+  --gray-600: 182 181 177;
+  --gray-500: 103 102 100;
+  --gray-400: 93 93 91;
+  --gray-300: 82 81 79;
+  --gray-200: 72 72 70;
+  --gray-100: 58 58 57;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="glitch-databend"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ffe600;
+  --atlas-focus-ring: #ffe600;
+  --atlas-retro-window-bg: #272727;
+  --atlas-retro-header-bg: #ffe600;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #363636;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0a0a0a;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #888888;
+  --gray-900: 10 10 10;
+  --gray-800: 39 39 39;
+  --gray-700: 54 54 54;
+  --gray-600: 87 87 87;
+  --gray-500: 143 143 143;
+  --gray-400: 153 153 153;
+  --gray-300: 171 171 171;
+  --gray-200: 184 184 184;
+  --gray-100: 203 203 203;
+  --gray-50: 255 255 255;
+}
+
+[data-atlas-theme="y2k-chrome"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #5a6478;
+  --atlas-focus-ring: #5a6478;
+  --atlas-retro-window-bg: #c8dfed;
+  --atlas-retro-header-bg: #5a6478;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #bacfdc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #d7f0ff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #6e7b82;
+  --gray-900: 215 240 255;
+  --gray-800: 200 223 237;
+  --gray-700: 186 207 220;
+  --gray-600: 156 174 185;
+  --gray-500: 86 96 102;
+  --gray-400: 78 87 92;
+  --gray-300: 66 74 78;
+  --gray-200: 58 65 69;
+  --gray-100: 46 51 55;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="duotone-poster"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #1a1a3a;
+  --atlas-focus-ring: #1a1a3a;
+  --atlas-retro-window-bg: #e3dac4;
+  --atlas-retro-header-bg: #1a1a3a;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #d3cbb6;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #f4ead3;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #7d786c;
+  --gray-900: 244 234 211;
+  --gray-800: 227 218 196;
+  --gray-700: 211 203 182;
+  --gray-600: 177 170 153;
+  --gray-500: 98 94 84;
+  --gray-400: 89 85 76;
+  --gray-300: 75 72 65;
+  --gray-200: 66 63 57;
+  --gray-100: 52 50 45;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="grid-paper"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #c83030;
+  --atlas-focus-ring: #c83030;
+  --atlas-retro-window-bg: #e8e8df;
+  --atlas-retro-header-bg: #c83030;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #d8d8cf;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #fafaf0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #80807b;
+  --gray-900: 250 250 240;
+  --gray-800: 232 232 223;
+  --gray-700: 216 216 207;
+  --gray-600: 181 181 174;
+  --gray-500: 102 102 98;
+  --gray-400: 95 95 91;
+  --gray-300: 81 81 78;
+  --gray-200: 72 72 69;
+  --gray-100: 58 58 56;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="maximalist-banners"] {
+  color-scheme: light;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: .35rem;
+  --atlas-accent: #ffff00;
+  --atlas-focus-ring: #ffff00;
+  --atlas-retro-window-bg: #ed00ed;
+  --atlas-retro-header-bg: #ffff00;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #dc00dc;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ff00ff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #820082;
+  --gray-900: 255 0 255;
+  --gray-800: 237 0 237;
+  --gray-700: 220 0 220;
+  --gray-600: 185 0 185;
+  --gray-500: 59 0 59;
+  --gray-400: 38 0 38;
+  --gray-300: 0 0 0;
+  --gray-200: 0 0 0;
+  --gray-100: 0 0 0;
+  --gray-50: 0 0 0;
+}

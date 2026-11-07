@@ -1,0 +1,11 @@
+/* CRT Phosphor Terminal — design tokens
+   Extracted from styles/09-crt-phosphor/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #001a00;
+  --ink: #33ff33;
+  --ink-dim: #1a8a1a;
+  --ink-bright: #aaffaa;
+  --amber: #ffb400;
+  --font: "VT323", "IBM Plex Mono", "Courier New", monospace;
+}

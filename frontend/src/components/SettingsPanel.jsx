@@ -14,6 +14,8 @@ import { useFocusTrap } from '../utils/focusTrap'
 import { describeAutoApprove } from '../utils/toolApproval'
 import { FOCUS_RING } from '../utils/focusRing'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
+import ThemePicker from '../themes/ThemePicker'
+import { RetroButton, RetroWindow } from '../themes/RetroControls'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -53,7 +55,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // config fetch), but unmounting it on a tab switch throws away the save-result
   // notifications its cards raise.
   const [adminTabVisited, setAdminTabVisited] = useState(false)
-  const { theme, toggleTheme } = useTheme()
+  const { toggleTheme, themeDefinition } = useTheme()
+  const darkBaseTheme = themeDefinition.mode === 'dark'
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
@@ -400,11 +403,11 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
         role="dialog"
         aria-modal="true"
         aria-label="Tools and Settings"
-        className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full h-[85vh] mx-4 flex flex-col"
+        className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full h-[85vh] mx-4 flex flex-col atlas-theme-chrome"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0 atlas-theme-titlebar">
           <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
             <ToolsSettingsIcon className="text-blue-400" />
             Tools and Settings
@@ -553,24 +556,23 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6"
         >
           {/* Appearance -- moved off the top bar in issue #836 */}
-          <div className="bg-gray-700 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-50 font-medium">Appearance</label>
-              <button
-                onClick={toggleTheme}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
-                title={reduceHelpText ? undefined : (theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode')}
-              >
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              </button>
-            </div>
+          <RetroWindow title="Appearance">
+            <RetroButton
+              onClick={toggleTheme}
+              className="inline-flex items-center gap-2 text-sm"
+              title={reduceHelpText ? undefined : (darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode')}
+            >
+              {darkBaseTheme ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode'}
+            </RetroButton>
             {!reduceHelpText && (
-              <p className="text-sm text-gray-400">
-                Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
+              <p className="mt-2 text-sm">
+                Currently using {themeDefinition.name} theme.
               </p>
             )}
-          </div>
+          </RetroWindow>
+
+          <ThemePicker />
 
           {/* LLM Temperature Setting */}
           <div className="space-y-3">

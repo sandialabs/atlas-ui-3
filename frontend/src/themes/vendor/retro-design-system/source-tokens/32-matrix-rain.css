@@ -1,0 +1,12 @@
+/* Matrix Rain — design tokens
+   Extracted from styles/32-matrix-rain/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #000000;
+  --mx-dim: #003b00;
+  --mx: #00a830;
+  --mx-hi: #62ff9d;
+  --mx-white: #ccffcc;
+  --warn: #ff3860;
+  --font: "Matrix Code NFI", "MS Mincho", "MS Gothic", "Courier New", monospace;
+}

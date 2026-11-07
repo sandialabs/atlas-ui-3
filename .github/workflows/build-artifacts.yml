@@ -86,6 +86,9 @@ jobs:
       run: |
         bash scripts/check-docs.sh
 
+    - name: Check Retro Design System generated catalog
+      run: python frontend/scripts/build-retro-catalog.py --check
+
     - name: Install uv
       # Pinned to a commit SHA so the install step is immutable.
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -99,6 +102,10 @@ jobs:
       run: |
         cd frontend
         VITE_APP_NAME="ATLAS" VITE_FEATURE_ANIMATED_LOGO="true" VITE_FEATURE_POWERED_BY_ATLAS="false" VITE_FEATURE_RAG_CITATIONS="false" npm run build
+
+    - name: Check Retro Design System browser contrast
+      run: |
+        python3 frontend/scripts/check-retro-browser.py --chrome "$(command -v google-chrome)"
 
     - name: Create build directory structure
       run: |

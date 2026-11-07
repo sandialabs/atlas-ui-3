@@ -1,0 +1,13 @@
+/* Mac System 7 — design tokens
+   Extracted from styles/01-mac-system-7/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #a8a8a8;
+  --desktop: #888;
+  --paper: #ffffff;
+  --ink: #000000;
+  --chrome: #dddddd;
+  --shadow: #000;
+  --font-sys: "Chicago", "Charcoal", "Geneva", Tahoma, sans-serif;
+  --font-body: "Geneva", "Helvetica", sans-serif;
+}

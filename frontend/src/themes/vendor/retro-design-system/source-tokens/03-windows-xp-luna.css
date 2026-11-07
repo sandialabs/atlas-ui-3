@@ -1,0 +1,16 @@
+/* Windows XP Luna — design tokens
+   Extracted from styles/03-windows-xp-luna/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg-top: #5a7edb;
+  --bg-bot: #99c6ff;
+  --luna-blue: #2a5fd7;
+  --luna-blue-2: #5893df;
+  --luna-blue-3: #0c3aa2;
+  --chrome: #ece9d8;
+  --chrome-2: #d6d3c2;
+  --title-gradient: linear-gradient(to bottom, #0a246a 0%, #3a6ea5 10%, #2754b5 60%, #0a246a 100%);
+  --taskbar: linear-gradient(to bottom, #3c92f0 0%, #1747a4 10%, #245edb 40%, #2561d2 100%);
+  --start-green: linear-gradient(to bottom, #389238, #3cb83c 30%, #2b9033 60%, #276f2f 100%);
+  --font: "Trebuchet MS", "Tahoma", "Franklin Gothic Medium", sans-serif;
+}

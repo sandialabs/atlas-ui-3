@@ -1,0 +1,1210 @@
+{
+  "$schema": "./manifest.schema.json",
+  "generated": "2026-06-02",
+  "count": 53,
+  "systems": [
+    {
+      "id": 1,
+      "slug": "01-mac-system-7",
+      "name": "Mac System 7",
+      "era": "Desktop OS",
+      "year": 1991,
+      "tags": [
+        "mac",
+        "monochrome",
+        "bevel",
+        "classic"
+      ],
+      "path": "styles/01-mac-system-7/index.html",
+      "palette": [
+        "#a8a8a8",
+        "#888888",
+        "#ffffff",
+        "#000000",
+        "#dddddd"
+      ]
+    },
+    {
+      "id": 2,
+      "slug": "02-windows-95",
+      "name": "Windows 95",
+      "era": "Desktop OS",
+      "year": 1995,
+      "tags": [
+        "windows",
+        "bevel",
+        "chrome",
+        "classic"
+      ],
+      "path": "styles/02-windows-95/index.html",
+      "palette": [
+        "#008080",
+        "#c0c0c0",
+        "#dfdfdf",
+        "#ffffff",
+        "#808080",
+        "#000000",
+        "#000080"
+      ]
+    },
+    {
+      "id": 3,
+      "slug": "03-windows-xp-luna",
+      "name": "Windows XP Luna",
+      "era": "Desktop OS",
+      "year": 2001,
+      "tags": [
+        "windows",
+        "glossy",
+        "blue",
+        "luna"
+      ],
+      "path": "styles/03-windows-xp-luna/index.html",
+      "palette": [
+        "#5a7edb",
+        "#99c6ff",
+        "#2a5fd7",
+        "#5893df",
+        "#0c3aa2",
+        "#ece9d8",
+        "#d6d3c2",
+        "#0a246a"
+      ]
+    },
+    {
+      "id": 4,
+      "slug": "04-aqua-osx",
+      "name": "Mac OS X Aqua",
+      "era": "Desktop OS",
+      "year": 2001,
+      "tags": [
+        "mac",
+        "glossy",
+        "gel",
+        "aqua"
+      ],
+      "path": "styles/04-aqua-osx/index.html",
+      "palette": [
+        "#b8c9e0",
+        "#e8e8e8",
+        "#c8c8c8",
+        "#4d90fe",
+        "#2057c2",
+        "#ff9a8a",
+        "#ff4b2b",
+        "#b21808"
+      ]
+    },
+    {
+      "id": 5,
+      "slug": "05-amiga-workbench",
+      "name": "Amiga Workbench",
+      "era": "Desktop OS",
+      "year": 1985,
+      "tags": [
+        "amiga",
+        "retro",
+        "orange",
+        "blue"
+      ],
+      "path": "styles/05-amiga-workbench/index.html",
+      "palette": [
+        "#0055aa",
+        "#ff8800",
+        "#ffffff",
+        "#000000",
+        "#a0a0a0"
+      ]
+    },
+    {
+      "id": 6,
+      "slug": "06-nextstep",
+      "name": "NeXTSTEP",
+      "era": "Desktop OS",
+      "year": 1989,
+      "tags": [
+        "next",
+        "greyscale",
+        "unix",
+        "chiseled"
+      ],
+      "path": "styles/06-nextstep/index.html",
+      "palette": [
+        "#555561",
+        "#a8a8b0",
+        "#606068",
+        "#2c2c30",
+        "#d0d0d4",
+        "#f0f0f4",
+        "#3c3c40",
+        "#000000"
+      ]
+    },
+    {
+      "id": 7,
+      "slug": "07-beos",
+      "name": "BeOS",
+      "era": "Desktop OS",
+      "year": 1996,
+      "tags": [
+        "beos",
+        "yellow",
+        "tab",
+        "media"
+      ],
+      "path": "styles/07-beos/index.html",
+      "palette": [
+        "#2a5556",
+        "#cfcfcf",
+        "#e8e8e8",
+        "#ffffff",
+        "#888888",
+        "#404040",
+        "#ffcc00",
+        "#cc9900"
+      ]
+    },
+    {
+      "id": 8,
+      "slug": "08-teletext",
+      "name": "Teletext",
+      "era": "Broadcast",
+      "year": 1974,
+      "tags": [
+        "teletext",
+        "blocky",
+        "primary",
+        "tv"
+      ],
+      "path": "styles/08-teletext/index.html",
+      "palette": [
+        "#000000",
+        "#ff0000",
+        "#00ff00",
+        "#ffff00",
+        "#0000ff",
+        "#ff00ff",
+        "#00ffff",
+        "#ffffff"
+      ]
+    },
+    {
+      "id": 9,
+      "slug": "09-crt-phosphor",
+      "name": "CRT Phosphor Terminal",
+      "era": "Terminal",
+      "year": 1980,
+      "tags": [
+        "terminal",
+        "green",
+        "scanline",
+        "phosphor"
+      ],
+      "path": "styles/09-crt-phosphor/index.html",
+      "palette": [
+        "#001a00",
+        "#33ff33",
+        "#1a8a1a",
+        "#aaffaa",
+        "#ffb400"
+      ]
+    },
+    {
+      "id": 10,
+      "slug": "10-dos-cga",
+      "name": "DOS CGA",
+      "era": "Terminal",
+      "year": 1981,
+      "tags": [
+        "dos",
+        "cyan",
+        "magenta",
+        "4-color"
+      ],
+      "path": "styles/10-dos-cga/index.html",
+      "palette": [
+        "#000000",
+        "#0000aa",
+        "#5555ff",
+        "#00aa00",
+        "#00aaaa",
+        "#55ffff",
+        "#aa0000",
+        "#aa00aa"
+      ]
+    },
+    {
+      "id": 11,
+      "slug": "11-8bit-arcade",
+      "name": "8-Bit Arcade",
+      "era": "Gaming",
+      "year": 1983,
+      "tags": [
+        "arcade",
+        "pixel",
+        "neon",
+        "8-bit"
+      ],
+      "path": "styles/11-8bit-arcade/index.html",
+      "palette": [
+        "#0b0b1e",
+        "#ff2d95",
+        "#00e5ff",
+        "#ffd300",
+        "#2bff88",
+        "#ff3b3b",
+        "#7c1dfd",
+        "#ffffff"
+      ]
+    },
+    {
+      "id": 12,
+      "slug": "12-frutiger-aero",
+      "name": "Frutiger Aero",
+      "era": "Web/UI",
+      "year": 2007,
+      "tags": [
+        "aero",
+        "glossy",
+        "nature",
+        "glass"
+      ],
+      "path": "styles/12-frutiger-aero/index.html",
+      "palette": [
+        "#7fcfff",
+        "#c7f0ff",
+        "#6ec86e",
+        "#0ea5ff",
+        "#3dd36b",
+        "#0b2a3c"
+      ]
+    },
+    {
+      "id": 13,
+      "slug": "13-winamp-skin",
+      "name": "Winamp Skin",
+      "era": "App",
+      "year": 1997,
+      "tags": [
+        "winamp",
+        "media",
+        "skin",
+        "lcd"
+      ],
+      "path": "styles/13-winamp-skin/index.html",
+      "palette": [
+        "#3c3c3c",
+        "#5a5a5a",
+        "#8a8a8a",
+        "#1a1a1a",
+        "#000000",
+        "#00ff33",
+        "#004d11",
+        "#ffb400"
+      ]
+    },
+    {
+      "id": 14,
+      "slug": "14-geocities-web10",
+      "name": "GeoCities Web 1.0",
+      "era": "Web",
+      "year": 1996,
+      "tags": [
+        "web1.0",
+        "kitsch",
+        "gif",
+        "tiled"
+      ],
+      "path": "styles/14-geocities-web10/index.html",
+      "palette": [
+        "#000000",
+        "#0000ee",
+        "#551a8b",
+        "#ff3399",
+        "#00ff00",
+        "#ffff00",
+        "#ff0000",
+        "#00ffff"
+      ]
+    },
+    {
+      "id": 15,
+      "slug": "15-cassette-futurism",
+      "name": "Cassette Futurism",
+      "era": "Sci-Fi",
+      "year": 1979,
+      "tags": [
+        "scifi",
+        "control-panel",
+        "amber",
+        "analog"
+      ],
+      "path": "styles/15-cassette-futurism/index.html",
+      "palette": [
+        "#0a0704",
+        "#1a1510",
+        "#241d15",
+        "#3a2f22",
+        "#ffb000",
+        "#8a5c00",
+        "#ffd470",
+        "#d9a85e"
+      ]
+    },
+    {
+      "id": 16,
+      "slug": "16-vaporwave",
+      "name": "Vaporwave",
+      "era": "Aesthetic",
+      "year": 2011,
+      "tags": [
+        "vaporwave",
+        "pastel",
+        "synth",
+        "neon"
+      ],
+      "path": "styles/16-vaporwave/index.html",
+      "palette": [
+        "#ff71ce",
+        "#01cdfe",
+        "#b967ff",
+        "#05ffa1",
+        "#fffb96",
+        "#1a0b2e",
+        "#ff00e5",
+        "#f8f8ff"
+      ]
+    },
+    {
+      "id": 17,
+      "slug": "17-memphis",
+      "name": "Memphis",
+      "era": "Design",
+      "year": 1981,
+      "tags": [
+        "memphis",
+        "postmodern",
+        "primary",
+        "squiggle"
+      ],
+      "path": "styles/17-memphis/index.html",
+      "palette": [
+        "#000000",
+        "#ffffff",
+        "#ff4fa3",
+        "#12c3ce",
+        "#ffe034",
+        "#ff2e2e",
+        "#2e4bff"
+      ]
+    },
+    {
+      "id": 18,
+      "slug": "18-ps1-tech",
+      "name": "PS1 Tech",
+      "era": "Gaming",
+      "year": 1994,
+      "tags": [
+        "playstation",
+        "low-poly",
+        "tech",
+        "gradient"
+      ],
+      "path": "styles/18-ps1-tech/index.html",
+      "palette": [
+        "#0a0a10",
+        "#c0c0c0",
+        "#606068",
+        "#2a2a32",
+        "#00ffff",
+        "#9d4edd",
+        "#39ff14",
+        "#e8e8f0"
+      ]
+    },
+    {
+      "id": 19,
+      "slug": "19-os2-warp",
+      "name": "OS/2 Warp",
+      "era": "Desktop OS",
+      "year": 1994,
+      "tags": [
+        "os2",
+        "ibm",
+        "bevel",
+        "blue"
+      ],
+      "path": "styles/19-os2-warp/index.html",
+      "palette": [
+        "#2d7a7a",
+        "#c0c0c0",
+        "#dfdfdf",
+        "#808080",
+        "#404040",
+        "#00007f",
+        "#1084d0",
+        "#000000"
+      ]
+    },
+    {
+      "id": 20,
+      "slug": "20-macos9-platinum",
+      "name": "Mac OS 9 Platinum",
+      "era": "Desktop OS",
+      "year": 1999,
+      "tags": [
+        "mac",
+        "platinum",
+        "pinstripe",
+        "grey"
+      ],
+      "path": "styles/20-macos9-platinum/index.html",
+      "palette": [
+        "#808080",
+        "#dddddd",
+        "#f5f5f5",
+        "#c5c5c5",
+        "#858585",
+        "#555555",
+        "#a0a0a0",
+        "#3a62ab"
+      ]
+    },
+    {
+      "id": 21,
+      "slug": "21-web20-glossy",
+      "name": "Web 2.0 Glossy",
+      "era": "Web/UI",
+      "year": 2005,
+      "tags": [
+        "web2.0",
+        "glossy",
+        "reflection",
+        "rounded"
+      ],
+      "path": "styles/21-web20-glossy/index.html",
+      "palette": [
+        "#e8f0f7",
+        "#ffffff",
+        "#a8d0f0",
+        "#d4e8f7",
+        "#2a7ac9",
+        "#62a8e8",
+        "#1e5a9c",
+        "#ff8c1a"
+      ]
+    },
+    {
+      "id": 22,
+      "slug": "22-gameboy-dmg",
+      "name": "Game Boy DMG",
+      "era": "Gaming",
+      "year": 1989,
+      "tags": [
+        "gameboy",
+        "green",
+        "lcd",
+        "4-shade"
+      ],
+      "path": "styles/22-gameboy-dmg/index.html",
+      "palette": [
+        "#b8b0a4",
+        "#8a8478",
+        "#6a6458",
+        "#2a3028",
+        "#0f380f",
+        "#306230",
+        "#8bac0f",
+        "#9bbc0f"
+      ]
+    },
+    {
+      "id": 23,
+      "slug": "23-braun-rams",
+      "name": "Braun / Dieter Rams",
+      "era": "Design",
+      "year": 1960,
+      "tags": [
+        "braun",
+        "functional",
+        "minimal",
+        "industrial"
+      ],
+      "path": "styles/23-braun-rams/index.html",
+      "palette": [
+        "#f4f3f0",
+        "#ffffff",
+        "#1a1a1a",
+        "#e4e3e0",
+        "#b8b7b3",
+        "#6a6965",
+        "#2a2a28",
+        "#f2642a"
+      ]
+    },
+    {
+      "id": 24,
+      "slug": "24-tron-vector",
+      "name": "Tron Vector",
+      "era": "Sci-Fi",
+      "year": 1982,
+      "tags": [
+        "tron",
+        "vector",
+        "cyan",
+        "grid"
+      ],
+      "path": "styles/24-tron-vector/index.html",
+      "palette": [
+        "#000008",
+        "#0a1a3a",
+        "#00e4ff",
+        "#007a8a",
+        "#a0f4ff",
+        "#ff7a00",
+        "#ff2040"
+      ]
+    },
+    {
+      "id": 25,
+      "slug": "25-vhs-tracking",
+      "name": "VHS Tracking",
+      "era": "Analog",
+      "year": 1980,
+      "tags": [
+        "vhs",
+        "glitch",
+        "scanline",
+        "analog"
+      ],
+      "path": "styles/25-vhs-tracking/index.html",
+      "palette": [
+        "#0a0a0a",
+        "#141014",
+        "#ff1a1a",
+        "#f4f4f4",
+        "#ffe84a",
+        "#4ae2ff",
+        "#ff2a2a",
+        "#2aff2a"
+      ]
+    },
+    {
+      "id": 26,
+      "slug": "26-risograph",
+      "name": "Risograph",
+      "era": "Print",
+      "year": 1986,
+      "tags": [
+        "riso",
+        "print",
+        "duotone",
+        "grain"
+      ],
+      "path": "styles/26-risograph/index.html",
+      "palette": [
+        "#f3efe4",
+        "#e6dfcb",
+        "#ff4fa5",
+        "#ffb8db",
+        "#0078b4",
+        "#6ca8d4",
+        "#f6d800",
+        "#00a03c"
+      ]
+    },
+    {
+      "id": 27,
+      "slug": "27-ibm-3270",
+      "name": "IBM 3270 Mainframe",
+      "era": "Terminal",
+      "year": 1971,
+      "tags": [
+        "ibm",
+        "mainframe",
+        "terminal",
+        "cics"
+      ],
+      "path": "styles/27-ibm-3270/index.html",
+      "palette": [
+        "#000000",
+        "#00d4d4",
+        "#00d400",
+        "#e4e4e4",
+        "#ff3030",
+        "#ffe84a",
+        "#4a9cff",
+        "#ff7aa8"
+      ]
+    },
+    {
+      "id": 28,
+      "slug": "28-nethack-ascii",
+      "name": "NetHack ASCII",
+      "era": "Terminal",
+      "year": 1987,
+      "tags": [
+        "ascii",
+        "roguelike",
+        "terminal",
+        "mono"
+      ],
+      "path": "styles/28-nethack-ascii/index.html",
+      "palette": [
+        "#000000",
+        "#a0a0a0",
+        "#707070",
+        "#ffff00",
+        "#ff4040",
+        "#40ff40",
+        "#6080ff",
+        "#ff40ff"
+      ]
+    },
+    {
+      "id": 29,
+      "slug": "29-templeos",
+      "name": "TempleOS",
+      "era": "Desktop OS",
+      "year": 2013,
+      "tags": [
+        "templeos",
+        "16-color",
+        "vga",
+        "mono"
+      ],
+      "path": "styles/29-templeos/index.html",
+      "palette": [
+        "#0000aa",
+        "#ffffff",
+        "#ff0000",
+        "#ffff00",
+        "#00ff00",
+        "#00ffff",
+        "#ff00ff",
+        "#ffaa00"
+      ]
+    },
+    {
+      "id": 30,
+      "slug": "30-bbs-ansi",
+      "name": "BBS ANSI Art",
+      "era": "Terminal",
+      "year": 1989,
+      "tags": [
+        "bbs",
+        "ansi",
+        "block",
+        "16-color"
+      ],
+      "path": "styles/30-bbs-ansi/index.html",
+      "palette": [
+        "#000000",
+        "#aa0000",
+        "#ff5555",
+        "#00aa00",
+        "#55ff55",
+        "#aa5500",
+        "#ffff55",
+        "#0000aa"
+      ]
+    },
+    {
+      "id": 31,
+      "slug": "31-midnight-commander",
+      "name": "Midnight Commander",
+      "era": "Terminal",
+      "year": 1994,
+      "tags": [
+        "tui",
+        "blue",
+        "filemanager",
+        "ncurses"
+      ],
+      "path": "styles/31-midnight-commander/index.html",
+      "palette": [
+        "#0000aa",
+        "#aaaaaa",
+        "#ffffff",
+        "#ffff55",
+        "#55ffff",
+        "#00aaaa",
+        "#000000",
+        "#55ff55"
+      ]
+    },
+    {
+      "id": 32,
+      "slug": "32-matrix-rain",
+      "name": "Matrix Rain",
+      "era": "Sci-Fi",
+      "year": 1999,
+      "tags": [
+        "matrix",
+        "green",
+        "code",
+        "rain"
+      ],
+      "path": "styles/32-matrix-rain/index.html",
+      "palette": [
+        "#000000",
+        "#003b00",
+        "#00a830",
+        "#62ff9d",
+        "#ccffcc",
+        "#ff3860"
+      ]
+    },
+    {
+      "id": 33,
+      "slug": "33-btop-meters",
+      "name": "btop Meters",
+      "era": "Terminal",
+      "year": 2021,
+      "tags": [
+        "tui",
+        "monitor",
+        "gradient",
+        "meters"
+      ],
+      "path": "styles/33-btop-meters/index.html",
+      "palette": [
+        "#131424",
+        "#1a1c30",
+        "#3b3e5e",
+        "#e8ecff",
+        "#7a82b0",
+        "#00e4ff",
+        "#6de37a",
+        "#e5e56a"
+      ]
+    },
+    {
+      "id": 34,
+      "slug": "34-c64-basic",
+      "name": "Commodore 64 BASIC",
+      "era": "Terminal",
+      "year": 1982,
+      "tags": [
+        "c64",
+        "blue",
+        "petscii",
+        "basic"
+      ],
+      "path": "styles/34-c64-basic/index.html",
+      "palette": [
+        "#9692d9",
+        "#443ec4",
+        "#2e2898",
+        "#a8a0ff",
+        "#c8c0ff",
+        "#ffffff",
+        "#e04040",
+        "#4aff4a"
+      ]
+    },
+    {
+      "id": 35,
+      "slug": "35-flat-2013",
+      "name": "Flat Design 2013",
+      "era": "Web/UI",
+      "year": 2013,
+      "tags": [
+        "flat",
+        "ios7",
+        "minimal",
+        "bright"
+      ],
+      "path": "styles/35-flat-2013/index.html",
+      "palette": [
+        "#ecf0f1",
+        "#1abc9c",
+        "#2ecc71",
+        "#3498db",
+        "#9b59b6",
+        "#34495e",
+        "#f1c40f",
+        "#e67e22"
+      ]
+    },
+    {
+      "id": 36,
+      "slug": "36-glassmorphism",
+      "name": "Glassmorphism",
+      "era": "Web/UI",
+      "year": 2020,
+      "tags": [
+        "glass",
+        "blur",
+        "frosted",
+        "modern"
+      ],
+      "path": "styles/36-glassmorphism/index.html",
+      "palette": [
+        "#ffffff",
+        "#ff6ec4",
+        "#7873f5"
+      ]
+    },
+    {
+      "id": 37,
+      "slug": "37-neumorphism",
+      "name": "Neumorphism",
+      "era": "Web/UI",
+      "year": 2020,
+      "tags": [
+        "neumorph",
+        "soft",
+        "shadow",
+        "mono"
+      ],
+      "path": "styles/37-neumorphism/index.html",
+      "palette": [
+        "#e0e5ec",
+        "#4a5568",
+        "#8a94a6",
+        "#6c8cff",
+        "#a3b1c6",
+        "#ffffff"
+      ]
+    },
+    {
+      "id": 38,
+      "slug": "38-blueprint-cad",
+      "name": "Blueprint / CAD",
+      "era": "Technical",
+      "year": 1980,
+      "tags": [
+        "blueprint",
+        "cad",
+        "grid",
+        "cyan"
+      ],
+      "path": "styles/38-blueprint-cad/index.html",
+      "palette": [
+        "#0d3a6b",
+        "#082852",
+        "#c0daf4",
+        "#6892c4",
+        "#eaf2fb",
+        "#ff6b6b",
+        "#ffe066"
+      ]
+    },
+    {
+      "id": 39,
+      "slug": "39-claymorphism",
+      "name": "Claymorphism",
+      "era": "Web/UI",
+      "year": 2021,
+      "tags": [
+        "clay",
+        "3d",
+        "soft",
+        "playful"
+      ],
+      "path": "styles/39-claymorphism/index.html",
+      "palette": [
+        "#f0e9ff",
+        "#3a2e5c",
+        "#7c6ba8",
+        "#ffb3d1",
+        "#c9a8ff",
+        "#9ec8ff",
+        "#a8f0d0",
+        "#ffe58a"
+      ]
+    },
+    {
+      "id": 40,
+      "slug": "40-brutalist-web",
+      "name": "Brutalist Web",
+      "era": "Web/UI",
+      "year": 2016,
+      "tags": [
+        "brutalist",
+        "raw",
+        "mono",
+        "highcontrast"
+      ],
+      "path": "styles/40-brutalist-web/index.html",
+      "palette": [
+        "#ffffff",
+        "#000000",
+        "#0000ee",
+        "#551a8b",
+        "#ff0000",
+        "#c0c0c0",
+        "#e0e0e0",
+        "#f0f0f0"
+      ]
+    },
+    {
+      "id": 41,
+      "slug": "41-swiss-intl",
+      "name": "Swiss Style",
+      "era": "Design",
+      "year": 1950,
+      "tags": [
+        "swiss",
+        "grid",
+        "helvetica",
+        "minimal"
+      ],
+      "path": "styles/41-swiss-intl/index.html",
+      "palette": [
+        "#f4f3ee",
+        "#0a0a0a",
+        "#e63946",
+        "#6a6a6a"
+      ]
+    },
+    {
+      "id": 42,
+      "slug": "42-bauhaus",
+      "name": "Bauhaus",
+      "era": "Design",
+      "year": 1919,
+      "tags": [
+        "bauhaus",
+        "primary",
+        "geometric",
+        "modernist"
+      ],
+      "path": "styles/42-bauhaus/index.html",
+      "palette": [
+        "#f0ebe0",
+        "#0a0a0a",
+        "#d32027",
+        "#f5c518",
+        "#1c4fb5"
+      ]
+    },
+    {
+      "id": 43,
+      "slug": "43-pop-art-lichtenstein",
+      "name": "Pop Art",
+      "era": "Art",
+      "year": 1960,
+      "tags": [
+        "popart",
+        "halftone",
+        "primary",
+        "comic"
+      ],
+      "path": "styles/43-pop-art-lichtenstein/index.html",
+      "palette": [
+        "#fffef8",
+        "#0a0a0a",
+        "#ed1c24",
+        "#ffde00",
+        "#1b4ea0",
+        "#ffd6c7"
+      ]
+    },
+    {
+      "id": 44,
+      "slug": "44-op-art",
+      "name": "Op Art",
+      "era": "Art",
+      "year": 1964,
+      "tags": [
+        "opart",
+        "bw",
+        "illusion",
+        "pattern"
+      ],
+      "path": "styles/44-op-art/index.html",
+      "palette": [
+        "#0a0a0a",
+        "#f5f5f5",
+        "#ec1e23"
+      ]
+    },
+    {
+      "id": 45,
+      "slug": "45-hypnagogic",
+      "name": "Hypnagogic",
+      "era": "Aesthetic",
+      "year": 2015,
+      "tags": [
+        "dreamy",
+        "gradient",
+        "surreal",
+        "soft"
+      ],
+      "path": "styles/45-hypnagogic/index.html",
+      "palette": [
+        "#dcc89a",
+        "#c89050",
+        "#e8d8b0",
+        "#fff4c8",
+        "#6a5530",
+        "#2a2418",
+        "#8a7a54",
+        "#3d5a80"
+      ]
+    },
+    {
+      "id": 46,
+      "slug": "46-monochrome-zen",
+      "name": "Monochrome Zen",
+      "era": "Design",
+      "year": 2010,
+      "tags": [
+        "mono",
+        "zen",
+        "minimal",
+        "calm"
+      ],
+      "path": "styles/46-monochrome-zen/index.html",
+      "palette": [
+        "#fafaf7",
+        "#0a0a0a"
+      ]
+    },
+    {
+      "id": 47,
+      "slug": "47-default-browser",
+      "name": "Default Browser",
+      "era": "Web",
+      "year": 1994,
+      "tags": [
+        "html",
+        "unstyled",
+        "timesnewroman",
+        "default"
+      ],
+      "path": "styles/47-default-browser/index.html",
+      "palette": []
+    },
+    {
+      "id": 48,
+      "slug": "48-wireframe-sketch",
+      "name": "Wireframe Sketch",
+      "era": "Technical",
+      "year": 2010,
+      "tags": [
+        "wireframe",
+        "sketch",
+        "lofi",
+        "grey"
+      ],
+      "path": "styles/48-wireframe-sketch/index.html",
+      "palette": [
+        "#fbfaf4",
+        "#2a2a2a",
+        "#b0b0b0",
+        "#8a8a8a",
+        "#d4d1c4"
+      ]
+    },
+    {
+      "id": 49,
+      "slug": "49-glitch-databend",
+      "name": "Glitch Databend",
+      "era": "Aesthetic",
+      "year": 2010,
+      "tags": [
+        "glitch",
+        "databend",
+        "rgb",
+        "corrupt"
+      ],
+      "path": "styles/49-glitch-databend/index.html",
+      "palette": [
+        "#0a0a0a",
+        "#f0f0f0",
+        "#ff004d",
+        "#00f4ff",
+        "#00ff8c",
+        "#ffe600",
+        "#ff00ae"
+      ]
+    },
+    {
+      "id": 50,
+      "slug": "50-y2k-chrome",
+      "name": "Y2K Chrome",
+      "era": "Aesthetic",
+      "year": 2000,
+      "tags": [
+        "y2k",
+        "chrome",
+        "metallic",
+        "bubble"
+      ],
+      "path": "styles/50-y2k-chrome/index.html",
+      "palette": [
+        "#d7f0ff",
+        "#ffccee",
+        "#e8d9ff",
+        "#202030",
+        "#ffffff",
+        "#b8c4d8",
+        "#5a6478",
+        "#ff6ab8"
+      ]
+    },
+    {
+      "id": 51,
+      "slug": "51-duotone-poster",
+      "name": "Duotone Poster",
+      "era": "Print",
+      "year": 2015,
+      "tags": [
+        "duotone",
+        "poster",
+        "highcontrast",
+        "bold"
+      ],
+      "path": "styles/51-duotone-poster/index.html",
+      "palette": [
+        "#f4ead3",
+        "#ff3a38",
+        "#1a1a3a"
+      ]
+    },
+    {
+      "id": 52,
+      "slug": "52-grid-paper",
+      "name": "Grid Paper",
+      "era": "Technical",
+      "year": 1980,
+      "tags": [
+        "grid",
+        "paper",
+        "graph",
+        "engineering"
+      ],
+      "path": "styles/52-grid-paper/index.html",
+      "palette": [
+        "#fafaf0",
+        "#1a2847",
+        "#4a5a6e",
+        "#c83030",
+        "#2a7a3a"
+      ]
+    },
+    {
+      "id": 53,
+      "slug": "53-maximalist-banners",
+      "name": "Maximalist 90s Banner",
+      "era": "Web",
+      "year": 1997,
+      "tags": [
+        "maximalist",
+        "banner",
+        "loud",
+        "90s"
+      ],
+      "path": "styles/53-maximalist-banners/index.html",
+      "palette": [
+        "#ff00ff",
+        "#00ffff",
+        "#ffff00",
+        "#000000"
+      ]
+    }
+  ]
+}

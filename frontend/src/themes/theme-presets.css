@@ -1,0 +1,404 @@
+/*
+ * Atlas adapter for NovusGFX Retro Design System (MIT).
+ * These scoped semantic aliases adapt the vendored upstream design tokens
+ * without copying global demo CSS, fonts, logos, or historic artwork.
+ * Original token files: vendor/retro-design-system/tokens.css
+ */
+:root {
+  --atlas-font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --atlas-surface: rgb(var(--gray-800));
+  --atlas-border: rgb(var(--gray-600));
+  --atlas-accent: #60a5fa;
+  --atlas-focus-ring: #93c5fd;
+  --atlas-radius: 0.5rem;
+}
+
+/* CRT Phosphor — from RDS 09 tokens --bg, --ink, --ink-dim. */
+[data-atlas-theme="crt-phosphor"] {
+  --gray-50: 170 255 170;
+  --gray-100: 94 255 94;
+  --gray-200: 51 255 51;
+  --gray-300: 43 215 43;
+  --gray-400: 38 190 38;
+  --gray-500: 30 170 30;
+  --gray-600: 20 95 20;
+  --gray-700: 0 70 0;
+  --gray-800: 0 45 0;
+  --gray-900: 0 26 0;
+  --atlas-font-ui: var(--font);
+  --atlas-accent: var(--ink);
+  --atlas-focus-ring: #33ff33;
+  --atlas-radius: 0;
+  color-scheme: dark;
+}
+
+/* Windows 95 — RDS 02 --chrome / --title / --font. */
+[data-atlas-theme="win95"] {
+  --gray-50: 0 0 0;
+  --gray-100: 15 15 15;
+  --gray-200: 34 34 34;
+  --gray-300: 55 55 55;
+  --gray-400: 78 78 78;
+  --gray-500: 95 95 95;
+  --gray-600: 138 138 138;
+  --gray-700: 175 175 175;
+  --gray-800: 223 223 223;
+  --gray-900: 192 192 192;
+  --atlas-font-ui: var(--font);
+  --atlas-accent: var(--title);
+  --atlas-focus-ring: #000080;
+  --atlas-radius: 0;
+  color-scheme: light;
+}
+
+/* Mac System 7 — RDS 01 --bg / --chrome / --font-sys. */
+[data-atlas-theme="mac7"] {
+  --gray-50: 0 0 0;
+  --gray-100: 17 17 17;
+  --gray-200: 34 34 34;
+  --gray-300: 55 55 55;
+  --gray-400: 75 75 75;
+  --gray-500: 95 95 95;
+  --gray-600: 135 135 135;
+  --gray-700: 168 168 168;
+  --gray-800: 221 221 221;
+  --gray-900: 245 245 245;
+  --atlas-font-ui: var(--font-sys);
+  --atlas-accent: var(--ink);
+  --atlas-focus-ring: #000000;
+  --atlas-radius: 0;
+  color-scheme: light;
+}
+
+[data-theme="light"] { --atlas-focus-ring: #1d4ed8; }
+
+body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--gray-100))); }
+
+/* Reusable chrome, deliberately isolated from compliance/status indicators. */
+.atlas-theme-chrome {
+  background: var(--atlas-surface);
+  border: 1px solid var(--atlas-border);
+  border-radius: var(--atlas-radius);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-theme-chrome {
+  border: 1px solid var(--ink);
+}
+[data-atlas-theme="win95"] .atlas-theme-chrome {
+  border: 2px solid;
+  border-color: var(--chrome-lighter) var(--chrome-dark) var(--chrome-dark) var(--chrome-lighter);
+  box-shadow: inset 1px 1px var(--chrome-light);
+}
+[data-atlas-theme="mac7"] .atlas-theme-chrome {
+  border: 1px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--shadow);
+}
+
+[data-atlas-theme="crt-phosphor"] button,
+[data-atlas-theme="win95"] button,
+[data-atlas-theme="mac7"] button,
+[data-atlas-theme="crt-phosphor"] [role="dialog"],
+[data-atlas-theme="win95"] [role="dialog"],
+[data-atlas-theme="mac7"] [role="dialog"] {
+  border-radius: var(--atlas-radius);
+}
+[data-atlas-theme="win95"] [role="dialog"] {
+  border: 2px solid;
+  border-color: var(--chrome-lighter) var(--chrome-dark) var(--chrome-dark) var(--chrome-lighter);
+}
+[data-atlas-theme="mac7"] [role="dialog"] {
+  border: 1px solid var(--ink);
+  box-shadow: 2px 2px var(--shadow);
+}
+[data-atlas-theme="crt-phosphor"] [role="dialog"] { border: 1px solid var(--ink); }
+
+/* Original desktop title-bar conventions, scoped to the one Settings dialog. */
+[data-atlas-theme="win95"] .atlas-theme-titlebar {
+  background: var(--title);
+  border-bottom: 2px solid var(--chrome-dark);
+}
+[data-atlas-theme="win95"] .atlas-theme-titlebar h2 {
+  color: var(--title-text);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--chrome) 0 2px,
+    var(--ink) 2px 3px,
+    var(--chrome) 3px 5px
+  );
+  border-bottom: 1px solid var(--ink);
+}
+[data-atlas-theme="mac7"] .atlas-theme-titlebar h2 {
+  background: var(--chrome);
+  padding-inline: 0.5rem;
+}
+[data-atlas-theme="crt-phosphor"] .atlas-theme-titlebar {
+  border-bottom: 1px solid var(--ink);
+}
+
+/* Theme choices use native radio inputs; previews are strictly decorative. */
+.atlas-theme-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 66px;
+  height: 48px;
+  padding: 6px;
+  border: 2px solid var(--preview-fg);
+  background: var(--preview-bg);
+}
+.atlas-theme-preview-bar { height: 8px; background: var(--preview-accent); }
+.atlas-theme-preview-line {
+  height: 4px;
+  width: 84%;
+  background: var(--preview-fg);
+  opacity: 0.9;
+}
+.atlas-theme-preview-line-short { width: 60%; background: var(--preview-surface); opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .atlas-theme-preview, .atlas-theme-option { transition: none; }
+}
+
+/* Semantic focus accents keep themes visually distinct without changing
+ * compliance badges, errors, or any security classification indicator. */
+.atlas-theme-option {
+  position: relative;
+}
+.atlas-theme-option:focus-within {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 2px;
+}
+.atlas-theme-radio { accent-color: var(--atlas-focus-ring); }
+.atlas-theme-option:has(.atlas-theme-radio:checked) {
+  outline: 2px solid var(--atlas-focus-ring);
+  outline-offset: -2px;
+}
+.atlas-theme-source-link:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 3px;
+}
+[data-atlas-theme="win95"] .atlas-theme-preview[data-preview="win95"] {
+  border-color: var(--chrome-lighter) var(--chrome-dark) var(--chrome-dark) var(--chrome-lighter);
+  border-width: 3px;
+}
+[data-atlas-theme="mac7"] .atlas-theme-preview[data-preview="mac7"] {
+  box-shadow: 2px 2px 0 var(--shadow);
+}
+[data-atlas-theme="win95"] .atlas-theme-header {
+  border-bottom: 2px solid var(--chrome-dark);
+  box-shadow: inset 0 1px 0 var(--chrome-lighter);
+}
+[data-atlas-theme="mac7"] .atlas-theme-header {
+  border-bottom: 2px solid var(--ink);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-theme-header {
+  border-bottom: 1px solid var(--ink);
+}
+
+/* Reusable Retro Design System window + button/input component layer. This
+ * only styles classes explicitly applied by RetroControls, never global
+ * HTML forms, buttons, security badges, or application status indicators. */
+:root {
+  --atlas-retro-window-bg: rgb(var(--gray-800));
+  --atlas-retro-header-bg: rgb(var(--gray-700));
+  --atlas-retro-header-fg: rgb(var(--gray-100));
+  --atlas-retro-control-bg: rgb(var(--gray-700));
+  --atlas-retro-control-fg: rgb(var(--gray-100));
+  --atlas-retro-input-bg: rgb(var(--gray-900));
+  --atlas-retro-input-fg: rgb(var(--gray-100));
+  --atlas-retro-control-border: rgb(var(--gray-600));
+}
+[data-atlas-theme="win95"] {
+  --atlas-retro-window-bg: var(--chrome);
+  --atlas-retro-header-bg: var(--title);
+  --atlas-retro-header-fg: var(--title-text);
+  --atlas-retro-control-bg: var(--chrome);
+  --atlas-retro-control-fg: var(--ink);
+  --atlas-retro-input-bg: #fff;
+  --atlas-retro-input-fg: var(--ink);
+  --atlas-retro-control-border: var(--chrome-dark);
+}
+[data-atlas-theme="mac7"] {
+  --atlas-retro-window-bg: var(--paper);
+  --atlas-retro-header-bg: var(--chrome);
+  --atlas-retro-header-fg: var(--ink);
+  --atlas-retro-control-bg: var(--chrome);
+  --atlas-retro-control-fg: var(--ink);
+  --atlas-retro-input-bg: var(--paper);
+  --atlas-retro-input-fg: var(--ink);
+  --atlas-retro-control-border: var(--ink);
+}
+[data-atlas-theme="crt-phosphor"] {
+  --atlas-retro-window-bg: var(--bg);
+  --atlas-retro-header-bg: var(--bg);
+  --atlas-retro-header-fg: var(--ink-bright);
+  --atlas-retro-control-bg: var(--bg);
+  --atlas-retro-control-fg: var(--ink-bright);
+  --atlas-retro-input-bg: var(--bg);
+  --atlas-retro-input-fg: var(--ink-bright);
+  --atlas-retro-control-border: var(--ink);
+}
+.atlas-retro-workbench-details { margin-top: 1rem; }
+.atlas-retro-workbench-details > summary {
+  display: list-item;
+  cursor: pointer;
+  color: rgb(var(--gray-100));
+  font-weight: 600;
+}
+.atlas-retro-workbench-details > summary:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 4px;
+}
+.atlas-retro-window {
+  background: var(--atlas-retro-window-bg);
+  color: var(--atlas-retro-window-fg, var(--atlas-retro-control-fg));
+  border: 2px solid var(--atlas-retro-control-border);
+  border-radius: var(--atlas-radius);
+  overflow: hidden;
+  margin-block: 0.75rem;
+}
+.atlas-retro-window-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--atlas-retro-header-bg);
+  color: var(--atlas-retro-header-fg);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--atlas-retro-control-border);
+}
+.atlas-retro-window-title { font: inherit; font-weight: 700; flex: 1; }
+.atlas-retro-window-close {
+  display: grid;
+  place-items: center;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  font: inherit;
+  font-weight: 700;
+  color: var(--atlas-retro-header-fg);
+  background: transparent;
+  border: 1px solid currentColor;
+  cursor: pointer;
+}
+.atlas-retro-window-close:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 3px;
+}
+.atlas-retro-window-symbol, .atlas-retro-window-glyphs { font: inherit; }
+.atlas-retro-window-content { padding: 0.9rem; }
+.atlas-retro-window-footer {
+  border-top: 1px solid var(--atlas-retro-control-border);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--atlas-retro-control-fg);
+}
+.atlas-retro-workbench-help { font-size: 0.825rem; margin-bottom: 0.8rem; }
+.atlas-retro-form { display: flex; align-items: end; flex-wrap: wrap; gap: 0.75rem; }
+.atlas-retro-field { flex: 1 1 180px; min-width: 0; display: grid; gap: 0.35rem; }
+.atlas-retro-field-label { font-size: 0.825rem; font-weight: 600; }
+.atlas-retro-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  background: var(--atlas-retro-input-bg);
+  color: var(--atlas-retro-input-fg);
+  border: 2px solid var(--atlas-retro-control-border);
+  border-radius: var(--atlas-radius);
+  font: inherit;
+}
+.atlas-retro-button {
+  min-height: 2.6rem;
+  padding: 0.5rem 0.8rem;
+  color: var(--atlas-retro-control-fg);
+  background: var(--atlas-retro-control-bg);
+  border: 2px solid var(--atlas-retro-control-border);
+  border-radius: var(--atlas-radius);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.atlas-retro-output { display: block; margin-top: 0.85rem; overflow-wrap: anywhere; }
+.atlas-retro-input:focus-visible,
+.atlas-retro-button:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 3px;
+}
+.atlas-retro-button:disabled { cursor: not-allowed; opacity: 0.65; }
+
+/* Windows 95: classic raised buttons, inset fields, squared title bars. */
+[data-atlas-theme="win95"] .atlas-retro-window-titlebar {
+  background: var(--title);
+  color: var(--title-text);
+  border-bottom: 2px solid var(--chrome-dark);
+}
+[data-atlas-theme="win95"] .atlas-retro-window {
+  border-color: var(--chrome-lighter) var(--chrome-darker) var(--chrome-darker) var(--chrome-lighter);
+  box-shadow: inset 1px 1px var(--chrome-light);
+}
+[data-atlas-theme="win95"] .atlas-retro-button {
+  border-color: var(--chrome-lighter) var(--chrome-darker) var(--chrome-darker) var(--chrome-lighter);
+  box-shadow: inset 1px 1px var(--chrome-light);
+}
+[data-atlas-theme="win95"] .atlas-retro-button:active {
+  border-color: var(--chrome-dark) var(--chrome-lighter) var(--chrome-lighter) var(--chrome-dark);
+  box-shadow: inset 1px 1px var(--chrome-dark);
+}
+[data-atlas-theme="win95"] .atlas-retro-input {
+  border-color: var(--chrome-dark) var(--chrome-lighter) var(--chrome-lighter) var(--chrome-dark);
+}
+[data-atlas-theme="mac7"] .atlas-retro-window { box-shadow: 2px 2px 0 var(--shadow); }
+[data-atlas-theme="mac7"] .atlas-retro-window-titlebar {
+  background-color: var(--chrome);
+  background-image: repeating-linear-gradient(to bottom, var(--chrome) 0 2px, var(--ink) 2px 3px, var(--chrome) 3px 5px);
+}
+[data-atlas-theme="mac7"] .atlas-retro-window-title {
+  background: var(--chrome);
+  padding-inline: 0.4rem;
+  text-align: center;
+}
+[data-atlas-theme="mac7"] .atlas-retro-input {
+  border: 1px solid var(--ink);
+  box-shadow: inset 1px 1px 0 var(--shadow);
+}
+[data-atlas-theme="mac7"] .atlas-retro-button {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--paper), inset 0 0 0 2px var(--ink);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-retro-window-titlebar {
+  border-bottom: 1px solid var(--ink);
+}
+[data-atlas-theme="crt-phosphor"] .atlas-retro-input {
+  border: 1px solid var(--ink);
+  border-radius: 0;
+}
+[data-atlas-theme="crt-phosphor"] .atlas-retro-window { font-family: var(--atlas-font-ui); }
+[data-atlas-theme="crt-phosphor"] .atlas-retro-button:hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-retro-window, .atlas-retro-button { transition: none; animation: none; }
+}
+
+.atlas-theme-filter .atlas-retro-field { flex: 1 1 240px; }
+
+.atlas-theme-category {
+  flex: 1 1 160px;
+  display: grid;
+  gap: 0.35rem;
+  color: rgb(var(--gray-100));
+}
+.atlas-theme-category > span { font-size: 0.825rem; font-weight: 600; }
+.atlas-theme-category > select {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.55rem 0.65rem;
+  min-height: 2.6rem;
+  border: 2px solid var(--atlas-retro-control-border);
+  border-radius: var(--atlas-radius);
+  background: var(--atlas-retro-input-bg);
+  color: var(--atlas-retro-input-fg);
+}
+.atlas-theme-category > select:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 3px;
+}

@@ -1,0 +1,13 @@
+/* Memphis Pop — design tokens
+   Extracted from styles/17-memphis/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --black: #000;
+  --white: #fff;
+  --pink: #ff4fa3;
+  --teal: #12c3ce;
+  --yellow: #ffe034;
+  --red: #ff2e2e;
+  --blue: #2e4bff;
+  --font: "Helvetica Neue", Helvetica, Impact, sans-serif;
+}

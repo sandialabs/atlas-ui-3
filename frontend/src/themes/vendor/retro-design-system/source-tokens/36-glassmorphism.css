@@ -1,0 +1,12 @@
+/* Glassmorphism — design tokens
+   Extracted from styles/36-glassmorphism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --ink: #ffffff;
+  --muted: rgba(255,255,255,0.7);
+  --glass-bg: rgba(255,255,255,0.15);
+  --glass-border: rgba(255,255,255,0.3);
+  --accent: #ff6ec4;
+  --accent-2: #7873f5;
+  --font: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+}
