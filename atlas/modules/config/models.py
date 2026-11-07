@@ -108,6 +108,10 @@ class ModelConfig(BaseModel):
     api_key: str = ""
     description: Optional[str] = None
     max_tokens: Optional[int] = 10000
+    # Opt in per model to OpenAI-style streaming usage metadata. Not all
+    # providers implement stream_options.include_usage; keep default disabled.
+    # The received counts are informational, not a hard spending cap.
+    request_stream_usage: bool = False
     # The model's context window in tokens (issue #877). Needed for custom
     # endpoints and aliases LiteLLM cannot look up; when unset the window is
     # taken from LiteLLM's model map, then CONTEXT_FALLBACK_WINDOW_TOKENS.

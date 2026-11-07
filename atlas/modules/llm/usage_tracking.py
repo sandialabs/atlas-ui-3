@@ -61,5 +61,36 @@ def record_usage(usage: Any) -> None:
         sink.add(getattr(usage, "prompt_tokens", None), getattr(usage, "completion_tokens", None))
 
 
+@dataclass
+class StreamUsageAccumulator:
+    """Merge provider usage snapshots for *one* streaming attempt.
+
+    Providers can repeat cumulative numbers, or report prompt and completion
+    separately. Taking the maximum of each independently avoids both double
+    counting and losing an earlier nonzero field to a later zero placeholder.
+    Keep one accumulator per attempt, since a retry is a separate provider call.
+    """
+
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+
+    def observe(self, usage: Any) -> None:
+        if usage is None:
+            return
+        for field in ("prompt_tokens", "completion_tokens"):
+            value = usage.get(field) if isinstance(usage, dict) else getattr(usage, field, None)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                continue
+            previous = getattr(self, field)
+            setattr(self, field, value if previous is None else max(previous, value))
+
+    def record(self) -> None:
+        """Record once, even when the stream failed, emptied, or was closed."""
+        record_usage({
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+        })
+
+
 def record_response_usage(response: Any) -> None:
     record_usage(getattr(response, "usage", None))

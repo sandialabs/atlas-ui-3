@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-10-14
+Last updated: 2026-11-06
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -67,6 +67,58 @@ retried using `LLM_MAX_RETRIES` (default: 5 retries after the first attempt) and
 If the budget is exhausted, the client receives an error instead of an empty
 successful response. Tool-only responses are valid, and failures after text
 has reached the client are never retried to avoid duplicating partial output.
+
+## Streaming Token Usage Reporting
+
+For a **static model** configured under `models:`, opt in to requesting
+provider-reported token usage during streaming completions only when that
+endpoint supports OpenAI-compatible `stream_options.include_usage`:
+
+```yaml
+models:
+  usage-capable-gateway:
+    model_name: openai/usage-capable-model
+    model_url: https://gateway.example.org/v1
+    api_key: "${MODEL_GATEWAY_API_KEY}"
+    request_stream_usage: true
+```
+
+The default is `false`. When enabled, Atlas asks LiteLLM to send
+`stream_options: {include_usage: true}` in both plain and tool-enabled
+streaming calls. This does not affect non-streaming requests. Enterprise
+LiteLLM gateway models can also opt in through `model_defaults` or an
+allowlist model entry; an entry overrides the gateway default.
+
+Some compatible servers return a final usage-only chunk; others may repeat
+*cumulative* counts in more than one chunk, or split prompt and completion
+counts across chunks. Atlas retains the **maximum observed prompt and
+completion counts independently** and records them **once per provider
+attempt**, avoiding double counting and preserving available counts for
+empty, failed, retried, or interrupted streams. These are best-effort
+provider-reported observations, not confirmed billing totals. If an opted-in
+endpoint returns no usage metadata, Atlas logs a warning naming the model;
+token counts may still be missing. If the provider explicitly rejects
+`stream_options.include_usage`, Atlas reports that the
+`request_stream_usage` flag is incompatible with that endpoint rather than
+suggesting that the user start a new conversation.
+
+For an offline, reproducible check that loads a real `llmconfig.yml` and
+sends streaming requests through the LiteLLM HTTP client to a local fake
+OpenAI-compatible provider (no paid API or credentials), run:
+
+```bash
+python scripts/verify_stream_usage_e2e.py
+```
+
+The script verifies both explicit opt-in and the unchanged default-off
+behavior at the HTTP request boundary. Check provider compatibility before
+enabling the flag in production.
+
+**Usage reports are observability data, not an authorization boundary.**
+Do not use these post-response counters to enforce prepaid spending limits,
+tenant quotas, or billing. For those purposes the upstream gateway must
+authorize and bound requests before dispatch and reconcile charges using
+trusted server-side evidence, including error and interrupted-stream cases.
 
 ## Environment Variable Expansion in LLM Configs
 
