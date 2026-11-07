@@ -111,13 +111,20 @@ async def _finished_parent_with_live_child_on_a(cluster):
 
 
 async def _finished_with_follow_up_on_a(cluster):
-    """A finished run and a live follow-up on the same conversation, both on A."""
+    """A finished API run and a live API follow-up on the same conversation, both on A."""
+    from atlas.application.chat.runs.external_runs import API_SOURCE
+
     first = await cluster.run()
+    first.launch_spec = {"source": API_SOURCE}
     cluster.registry.set_status(first.run_id, RunStatus.COMPLETED)
     await _release(cluster, first)
     follow_up = cluster.registry.start(conversation_id=first.conversation_id, user_email=OWNER)
+    follow_up.launch_spec = {"source": API_SOURCE}
     cluster.registry.attach_task(follow_up.run_id, asyncio.create_task(asyncio.sleep(30)))
     await cluster.a.claim(follow_up.run_id, first.conversation_id)
+    for record in (first, follow_up):
+        # What the owner's lease mirror writes into the shared record.
+        await cluster.b.bus._client().hset(cluster.b.coordinator.keys.run(record.run_id), "source", API_SOURCE)
     return first, follow_up
 
 
@@ -353,9 +360,13 @@ async def test_S30_both_finished_parent_remote_terminal(cluster, local):
 @gap("run_id wins over conversation_id, so naming a finished run stops its cascade but never the "
      "live follow-up the same frame's conversation holds (REST cancel does stop it)")
 async def test_S31_both_api_follow_up_local(cluster, local):
+    from atlas.application.chat.runs.external_runs import API_SOURCE
+
     first = local.start(conversation_id=CONV, user_email=OWNER)
+    first.launch_spec = {"source": API_SOURCE}
     local.set_status(first.run_id, RunStatus.COMPLETED)
     follow_up = _local_run(local)
+    follow_up.launch_spec = {"source": API_SOURCE}
     await ws_stop(local, {"run_id": first.run_id, "conversation_id": CONV})
     assert local.get(follow_up.run_id).status is RunStatus.CANCELLED
 
@@ -430,9 +441,13 @@ async def test_R06_unknown_id_unreadable(cluster, monkeypatch):
 async def test_R07_api_run_finished_record_expired(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.finished_on_a()
+    child = cluster.registry.start(conversation_id="conv-child", user_email=OWNER,
+                                   parent_run_id=run.run_id, depth=1)
+    cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await cluster.a.claim(child.run_id, child.conversation_id)
     await cluster.b.bus._client().delete(cluster.b.coordinator.keys.run(run.run_id))
-    answer = await run_control.route_api_cancel(run.run_id)
-    assert answer is not None and answer["ok"] is True
+    await run_control.route_api_cancel(run.run_id)
+    assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +600,26 @@ async def test_P04_unreadable_directory_is_best_effort(cluster):
     assert await run_control.route_approval(OWNER, run.run_id, request.invocation_id, "call_0") is None
 
 
+def _two_pending_call_zero():
+    from atlas.application.chat.approval_manager import ToolApprovalManager
+
+    manager = ToolApprovalManager()
+    for run_id in ("run-1", "run-2"):
+        manager.create_approval_request("call_0", "server_tool", {}, user_email=OWNER,
+                                        invocation_id=f"{run_id}:0:call_0", run_id=run_id)
+    return manager
+
+
+async def test_P07_bare_tool_call_id_shared_by_two_runs_is_ambiguous():
+    # No hint: the response settles neither run's request (the client gets unknown_tool_approval).
+    assert _two_pending_call_zero().find_open_request("call_0", None, None, OWNER) is None
+
+
+async def test_P08_run_hint_selects_one_of_two_bare_tool_call_ids():
+    request = _two_pending_call_zero().find_open_request("call_0", None, "run-2", OWNER)
+    assert request is not None and request.run_id == "run-2"
+
+
 # ---------------------------------------------------------------------------
 # The doc and this file agree
 # ---------------------------------------------------------------------------
@@ -637,7 +672,8 @@ def test_gap_rows_in_the_doc_are_exactly_the_strict_xfails():
     marked = set()
     for name, obj in globals().items():
         match = re.match(r"test_([A-Z]\d+)_", name)
-        if match and any(m.name == "xfail" for m in getattr(obj, "pytestmark", [])):
+        if match and any(m.name == "xfail" and m.kwargs.get("strict") is True
+                         for m in getattr(obj, "pytestmark", [])):
             marked.add(match.group(1))
     untested_gaps = {i for i in doc_gaps if THIS_FILE not in rows[i][-1]}
     assert doc_gaps - untested_gaps == marked

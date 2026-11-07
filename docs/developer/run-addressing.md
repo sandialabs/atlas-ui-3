@@ -48,14 +48,17 @@ with `error_type: run_control_unavailable` that keeps the client's running state
 - `ws chat` reads `conversation_id` only (`main.py:2209`); a `run_id` on a chat
   frame is ignored. `run id only` equals `neither`, `both` equals `conversation
   only`. With no conversation a chat frame never looks anything up: it starts a
-  turn, or steers the connection's own untracked agent turn (`should_steer`).
+  turn, or steers the connection's own untracked agent loop when that has no
+  conversation either (`should_steer`).
 - An untracked turn is never in the directory, so it has no `remote` rows (the
   one consequence is row `C12`). It also has no run id, so `run id only` for it
   is a stale or foreign id (row `S05`).
-- An approval is keyed by `invocation_id` / `tool_call_id`; `run_id` and
-  `conversation_id` only narrow the match. Every address resolves the same
-  request (`approval_resolution.py:100-133`), so the approval table has one row
-  per location. The directory only wakes the owner (`route_approval`); the
+- An approval is keyed by `invocation_id`, which names exactly one request. A
+  bare `tool_call_id` is ambiguous when two runs hold the same provider id
+  (`call_0`): `run_id` or `conversation_id` then disambiguates
+  (`approval_manager.py:355-388`, `approval_resolution.py:100-133`), rows `P07`
+  and `P08`. With an `invocation_id` every address resolves the same request,
+  so the other approval rows are per location. The directory only wakes the owner (`route_approval`); the
   write-once outcome settles the approval, so an unreadable directory or a
   missing nudge delays the tool by one poll and never loses the answer.
 - A finished parent has no `remote live` row (live would make it `tracked`).
@@ -120,8 +123,8 @@ first (`cancel_api_run`), then `route_api_cancel`, then
 | `R07` REST cancel | run_id only | finished API run | remote terminal, record expired | run and its children stopped on owner | GAP: same cause as `S09`; `_remote_entry` None, 404 (`agent_run_routes.py:430-432`) | `atlas/tests/test_run_addressing_table.py` |
 | `R08` REST cancel | run_id only | finished parent | remote terminal | children stopped | owner cascade | `test_stopping_a_finished_parent_stops_its_live_child_on_the_owner` |
 | `R09` REST cancel | run_id only | API follow-up | named run local, follow-up remote | follow-up stopped on its owner | `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_held_here_stops_its_follow_up_elsewhere` |
-| `R10` REST cancel | run_id only | API follow-up | named run remote terminal, follow-up remote | follow-up stopped | `route_api_cancel`, then `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere` |
-| `R11` REST cancel | run_id only | API follow-up | unreadable on the follow-up lookup | 503, not `cancelled: false` | `route_api_follow_up_cancel` returns the failure | `test_api_cancel_reports_a_follow_up_it_could_not_stop` |
+| `R10` REST cancel | run_id only | API follow-up | named run remote terminal, follow-up here | follow-up stopped | `route_api_cancel`, then `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere` |
+| `R11` REST cancel | run_id only | API follow-up | unreadable on the follow-up lookup | 503, not `cancelled: false` | `route_api_follow_up_cancel` returns the failure | n/a: untested; `test_api_cancel_reports_a_follow_up_it_could_not_stop` covers the owner timing out (504) |
 | `R12` REST cancel | conversation only, both, neither | any | any | n/a: the path takes a run id only | n/a | n/a |
 
 ## ws chat (steer)
@@ -144,7 +147,7 @@ connection's untracked turn (`should_steer`), then a new turn.
 | `C10` ws chat | conversation | off-record turn | local | refused `off_record`, as the remote path does | GAP: the local branch (`main.py:2177-2214`) never reads `turn_is_off_record`, so incognito text is queued into a recorded run | `atlas/tests/test_run_addressing_table.py` |
 | `C11` ws chat | conversation | untracked turn | local | queued into the connection's loop when the conversation matches, else a new turn | `should_steer` (`agent/steering.py:84-110`) | `test_agent_steering_through_chat_service` |
 | `C12` ws chat | conversation | untracked turn | on another replica | busy refusal | GAP: the directory cannot see an untracked turn (`main.py:2237-2290`), so a second turn starts beside it | n/a: needs two real processes, none exists yet (step E retires the untracked turn) |
-| `C13` ws chat | run_id only, neither | any | any | starts a new turn (a chat frame names its conversation, never a run) | `main.py:2209`, no lookup when the conversation is None | n/a: starts a turn, not exercised by the table tests |
+| `C13` ws chat | run_id only, neither | any | any | starts a new turn, except that a frame naming no conversation is steered into the connection's own untracked agent loop that also has none (a chat frame names its conversation, never a run) | `main.py:2209`, no lookup when the conversation is None, then `should_steer` | `test_both_none_conversation_ids_steer` for the steer; the new-turn case is not exercised here |
 | `C14` ws chat | conversation | tracked | remote live, two real replicas | steer reaches the loop once | via `route_steer` | `test_steer_via_non_owner_reaches_the_loop_once` |
 
 ## ws tool_approval_response
@@ -161,9 +164,11 @@ and `nudge_approval_owner` calls `route_approval` to wake a remote owner.
 | `P04` ws approval | run_id | tracked | unreadable | answer recorded, tool resumes on its next poll | `route_approval` returns None | `atlas/tests/test_run_addressing_table.py` |
 | `P05` ws approval | any | tracked, untracked, off-record | local | the local future resolves | `find_open_request`, `accepted` | n/a: not exercised by the table tests |
 | `P06` ws approval | run_id | tracked | remote live, two real replicas | tool runs once | via `route_approval` | `test_approval_via_non_owner_runs_the_tool_once` |
+| `P07` ws approval | tool_call_id only, shared by two runs | tracked | local | refused `unknown_tool_approval`; neither request settles | `find_open_request` finds two matches | `atlas/tests/test_run_addressing_table.py` |
+| `P08` ws approval | tool_call_id plus run_id | tracked | local | the hinted run's request is selected | `_bare_matches` filters on `run_id` | `atlas/tests/test_run_addressing_table.py` |
 
 ## Counts
 
-Rows `S01-S34`, `R01-R12`, `C01-C14` and `P01-P06`: 66 rows. `GAP` rows (9):
+Rows `S01-S34`, `R01-R12`, `C01-C14` and `P01-P08`: 68 rows. `GAP` rows (9):
 `S09`, `S17`, `S19`, `S20`, `S31`, `S32`, `R07`, `C10`, `C12`. Eight are strict
 `xfail` tests (`C10` runs for two off-record flags); `C12` has no test yet.
