@@ -60,6 +60,8 @@ class _Untracked:
         return self.task.cancel.called
 
 
+# Rows with no ``cluster`` argument run with no run-control bus bound, as a
+# single-instance deployment does: nothing is read from a directory.
 async def ws_stop(local, data, untracked=None):
     """The stop branch of ``websocket_endpoint`` (main.py, ``stop_streaming`` and
     ``agent_control`` stop are the same code): returns (frames sent, untracked
@@ -83,15 +85,19 @@ def _local_run(local, conversation_id=CONV, **kwargs):
 
 
 @pytest.fixture
-def local():
+async def local():
     registry = RunRegistry()
     yield registry
-    for record in registry.all_records():
-        if record.task is not None:
-            record.task.cancel()
+    tasks = [r.task for r in registry.all_records() if r.task is not None]
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _unreadable(cluster):
+    # Let replica A's inbox reader take its first turn: the shared fixture's
+    # teardown cannot stop a reader that never started (hangs on Python 3.11).
+    await asyncio.sleep(0.05)
     async def fail(*_a, **_k):
         raise TimeoutError("redis timed out")
 
@@ -134,7 +140,7 @@ def _is_unavailable(frames, run_id=None):
         assert frames[0]["run_id"] == run_id
 
 
-async def test_S01_run_id_only_tracked_local(cluster, local):
+async def test_S01_run_id_only_tracked_local(local):
     run = _local_run(local)
     frames, untracked = await ws_stop(local, {"run_id": run.run_id}, _Untracked())
     assert local.get(run.run_id).status is RunStatus.CANCELLED and not frames and not untracked
@@ -164,7 +170,7 @@ async def test_S04_run_id_only_tracked_unreadable(cluster, local):
     assert not cluster.registry.get(run.run_id).is_terminal
 
 
-async def test_S05_run_id_only_untracked_stale_id(cluster, local):
+async def test_S05_run_id_only_untracked_stale_id(local):
     frames, untracked = await ws_stop(local, {"run_id": "stale"}, _Untracked())
     # The id names a run, so it never reaches the connection's untracked turn.
     assert frames == [] and not untracked
@@ -177,7 +183,7 @@ async def test_S06_run_id_only_untracked_unreadable(cluster, local):
     assert not untracked
 
 
-async def test_S07_run_id_only_finished_parent_local(cluster, local):
+async def test_S07_run_id_only_finished_parent_local(local):
     parent = local.start(conversation_id=CONV, user_email=OWNER)
     child = _local_run(local, "conv-child", parent_run_id=parent.run_id, depth=1)
     local.set_status(parent.run_id, RunStatus.COMPLETED)
@@ -209,7 +215,7 @@ async def test_S10_run_id_only_finished_parent_unreadable(cluster, local):
     assert not cluster.registry.get(child.run_id).is_terminal
 
 
-async def test_S11_run_id_only_api_follow_up_local(cluster, local):
+async def test_S11_run_id_only_api_follow_up_local(local):
     first = local.start(conversation_id=CONV, user_email=OWNER)
     local.set_status(first.run_id, RunStatus.COMPLETED)
     follow_up = _local_run(local)
@@ -218,7 +224,7 @@ async def test_S11_run_id_only_api_follow_up_local(cluster, local):
     assert not local.get(follow_up.run_id).is_terminal
 
 
-async def test_S12_conversation_only_tracked_local(cluster, local):
+async def test_S12_conversation_only_tracked_local(local):
     run = _local_run(local)
     frames, untracked = await ws_stop(local, {"conversation_id": CONV}, _Untracked())
     assert local.get(run.run_id).status is RunStatus.CANCELLED and not frames and not untracked
@@ -248,14 +254,14 @@ async def test_S15_conversation_only_tracked_unreadable(cluster, local):
     assert not cluster.registry.get(run.run_id).is_terminal
 
 
-async def test_S16_conversation_only_untracked_local(cluster, local):
+async def test_S16_conversation_only_untracked_local(local):
     frames, untracked = await ws_stop(local, {"conversation_id": CONV}, _Untracked())
     assert frames == [] and untracked
 
 
 @gap("a stop naming conversation X cancels the connection's untracked turn even when that turn "
      "runs in conversation Y (the fallback never compares conversation ids)")
-async def test_S17_conversation_only_untracked_other_conversation(cluster, local):
+async def test_S17_conversation_only_untracked_other_conversation(local):
     untracked = _Untracked()
     untracked.slot["conversation_id"] = "conv-other"
     _frames, cancelled = await ws_stop(local, {"conversation_id": CONV}, untracked)
@@ -273,7 +279,7 @@ async def test_S18_conversation_only_untracked_unreadable(cluster, local):
 
 @gap("a conversation-only stop looks only for a live run, so a finished parent's live children "
      "are not stopped (the registry's children_of_conversation is never consulted)")
-async def test_S19_conversation_only_finished_parent_local(cluster, local):
+async def test_S19_conversation_only_finished_parent_local(local):
     parent = local.start(conversation_id=CONV, user_email=OWNER)
     child = _local_run(local, "conv-child", parent_run_id=parent.run_id, depth=1)
     local.set_status(parent.run_id, RunStatus.COMPLETED)
@@ -289,7 +295,7 @@ async def test_S20_conversation_only_finished_parent_remote_terminal(cluster, lo
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 
-async def test_S21_conversation_only_api_follow_up_local(cluster, local):
+async def test_S21_conversation_only_api_follow_up_local(local):
     first = local.start(conversation_id=CONV, user_email=OWNER)
     local.set_status(first.run_id, RunStatus.COMPLETED)
     follow_up = _local_run(local)
@@ -303,7 +309,7 @@ async def test_S22_conversation_only_api_follow_up_remote_live(cluster, local):
     assert cluster.registry.get(follow_up.run_id).status is RunStatus.CANCELLED
 
 
-async def test_S23_both_tracked_local_run_id_wins(cluster, local):
+async def test_S23_both_tracked_local_run_id_wins(local):
     run = _local_run(local)
     other = _local_run(local, "conv-other")
     await ws_stop(local, {"run_id": run.run_id, "conversation_id": "conv-other"})
@@ -333,7 +339,7 @@ async def test_S26_both_tracked_unreadable(cluster, local):
     _is_unavailable(frames, run.run_id)
 
 
-async def test_S27_both_stale_run_id_falls_back_to_conversation_local(cluster, local):
+async def test_S27_both_stale_run_id_falls_back_to_conversation_local(local):
     run = _local_run(local)
     await ws_stop(local, {"run_id": "stale", "conversation_id": CONV})
     assert local.get(run.run_id).status is RunStatus.CANCELLED
@@ -346,7 +352,7 @@ async def test_S28_both_stale_run_id_falls_back_to_conversation_remote(cluster, 
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
 
-async def test_S29_both_untracked_stale_run_id(cluster, local):
+async def test_S29_both_untracked_stale_run_id(local):
     frames, untracked = await ws_stop(local, {"run_id": "stale", "conversation_id": CONV}, _Untracked())
     assert frames == [] and not untracked
 
@@ -359,7 +365,7 @@ async def test_S30_both_finished_parent_remote_terminal(cluster, local):
 
 @gap("run_id wins over conversation_id, so naming a finished run stops its cascade but never the "
      "live follow-up the same frame's conversation holds (REST cancel does stop it)")
-async def test_S31_both_api_follow_up_local(cluster, local):
+async def test_S31_both_api_follow_up_local(local):
     from atlas.application.chat.runs.external_runs import API_SOURCE
 
     first = local.start(conversation_id=CONV, user_email=OWNER)
@@ -378,7 +384,7 @@ async def test_S32_both_api_follow_up_remote(cluster, local):
     assert cluster.registry.get(follow_up.run_id).status is RunStatus.CANCELLED
 
 
-async def test_S33_neither_stops_only_the_untracked_turn(cluster, local):
+async def test_S33_neither_stops_only_the_untracked_turn(local):
     run = _local_run(local)
     frames, untracked = await ws_stop(local, {}, _Untracked())
     assert untracked and frames == [] and not local.get(run.run_id).is_terminal
