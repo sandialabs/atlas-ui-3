@@ -71,7 +71,9 @@ class Replica:
     def ws_url(self) -> str:
         if self.url.startswith("https://"):
             return "wss://" + self.url[len("https://"):]
-        return "ws://" + self.url[len("http://"):]
+        if self.url.startswith("http://"):
+            return "ws://" + self.url[len("http://"):]
+        raise ValueError(f"replica URL must start with http:// or https://: {self.url!r}")
 
 
 class Validator:
