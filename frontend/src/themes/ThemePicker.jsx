@@ -1,25 +1,77 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import { THEME_REGISTRY } from './themeRegistry'
 import { RetroWorkbench, RetroInput, RetroButton } from './RetroControls'
+import { readThemeFavorites, writeThemeFavorites } from './themeFavorites'
 
 /** Native radio controls preserve arrow-key navigation and screen-reader state. */
 export default function ThemePicker() {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, themeDefinition } = useTheme()
   const [filter, setFilter] = useState('')
   const [category, setCategory] = useState('all')
+  const [favorites, setFavorites] = useState(readThemeFavorites)
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [focusSelected, setFocusSelected] = useState(false)
+  const selectedRadioRef = useRef(null)
   const query = filter.trim().toLowerCase()
   const categories = Array.from(new Set(THEME_REGISTRY.map(entry => entry.era.split(' · ')[0]))).sort()
+  const favoriteIds = new Set(favorites)
+  const currentIsFavorite = favoriteIds.has(theme)
   const visibleThemes = THEME_REGISTRY.filter(entry =>
     (category === 'all' || entry.era.split(' · ')[0] === category) &&
+    (!favoritesOnly || favoriteIds.has(entry.id)) &&
     (!query || [entry.name, entry.era, entry.description, ...(entry.tags || [])]
       .join(' ').toLowerCase().includes(query)),
   )
-  const resetFilter = () => { setFilter(''); setCategory('all') }
+  const selectedVisible = visibleThemes.some(entry => entry.id === theme)
+  const resetFilter = () => { setFilter(''); setCategory('all'); setFavoritesOnly(false) }
+  const revealSelected = () => {
+    resetFilter()
+    setFocusSelected(true)
+  }
+  const toggleFavorite = () => setFavorites(current =>
+    current.includes(theme) ? current.filter(id => id !== theme) : [...current, theme],
+  )
+
+  useEffect(() => {
+    writeThemeFavorites(favorites)
+  }, [favorites])
+
+  useEffect(() => {
+    if (!focusSelected) return
+    selectedRadioRef.current?.focus()
+    setFocusSelected(false)
+  }, [focusSelected])
 
   return (
     <fieldset className="space-y-3" aria-label="Registered interface themes">
       <legend className="text-sm font-medium text-gray-100">Theme gallery</legend>
+      <div className="atlas-theme-favorites flex flex-wrap items-center gap-3">
+        <p className="text-sm text-gray-100" aria-live="polite">
+          Current theme: <strong>{themeDefinition.name}</strong>
+        </p>
+        <RetroButton
+          onClick={toggleFavorite}
+          aria-pressed={currentIsFavorite}
+          className="text-sm"
+        >
+          {currentIsFavorite ? 'Remove current from favorites' : 'Favorite current theme'}
+        </RetroButton>
+        <label className="inline-flex items-center gap-2 text-sm text-gray-100">
+          <input
+            type="checkbox"
+            checked={favoritesOnly}
+            onChange={event => setFavoritesOnly(event.target.checked)}
+            className="atlas-theme-radio"
+          />
+          Favorites only ({favorites.length})
+        </label>
+        {!selectedVisible && (
+          <RetroButton onClick={revealSelected} className="text-sm">
+            Show selected theme
+          </RetroButton>
+        )}
+      </div>
       <div className="atlas-theme-filter flex flex-wrap items-end gap-2">
         <RetroInput
           label="Find a theme"
@@ -37,7 +89,7 @@ export default function ThemePicker() {
             {categories.map(era => <option value={era} key={era}>{era}</option>)}
           </select>
         </label>
-        {(filter || category !== 'all') && (
+        {(filter || category !== 'all' || favoritesOnly) && (
           <RetroButton onClick={resetFilter}>Clear theme filter</RetroButton>
         )}
       </div>
@@ -58,6 +110,7 @@ export default function ThemePicker() {
               onChange={() => setTheme(entry.id)}
               aria-label={entry.name}
               className="atlas-theme-radio shrink-0"
+              ref={entry.id === theme ? selectedRadioRef : undefined}
             />
             <span
               className="atlas-theme-preview shrink-0"
@@ -83,7 +136,7 @@ export default function ThemePicker() {
         ))}
         {visibleThemes.length === 0 && (
           <p className="text-sm text-gray-300">
-            No matching themes. Clear the filter to see all available styles.
+            No matching themes. Clear the filters to see all available styles.
           </p>
         )}
       </div>

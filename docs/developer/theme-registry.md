@@ -94,6 +94,18 @@ fall back to Dark. `data-atlas-theme` identifies the selected design.
 The General Settings gallery provides accessible native radio controls,
 search over names/tags/eras, a category filter, and a source attribution link.
 
+To make the full 55-theme gallery practical, users can **favorite the current
+theme** and filter to favorites. Favorites persist locally under
+`atlas-theme-favorites`; storage values are parsed defensively, deduplicated,
+and restricted to registered theme IDs, with a session-only fallback when
+storage is disabled. No favorites are sent to a server or used to load CSS.
+
+The currently active theme is always named above the gallery. When search,
+category, or favorites filtering hides it, **Show selected theme** resets the
+filters and returns keyboard focus to the selected native radio. This avoids
+losing the active selection within a large filtered collection.
+
+
 The Light/Dark shortcut still changes the **base mode**, even when a retro
 preset is selected. It does not mutate the user's configuration for
 models, tools, or conversation settings.
