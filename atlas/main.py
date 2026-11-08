@@ -37,8 +37,8 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TypeVar
 from uuid import UUID, uuid4
 
@@ -76,6 +76,7 @@ from atlas.application.chat.runs.eligibility import (
     turn_is_eligible_for_background_run,
     turn_is_off_record,
 )
+from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.auth_mode import validate_auth_modes
@@ -2221,9 +2222,13 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "conversation_id": tracked_run.conversation_id,
                             })
                             continue
-                        refusal = await chat_service.steering_classification_refusal(
-                            tracked_run.session_id, data.get("compliance_level_filter")
-                        )
+                        steer_request_id = data.get("request_id")
+                        outcome = run_registry.prior_steer(tracked_run.run_id, steer_request_id)
+                        refusal = None
+                        if outcome is None:
+                            refusal = await chat_service.steering_classification_refusal(
+                                tracked_run.session_id, data.get("compliance_level_filter")
+                            )
                         if refusal:
                             await websocket.send_json({
                                 "type": "error",
@@ -2236,9 +2241,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "conversation_id": tracked_run.conversation_id,
                             })
                             continue
-                        try:
-                            steering.queue.put_nowait(data.get("content", ""))
-                        except asyncio.QueueFull:
+                        # The registry is the one way a steer is queued, local
+                        # or routed; a request id it has seen is not queued twice.
+                        outcome = outcome or run_registry.steer(
+                            tracked_run.run_id, data.get("content", ""), steer_request_id
+                        )
+                        if outcome == STEER_QUEUE_FULL:
                             await websocket.send_json({
                                 "type": "error",
                                 "message": (
@@ -2251,13 +2259,16 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "conversation_id": tracked_run.conversation_id,
                             })
                             continue
-                        await websocket.send_json({
-                            "type": "agent_update",
-                            "update_type": "steering_queued",
-                            "run_id": tracked_run.run_id,
-                            "conversation_id": tracked_run.conversation_id,
-                        })
-                        continue
+                        if outcome == STEER_QUEUED:
+                            await websocket.send_json({
+                                "type": "agent_update",
+                                "update_type": "steering_queued",
+                                "run_id": tracked_run.run_id,
+                                "conversation_id": tracked_run.conversation_id,
+                            })
+                            continue
+                        # Not draining any more (the loop stopped while the
+                        # classification check ran): the busy refusal below.
                     # The run exists but its loop is not draining yet (it is
                     # starting up, or paused waiting for a tool approval).
                     # Refusing is the honest answer: queueing into a channel
@@ -2283,6 +2294,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 if tracked_run is None and frame_conversation_id:
                     if await steer_addressed_run(websocket, run_registry, user_email, data):
                         continue
+
+                # A client's repeat of a steer (same request id) must never
+                # become a new turn: the first attempt may have been applied
+                # and only its reply lost, and the run has since finished.
+                if data.get("steer_only") is True:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            "The run finished before this message could be resent. "
+                            "It may already have been received; check the transcript."
+                        ),
+                        "error_type": "steer_run_finished",
+                        "steering": True,
+                        "conversation_id": frame_conversation_id,
+                    })
+                    continue
 
                 # Authoritative server-side gate for system-prompt overrides.
                 # The frontend already withholds custom_system_prompt when the

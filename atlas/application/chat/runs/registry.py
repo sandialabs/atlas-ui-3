@@ -118,6 +118,12 @@ _TERMINAL_STATUSES = frozenset(
 )
 
 
+STEER_QUEUED = "steering_queued"
+STEER_QUEUE_FULL = "steering_queue_full"
+STEER_RUN_FINISHED = "run_finished"
+STEER_NOT_DRAINING = "not_draining"
+
+
 @dataclass
 class RunRecord:
     """One tracked run.
@@ -335,6 +341,43 @@ class RunRegistry:
         if record is None or record.user_email != normalize_user_email(user_email):
             return None
         return record
+
+    def prior_steer(self, run_id: Optional[str], request_id: Optional[str]) -> Optional[str]:
+        """The outcome an earlier steer with this ``request_id`` had, or None."""
+        record = self.get(run_id)
+        steering = record.steering if record is not None else None
+        return steering.recall_outcome(request_id) if steering is not None else None
+
+    def steer(self, run_id: Optional[str], text: str, request_id: Optional[str] = None) -> str:
+        """Queue a steering message on a run this replica owns: the only way in.
+
+        Returns ``STEER_QUEUED``, ``STEER_QUEUE_FULL``, ``STEER_RUN_FINISHED``
+        or ``STEER_NOT_DRAINING``. A ``request_id`` already queued on this run
+        answers ``STEER_QUEUED`` again and queues nothing; refusals changed
+        nothing, so they are not remembered, so a client retry, a
+        replayed bus command and a local resend all land once. Callers check
+        ownership and refusals first; this checks the run's state at the moment
+        of queueing, after any of their awaits.
+        """
+        record = self.get(run_id)
+        if record is None or record.is_terminal:
+            return STEER_RUN_FINISHED
+        steering = record.steering
+        if steering is None:
+            return STEER_NOT_DRAINING
+        seen = steering.recall_outcome(request_id)
+        if seen is not None:
+            return seen
+        if not steering.active:
+            return STEER_NOT_DRAINING
+        try:
+            steering.queue.put_nowait(text)
+        except asyncio.QueueFull:
+            # Nothing was queued, so nothing is remembered: a retry of this
+            # request may succeed once the loop has drained.
+            return STEER_QUEUE_FULL
+        steering.remember_outcome(request_id, STEER_QUEUED)
+        return STEER_QUEUED
 
     def active_for_conversation(
         self, conversation_id: Optional[str], user_email: str

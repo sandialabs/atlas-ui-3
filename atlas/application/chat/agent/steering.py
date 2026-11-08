@@ -21,7 +21,8 @@ be silently lost.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections import OrderedDict
+from typing import Any, Optional
 
 # Bound on how many steering messages may be queued for one agent turn. The
 # channel is drained at each iteration boundary, so in normal use this holds at
@@ -29,6 +30,11 @@ from typing import Any
 # flooded with queued turns that all land in history and in every subsequent
 # prompt (issue #824 review).
 STEERING_QUEUE_MAXSIZE = 8
+
+# How many client request ids one channel remembers (least recently used goes
+# first). A retry arrives within seconds of the send it repeats, so this only
+# has to outlast a handful of messages in one turn.
+STEERING_SEEN_MAXSIZE = 256
 
 
 class SteeringChannel:
@@ -42,8 +48,25 @@ class SteeringChannel:
     """
 
     def __init__(self) -> None:
-        self.queue: "asyncio.Queue[Any]" = asyncio.Queue(maxsize=STEERING_QUEUE_MAXSIZE)
+        self.queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=STEERING_QUEUE_MAXSIZE)
         self.active: bool = False
+        self._seen: "OrderedDict[str, str]" = OrderedDict()
+
+    def recall_outcome(self, request_id: Optional[str]) -> Optional[str]:
+        """The outcome remembered for ``request_id`` (it was queued), or None."""
+        if not isinstance(request_id, str) or request_id not in self._seen:
+            return None
+        self._seen.move_to_end(request_id)
+        return self._seen[request_id]
+
+    def remember_outcome(self, request_id: Optional[str], outcome: str) -> None:
+        """Remember that ``request_id`` was queued so a repeat is not queued again."""
+        if not isinstance(request_id, str) or not request_id:
+            return
+        self._seen[request_id] = outcome
+        self._seen.move_to_end(request_id)
+        while len(self._seen) > STEERING_SEEN_MAXSIZE:
+            self._seen.popitem(last=False)
 
     def activate(self) -> None:
         """Mark a loop as actively consuming this channel.

@@ -23,7 +23,6 @@ wait for its next poll, and a repeat finds the future already resolved.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -35,6 +34,12 @@ from atlas.application.chat.runs.control_bus import (
     STALE_GENERATION,
     get_run_control_bus,
     reply,
+)
+from atlas.application.chat.runs.registry import (
+    STEER_NOT_DRAINING,
+    STEER_QUEUE_FULL,
+    STEER_QUEUED,
+    STEER_RUN_FINISHED,
 )
 from atlas.core.user_identity import normalize_user_email
 
@@ -53,6 +58,26 @@ def user_actor(user_email: str) -> Dict[str, Any]:
 
 
 SERVICE_ACTOR: Dict[str, Any] = {"kind": "service"}
+
+
+def _steer_reply(outcome: str, record: Any) -> Dict[str, Any]:
+    if outcome == STEER_QUEUED:
+        return reply(True, run_id=record.run_id, conversation_id=record.conversation_id)
+    if outcome == STEER_QUEUE_FULL:
+        return reply(
+            False,
+            "steering_queue_full",
+            "The agent steering queue is full. Please wait for the agent to make "
+            "progress before sending another steering message.",
+        )
+    if outcome == STEER_NOT_DRAINING:
+        return reply(
+            False,
+            "conversation_busy",
+            "This conversation already has a run in progress. Wait for it to "
+            "reach its next step, or stop it, before sending another message.",
+        )
+    return reply(False, "run_not_found", "The run has finished.")
 
 
 class RunDirectoryUnavailable(Exception):
@@ -99,7 +124,7 @@ class RunControlService:
         if command == STOP:
             return self._stop(run_id, actor)
         if command == STEER:
-            return await self._steer(run_id, actor, args, envelope.get("deadline"))
+            return await self._steer(run_id, actor, args, envelope.get("deadline"), envelope.get("request_id"))
         if command == APPROVAL:
             return await self._approval(run_id, actor, args)
         if command == AUTO_APPROVE:
@@ -137,44 +162,36 @@ class RunControlService:
         return reply(True, changed=changed)
 
     async def _steer(self, run_id: str, actor: Dict[str, Any], args: Dict[str, Any],
-                     deadline: Any = None) -> Dict[str, Any]:
+                     deadline: Any = None, request_id: Optional[str] = None) -> Dict[str, Any]:
         record = self._owned_record(run_id, actor)
         if record is None or record.is_terminal:
             return reply(False, "run_not_found", "The run has finished.")
-        steering = record.steering
-        if steering is None or not steering.active:
-            return reply(
-                False,
-                "conversation_busy",
-                "This conversation already has a run in progress. Wait for it to "
-                "reach its next step, or stop it, before sending another message.",
-            )
-        if self._refusal_check is not None:
-            refusal = await self._refusal_check(record.session_id, args.get("compliance_level_filter"))
-            if refusal:
-                return reply(False, "classification_refused", refusal)
-        if deadline is not None and await _shared_now() > float(deadline):
-            # The check outlasted the sender's wait: it has already reported a
-            # timeout, and a client retry without a request id would queue a
-            # second copy.
-            return reply(False, COMMAND_EXPIRED, "The command arrived after its deadline.")
-        # Re-checked after the last await, right before queueing: the run may
-        # have ended, or its loop stopped draining, while the classification
-        # check or the clock read was awaited, and a message queued then would
-        # be acknowledged but never consumed.
-        if record.is_terminal or record.steering is not steering or not steering.active:
-            return reply(False, "run_not_found", "The run has finished.")
-        try:
-            steering.queue.put_nowait(args.get("content", ""))
-        except asyncio.QueueFull:
-            return reply(
-                False,
-                "steering_queue_full",
-                "The agent steering queue is full. Please wait for the agent to make "
-                "progress before sending another steering message.",
-            )
-        logger.info("Steered run %s with a message received by another replica", record.run_id)
-        return reply(True, run_id=record.run_id, conversation_id=record.conversation_id)
+        registry = self._registry()
+        prior = registry.prior_steer(record.run_id, request_id)
+        if prior is None:
+            steering = record.steering
+            if steering is None or not steering.active:
+                return _steer_reply(STEER_NOT_DRAINING, record)
+            if self._refusal_check is not None:
+                refusal = await self._refusal_check(record.session_id, args.get("compliance_level_filter"))
+                if refusal:
+                    return reply(False, "classification_refused", refusal)
+            if deadline is not None and await _shared_now() > float(deadline):
+                # The check outlasted the sender's wait: it has already reported a
+                # timeout, and a client retry without a request id would queue a
+                # second copy.
+                return reply(False, COMMAND_EXPIRED, "The command arrived after its deadline.")
+        # The registry re-checks the run after the last await, right before
+        # queueing, and answers a request id it has already seen with the
+        # outcome that request had.
+        outcome = prior or registry.steer(record.run_id, args.get("content", ""), request_id)
+        if outcome == STEER_NOT_DRAINING and prior is None:
+            # It was draining when this command arrived and stopped during the
+            # awaits above: the run is as good as finished.
+            return _steer_reply(STEER_RUN_FINISHED, record)
+        if outcome == STEER_QUEUED:
+            logger.info("Steered run %s with a message received by another replica", record.run_id)
+        return _steer_reply(outcome, record)
 
     async def _approval(self, run_id: str, actor: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         from atlas.application.chat.runs.execution_state import (
@@ -401,11 +418,12 @@ async def route_approval(entry: Dict[str, Any], user_email: str, invocation_id: 
                          tool_call_id: Optional[str]) -> Dict[str, Any]:
     """Wake the owner's waiting tool after this replica recorded the outcome.
 
-    The request id is derived from the invocation, so every replica that
-    records or re-sends the same answer sends the same command.
+    The request id is derived from the run and the invocation, so every replica
+    that records or re-sends the same answer sends the same command, and two
+    runs that reuse a tool call id never share a dedup record.
     """
     args = {"invocation_id": invocation_id, "tool_call_id": tool_call_id}
-    request_id = f"approval:{invocation_id or tool_call_id}"
+    request_id = f"approval:{entry.get('run_id')}:{invocation_id or tool_call_id}"
     return await _send(entry, APPROVAL, user_actor(user_email), args, request_id=request_id)
 
 

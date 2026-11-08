@@ -14,6 +14,7 @@ import { useAgentMode } from '../hooks/chat/useAgentMode'
 import { useMessages } from '../hooks/chat/useMessages'
 import { useFiles } from '../hooks/chat/useFiles'
 import { useSettings } from '../hooks/useSettings'
+import { newRequestId, rememberSteerFrame, takeSteerRetry } from '../utils/steerRetry'
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
@@ -326,6 +327,9 @@ export const ChatProvider = ({ children }) => {
 		save_mode: saveMode,
 		incognito: saveMode !== 'server',
 	}
+	// Chat frames by request id, so a steer the owner did not answer can be
+	// repeated once with the same id (issue #1128).
+	const steerRetryRef = useRef(new Map())
 	const buildContextRequestFields = useCallback(() => ({ ...contextRequestFieldsRef.current }), [])
 	const contextCompaction = useContextCompaction({
 		config: config.contextCompaction,
@@ -658,6 +662,12 @@ export const ChatProvider = ({ children }) => {
 			streamToken,
 			streamEnd,
 			getVisibleConversationId: () => activeConversationIdRef.current,
+			// One repeat of a steer whose owner did not answer, with the same
+			// request id: the owner applies it at most once (issue #1128).
+			retrySteer: (errorFrame) => {
+				const frame = takeSteerRetry(steerRetryRef.current, errorFrame)
+				return !!frame && !!sendMessageRef.current && !!sendMessageRef.current(frame)
+			},
 			onRunStatus: (data) => {
 				if (data?.type === 'run_started' && !activeConversationIdRef.current) {
 					// The run was just admitted for the chat on screen, which has no
@@ -1135,8 +1145,13 @@ export const ChatProvider = ({ children }) => {
 		// owns the folder.
 		const activeKeyIsPersona = isPersonaKey(activeKey)
 
-		const sent = sendMessage({
+		// Every chat frame carries a fresh request id: if it lands as a steer,
+		// the run's owner applies it at most once, so the single retry below
+		// (same id) cannot queue the message twice (issue #1128).
+		const requestId = newRequestId()
+		const chatFrame = {
 			type: 'chat',
+			request_id: requestId,
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
@@ -1193,7 +1208,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			workspace_id: pendingWorkspaceRestoreRef.current ?? activeWorkspaceId ?? null,
 			// Per-conversation automatic compaction (issue #877).
 			auto_compact: contextCompaction.enabled ? contextCompaction.autoCompact : undefined,
-		})
+		}
+		const sent = sendMessage(chatFrame)
 		// Guard against a stale isConnected: if the socket dropped between the
 		// check above and the send, bail out without mutating the UI so we don't
 		// hang on "Thinking...".
@@ -1201,6 +1217,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			toast.error('Not connected. Waiting to reconnect before sending.')
 			return false
 		}
+		rememberSteerFrame(steerRetryRef.current, requestId, chatFrame)
 		// A reconnect snapshot fetched before this turn must not erase it.
 		reconnectResyncGenerationRef.current += 1
 		// Sending a turn is the only user action that re-binds a conversation to

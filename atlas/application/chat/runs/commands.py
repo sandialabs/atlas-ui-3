@@ -125,7 +125,7 @@ async def steer_addressed_run(websocket, registry, user_email: str, data: dict) 
         # steer is refused instead.
         off_record=turn_is_off_record(data),
     )
-    frame = steer_frame(answer, entry)
+    frame = steer_frame(answer, entry, data.get("request_id"))
     if frame is None:
         return False
     await websocket.send_json(frame)

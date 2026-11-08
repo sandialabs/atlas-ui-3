@@ -281,6 +281,7 @@ export function createWebSocketHandler(deps) {
     streamToken,
     streamEnd,
     getVisibleConversationId,
+    retrySteer,
     onRunStatus,
     onConversationSaved,
     onContextUsage,
@@ -654,6 +655,12 @@ export function createWebSocketHandler(deps) {
       // flagged as needing attention in the history list instead, and the
       // server replays the request when that conversation is opened, so the
       // frame is deferred rather than lost.
+      // A steer whose owner did not answer is repeated once with its own
+      // request id (issue #1128), silently. Before the routing above: the
+      // user may have switched conversations while it timed out, and the
+      // repeat is still owed.
+      if (data.type === 'error' && typeof retrySteer === 'function' && retrySteer(data)) return
+
       if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {

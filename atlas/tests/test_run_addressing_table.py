@@ -26,6 +26,7 @@ from test_run_control_service import (  # noqa: F401  (fixtures and helpers)
     _ApiReplicas,
     _pending_approval,
     _release,
+    _remote_run_for_conversation,
     cluster,
 )
 
@@ -500,6 +501,25 @@ async def test_C07_remote_off_record_steer_is_refused_before_it_is_written(clust
     assert cluster.registry.get(run.run_id).steering.queue.empty()
 
 
+async def test_C15_retry_lands_on_the_owner_after_a_routed_attempt(cluster):
+    channel = _active_channel()
+    run = await cluster.run(steering=channel)
+    handled, frames = await _steer(run.conversation_id, request_id="r15")
+    assert handled and frames[0]["update_type"] == "steering_queued"
+    # The retry reaches the owner itself: same request id, queued once.
+    assert cluster.registry.steer(run.run_id, "go left", "r15") == "steering_queued"
+    assert channel.queue.qsize() == 1
+
+
+async def test_C16_retry_is_routed_after_a_local_attempt_on_the_owner(cluster):
+    channel = _active_channel()
+    run = await cluster.run(steering=channel)
+    assert cluster.registry.steer(run.run_id, "go left", "r16") == "steering_queued"
+    handled, frames = await _steer(run.conversation_id, request_id="r16")
+    assert handled and frames[0]["update_type"] == "steering_queued"
+    assert channel.queue.qsize() == 1
+
+
 def _local_steer_frames(chat_service, extra, steering):
     from fastapi.testclient import TestClient
     from main import app
@@ -593,6 +613,27 @@ def _two_pending_call_zero():
         manager.create_approval_request("call_0", "server_tool", {}, user_email=OWNER,
                                         invocation_id=f"{run_id}:0:call_0", run_id=run_id)
     return manager
+
+
+async def test_P09_runs_reusing_an_invocation_id_do_not_share_a_nudge_dedup_record(cluster):
+    first, second = await cluster.run(), await cluster.run()
+    entries = {run.run_id: await _remote_run_for_conversation(run.conversation_id) for run in (first, second)}
+    sent = []
+
+    async def capture(entry, command, actor, args=None, request_id=None, off_record=False):
+        sent.append(request_id)
+        return {"ok": True}
+
+    from atlas.application.chat.runs import run_control
+
+    original = run_control._send
+    run_control._send = capture
+    try:
+        for run in (first, second):
+            await run_control.route_approval(entries[run.run_id], OWNER, "inv-1", "call_0")
+    finally:
+        run_control._send = original
+    assert len(set(sent)) == 2 and all("inv-1" in r for r in sent)
 
 
 async def test_P07_bare_tool_call_id_shared_by_two_runs_is_ambiguous():

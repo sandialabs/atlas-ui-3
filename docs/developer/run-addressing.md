@@ -148,6 +148,9 @@ Code path: local run (`main.py`), then `steer_addressed_run`
 | `C10` ws chat | conversation | off-record turn | local | refused `off_record`, as the remote path does, unless the run is itself off-record | the local run branch of `chat` compares `turn_is_off_record` with `RunRecord.off_record` | `atlas/tests/test_run_addressing_table.py` |
 | `C13` ws chat | run_id only, neither | any | any | starts a new turn, except that a frame naming no conversation continues the plain turn this connection runs (steered into it, or refused `conversation_busy`) | the `chat` branch looks up `active_bound_to` when the frame has no conversation | n/a: not exercised here |
 | `C14` ws chat | conversation | tracked | remote live, two real replicas | steer reaches the loop once | via `route_steer` | `test_steer_via_non_owner_reaches_the_loop_once` |
+| `C15` ws chat | conversation | tracked | retry lands on the owner after a routed attempt, same `request_id` | queued once | owner `_steer` and the local branch of `chat` both call `RunRegistry.steer` | `atlas/tests/test_run_addressing_table.py` |
+| `C16` ws chat | conversation | tracked | retry is routed after a local attempt on the owner, same `request_id` | queued once | the same registry call, reached through `route_steer` | `atlas/tests/test_run_addressing_table.py` |
+| `C17` ws chat | conversation | tracked | remote live, two real replicas, the retry switches replicas | queued once, in either order | the same registry call | `test_steer_retried_on_another_replica_lands_once` |
 
 ## ws tool_approval_response
 
@@ -165,10 +168,11 @@ and `nudge_approval` resolves the run and calls `route_approval` to wake a remot
 | `P06` ws approval | run_id | tracked | remote live, two real replicas | tool runs once | via `route_approval` | `test_approval_via_non_owner_runs_the_tool_once` |
 | `P07` ws approval | tool_call_id only, shared by two runs | tracked | local | refused `unknown_tool_approval`; neither request settles | `find_open_request` finds two matches | `atlas/tests/test_run_addressing_table.py` |
 | `P08` ws approval | tool_call_id plus run_id | tracked | local | the hinted run's request is selected | `_bare_matches` filters on `run_id` | `atlas/tests/test_run_addressing_table.py` |
+| `P09` ws approval | run_id | tracked | two runs reuse one invocation id | each run's nudge has its own request id and dedup record | `route_approval` scopes the id to `(run_id, invocation_id)` | `atlas/tests/test_run_addressing_table.py` |
 
 ## Counts
 
-Rows `S01-S34`, `R01-R12`, `C01-C14` and `P01-P08`, less the eight retired
+Rows `S01-S34`, `R01-R12`, `C01-C17` and `P01-P09`, less the eight retired
 `untracked turn` ids (`S05`, `S06`, `S16`, `S17`, `S18`, `S29`, `C11`, `C12`):
-60 rows. `GAP` rows (4): `S19`, `S20`, `S31`, `S32`. All are
+64 rows. `GAP` rows (4): `S19`, `S20`, `S31`, `S32`. All are
 strict `xfail` tests.
