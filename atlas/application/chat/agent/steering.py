@@ -37,6 +37,21 @@ STEERING_QUEUE_MAXSIZE = 8
 STEERING_SEEN_MAXSIZE = 256
 
 
+class QueuedSteer(str):
+    """Steering text that remembers the client request id it was queued under.
+
+    A plain ``str`` to the loop; ``drain_leftovers`` reads ``request_id`` to
+    forget the id of a message it discards.
+    """
+
+    request_id: Optional[str] = None
+
+    def __new__(cls, text: str, request_id: Optional[str] = None) -> "QueuedSteer":
+        obj = super().__new__(cls, text)
+        obj.request_id = request_id if isinstance(request_id, str) and request_id else None
+        return obj
+
+
 class SteeringChannel:
     """Conduit for user steering messages to a running agent loop.
 
@@ -98,7 +113,13 @@ class SteeringChannel:
         leftovers = []
         while True:
             try:
-                leftovers.append(self.queue.get_nowait())
+                item = self.queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+            leftovers.append(item)
+            # The text is discarded, so a retry of its id must not be told it
+            # is queued: forget the id and let the retry be judged afresh.
+            request_id = getattr(item, "request_id", None)
+            if request_id:
+                self._seen.pop(request_id, None)
         return leftovers

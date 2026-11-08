@@ -41,6 +41,7 @@ from uuid import UUID, uuid4
 
 # The admission errors live in their own module so the coordinator can raise
 # them without importing the registry.
+from atlas.application.chat.agent.steering import QueuedSteer
 from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
@@ -139,6 +140,9 @@ class RunRecord:
     status: RunStatus = RunStatus.QUEUED
     task: Optional["asyncio.Task"] = None
     steering: Optional[Any] = None
+    # Request ids a steer queued on this run, kept after the channel is
+    # released at the end so a late retry still gets its remembered answer.
+    steer_seen: Optional[Any] = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     ended_at: Optional[float] = None
@@ -342,10 +346,19 @@ class RunRegistry:
             return None
         return record
 
+    @staticmethod
+    def _release_steering(record: "RunRecord") -> None:
+        """Drop the channel at the end of a run but keep its remembered ids."""
+        if record.steering is not None:
+            record.steer_seen = record.steering
+        record.steering = None
+
     def prior_steer(self, run_id: Optional[str], request_id: Optional[str]) -> Optional[str]:
         """The outcome an earlier steer with this ``request_id`` had, or None."""
         record = self.get(run_id)
-        steering = record.steering if record is not None else None
+        if record is None:
+            return None
+        steering = record.steering or record.steer_seen
         return steering.recall_outcome(request_id) if steering is not None else None
 
     def steer(self, run_id: Optional[str], text: str, request_id: Optional[str] = None) -> str:
@@ -353,25 +366,29 @@ class RunRegistry:
 
         Returns ``STEER_QUEUED``, ``STEER_QUEUE_FULL``, ``STEER_RUN_FINISHED``
         or ``STEER_NOT_DRAINING``. A ``request_id`` already queued on this run
-        answers ``STEER_QUEUED`` again and queues nothing; refusals changed
-        nothing, so they are not remembered, so a client retry, a
-        replayed bus command and a local resend all land once. Callers check
+        answers ``STEER_QUEUED`` again, even once the run has ended, and queues
+        nothing; refusals changed nothing, so they are not remembered, so a
+        client retry, a replayed bus command and a local resend all land once. Callers check
         ownership and refusals first; this checks the run's state at the moment
         of queueing, after any of their awaits.
         """
         record = self.get(run_id)
-        if record is None or record.is_terminal:
+        if record is None:
             return STEER_RUN_FINISHED
         steering = record.steering
-        if steering is None:
-            return STEER_NOT_DRAINING
-        seen = steering.recall_outcome(request_id)
+        # The remembered outcome wins over the terminal guard: a retry of an
+        # id that was queued answers the same even after the run ends.
+        seen = self.prior_steer(run_id, request_id)
         if seen is not None:
             return seen
+        if record.is_terminal:
+            return STEER_RUN_FINISHED
+        if steering is None:
+            return STEER_NOT_DRAINING
         if not steering.active:
             return STEER_NOT_DRAINING
         try:
-            steering.queue.put_nowait(text)
+            steering.queue.put_nowait(QueuedSteer(text, request_id))
         except asyncio.QueueFull:
             # Nothing was queued, so nothing is remembered: a retry of this
             # request may succeed once the loop has drained.
@@ -661,7 +678,7 @@ class RunRegistry:
         if status.is_terminal:
             record.ended_at = record.updated_at
             record.end_reason = reason or default_end_reason(status.value)
-            record.steering = None
+            self._release_steering(record)
             record.task = None
             # Whatever the run was streaming closed with it (issue #957): the
             # turn's text is in the stored transcript now, and a stale buffer
@@ -1002,7 +1019,7 @@ class RunRegistry:
         record.pending_requests.clear()
         record.updated_at = time.time()
         record.ended_at = record.ended_at or record.updated_at
-        record.steering = None
+        self._release_steering(record)
         record.task = None
         # The claim belongs to whoever took the run over; never renew or
         # release it from here (the scripts would refuse anyway).

@@ -2218,6 +2218,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "message": "This run is recorded, so a message that is not saved cannot steer it.",
                                 "error_type": "off_record",
                                 "steering": True,
+                                "request_id": data.get("request_id"),
                                 "run_id": tracked_run.run_id,
                                 "conversation_id": tracked_run.conversation_id,
                             })
@@ -2237,6 +2238,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 # Marks a refused steer: the run keeps going,
                                 # so the client must not end the turn.
                                 "steering": True,
+                                "request_id": steer_request_id,
                                 "run_id": tracked_run.run_id,
                                 "conversation_id": tracked_run.conversation_id,
                             })
@@ -2255,6 +2257,8 @@ async def websocket_endpoint(websocket: WebSocket):
                                     "another steering message."
                                 ),
                                 "error_type": "steering_queue_full",
+                                "steering": True,
+                                "request_id": steer_request_id,
                                 "run_id": tracked_run.run_id,
                                 "conversation_id": tracked_run.conversation_id,
                             })
@@ -2283,6 +2287,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             "before sending another message."
                         ),
                         "error_type": "conversation_busy",
+                        "steering": True,
+                        "request_id": data.get("request_id"),
                         "run_id": tracked_run.run_id,
                         "conversation_id": tracked_run.conversation_id,
                     })
@@ -2307,6 +2313,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         ),
                         "error_type": "steer_run_finished",
                         "steering": True,
+                        "request_id": data.get("request_id"),
                         "conversation_id": frame_conversation_id,
                     })
                     continue

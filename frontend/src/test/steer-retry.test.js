@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { newRequestId, rememberSteerFrame, takeSteerRetry } from '../utils/steerRetry'
+import { newRequestId, rememberSteerFrame, takeSteerRetry, STEER_RETRY_WINDOW_MS } from '../utils/steerRetry'
 import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
 
 const unavailable = (requestId, extra = {}) => ({
@@ -25,20 +25,27 @@ describe('steer retry (issue #1128)', () => {
     expect(takeSteerRetry(frames, unavailable('r1'))).toBeNull()
   })
 
-  it('also retries a command timeout, but not a refusal', () => {
+  it('retries only an unanswered steer, not a refusal or a timeout code', () => {
     const frames = new Map()
     rememberSteerFrame(frames, 'r1', { type: 'chat', request_id: 'r1' })
     rememberSteerFrame(frames, 'r2', { type: 'chat', request_id: 'r2' })
     expect(takeSteerRetry(frames, unavailable('r2', { error_type: 'steering_queue_full' }))).toBeNull()
-    expect(takeSteerRetry(frames, unavailable('r1', { error_type: 'command_timeout' }))).not.toBeNull()
+    // The server reports an unanswered steer as run_control_unavailable, so
+    // command_timeout never matches a steer frame.
+    expect(takeSteerRetry(frames, unavailable('r1', { error_type: 'command_timeout' }))).toBeNull()
   })
 
-  it('forgets the oldest frames', () => {
+  it('expires frames by deadline, not by count', () => {
     const frames = new Map()
-    for (let i = 0; i < 20; i += 1) rememberSteerFrame(frames, `r${i}`, { request_id: `r${i}` })
-    expect(frames.size).toBe(8)
-    expect(takeSteerRetry(frames, unavailable('r0'))).toBeNull()
-    expect(takeSteerRetry(frames, unavailable('r19'))).not.toBeNull()
+    for (let i = 0; i < 20; i += 1) rememberSteerFrame(frames, `r${i}`, { request_id: `r${i}` }, 1000)
+    expect(frames.size).toBe(20)
+    expect(takeSteerRetry(frames, unavailable('r0'), 1000 + STEER_RETRY_WINDOW_MS - 1)).not.toBeNull()
+    // Past the deadline the frame is not repeated, and is dropped.
+    expect(takeSteerRetry(frames, unavailable('r1'), 1000 + STEER_RETRY_WINDOW_MS + 1)).toBeNull()
+    expect(frames.has('r1')).toBe(false)
+    // Remembering a new frame sweeps the expired ones.
+    rememberSteerFrame(frames, 'new', { request_id: 'new' }, 1000 + STEER_RETRY_WINDOW_MS + 1)
+    expect(frames.size).toBe(1)
   })
 
   it('repeats a steer even when another conversation is on screen', () => {
