@@ -36,6 +36,7 @@ from atlas.application.chat.runs.commands import (
     steer_addressed_run,
     stop_addressed_run,
 )
+from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 from atlas.application.chat.runs.launcher import LaunchRefused
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus
 
@@ -96,7 +97,7 @@ async def _finished_parent_with_live_child_on_a(cluster):
     child = cluster.registry.start(conversation_id="conv-child", user_email=OWNER,
                                    parent_run_id=parent.run_id, depth=1)
     cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
-    await cluster.a.claim(child.run_id, child.conversation_id)
+    await cluster.a.claim(child.run_id, child.conversation_id, parent_run_id=parent.run_id)
     cluster.registry.set_status(parent.run_id, RunStatus.COMPLETED)
     await _release(cluster, parent)
     return parent, child
@@ -175,11 +176,11 @@ async def test_S08_run_id_only_finished_parent_remote_terminal(cluster, local):
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 
-@gap("the directory record outlives only 300 s, the owner's registry 30 min: a stop naming a "
-     "finished parent past the record is a silent no-op and its children keep running")
-async def test_S09_run_id_only_finished_parent_record_expired(cluster, local):
+async def test_S09_run_id_only_finished_parent_record_outlives_children(cluster, local):
     parent, child = await _finished_parent_with_live_child_on_a(cluster)
-    await cluster.b.bus._client().delete(cluster.b.coordinator.keys.run(parent.run_id))
+    # The record is kept beyond the retention window while a child is live.
+    ttl = await cluster.b.bus._client().pttl(cluster.b.coordinator.keys.run(parent.run_id))
+    assert ttl > RUN_RETENTION_SECONDS * 1000
     await ws_stop(local, {"run_id": parent.run_id})
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
@@ -407,16 +408,17 @@ async def test_R06_unknown_id_unreadable(cluster, monkeypatch):
     assert answer["ok"] is False and answer["code"] == "owner_unavailable"
 
 
-@gap("same retention mismatch as S09: past the 300 s directory record the cancel answers not found "
-     "while the owner still retains the finished run and its children for 30 min")
-async def test_R07_api_run_finished_record_expired(cluster, monkeypatch):
+async def test_R07_api_run_finished_record_outlives_children(cluster, monkeypatch):
     api = _ApiReplicas(cluster, monkeypatch)
     run = await api.finished_on_a()
     child = cluster.registry.start(conversation_id="conv-child", user_email=OWNER,
                                    parent_run_id=run.run_id, depth=1)
     cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
-    await cluster.a.claim(child.run_id, child.conversation_id)
-    await cluster.b.bus._client().delete(cluster.b.coordinator.keys.run(run.run_id))
+    claim = await cluster.a.claim(child.run_id, child.conversation_id, parent_run_id=run.run_id)
+    # The child's next heartbeat keeps the finished parent's record readable.
+    await cluster.a.coordinator.renew([claim], {})
+    ttl = await cluster.b.bus._client().pttl(cluster.b.coordinator.keys.run(run.run_id))
+    assert ttl > RUN_RETENTION_SECONDS * 1000
     with contextlib.suppress(LaunchRefused):
         await cancel_api_run_addressed(run.run_id)
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED

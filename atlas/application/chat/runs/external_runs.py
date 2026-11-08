@@ -583,15 +583,9 @@ async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
             raise LaunchRefused(
                 "The run's status could not be read right now. Try again.", code="unavailable"
             )
-        source = doc.get("source")
-        if source is None:
-            # No launch source written (the launch had not returned, or the
-            # write failed and the owner died or is retrying): it may well be
-            # an API run, interrupted or not, so never a 404.
-            raise LaunchRefused(
-                "The run's status is not available yet. Try again.", code="unavailable"
-            )
-        if source != API_SOURCE:
+        # The source is in the record from admission, so a run that is not an
+        # API run is known not to be one.
+        if doc.get("source") != API_SOURCE:
             raise
         return _status_from_shared(doc)
 
@@ -711,6 +705,7 @@ async def follow_up_api_run(
             # The conversation's classification is immutable: the follow-up
             # runs at the level it was launched at, never one the caller picks.
             compliance_level=spec.get("compliance_level"),
+            follow_up_of=target.run_id,
         )
         new_spec["previous_run_id"] = target.run_id
         handle = _handle(record, new_spec, admin_gated)

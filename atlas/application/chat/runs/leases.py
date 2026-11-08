@@ -129,6 +129,9 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     # The launch source is a field of its own, written before the launch
     # returned; ``None`` means it has not been written (yet).
     view["source"] = raw.get("source") if "source" in raw else view.get("source")
+    # Known from admission, so present before the owner's first snapshot.
+    view["parent_run_id"] = view.get("parent_run_id") or raw.get("parent_run_id") or None
+    view["previous_run_id"] = view.get("previous_run_id") or raw.get("follow_up_of") or None
     view.update({
         "run_id": raw.get("run_id"),
         "conversation_id": raw.get("conversation_id"),

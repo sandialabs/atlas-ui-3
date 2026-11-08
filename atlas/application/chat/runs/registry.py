@@ -45,7 +45,7 @@ from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
 )
-from atlas.application.chat.runs.coordination import release_claim_soon
+from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS, release_claim_soon
 from atlas.application.chat.runs.stream_replay import StreamReplay
 from atlas.core.coordination_metrics import (
     EndReason,
@@ -69,16 +69,19 @@ def _current_task() -> Optional[asyncio.Task]:
 # them here keeps each task alive until its write lands.
 _PROJECTION_TASKS: "set[asyncio.Task]" = set()
 
-# How long a run that reached a terminal state stays queryable. Long enough
-# that a browser reopened a few minutes later still learns "that finished" /
-# "that failed" instead of silently showing nothing; short enough that an
-# always-on server does not accumulate run records forever.
-TERMINAL_RETENTION_SECONDS = 30 * 60
-
+# A run that reached a terminal state stays queryable for RUN_RETENTION_SECONDS
+# (coordination.py): long enough that a browser reopened a few minutes later
+# still learns "that finished" / "that failed", short enough that an always-on
+# server does not accumulate run records forever.
 # Cap on retained terminal runs per user, so a scripted client that starts and
 # finishes thousands of runs inside the retention window cannot grow the
 # registry without bound.
 MAX_RETAINED_TERMINAL_RUNS_PER_USER = 50
+
+# How far down (and, in the shared record's scripts, up) the launch tree
+# liveness and retention look. ATLAS_LAUNCH_MAX_DEPTH has no upper bound, so
+# this is a safety cap, not the depth limit itself.
+MAX_SUBTREE_DEPTH = 64
 
 # Matches the title length ConversationRepository stores for a conversation.
 RUN_TITLE_MAX_CHARS = 200
@@ -1023,8 +1026,10 @@ class RunRegistry:
                 # no record and cascade to nothing. Descendants, not just direct
                 # children -- a finished child can itself have a live one.
                 continue
-            ended = record.ended_at or record.updated_at
-            if now - ended > TERMINAL_RETENTION_SECONDS:
+            # The window starts when the last descendant ended, as the shared
+            # record's does (coordinator scripts), so both expire together.
+            ended = max(self._ended_at(record), self._latest_end_below(run_id))
+            if now - ended > RUN_RETENTION_SECONDS:
                 self.remove(run_id)
                 removed += 1
             else:
@@ -1040,9 +1045,23 @@ class RunRegistry:
 
         return removed
 
+    @staticmethod
+    def _ended_at(record: RunRecord) -> float:
+        return record.ended_at or record.updated_at
+
+    def _latest_end_below(self, run_id: str, _depth: int = 0) -> float:
+        """When the last run below ``run_id`` in the launch tree ended (0 if none)."""
+        if _depth > MAX_SUBTREE_DEPTH:  # pragma: no cover - depth is capped far below this
+            return 0.0
+        latest = 0.0
+        for child in self.children_of(run_id, include_terminal=True):
+            latest = max(latest, self._ended_at(child) if child.is_terminal else 0.0,
+                         self._latest_end_below(child.run_id, _depth + 1))
+        return latest
+
     def _has_live_descendants(self, run_id: str, _depth: int = 0) -> bool:
         """Whether anything below ``run_id`` in the launch tree is still running."""
-        if _depth > 10:  # pragma: no cover - depth is capped far below this
+        if _depth > MAX_SUBTREE_DEPTH:  # pragma: no cover - depth is capped far below this
             return False
         for child in self.children_of(run_id, include_terminal=True):
             if not child.is_terminal:

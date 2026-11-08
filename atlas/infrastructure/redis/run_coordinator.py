@@ -13,7 +13,11 @@ is documented in ``docs/developer/run-coordination.md``:
     The live run record: ``run_id``, ``conversation_id``, ``user_email``,
     ``owner`` (replica id), ``generation`` (fencing token), ``status``,
     ``lease_expires_at`` (epoch ms, 0 once released), ``created_at``,
-    ``updated_at``. Kept for a retention window after release.
+    ``updated_at``, and the routing fields known at admission: ``source``,
+    ``parent_run_id``, ``follow_up_of`` (empty when absent). Kept for the
+    retention window after release, and for as long as a descendant is live.
+``<p>:run-kids:<run_id>`` (set)
+    The run ids launched by ``run_id``; how the scripts find live descendants.
 ``<p>:run-conv:<conversation_id>`` (string, PX lease)
     The run id holding the conversation. One per conversation, across all
     users: conversation ids are global in storage, so two users must not
@@ -52,7 +56,7 @@ from atlas.application.chat.runs.admission_errors import (
 )
 from atlas.application.chat.runs.coordination import (
     RUN_LEASE_SECONDS,
-    RUN_RECORD_RETENTION_SECONDS,
+    RUN_RETENTION_SECONDS,
     RunClaim,
     RunCoordinationUnavailableError,
     default_replica_id,
@@ -71,8 +75,63 @@ local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 """
 
+# Subtree retention, shared by the scripts that end a run. ``p`` is the key
+# prefix (``<p>:``), because the keys of a run's ancestors and descendants are
+# not known to the caller. A run with a live descendant keeps its record, so a
+# stop or cancel through another replica still finds it; the ancestor walk is
+# bounded like the registry's (``MAX_SUBTREE_DEPTH``).
+_SUBTREE = """
+local function terminal(status)
+  return status == 'completed' or status == 'failed' or status == 'cancelled'
+end
+local function live_below(p, id, depth)
+  if depth > 64 then return false end
+  local kids_key = p .. 'run-kids:' .. id
+  for _, kid in ipairs(redis.call('SMEMBERS', kids_key)) do
+    local rec = p .. 'run:' .. kid
+    local status = redis.call('HGET', rec, 'status')
+    if not status then
+      redis.call('SREM', kids_key, kid)
+    else
+      if (not terminal(status))
+          and tonumber(redis.call('HGET', rec, 'lease_expires_at') or '0') > now then
+        return true
+      end
+      if live_below(p, kid, depth + 1) then return true end
+    end
+  end
+  return false
+end
+local function expire_both(p, id, ms)
+  redis.call('PEXPIRE', p .. 'run:' .. id, ms)
+  redis.call('PEXPIRE', p .. 'run-kids:' .. id, ms)
+end
+-- A run just ended: its record keeps `retention` after the last descendant
+-- ends (`lease + retention` while one is live, renewed by that descendant's
+-- own heartbeat), and finished ancestors whose last live descendant it was
+-- start their retention now.
+local function end_run(p, id, retention, lease)
+  if live_below(p, id, 0) then
+    expire_both(p, id, lease + retention)
+    return
+  end
+  expire_both(p, id, retention)
+  local cur = redis.call('HGET', p .. 'run:' .. id, 'parent_run_id')
+  local hops = 0
+  while cur and cur ~= '' and hops < 64 do
+    local rec = p .. 'run:' .. cur
+    local status = redis.call('HGET', rec, 'status')
+    if (not status) or (not terminal(status)) or live_below(p, cur, 0) then break end
+    expire_both(p, cur, retention)
+    cur = redis.call('HGET', rec, 'parent_run_id')
+    hops = hops + 1
+  end
+end
+"""
+
 # KEYS: conv, user, run, fence, live
-# ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms
+# ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms,
+#       source, parent_run_id, follow_up_of, key_prefix
 CLAIM_SCRIPT = _NOW + """
 local lease = tonumber(ARGV[6])
 local holder = redis.call('GET', KEYS[1])
@@ -101,16 +160,22 @@ redis.call('PEXPIRE', KEYS[2], lease * 2)
 redis.call('HSET', KEYS[3],
   'run_id', ARGV[1], 'conversation_id', ARGV[2], 'user_email', ARGV[3],
   'owner', ARGV[4], 'generation', generation, 'status', 'queued',
-  'lease_expires_at', expires, 'created_at', now, 'updated_at', now)
+  'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
+  'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
+if ARGV[9] ~= '' then
+  local kids = ARGV[11] .. 'run-kids:' .. ARGV[9]
+  redis.call('SADD', kids, ARGV[1])
+  redis.call('PEXPIRE', kids, lease + tonumber(ARGV[7]))
+end
 redis.call('ZADD', KEYS[5], expires, ARGV[1])
 return {'ok', generation, expires}
 """
 
 # KEYS: run, conv, user, live
 # ARGV: run_id, owner, generation ('' = any generation this owner holds),
-#       status, retention_ms
-RELEASE_SCRIPT = _NOW + """
+#       status, retention_ms, lease_ms, key_prefix
+RELEASE_SCRIPT = _NOW + _SUBTREE + """
 local generation = redis.call('HGET', KEYS[1], 'generation')
 local owner = redis.call('HGET', KEYS[1], 'owner')
 if generation then
@@ -136,14 +201,14 @@ end
 redis.call('ZREM', KEYS[4], ARGV[1])
 if generation then
   redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', 0, 'updated_at', now)
-  redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[5]))
+  end_run(ARGV[7], ARGV[1], tonumber(ARGV[5]), tonumber(ARGV[6]))
 end
 return freed
 """
 
 # KEYS: run, conv, user, live
-# ARGV: run_id, owner, generation, status, lease_ms, retention_ms
-RENEW_SCRIPT = _NOW + """
+# ARGV: run_id, owner, generation, status, lease_ms, retention_ms, key_prefix
+RENEW_SCRIPT = _NOW + _SUBTREE + """
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[3] then return 0 end
 if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[2] then return 0 end
 local current = redis.call('HGET', KEYS[1], 'status')
@@ -163,6 +228,17 @@ redis.call('PEXPIRE', KEYS[3], lease * 2)
 redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', expires, 'updated_at', now)
 redis.call('PEXPIRE', KEYS[1], lease + tonumber(ARGV[6]))
 redis.call('ZADD', KEYS[4], expires, ARGV[1])
+-- A finished ancestor stays readable while this run is live.
+local cur = redis.call('HGET', KEYS[1], 'parent_run_id')
+local hops = 0
+while cur and cur ~= '' and hops < 64 do
+  local rec = ARGV[7] .. 'run:' .. cur
+  local status = redis.call('HGET', rec, 'status')
+  if not status then break end
+  if terminal(status) then expire_both(ARGV[7], cur, lease + tonumber(ARGV[6])) end
+  cur = redis.call('HGET', rec, 'parent_run_id')
+  hops = hops + 1
+end
 return expires
 """
 
@@ -231,7 +307,7 @@ class RedisRunCoordinator:
         *,
         replica_id: Optional[str] = None,
         lease_seconds: float = RUN_LEASE_SECONDS,
-        retention_seconds: float = RUN_RECORD_RETENTION_SECONDS,
+        retention_seconds: float = RUN_RETENTION_SECONDS,
     ):
         self._redis = redis_manager
         self.keys = RunCoordinationKeys(redis_manager)
@@ -239,6 +315,8 @@ class RedisRunCoordinator:
         self.lease_seconds = float(lease_seconds)
         self._lease_ms = int(lease_seconds * 1000)
         self._retention_ms = int(retention_seconds * 1000)
+        # ``<p>:``: the scripts build the keys of a run's relatives from it.
+        self._prefix = redis_manager.key("")
         client = redis_manager.client
         self._claim = client.register_script(CLAIM_SCRIPT)
         self._release = client.register_script(RELEASE_SCRIPT)
@@ -257,6 +335,9 @@ class RedisRunCoordinator:
         conversation_id: str,
         user_email: str,
         max_runs_per_user: int,
+        source: str = "",
+        parent_run_id: Optional[str] = None,
+        follow_up_of: Optional[str] = None,
     ) -> Optional[RunClaim]:
         owner_email = normalize_user_email(user_email)
         try:
@@ -276,6 +357,10 @@ class RedisRunCoordinator:
                     max(1, int(max_runs_per_user)),
                     self._lease_ms,
                     self._retention_ms,
+                    source or "",
+                    parent_run_id or "",
+                    follow_up_of or "",
+                    self._prefix,
                 ],
             )
         except Exception as exc:
@@ -315,7 +400,8 @@ class RedisRunCoordinator:
                 self.keys.user(user_email),
                 self.keys.live(),
             ],
-            args=[run_id, self.replica_id, generation, status, self._retention_ms],
+            args=[run_id, self.replica_id, generation, status, self._retention_ms,
+                  self._lease_ms, self._prefix],
         )
         return bool(int(freed))
 
@@ -356,6 +442,7 @@ class RedisRunCoordinator:
                             statuses.get(claim.run_id, "running"),
                             self._lease_ms,
                             self._retention_ms,
+                            self._prefix,
                         ],
                     )
                 except Exception as exc:
@@ -375,7 +462,8 @@ class RedisRunCoordinator:
 
         Fields as strings, per the contract: ``run_id``, ``conversation_id``,
         ``user_email``, ``owner``, ``generation``, ``status``,
-        ``lease_expires_at``, ``created_at``, ``updated_at``. Readable by any
+        ``lease_expires_at``, ``created_at``, ``updated_at``, ``source``,
+        ``parent_run_id``, ``follow_up_of``. Readable by any
         replica (inspection, fencing checks).
         """
         raw = await self._redis.client.hgetall(self.keys.run(run_id))

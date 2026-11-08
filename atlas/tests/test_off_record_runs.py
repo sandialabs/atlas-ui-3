@@ -46,6 +46,7 @@ CLAIM_FIELDS = {
     "run_id", "conversation_id", "user_email", "owner", "generation", "status",
     "lease_expires_at", "interrupted", "snapshot", "error", "source", "created_at",
     "updated_at", "ended_at", "released_at", "replica", "claimed_at",
+    "parent_run_id", "follow_up_of",
 }
 
 

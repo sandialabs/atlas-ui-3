@@ -33,14 +33,15 @@ from typing import Any, Dict, List, Optional
 
 from redis.exceptions import WatchError
 
+from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
 PROJECTION_TTL_SECONDS = 24 * 60 * 60
 # A finished run's document only has to outlive the clients still reconciling
-# it. Its rows are in history, so it is not kept for the full day.
-TERMINAL_PROJECTION_TTL_SECONDS = 15 * 60
+# it (RUN_RETENTION_SECONDS). Its rows are in history, so it is not kept for the
+# full day.
 _MAX_STR_CHARS = 8000
 _MAX_DEPTH = 6
 _TERMINAL_INVOCATION = frozenset(
@@ -669,7 +670,7 @@ def _outcome_keys(doc: Optional[dict], email: str, indexed=()) -> List[str]:
 
 def _ttl_for(doc: dict) -> int:
     if doc.get("status") in _TERMINAL_RUN:
-        return TERMINAL_PROJECTION_TTL_SECONDS
+        return RUN_RETENTION_SECONDS
     return PROJECTION_TTL_SECONDS
 
 

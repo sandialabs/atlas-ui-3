@@ -58,6 +58,8 @@ def owner_entry(record: Optional[Dict[str, str]], *, include_terminal: bool = Fa
         "generation": generation,
         "status": record.get("status"),
         "source": record.get("source") or "",
+        "parent_run_id": record.get("parent_run_id") or "",
+        "follow_up_of": record.get("follow_up_of") or "",
         "terminal": terminal,
     }
 

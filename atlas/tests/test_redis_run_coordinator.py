@@ -288,3 +288,55 @@ def test_replica_id_is_stable_for_the_process():
     assert default_replica_id() == default_replica_id()
     m = RedisClientManager(RedisSettings(url="redis://fake/0"), client=fakeredis.FakeAsyncRedis())
     assert RedisRunCoordinator(m).replica_id == RedisRunCoordinator(m).replica_id
+
+
+async def test_claim_writes_the_routing_fields_from_admission(server):
+    a = _coordinator(server, "replica-a")
+    parent = await _claim(a, "parent")
+    await a.claim(
+        run_id="child", conversation_id="conv-2", user_email=USER, max_runs_per_user=5,
+        source="agent_api", parent_run_id="parent", follow_up_of="earlier",
+    )
+    record = await a.read("child")
+    assert (record["source"], record["parent_run_id"], record["follow_up_of"]) == (
+        "agent_api", "parent", "earlier")
+    assert await a.read("parent") is not None and parent.run_id == "parent"
+    plain = await a.read("parent")
+    assert (plain["source"], plain["parent_run_id"], plain["follow_up_of"]) == ("", "", "")
+
+
+async def test_parent_record_outlives_its_children(server):
+    a = _coordinator(server, "replica-a", lease_seconds=30, retention_seconds=100)
+    client = a._redis.client
+    parent = await _claim(a, "parent", "conv-p")
+    child = await a.claim(run_id="child", conversation_id="conv-c", user_email=USER,
+                          max_runs_per_user=5, parent_run_id="parent")
+    grandchild = await a.claim(run_id="grand", conversation_id="conv-g", user_email=USER,
+                               max_runs_per_user=5, parent_run_id="child")
+    pkey, ckey = a.keys.run("parent"), a.keys.run("child")
+
+    # The parent finishes first: with live descendants its record is kept for
+    # lease + retention, not retention alone.
+    assert await a.release(parent, "completed")
+    assert await client.pttl(pkey) > 100_000
+
+    # The child finishing keeps both ancestors while the grandchild is live,
+    # and the grandchild's heartbeat refreshes the finished ancestors.
+    assert await a.release(child, "completed")
+    assert await client.pttl(ckey) > 100_000 and await client.pttl(pkey) > 100_000
+    await client.pexpire(pkey, 5_000)
+    assert (await a.renew([grandchild], {"grand": "running"}))["grand"] is True
+    assert await client.pttl(pkey) > 100_000
+    assert (await a.read("parent"))["status"] == "completed"
+
+    # The last descendant ending starts the retention window up the chain.
+    assert await a.release(grandchild, "completed")
+    for key in (pkey, ckey, a.keys.run("grand")):
+        assert 0 < await client.pttl(key) <= 100_000
+
+
+async def test_parent_record_expires_normally_without_live_children(server):
+    a = _coordinator(server, "replica-a", lease_seconds=30, retention_seconds=100)
+    parent = await _claim(a, "parent", "conv-p")
+    assert await a.release(parent, "completed")
+    assert 0 < await a._redis.client.pttl(a.keys.run("parent")) <= 100_000

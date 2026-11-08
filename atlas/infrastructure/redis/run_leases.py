@@ -23,11 +23,11 @@ import time
 from typing import Any, List, Optional
 
 from atlas.application.chat.runs.coordination import RunClaim
-from atlas.infrastructure.redis.run_coordinator import _NOW, RunCoordinationKeys
+from atlas.infrastructure.redis.run_coordinator import _NOW, _SUBTREE, RunCoordinationKeys
 
 # KEYS: run, conv, user, fence, live
-# ARGV: run_id, error, interrupted_by, retention_ms, retry_ms
-INTERRUPT_SCRIPT = _NOW + """
+# ARGV: run_id, error, interrupted_by, retention_ms, retry_ms, lease_ms, key_prefix
+INTERRUPT_SCRIPT = _NOW + _SUBTREE + """
 local status = redis.call('HGET', KEYS[1], 'status')
 if (not status) or status == 'completed' or status == 'failed' or status == 'cancelled' then
   -- Taken over earlier and still in runs-live, so its projection is not
@@ -58,7 +58,7 @@ end
 redis.call('HSET', KEYS[1], 'status', 'failed', 'interrupted', '1', 'error', ARGV[2],
   'owner', '', 'interrupted_by', ARGV[3], 'generation', generation,
   'lease_expires_at', 0, 'updated_at', now)
-redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
+end_run(ARGV[7], ARGV[1], tonumber(ARGV[4]), tonumber(ARGV[6]))
 if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 redis.call('ZREM', KEYS[3], ARGV[1])
 -- Kept in runs-live until the caller closed the projection, so a failed
@@ -104,7 +104,9 @@ class RedisRunLeases:
         self.keys: RunCoordinationKeys = coordinator.keys
         self.replica_id: str = coordinator.replica_id
         self.lease_seconds = float(getattr(coordinator, "lease_seconds", 30.0))
-        self._retention_ms = int(getattr(coordinator, "_retention_ms", 300_000))
+        self._retention_ms = int(getattr(coordinator, "_retention_ms"))
+        self._lease_ms = int(getattr(coordinator, "_lease_ms"))
+        self._prefix = coordinator._prefix
         # A failed projection close is retried after this long.
         self._retry_ms = max(1, int(self.lease_seconds * 1000 / 3))
         client = self._redis.client
@@ -125,7 +127,8 @@ class RedisRunLeases:
                 self.keys.fence(),
                 self.keys.live(),
             ],
-            args=[run_id, error, self.replica_id, self._retention_ms, self._retry_ms],
+            args=[run_id, error, self.replica_id, self._retention_ms, self._retry_ms,
+                  self._lease_ms, self._prefix],
         )
         return int(generation) or None
 

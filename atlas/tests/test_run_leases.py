@@ -428,18 +428,19 @@ async def test_launch_source_is_in_the_run_hash_before_the_launch_returns(server
     set_lease_guard(b.guard)
     run_id = str(uuid4())
     claim = await a.coordinator.claim(
-        run_id=run_id, conversation_id="conv-9", user_email=EMAIL, max_runs_per_user=5
+        run_id=run_id, conversation_id="conv-9", user_email=EMAIL, max_runs_per_user=5,
+        source=API_SOURCE,
     )
     record = a.registry.start(
         conversation_id="conv-9", user_email=EMAIL, title="task", run_id=run_id
     )
     record.claim = claim
     record.launch_spec = {"source": API_SOURCE, "model": "m"}
+    # The source is in the record from admission, before any lease mirror.
+    assert (await a.record(run_id))["source"] == API_SOURCE
 
-    # Claimed, but its owner has written nothing else yet: not a 404.
-    with pytest.raises(LaunchRefused) as refused:
-        await get_api_run_anywhere(run_id)
-    assert refused.value.code == "unavailable"
+    # Claimed, its owner has written no snapshot yet: already answerable.
+    assert (await get_api_run_anywhere(run_id))["status"] == "queued"
 
     await a.guard.publish_now(run_id)  # what launch_api_run awaits before the 202
     assert (await a.record(run_id))["source"] == API_SOURCE
@@ -788,20 +789,20 @@ async def test_terminal_projection_write_needs_the_claim(server):
     task.cancel()
 
 
-async def test_interrupted_run_without_a_source_is_unavailable(server):
+async def test_interrupted_api_run_before_its_first_mirror_is_answerable(server):
     a, b = Replica(server, "A"), Replica(server, "B")
     set_lease_guard(b.guard)
     run_id = str(uuid4())
     claim = await a.coordinator.claim(
-        run_id=run_id, conversation_id="conv-7", user_email=EMAIL, max_runs_per_user=5
+        run_id=run_id, conversation_id="conv-7", user_email=EMAIL, max_runs_per_user=5,
+        source=API_SOURCE,
     )
     assert claim is not None  # claimed; its owner died before the first mirror
     await a.client.hset(a.keys.run(run_id), "lease_expires_at", 1)
     await a.client.zadd(a.keys.live(), {run_id: 1})
     assert await b.guard.sweep_once() == [run_id]
-    with pytest.raises(LaunchRefused) as refused:
-        await get_api_run_anywhere(run_id)
-    assert refused.value.code == "unavailable"
+    status = await get_api_run_anywhere(run_id)
+    assert status["status"] == "failed" and status["interrupted"] is True
 
 
 async def test_fenced_run_does_not_save_its_stale_turn(server):
@@ -1178,3 +1179,14 @@ async def test_lost_claim_records_fenced_on_the_stopped_run(server):
     assert local.fenced and local.end_reason == "fenced"
     assert outcome_for(local.status.value, local.end_reason) == "interrupted"
     task.cancel()
+
+
+def test_shared_view_carries_admission_relations_before_the_first_snapshot():
+    from atlas.application.chat.runs.leases import shared_view
+
+    view = shared_view({"run_id": "r2", "status": "queued", "source": API_SOURCE,
+                        "parent_run_id": "p", "follow_up_of": "r1"})
+    assert (view["parent_run_id"], view["previous_run_id"]) == ("p", "r1")
+    plain = shared_view({"run_id": "r3", "status": "queued", "source": "",
+                         "parent_run_id": "", "follow_up_of": ""})
+    assert plain["parent_run_id"] is None and plain["previous_run_id"] is None

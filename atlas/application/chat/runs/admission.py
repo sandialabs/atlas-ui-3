@@ -86,6 +86,8 @@ async def admit_run(
     user_email: str,
     app_settings: Any = None,
     precheck: Optional[Callable[[], None]] = None,
+    source: str = "",
+    follow_up_of: Optional[str] = None,
     **start_kwargs: Any,
 ) -> RunRecord:
     """Admit one run cluster-wide and register it locally, or raise.
@@ -93,6 +95,9 @@ async def admit_run(
     Raises ``ConversationBusyError``, ``ConcurrencyLimitError``,
     ``RunCoordinationUnavailableError`` (all ``RunRegistryError``), or whatever
     ``precheck`` raises. ``start_kwargs`` are passed to ``RunRegistry.start``.
+    ``source`` (the launch source) and ``follow_up_of`` (the run an API
+    follow-up continues) go to the shared run record with the claim, beside
+    ``parent_run_id``, so any replica can route by them from the first moment.
     """
     registry = get_run_registry()
     if _admission_closed:
@@ -114,6 +119,9 @@ async def admit_run(
         conversation_id=conversation_id,
         user_email=user_email,
         max_runs_per_user=limit,
+        source=source,
+        parent_run_id=start_kwargs.get("parent_run_id"),
+        follow_up_of=follow_up_of,
     )
     try:
         # Synchronous from here: the precheck and the insert cannot be

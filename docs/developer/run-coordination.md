@@ -101,14 +101,15 @@ rather than formatting keys by hand.
 
 | Key | Type | Contents | Lifetime |
 |-----|------|----------|----------|
-| `<p>:run:<run_id>` | hash | The run record (fields below) | Lease + 300 s while live; 300 s after release |
+| `<p>:run:<run_id>` | hash | The run record (fields below) | Lease + retention while live; retention after release (see [Time constants](#time-constants)), or lease + retention while a descendant is live |
+| `<p>:run-kids:<run_id>` | set | The run ids `run_id` launched; how the scripts find live descendants | As its run record |
 | `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
 | `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Removed on release; after a takeover, once the run's projection is closed |
-| `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; 120 s, refreshed per send |
-| `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | 120 s |
-| `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending 30 s, done 1 h |
+| `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; inbox TTL, refreshed per send |
+| `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | reply TTL |
+| `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending TTL, then done TTL |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
 Run record fields:
@@ -124,10 +125,37 @@ Run record fields:
 | `lease_expires_at` | Epoch ms from the Redis clock; `0` once released |
 | `created_at`, `updated_at` | Epoch ms from the Redis clock |
 | `snapshot` | JSON of the run's public status (title, `source`, model, tools, timestamps, the completed `result` capped at 20,001 characters), written by the owner under its owner/generation, so any replica can answer `GET /api/agent-runs/{id}` |
-| `source` | The run's launch source (`api` for agent-runs API runs, empty otherwise), written with the snapshot; an API launch awaits the first write before it returns 202 |
+| `source` | The run's launch source (`api` for agent-runs API runs, empty otherwise), written at claim. The snapshot write repeats it |
+| `parent_run_id` | The run that launched this one (empty for a top-level run), written at claim; the scripts walk it to keep a finished parent readable while a descendant is live |
+| `follow_up_of` | The run an API follow-up continues (empty otherwise), written at claim |
 | `error` | The run's error, if any |
 | `interrupted` | `1` once an orphan sweep took the run over (see below) |
 | `interrupted_by` | Replica id that took it over |
+
+### Time constants
+
+Two constants, `RUN_LEASE_SECONDS` (30 s) and `RUN_RETENTION_SECONDS` (30 min),
+both in `atlas/application/chat/runs/coordination.py`. Everything else derives
+from them, and nothing keeps its own number.
+
+| What | Value | Where |
+|------|-------|-------|
+| Lease; renewed every third of it | `RUN_LEASE_SECONDS` | claim, renew |
+| Run record after the run ended and no descendant is live | `RUN_RETENTION_SECONDS` | release, takeover |
+| Run record while a descendant is live | lease + retention, refreshed by each descendant's renewal | release, renew |
+| Registry terminal runs | `RUN_RETENTION_SECONDS` | `registry.py` |
+| Execution projection of a finished run | `RUN_RETENTION_SECONDS` | `execution_state.py` |
+| Control inbox and reply streams | 4 x lease | `control_bus.py` |
+| Control `done` dedup record | `RUN_RETENTION_SECONDS` | `control_bus.py` |
+| Control `pending` marker | lease | `control_bus.py` |
+
+When a run ends, `RELEASE` and `INTERRUPT` set its record's expiry to the
+retention window only if nothing below it in the launch tree is live; otherwise
+they keep it for lease + retention, and each live descendant's `RENEW` pushes a
+finished ancestor's expiry out again. A descendant ending starts the retention
+window for every finished ancestor it was the last live descendant of (the walk
+is capped at 64 levels, as in the registry). So a stop or cancel of a finished
+parent through any replica finds its record for as long as its children run.
 
 Rules every script follows:
 

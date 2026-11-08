@@ -808,6 +808,7 @@ async def _start_child_run(
     source: str = "atlas_launch",
     actor: Optional[str] = None,
     compliance_level: Any = _FROM_CONTEXT,
+    follow_up_of: Optional[str] = None,
 ) -> Tuple[Any, Dict[str, Any], List[str]]:
     """Admit a child run on ``conversation_id`` and schedule its task.
 
@@ -905,6 +906,8 @@ async def _start_child_run(
             parent_conversation_id=getattr(run_context, "conversation_id", None),
             depth=parent_depth + 1,
             title=title,
+            source=source,
+            follow_up_of=follow_up_of,
         )
     except ConcurrencyLimitError as e:
         raise LaunchRefused(str(e), code="concurrency_limit") from e

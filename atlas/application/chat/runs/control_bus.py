@@ -49,6 +49,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from atlas.application.chat.runs.coordination import RUN_LEASE_SECONDS, RUN_RETENTION_SECONDS
 from atlas.application.chat.runs.run_directory import RunDirectory
 
 logger = logging.getLogger(__name__)
@@ -61,16 +62,16 @@ INBOX_MAXLEN = 1000
 # commands sent to a dead or stalled owner (and their arguments, a steering
 # message among them) stay in Redis. Every command expires within seconds, so
 # nothing older than this is ever executable. Refreshed on each send.
-INBOX_TTL_SECONDS = 120
+INBOX_TTL_SECONDS = 4 * RUN_LEASE_SECONDS
 # A serialized command larger than this is refused before it is written, so a
 # large client payload cannot fill the shared Redis (sessions, leases).
 MAX_COMMAND_BYTES = 256 * 1024
-REPLY_TTL_SECONDS = 120
+REPLY_TTL_SECONDS = 4 * RUN_LEASE_SECONDS
 # How long a request id is remembered. A retry inside this window gets the
 # original reply; the in-flight marker is short so a command whose owner died
 # mid-execution does not block a retry for the full window.
-DONE_TTL_SECONDS = 60 * 60
-PENDING_TTL_SECONDS = 30
+DONE_TTL_SECONDS = RUN_RETENTION_SECONDS
+PENDING_TTL_SECONDS = RUN_LEASE_SECONDS
 # Retries of the "done" write after a command acted, within the pending TTL.
 DONE_WRITE_ATTEMPTS = 6
 # Kept below the pool's socket timeout so a blocking read never trips it.
