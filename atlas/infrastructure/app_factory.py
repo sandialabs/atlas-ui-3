@@ -251,12 +251,12 @@ class AppFactory:
                 await bus.stop()
             await self.redis.close()
 
-    async def session_store_health(self) -> Dict[str, Any]:
-        """Health of the session store, for ``/api/health``."""
+    async def session_store_health(self, timeout: float = 1.0) -> Dict[str, Any]:
+        """Health of the session store, for ``/api/health``; the ping is bounded by ``timeout``."""
         backend = self.config_manager.app_settings.session_repository_type
         report: Dict[str, Any] = {"backend": backend}
         if self.redis is not None:
-            report.update(await self.redis.health())
+            report.update(await self.redis.health(timeout=timeout))
             stats = getattr(self.session_repository, "stats", None)
             if callable(stats):
                 report.update(stats())

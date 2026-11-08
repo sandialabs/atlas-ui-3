@@ -101,7 +101,7 @@ class RedisSessionRepository:
         self._live.pop(session_id, None)
 
     def _unavailable(self, op: str, session_id: UUID, exc: BaseException) -> SessionStoreUnavailableError:
-        self._redis.stats.record_error(exc)
+        self._redis.stats.record_error(exc, op=f"session_{op}")
         logger.error(
             "Session store %s failed for session %s: %s",
             op,

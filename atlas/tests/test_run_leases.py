@@ -1143,3 +1143,38 @@ async def test_started_guard_gates_releases_until_stopped(server):
     assert get_release_gate() == a.guard.gate_release
     await a.guard.stop()
     assert get_release_gate() is None
+
+
+async def test_orphan_takeover_records_owner_lost_in_the_projection(server):
+    store = MemoryExecutionStore()
+    set_execution_store(store)
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    publish = {
+        "type": "run_status", "status": "running", "run_id": record.run_id,
+        "conversation_id": "conv-1", "user_email": EMAIL,
+    }
+    await store.apply_event(publish)
+    await a.expire(record)
+    assert await b.guard.sweep_once() == [record.run_id]
+    doc = await store.get("conv-1", EMAIL)
+    assert doc["status"] == "failed"
+    assert doc["end_reason"] == "owner_lost"
+    task.cancel()
+
+
+async def test_lost_claim_records_fenced_on_the_stopped_run(server):
+    from atlas.core.coordination_metrics import outcome_for
+
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    await a.expire(record)
+    await b.guard.sweep_once()
+    claim = record.claim
+    a.registry.mark_detached(record.run_id)
+    await a.settle()
+    await a.coordinator.renew([claim], {record.run_id: "running"})
+    local = a.registry.get(record.run_id)
+    assert local.fenced and local.end_reason == "fenced"
+    assert outcome_for(local.status.value, local.end_reason) == "interrupted"
+    task.cancel()

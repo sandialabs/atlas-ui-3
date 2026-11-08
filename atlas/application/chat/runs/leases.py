@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from atlas.application.chat.runs.registry import RunRecord, RunRegistry
+from atlas.core.coordination_metrics import EndReason
 
 logger = logging.getLogger(__name__)
 
@@ -542,6 +543,7 @@ async def _close_projection(run_id: str, raw: Dict[str, str]) -> bool:
             "conversation_id": conversation_id,
             "user_email": user_email,
             "error": INTERRUPTED_ERROR,
+            "end_reason": EndReason.OWNER_LOST.value,
         })
         # Confirmed only by reading it back: ``apply_event`` also returns
         # nothing when it gave up after its revision retries.

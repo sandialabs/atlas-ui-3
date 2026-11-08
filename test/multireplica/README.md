@@ -44,11 +44,11 @@ Scaling") lists the code paths whose PRs must run it.
 
 | Piece | Where | Notes |
 |-------|-------|-------|
-| Redis + Postgres | `harness/infra.py` | podman, one pair per session |
+| Redis + Postgres | `harness/infra.py` | podman, one pair per session; `freeze_container` / `thaw_container` simulate an outage |
 | Scripted model | `harness/mock_llm.py` | OpenAI-compatible; directives in the message drive tool calls |
 | Side-effect tool | `harness/side_effect_mcp.py`, `harness/side_effect_keys.py` | stdio MCP server; every execution is appended to a shared file so tests can count them across replicas. Writer and reader share one key-to-filename function; the reader skips torn or undecodable lines |
 | Replicas | `harness/replica.py` | `uvicorn atlas.main:app` per replica, own port, process group, log and `.env`; environment built from scratch, `ENVIRONMENT=development` (required by `DEBUG_MODE`) and `PYTHON_DOTENV_DISABLED=1` so litellm's import-time `load_dotenv()` cannot pull in a `.env` found above the venv |
-| Client helpers | `harness/cluster.py` | agent-runs REST API (`launch`, `run_status`, `cancel`, `wait_terminal`), conversations, side-effect counts |
+| Client helpers | `harness/cluster.py` | agent-runs REST API (`launch`, `run_status`, `cancel`, `wait_terminal`), conversations, side-effect counts, `health`, `coordination` (as `ADMIN_USERS` identity `mr-admin@example.com`) |
 | Browser tab | `harness/ws_client.py` | chat WebSocket to one replica; `auto_approve` answers named tools the way the UI's auto-approve does |
 
 Replicas start once per session. The `cluster` fixture restarts or resumes any
@@ -93,6 +93,14 @@ answer. A message without directives is answered `ECHO: <message>`.
 - `test_known_bugs.py`: bugs the harness found that are outside #1128, in the
   same strict-xfail style. A fixed bug keeps its test as a regression test
   (the REST-only cap bug, fixed with #1128).
+- `test_failure_exercises.py`: issue #1129 observability under failure, must
+  pass on main. Per-replica `/admin/coordination`, a graceful stop (SIGTERM)
+  reported as interrupted (`end_reason=replica_shutdown`) on the other
+  replica without replaying a side effect, and Redis / PostgreSQL outages
+  (`podman pause` of the harness container) visible in `/api/health`,
+  `/admin/coordination` and `[COORD]` log lines, then recovered. The outage
+  tests skip when the suite uses supplied `ATLAS_TEST_*_URL` servers.
+  Expected behavior: `docs/admin/multi-replica-observability.md`.
 
 ## Writing a test
 

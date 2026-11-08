@@ -42,6 +42,8 @@ AGENT_RUNS_API_KEY=...
 
 ## Endpoints
 
+A terminal run also carries `end_reason`: `completed`, `user_cancelled`, `error`, `wall_clock_limit`, or `replica_shutdown` when the replica running it shut down (status `failed`; see [Multi-Replica Observability](multi-replica-observability.md)).
+
 All requests carry `Authorization: Bearer <AGENT_RUNS_API_KEY>`. The full schema is in the
 server's OpenAPI document (`/openapi.json`, browsable at `/docs`) under the `agent-runs` tag.
 
@@ -50,7 +52,7 @@ server's OpenAPI document (`/openapi.json`, browsable at `/docs`) under the `age
 | `GET /api/agent-runs/options?user=` | `atlas_discover_launch_options` | Workspaces and models the user may launch with |
 | `POST /api/agent-runs` | `atlas_launch` | Start a run in a new top-level conversation |
 | `GET /api/agent-runs?user=` | `atlas_get_runs` | API-started runs still retained (optionally one user's) |
-| `GET /api/agent-runs/{run_id}` | `atlas_result` | Status, timestamps, error and final reply |
+| `GET /api/agent-runs/{run_id}` | `atlas_result` | Status, timestamps, error, `end_reason` and final reply |
 | `POST /api/agent-runs/{run_id}/follow-up` | `atlas_follow_up` | Next message in that run's conversation |
 | `POST /api/agent-runs/{run_id}/cancel` | Stop in the UI | Stop the run and anything it launched |
 

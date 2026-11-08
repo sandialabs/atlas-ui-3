@@ -1,6 +1,6 @@
 # Logging and Monitoring
 
-Last updated: 2026-10-27
+Last updated: 2026-11-04
 
 The application produces structured logs in JSON Lines format (`.jsonl`), which makes them easy to parse and analyze.
 
@@ -83,6 +83,10 @@ Returns a richer JSON response containing the service status, name, version, git
 
 The response also carries a `checks` object with the startup outcome of optional features (issue #992), for example `"checks": {"chat_history": "ok"}`. Possible outcomes are `ok`, `failed` (the feature is enabled but could not start) and `disabled` (the feature flag is off). When an enabled feature failed, or a shared session store is unreachable, `status` becomes `"degraded"`. Degraded responses keep HTTP 200 on purpose: the replica still answers, and a readiness probe that pulled every replica during a database outage would turn a degraded feature into a full outage. Error detail stays in the server logs, since this endpoint is unauthenticated.
 
-You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks database connectivity or external dependencies beyond the startup outcomes and session-store reachability reported above.
+When chat history started, `checks` also carries `chat_history_db` (`ok` or `unavailable`), a live `SELECT 1` against the chat-history database (issue #1129). In `/api/health` the database probe and the session-store ping run concurrently within a 0.8 s budget, under the default Kubernetes probe timeout of 1 s. The database probe is single-flight, cached for 2 s, runs on its own two-thread pool and sets a server-side `statement_timeout`, so a black-holed database cannot hold the endpoint open, a burst of probes costs one query, and other work is never starved of threads. Without it, a PostgreSQL outage that began after startup left every replica reporting `healthy`.
+
+You can integrate either endpoint into your monitoring infrastructure (Kubernetes liveness/readiness probes, AWS ELB health checks, Prometheus monitoring). Neither endpoint checks external dependencies beyond the startup outcomes, the chat-history database and session-store reachability reported above.
+
+For multi-replica deployments, per-replica run and dependency metrics (`/admin/coordination`, Prometheus text at `/admin/coordination/metrics`) and the `[COORD]` log lines are described in [Multi-Replica Observability and Failure Exercises](multi-replica-observability.md).
 
 For more detailed system status information that includes configuration and component health, admin users can access the `/admin/system-status` endpoint, which requires authentication and admin group membership.

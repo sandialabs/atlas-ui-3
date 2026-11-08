@@ -284,6 +284,11 @@ async def shut_down_live_runs(timeout: float = 10.0) -> int:
         claim, record.claim = record.claim, None
         if claim is not None:
             held.append((record, claim))
+    # Recorded failed (interrupted, ``replica_shutdown``) before the tasks
+    # unwind, so a run's own handler cannot record a user-style cancel over it
+    # and the claim released below carries the same status as the projection.
+    # The claims were taken out of the records above, so this releases nothing.
+    registry.interrupt_active()
     for task in tasks.values():
         task.cancel()
     if tasks:
