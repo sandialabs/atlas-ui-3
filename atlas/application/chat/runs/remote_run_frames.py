@@ -44,14 +44,24 @@ def directory_unavailable_frame(conversation_id: Any) -> Dict[str, Any]:
     }
 
 
-def steer_frame(answer: Dict[str, Any], entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def steer_frame(
+    answer: Dict[str, Any], entry: Dict[str, Any], request_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """The frame for a routed steer, or None when the run has finished.
 
     ``None`` tells the caller to handle the message as a new turn: the run it
     would have steered is gone. Every refusal carries ``steering: true``: the
     run keeps executing on its owner, so the client must keep its running
-    state (and its Stop control) rather than end the turn.
+    state (and its Stop control) rather than end the turn. A refusal echoes the
+    client's ``request_id`` so the client can retry the same steer once.
     """
+    frame = _steer_frame(answer, entry)
+    if frame is not None and frame.get("type") == "error" and request_id:
+        frame["request_id"] = request_id
+    return frame
+
+
+def _steer_frame(answer: Dict[str, Any], entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     code = answer.get("code")
     if answer.get("ok"):
         return {"type": "agent_update", "update_type": "steering_queued", **_ids(entry)}

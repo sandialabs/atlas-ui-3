@@ -281,6 +281,7 @@ export function createWebSocketHandler(deps) {
     streamToken,
     streamEnd,
     getVisibleConversationId,
+    retrySteer,
     onRunStatus,
     onConversationSaved,
     onContextUsage,
@@ -921,6 +922,9 @@ export function createWebSocketHandler(deps) {
           // stop or steer for a run another server executes that could not be
           // reached (issue #1128): the run is still going there, and Stop must
           // stay available.
+          // A steer whose owner did not answer is repeated once with its own
+          // request id (issue #1128); the repeat is silent.
+          if (typeof retrySteer === 'function' && retrySteer(data)) break
           if (data.steering === true || (data.error_type === 'run_control_unavailable' && data.run_id)) {
             addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
             break

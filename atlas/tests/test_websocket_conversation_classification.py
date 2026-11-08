@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 
+from atlas.application.chat.agent.steering import SteeringChannel
 from atlas.application.chat.runs import get_run_registry, reset_run_registry
 from atlas.application.chat.service import UNSET
 from atlas.domain.errors import ValidationError
@@ -96,8 +97,8 @@ def test_refused_turn_reports_the_classification_error_type(chat_service):
 def test_steer_at_another_level_is_refused_not_injected(chat_service):
     registry = get_run_registry()
     run = registry.start(conversation_id=CONV, user_email=USER)
-    steering = MagicMock()
-    steering.active = True
+    steering = SteeringChannel()
+    steering.activate()
     run.steering = steering
     chat_service.steering_classification_refusal = AsyncMock(
         return_value="The running turn is working under CUI."
@@ -117,6 +118,6 @@ def test_steer_at_another_level_is_refused_not_injected(chat_service):
     assert frame["run_id"] == run.run_id
     # Marked as a steer refusal so the client does not end the running turn.
     assert frame["steering"] is True
-    steering.queue.put_nowait.assert_not_called()
+    assert steering.queue.empty()
     args = chat_service.steering_classification_refusal.await_args.args
     assert args == (run.session_id, "UUR")

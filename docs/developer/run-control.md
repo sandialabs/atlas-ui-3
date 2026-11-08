@@ -56,10 +56,14 @@ earlier delivery.
   (for example once a full steering queue has drained). Once a command has
   acted, writing its reply to the dedup record is retried for as long as
   the pending marker holds the request (`DONE_WRITE_ATTEMPTS`). The dedup
-  covers routed commands only: a steer a replica queues for a run it holds
-  itself does not consult `ctl-done`, so a client that retries one
-  `request_id` against two replicas can queue it twice. The browser client
-  sends no `request_id`.
+  covers routed commands only, and is an optimisation: a steer's
+  correctness rests on the run's registry (`RunRegistry.steer`), the one
+  way a steer is queued, local or routed. It remembers (bounded, in process,
+  256 per run) the request ids it has queued, so a client that retries one
+  `request_id` against any replica, in any order, queues the message once.
+  Refusals changed nothing and are not remembered. The browser sends a fresh
+  `request_id` on every chat frame and repeats a steer once, with the same
+  id, when its owner did not answer.
 - **Correlated.** A sender reads only the reply carrying its own attempt id,
   so a retry never picks up an answer an earlier attempt left in the stream.
 - **Fenced.** Before anything is recorded or executed, the owner reads the

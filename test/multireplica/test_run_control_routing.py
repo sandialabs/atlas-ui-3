@@ -9,6 +9,8 @@ an approval-gated tool twice.
 import time
 import uuid
 
+import pytest
+
 from harness.cluster import directive
 from harness.ws_client import WsClient, chat_frame
 
@@ -123,6 +125,31 @@ def test_steer_via_non_owner_reaches_the_loop_once(cluster):
                 ack = other_tab.recv_until(lambda f: f.get("type") in ("agent_update", "error"), 15)
                 assert ack.get("update_type") == "steering_queued", ack
                 assert ack["run_id"] == run_id, ack
+            stored = _stored_conversation(cluster, cluster.b, user, conversation_id)
+        finally:
+            cluster.cancel_everywhere(run_id)
+    steers = [m for m in stored["messages"] if m.get("role") == "user" and steer_text in str(m.get("content"))]
+    assert len(steers) == 1, f"steer applied {len(steers)} times: {stored['messages']}"
+
+
+@pytest.mark.parametrize("first_on_owner", [False, True], ids=["routed_then_local", "local_then_routed"])
+def test_steer_retried_on_another_replica_lands_once(cluster, first_on_owner):
+    user = cluster.new_user()
+    steer_text = f"steer-{uuid.uuid4().hex[:8]}"
+    with WsClient(cluster.a, user, auto_approve={"atlas_sleep"}) as owner_tab, \
+            WsClient(cluster.b, user) as other_tab:
+        owner_tab.send(chat_frame(directive("steer", sleep=3, steps=4), ["atlas_sleep"]))
+        started = owner_tab.recv_until(_is("run_started"), 30)
+        run_id, conversation_id = started["run_id"], started["conversation_id"]
+        try:
+            owner_tab.recv_until(_is("tool_start"), 30)
+            request_id = uuid.uuid4().hex
+            tabs = [owner_tab, other_tab] if first_on_owner else [other_tab, owner_tab]
+            for tab in tabs:  # one request id, the retry switches replicas
+                tab.send(chat_frame(steer_text, ["atlas_sleep"], conversation_id=conversation_id,
+                                    request_id=request_id))
+                ack = tab.recv_until(lambda f: f.get("type") in ("agent_update", "error"), 15)
+                assert ack.get("update_type") == "steering_queued", ack
             stored = _stored_conversation(cluster, cluster.b, user, conversation_id)
         finally:
             cluster.cancel_everywhere(run_id)
