@@ -604,7 +604,8 @@ async def test_reset_waits_for_a_turn_that_stop_already_cancelled(registry):
                 try:
                     await asyncio.sleep(0.01)
                 except asyncio.CancelledError:
-                    pass
+                    # A further cancel does not interrupt the write in progress.
+                    continue
 
     work = main_module._ConnectionWork()
     record = registry.start(
