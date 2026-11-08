@@ -655,6 +655,12 @@ export function createWebSocketHandler(deps) {
       // flagged as needing attention in the history list instead, and the
       // server replays the request when that conversation is opened, so the
       // frame is deferred rather than lost.
+      // A steer whose owner did not answer is repeated once with its own
+      // request id (issue #1128), silently. Before the routing above: the
+      // user may have switched conversations while it timed out, and the
+      // repeat is still owed.
+      if (data.type === 'error' && typeof retrySteer === 'function' && retrySteer(data)) return
+
       if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {
@@ -922,9 +928,6 @@ export function createWebSocketHandler(deps) {
           // stop or steer for a run another server executes that could not be
           // reached (issue #1128): the run is still going there, and Stop must
           // stay available.
-          // A steer whose owner did not answer is repeated once with its own
-          // request id (issue #1128); the repeat is silent.
-          if (typeof retrySteer === 'function' && retrySteer(data)) break
           if (data.steering === true || (data.error_type === 'run_control_unavailable' && data.run_id)) {
             addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
             break

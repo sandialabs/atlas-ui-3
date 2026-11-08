@@ -34,5 +34,8 @@ export function takeSteerRetry(frames, errorFrame) {
   const frame = frames.get(errorFrame.request_id)
   if (!frame) return null
   frames.delete(errorFrame.request_id)
-  return frame
+  // steer_only: if the run finished meanwhile (the first attempt may have been
+  // applied, only its reply was lost), the server answers with a notice instead
+  // of starting a new turn that would repeat the message.
+  return { ...frame, steer_only: true }
 }

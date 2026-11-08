@@ -82,3 +82,35 @@ def test_the_seen_set_is_bounded_and_forgets_the_oldest():
         channel.remember_outcome(f"r{i}", STEER_QUEUED)
     assert channel.recall_outcome("r0") is None
     assert channel.recall_outcome(f"r{STEERING_SEEN_MAXSIZE + 9}") == STEER_QUEUED
+
+
+def test_a_non_string_request_id_is_treated_as_absent():
+    channel = SteeringChannel()
+    channel.remember_outcome(["x"], STEER_QUEUED)
+    channel.remember_outcome({"a": 1}, STEER_QUEUED)
+    assert channel.recall_outcome(["x"]) is None
+    assert channel.recall_outcome({"a": 1}) is None
+    registry = RunRegistry()
+    record, queue_channel = _run(registry)
+    assert registry.steer(record.run_id, "x", ["bad"]) == STEER_QUEUED
+    assert registry.steer(record.run_id, "x", ["bad"]) == STEER_QUEUED
+    assert queue_channel.queue.qsize() == 2
+
+
+from test_websocket_conversation_classification import (  # noqa: E402,F401
+    CONV,
+    _connect,
+    chat_service,
+)
+
+
+def test_a_steer_repeat_for_a_finished_run_never_starts_a_turn(chat_service):
+    from fastapi.testclient import TestClient
+    from main import app
+
+    with _connect(TestClient(app)) as ws:
+        ws.send_json({"type": "chat", "content": "go left", "model": "m", "conversation_id": CONV,
+                      "request_id": "r1", "steer_only": True})
+        frame = ws.receive_json()
+    assert frame["error_type"] == "steer_run_finished" and frame["steering"] is True
+    chat_service.handle_chat_message.assert_not_called()

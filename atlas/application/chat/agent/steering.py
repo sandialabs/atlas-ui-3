@@ -48,20 +48,20 @@ class SteeringChannel:
     """
 
     def __init__(self) -> None:
-        self.queue: "asyncio.Queue[Any]" = asyncio.Queue(maxsize=STEERING_QUEUE_MAXSIZE)
+        self.queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=STEERING_QUEUE_MAXSIZE)
         self.active: bool = False
         self._seen: "OrderedDict[str, str]" = OrderedDict()
 
     def recall_outcome(self, request_id: Optional[str]) -> Optional[str]:
         """The outcome remembered for ``request_id`` (it was queued), or None."""
-        if not request_id or request_id not in self._seen:
+        if not isinstance(request_id, str) or request_id not in self._seen:
             return None
         self._seen.move_to_end(request_id)
         return self._seen[request_id]
 
     def remember_outcome(self, request_id: Optional[str], outcome: str) -> None:
         """Remember that ``request_id`` was queued so a repeat is not queued again."""
-        if not request_id:
+        if not isinstance(request_id, str) or not request_id:
             return
         self._seen[request_id] = outcome
         self._seen.move_to_end(request_id)

@@ -2295,6 +2295,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     if await steer_addressed_run(websocket, run_registry, user_email, data):
                         continue
 
+                # A client's repeat of a steer (same request id) must never
+                # become a new turn: the first attempt may have been applied
+                # and only its reply lost, and the run has since finished.
+                if data.get("steer_only") is True:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": (
+                            "The run finished before this message could be resent. "
+                            "It may already have been received; check the transcript."
+                        ),
+                        "error_type": "steer_run_finished",
+                        "steering": True,
+                        "conversation_id": frame_conversation_id,
+                    })
+                    continue
+
                 # Authoritative server-side gate for system-prompt overrides.
                 # The frontend already withholds custom_system_prompt when the
                 # feature is disabled, but a stale or hand-crafted client could

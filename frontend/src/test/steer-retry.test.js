@@ -21,7 +21,7 @@ describe('steer retry (issue #1128)', () => {
     const frames = new Map()
     const frame = { type: 'chat', request_id: 'r1', content: 'go left' }
     rememberSteerFrame(frames, 'r1', frame)
-    expect(takeSteerRetry(frames, unavailable('r1'))).toBe(frame)
+    expect(takeSteerRetry(frames, unavailable('r1'))).toEqual({ ...frame, steer_only: true })
     expect(takeSteerRetry(frames, unavailable('r1'))).toBeNull()
   })
 
@@ -41,6 +41,27 @@ describe('steer retry (issue #1128)', () => {
     expect(takeSteerRetry(frames, unavailable('r19'))).not.toBeNull()
   })
 
+  it('repeats a steer even when another conversation is on screen', () => {
+    const frames = new Map()
+    const sent = []
+    rememberSteerFrame(frames, 'r1', { type: 'chat', request_id: 'r1' })
+    const addMessage = vi.fn()
+    const handler = createWebSocketHandler({
+      addMessage,
+      mapMessages: vi.fn(),
+      setIsThinking: vi.fn(),
+      getVisibleConversationId: () => 'other-conversation',
+      retrySteer: (errorFrame) => {
+        const frame = takeSteerRetry(frames, errorFrame)
+        if (frame) sent.push(frame)
+        return !!frame
+      },
+    })
+    handler(unavailable('r1', { conversation_id: 'conv-1' }))
+    expect(sent).toHaveLength(1)
+    expect(addMessage).not.toHaveBeenCalled()
+  })
+
   it('shows nothing for the first failure and the error for the second', () => {
     const frames = new Map()
     const sent = []
@@ -57,7 +78,7 @@ describe('steer retry (issue #1128)', () => {
       },
     })
     handler(unavailable('r1'))
-    expect(sent).toEqual([{ type: 'chat', request_id: 'r1', content: 'x' }])
+    expect(sent).toEqual([{ type: 'chat', request_id: 'r1', content: 'x', steer_only: true }])
     expect(addMessage).not.toHaveBeenCalled()
     handler(unavailable('r1'))
     expect(sent).toHaveLength(1)
