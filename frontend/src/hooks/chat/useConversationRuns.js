@@ -76,6 +76,8 @@ export function useConversationRuns() {
 					// take a title from, so the history list would have nothing to
 					// show for it. The caller supplies the first prompt.
 					title: data.title || prev[data.conversation_id]?.title || null,
+					// A plain turn ends with the socket: nothing to rediscover.
+					connection_bound: data.connection_bound === true,
 					// Set for a run launched by atlas_launch: the client scopes
 					// background auto-approve to runs the user started.
 					parent_run_id: data.parent_run_id || prev[data.conversation_id]?.parent_run_id || null,

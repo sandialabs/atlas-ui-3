@@ -153,13 +153,13 @@ async def test_cleanup_releases_on_service_tool_manager():
     The stale behaviour released on a package-level singleton, so the entries
     on the runtime manager survived the disconnect and leaked.
     """
-    from main import cleanup_disconnected_session
+    from main import _ConnectionWork, cleanup_disconnected_session
 
     entries = _live_manager_with_entries()
     service = _service_for(entries.manager)
     session_id = uuid4()
 
-    await cleanup_disconnected_session(service, session_id, USER, {"task": None})
+    await cleanup_disconnected_session(service, session_id, USER, _ConnectionWork())
 
     _assert_released(entries)
 
@@ -167,7 +167,7 @@ async def test_cleanup_releases_on_service_tool_manager():
 @pytest.mark.asyncio
 async def test_cleanup_release_failure_does_not_break_teardown():
     """A release error is swallowed; ``end_session`` still runs."""
-    from main import cleanup_disconnected_session
+    from main import _ConnectionWork, cleanup_disconnected_session
 
     entries = _live_manager_with_entries()
     entries.manager.release_sessions = AsyncMock(side_effect=RuntimeError("boom"))
@@ -175,7 +175,7 @@ async def test_cleanup_release_failure_does_not_break_teardown():
     session_id = uuid4()
 
     # Must not raise, and the session must still be ended.
-    await cleanup_disconnected_session(service, session_id, USER, {"task": None})
+    await cleanup_disconnected_session(service, session_id, USER, _ConnectionWork())
     assert service.session_repository._session.active is False
 
 

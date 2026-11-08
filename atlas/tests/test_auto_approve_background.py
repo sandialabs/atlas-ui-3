@@ -13,13 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 from atlas.application.chat.approval_manager import get_approval_manager
-from atlas.application.chat.auto_approve_state import (
-    begin_untracked_turn,
-    clear_session_auto_approve,
-    end_untracked_turn,
-    session_auto_approve,
-    set_session_auto_approve,
-)
 from atlas.application.chat.runs.context import clear_current_run, set_current_run
 from atlas.application.chat.runs.registry import get_run_registry, reset_run_registry
 from atlas.application.chat.utilities.tool_executor import execute_single_tool
@@ -53,18 +46,9 @@ def _tool_call(call_id):
 def registry():
     reset_run_registry()
     clear_current_run()
-    clear_session_auto_approve()
     yield get_run_registry()
     clear_current_run()
     reset_run_registry()
-    clear_session_auto_approve()
-
-
-@pytest.fixture(autouse=True)
-def _reset_session_auto_approve():
-    clear_session_auto_approve()
-    yield
-    clear_session_auto_approve()
 
 
 @pytest.fixture
@@ -240,7 +224,7 @@ async def test_launched_child_is_not_covered_by_the_parent_switch(
 
 
 @pytest.mark.asyncio
-async def test_untracked_turn_uses_the_session_flag(approval_manager, monkeypatch):
+async def test_call_with_no_run_uses_the_session_flag(approval_manager, monkeypatch):
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     clear_current_run()
     frames = []
@@ -298,7 +282,7 @@ def test_preference_frame_is_strict_and_does_not_cross_users(registry):
 async def test_child_without_a_parent_record_is_not_auto_approved(
     registry, approval_manager, monkeypatch
 ):
-    """An untracked turn launches a child with no parent_run_id.
+    """A child launched from a plain turn has no parent_run_id.
 
     Depth and the launch spec are what mark it. The user switch must not
     approve its tools, even if something wrote the bit onto the record.
@@ -312,7 +296,6 @@ async def test_child_without_a_parent_record_is_not_auto_approved(
     assert child.auto_approve_user_tools is False
 
     child.auto_approve_user_tools = True
-    begin_untracked_turn(child.session_id, True)
     set_current_run(child.run_id, child.conversation_id)
     frames = []
     result = await _run(
@@ -334,110 +317,16 @@ async def test_child_without_a_parent_record_is_not_auto_approved(
     assert registry.set_auto_approve_user_tools(USER, True) == 0
 
 
-def test_session_bit_is_strict_and_does_not_cross_sessions():
-    begin_untracked_turn("session-a", True)
-    begin_untracked_turn("session-b", False)
-    assert session_auto_approve("session-a") is True
-    assert session_auto_approve("session-b") is False
-    assert set_session_auto_approve("session-a", "true") is True  # type: ignore[arg-type]
-    assert session_auto_approve("session-a") is False
-    begin_untracked_turn(None, True)
-    assert session_auto_approve(None) is None
-
-
-def test_toggle_without_a_running_turn_leaves_no_entry():
-    """A toggle with no untracked turn running has nothing to update."""
-    assert set_session_auto_approve("idle", True) is False
-    assert session_auto_approve("idle") is None
-
-
-def test_off_toggle_during_admission_is_not_overwritten():
-    """The entry opens before the task, so a toggle in the startup window sticks.
-
-    Nothing writes the admission value again once the turn has begun; the
-    service no longer touches the map after its awaits.
-    """
-    begin_untracked_turn("s-startup", True)
-    # The user turns the switch off before the turn reaches its first tool.
-    assert set_session_auto_approve("s-startup", False) is True
-    assert session_auto_approve("s-startup") is False
-
-
-def test_overlapping_turns_keep_the_latest_toggle_until_the_last_finishes():
-    """One turn finishing must not drop the off-toggle another turn relies on."""
-    begin_untracked_turn("s-overlap", True)  # turn being torn down
-    begin_untracked_turn("s-overlap", True)  # the next turn
-    set_session_auto_approve("s-overlap", False)
-
-    end_untracked_turn("s-overlap")
-    assert session_auto_approve("s-overlap") is False
-
-    end_untracked_turn("s-overlap")
-    assert session_auto_approve("s-overlap") is None
-    end_untracked_turn("s-overlap")  # an extra release is harmless
-    assert session_auto_approve("s-overlap") is None
-
-
 @pytest.mark.asyncio
-async def test_untracked_turn_stops_auto_approving_when_the_switch_goes_off(
-    approval_manager, monkeypatch
-):
-    """No run record: the admission snapshot stays true, the live bit moves."""
-    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
-    clear_current_run()
-    begin_untracked_turn("s-live", True)
-    frames = []
-
-    first = await _run(
-        "call_live_on",
-        {"user_email": USER, "session_id": "s-live", "auto_approve_tools": True},
-        frames,
-    )
-    assert first.success is True
-    assert not any(frame.get("type") == "tool_approval_request" for frame in frames)
-
-    set_session_auto_approve("s-live", False)
-    frames.clear()
-    second = await _run(
-        "call_live_off",
-        {"user_email": USER, "session_id": "s-live", "auto_approve_tools": True},
-        frames,
-    )
-    assert second.success is False
-    assert second.error == "Approval timeout"
-    assert any(frame.get("type") == "tool_approval_request" for frame in frames)
-
-
 @pytest.mark.asyncio
-async def test_untracked_turn_still_approves_when_the_client_is_gone(
-    approval_manager, monkeypatch
-):
-    """Closing the browser does not clear a switch that is still on."""
-    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
-    clear_current_run()
-    begin_untracked_turn("s-closed", True)
-
-    result = await execute_single_tool(
-        _tool_call("call_closed_untracked"),
-        {"user_email": USER, "session_id": "s-closed", "auto_approve_tools": True},
-        _FakeToolManager(),
-        update_callback=None,
-        config_manager=SimpleNamespace(),
-    )
-
-    assert result.success is True
-    assert result.content == "ran"
-
-
 @pytest.mark.asyncio
 async def test_tracked_run_keeps_its_own_bit_when_the_session_disagrees(
     registry, approval_manager, monkeypatch
 ):
-    """The owning run record outlives the socket and wins over the session bit."""
+    """The owning run record outlives the socket and wins over the session copy."""
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     record = registry.start(conversation_id="conv-authority", user_email=USER)
     record.note_auto_approve({"auto_approve_tools": True})
-    begin_untracked_turn(record.session_id, False)
     set_current_run(record.run_id, record.conversation_id)
 
     approved = await execute_single_tool(
@@ -454,7 +343,6 @@ async def test_tracked_run_keeps_its_own_bit_when_the_session_disagrees(
     assert approved.success is True
 
     record.note_auto_approve({"auto_approve_tools": False})
-    set_session_auto_approve(record.session_id, True)
     frames = []
     refused = await _run(
         "call_record_off",
@@ -552,7 +440,6 @@ async def test_run_without_a_record_is_not_auto_approved(
     """A bound run id the registry does not know is not covered by the switch."""
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     set_current_run("run-unknown", "conv-unknown")
-    begin_untracked_turn("s-unknown", True)
     frames = []
 
     result = await _run(
@@ -567,57 +454,104 @@ async def test_run_without_a_record_is_not_auto_approved(
     assert request["auto_approvable"] is False
 
 
-# ---------------------------------------------------------------------------
-# A chat frame for another conversation must not orphan the untracked turn
-# still running on the connection (review of #1171).
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+
+
+@pytest.mark.asyncio
+async def test_plain_turn_stops_auto_approving_when_the_switch_goes_off(
+    registry, approval_manager, monkeypatch
+):
+    """A plain turn is a run: the toggle moves its record while it executes."""
+    _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
+    record = registry.start(
+        conversation_id="conv-plain", user_email=USER, session_id="s-plain", connection_bound=True
+    )
+    record.note_auto_approve({"auto_approve_tools": True})
+    set_current_run(record.run_id, record.conversation_id)
+    context = {"user_email": USER, "session_id": "s-plain", "auto_approve_tools": True}
+    frames = []
+
+    first = await _run("call_plain_on", context, frames)
+    assert first.success is True
+    assert not any(frame.get("type") == "tool_approval_request" for frame in frames)
+
+    assert registry.set_auto_approve_user_tools(USER, False) == 1
+    second = await _run("call_plain_off", context, frames)
+    assert second.success is False
+    assert second.error == "Approval timeout"
+    assert any(frame.get("type") == "tool_approval_request" for frame in frames)
+
+
+# A chat frame for another conversation must not orphan the plain turn still
+# running on the connection (review of #1171).
 
 
 async def _sleep_forever():
     await asyncio.sleep(3600)
 
 
+def _bound_turn(registry, session_id, conversation_id):
+    record = registry.start(
+        conversation_id=conversation_id, user_email=USER, session_id=session_id, connection_bound=True
+    )
+    task = asyncio.create_task(_sleep_forever())
+    registry.attach_task(record.run_id, task)
+    return record, task
+
+
 @pytest.mark.asyncio
-async def test_superseded_untracked_turn_is_cancelled_and_awaited():
+async def test_superseded_turn_is_cancelled_and_awaited(registry):
     import atlas.main as main_module
 
-    previous = asyncio.create_task(_sleep_forever())
+    record, task = _bound_turn(registry, "s-sup", "c1")
+    other_session, other_task = _bound_turn(registry, "s-other", "c2")
     await asyncio.sleep(0)
-    slot = {"task": previous, "kind": "chat", "steering": None, "conversation_id": "c1"}
+    work = main_module._ConnectionWork()
 
-    assert await main_module._cancel_superseded_untracked_turn(slot) is True
-    assert previous.done()
-    assert previous.cancelled()
+    assert await main_module._cancel_connection_turns(registry, "s-sup", USER, work) is True
+    assert task.cancelled()
+    assert registry.get(record.run_id).status.value == "cancelled"
+    # Another connection's turn is not this connection's to cancel.
+    assert not other_task.done() and not registry.get(other_session.run_id).is_terminal
+    other_task.cancel()
 
 
 @pytest.mark.asyncio
-async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone():
+async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone(registry):
     import atlas.main as main_module
 
-    # Nothing running on the connection: a tracked run lives in the registry,
-    # not in this slot, so an empty slot is the background-run case.
-    cancelled_empty = await main_module._cancel_superseded_untracked_turn({"task": None, "kind": None})
-    assert cancelled_empty is False
+    work = main_module._ConnectionWork()
+    assert await main_module._cancel_connection_turns(registry, "s-idle", USER, work) is False
 
-    finished = asyncio.create_task(asyncio.sleep(0))
-    await asyncio.wait([finished])
-    assert finished.done()
-    cancelled_finished = await main_module._cancel_superseded_untracked_turn({"task": finished, "kind": "chat"})
-    assert cancelled_finished is False
+    record, task = _bound_turn(registry, "s-done", "c1")
+    registry.set_status(record.run_id, main_module.RunStatus.COMPLETED)
+    task.cancel()
+    assert await main_module._cancel_connection_turns(registry, "s-done", USER, work) is False
 
-    compacting = asyncio.create_task(_sleep_forever())
+    # A run with its own session is not bound to the connection.
+    own = registry.start(conversation_id="c-own", user_email=USER, session_id="s-done")
+    own_task = asyncio.create_task(_sleep_forever())
+    registry.attach_task(own.run_id, own_task)
+    # A compaction is left alone unless the caller asks for it (reset does).
+    compaction = asyncio.create_task(_sleep_forever())
+    work.compaction = compaction
     await asyncio.sleep(0)
     try:
-        cancelled_compact = await main_module._cancel_superseded_untracked_turn({"task": compacting, "kind": "compact"})
-        assert cancelled_compact is False
-        assert not compacting.done()
+        assert await main_module._cancel_connection_turns(registry, "s-done", USER, work) is False
+        assert not own_task.done() and not compaction.done()
+        assert await main_module._cancel_connection_turns(
+            registry, "s-done", USER, work, include_compaction=True
+        ) is True
+        assert compaction.cancelled() and not own_task.done()
     finally:
-        compacting.cancel()
-        await asyncio.wait([compacting])
+        own_task.cancel()
+        await asyncio.wait([own_task, compaction], timeout=1.0)
 
 
 @pytest.mark.asyncio
-async def test_superseded_turn_cancel_is_bounded(monkeypatch):
+async def test_superseded_turn_cancel_is_bounded(registry, monkeypatch):
     import atlas.main as main_module
 
     monkeypatch.setattr(main_module, "SUPERSEDED_TURN_CANCEL_TIMEOUT", 0.05)
@@ -628,44 +562,22 @@ async def test_superseded_turn_cancel_is_bounded(monkeypatch):
         except asyncio.CancelledError:
             await asyncio.sleep(3600)
 
+    record = registry.start(
+        conversation_id="c-stubborn", user_email=USER, session_id="s-stubborn", connection_bound=True
+    )
     stubborn = asyncio.create_task(_resists_cancel())
+    registry.attach_task(record.run_id, stubborn)
     await asyncio.sleep(0)
-    slot = {"task": stubborn, "kind": "chat"}
+    work = main_module._ConnectionWork()
     try:
         started = asyncio.get_running_loop().time()
-        assert await main_module._cancel_superseded_untracked_turn(slot) is True
+        assert await main_module._cancel_connection_turns(registry, "s-stubborn", USER, work) is True
         assert asyncio.get_running_loop().time() - started < 1.0
         # Still reachable: Stop, reset and the disconnect cleanup cancel it again.
-        assert slot["superseded"] == [stubborn]
-        assert main_module._cancel_superseded_leftovers(slot) == 1
+        assert work.stragglers == [stubborn] and work.busy()
+        assert work.cancel_stragglers() == 1
         assert not stubborn.done()
-        slot["superseded"] = []
-        assert main_module._cancel_superseded_leftovers(slot) == 0
     finally:
         stubborn.cancel()
         stubborn.cancel()
         await asyncio.wait([stubborn], timeout=1.0)
-
-
-def test_overlapping_admission_keeps_the_live_toggle():
-    """A chat frame from a stale tab must not undo an off-toggle mid-turn."""
-    begin_untracked_turn("s-stale", True)
-    set_session_auto_approve("s-stale", False)
-    begin_untracked_turn("s-stale", True)  # overlapping turn, older bit
-    assert session_auto_approve("s-stale") is False
-    end_untracked_turn("s-stale")
-    end_untracked_turn("s-stale")
-    assert session_auto_approve("s-stale") is None
-
-
-def test_an_off_admission_clears_a_retained_on_bit():
-    from atlas.application.chat import auto_approve_state as state
-
-    state.clear_session_auto_approve()
-    state.begin_untracked_turn("s-off", True)
-    state.begin_untracked_turn("s-off", False)
-    assert state.session_auto_approve("s-off") is False
-    # An On admission never re-enables a bit a live toggle turned off.
-    state.begin_untracked_turn("s-off", True)
-    assert state.session_auto_approve("s-off") is False
-    state.clear_session_auto_approve()

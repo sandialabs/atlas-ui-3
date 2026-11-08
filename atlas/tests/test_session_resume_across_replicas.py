@@ -75,7 +75,7 @@ async def _turn(service, session_id, content, seen):
 
 async def _disconnect(service, session_id):
     """The old socket closing: its normal teardown ends the session."""
-    await main.cleanup_disconnected_session(service, session_id, USER, {"task": None})
+    await main.cleanup_disconnected_session(service, session_id, USER, main._ConnectionWork())
 
 
 @pytest.fixture
@@ -298,7 +298,7 @@ async def test_same_process_takeover_detaches_the_old_connection():
     # package-level singleton). Reset the mock so this assertion is about the
     # second teardown only.
     old.tool_manager.release_sessions.reset_mock()
-    await main.cleanup_disconnected_session(old, session_id, USER, {"task": None})
+    await main.cleanup_disconnected_session(old, session_id, USER, main._ConnectionWork())
     old.tool_manager.release_sessions.assert_not_called()
     with pytest.raises(SessionConflictError):
         await old.create_session(session_id, USER)

@@ -85,51 +85,44 @@ def test_non_dict_event_passes_through():
 # Stop routing
 # ---------------------------------------------------------------------------
 
-async def _stop(registry, frame, user=None):
-    """Press Stop the way the transport does; whether the untracked task was cancelled."""
-    task = MagicMock()
-    task.done.return_value = False
+async def _stop(registry, frame, user=None, session_id=None):
+    """Press Stop the way the transport does; the frames the client was sent."""
     ws = MagicMock()
     ws.send_json = AsyncMock()
-    await stop_addressed_run(ws, registry, user or USER, frame, {"task": task})
-    return task.cancel.called
+    await stop_addressed_run(ws, registry, user or USER, frame, session_id)
+    return [call.args[0] for call in ws.send_json.await_args_list]
 
 
 async def test_stop_by_run_id_cancels_only_that_run(registry):
     run_a = registry.start(conversation_id="conv-a", user_email=USER)
     run_b = registry.start(conversation_id="conv-b", user_email=USER)
 
-    # The frame addressed a run, so the transport must NOT fall back to the
-    # connection's untracked task -- even though no task was attached here and
-    # so nothing was actually cancelled.
-    assert await _stop(registry, {"run_id": run_a.run_id}) is False
+    assert await _stop(registry, {"run_id": run_a.run_id}) == []
     assert registry.get(run_a.run_id).status == RunStatus.CANCELLED
     assert registry.get(run_b.run_id).status != RunStatus.CANCELLED
 
 
-async def test_stale_stop_frame_does_not_fall_back_to_the_legacy_slot(registry):
-    """A stop frame naming an already-terminal run must not cancel something else.
-
-    `cancel()` reports False for a run that has already finished, which is
-    indistinguishable from "no run named" if the return value is taken to mean
-    "a cancel happened". Taking it to mean "the frame addressed a run" keeps the
-    untracked fallback reserved for clients that name nothing, so a stale stop
-    cannot reach an unrelated turn in flight on this socket.
-    """
+async def test_stale_stop_frame_stops_nothing_else(registry):
+    """A stop frame naming an already-terminal run must not cancel something else."""
     run = registry.start(conversation_id="conv-a", user_email=USER)
     registry.set_status(run.run_id, RunStatus.COMPLETED)
+    other = registry.start(conversation_id="conv-b", user_email=USER)
 
-    assert await _stop(registry, {"run_id": run.run_id}) is False
+    assert await _stop(registry, {"run_id": run.run_id}) == []
+    assert not registry.get(other.run_id).is_terminal
 
 
-async def test_stop_frame_naming_an_unknown_run_does_not_fall_back(registry):
+async def test_stop_frame_naming_an_unknown_run_stops_nothing(registry):
     """Reaped or foreign run ids are addressed, not absent."""
-    assert await _stop(registry, {"run_id": "no-such-run"}) is False
+    other = registry.start(conversation_id="conv-a", user_email=USER)
+    assert await _stop(registry, {"run_id": "no-such-run"}) == []
+    assert not registry.get(other.run_id).is_terminal
 
 
-async def test_stop_frame_with_only_an_unknown_conversation_falls_back(registry):
-    """Nothing resolvable and no run id named: the legacy slot is the target."""
-    assert await _stop(registry, {"conversation_id": "conv-unknown"}) is True
+async def test_stop_frame_with_only_an_unknown_conversation_stops_nothing(registry):
+    other = registry.start(conversation_id="conv-a", user_email=USER)
+    assert await _stop(registry, {"conversation_id": "conv-unknown"}) == []
+    assert not registry.get(other.run_id).is_terminal
 
 
 async def test_stop_by_conversation_id_resolves_the_run(registry):
@@ -138,9 +131,19 @@ async def test_stop_by_conversation_id_resolves_the_run(registry):
     assert registry.get(run.run_id).status == RunStatus.CANCELLED
 
 
-async def test_stop_frame_without_ids_falls_back_to_the_legacy_slot(registry):
-    registry.start(conversation_id="conv-a", user_email=USER)
-    assert await _stop(registry, {}) is True
+async def test_stop_frame_without_ids_stops_the_connections_plain_turn(registry):
+    """An older client names nothing: it means the turn on its own session."""
+    plain = registry.start(conversation_id="conv-a", user_email=USER, session_id="s-1", connection_bound=True)
+    detached = registry.start(conversation_id="conv-b", user_email=USER)
+    elsewhere = registry.start(conversation_id="conv-c", user_email=USER, session_id="s-2", connection_bound=True)
+
+    assert await _stop(registry, {}) == []  # no connection named: nothing to address
+    assert not registry.get(plain.run_id).is_terminal
+
+    assert await _stop(registry, {}, session_id="s-1") == []
+    assert registry.get(plain.run_id).status == RunStatus.CANCELLED
+    assert not registry.get(detached.run_id).is_terminal
+    assert not registry.get(elsewhere.run_id).is_terminal
 
 
 async def test_stop_cannot_reach_another_users_run(registry):

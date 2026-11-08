@@ -1321,7 +1321,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// pure navigation -- the run keeps going in the background and shows up
 		// as an indicator in history. Only an untracked turn still has to be
 		// stopped, because nothing else can own it once the view is cleared.
-		const hasBackgroundRun = isRunActive(runs.getRun(activeConversationId))
+		// (A plain turn is a run too, issue #1128, but it ends with the view's
+		// session, so it is not a background run.)
+		const currentRun = runs.getRun(activeConversationId)
+		const hasBackgroundRun = isRunActive(currentRun) && !currentRun?.connection_bound
 		const mustStopCurrentTurn = isGenerating && !hasBackgroundRun
 		const hasContent = messages.length > 0
 		// Snapshot what the view is about to lose. Held
@@ -2606,7 +2609,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		isThinking,
 		// A run rediscovered after a reconnect has no streaming state behind it,
 		// but it is still running and must still be stoppable (issue #884).
-		isAgentRunning: isAgentRunning || isRunActive(runs.runsByConversation[activeConversationId]),
+		// A plain turn is a run too (issue #1128), but it ends with the socket,
+		// so it is never rediscovered and keeps the plain Stop-streaming control.
+		isAgentRunning: isAgentRunning || (
+			isRunActive(runs.runsByConversation[activeConversationId])
+			&& !runs.runsByConversation[activeConversationId]?.connection_bound
+		),
 		isSynthesizing,
 		sendChatMessage,
 		rewindAndResubmit,

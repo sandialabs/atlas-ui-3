@@ -642,12 +642,11 @@ export function createWebSocketHandler(deps) {
       // the wrong chat" failure this feature has to avoid.
       //
       // The `run_id` test is what makes this safe rather than merely
-      // approximate. Only a tracked run tags its events, and a tracked run
-      // always has a conversation id (the server refuses to start one without
-      // it), so a mismatch here is always a background run -- including when
-      // nothing is on screen yet, which is exactly when a fresh, empty chat
-      // would otherwise fill up with another conversation's output. Untagged
-      // events, from older producers and the whole untracked single-run path,
+      // approximate. Every chat turn is a run (issue #1128) and tags its
+      // events, and a run always has a conversation id, so a mismatch here is
+      // always a background run -- including when nothing is on screen yet,
+      // which is exactly when a fresh, empty chat would otherwise fill up with
+      // another conversation's output. Untagged events, from older producers,
       // are always applied.
       // An approval request for a conversation that is not on screen is not
       // shown as a modal here -- a prompt about a chat the user is not looking

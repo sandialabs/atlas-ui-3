@@ -644,14 +644,10 @@ class ChatService:
         # where atlas_launch needs it: a sub-conversation persists its own
         # transcript, which an incognito turn must not start (#925).
         session.context["incognito"] = turn_is_incognito
-        # Same path for a turn that is not a tracked run. Tracked runs also
-        # keep the flag on the run record, which is what the gate reads after
-        # the socket that admitted them has closed.
+        # The copy a call with no run (a direct service call, the CLI) reads.
+        # A websocket turn is a run, and the tool gate reads the switch from
+        # the run's record, which a toggle updates while the turn executes.
         session.context["auto_approve_tools"] = auto_approve_tools
-        # The live bit an untracked websocket turn reads is opened by the
-        # websocket handler before it schedules this task (see
-        # ``auto_approve_state.begin_untracked_turn``). Writing it here, after
-        # the awaits above, would undo an off-toggle that arrived meanwhile.
 
         # Rewind / edit-and-resubmit is the one turn that legitimately ends with
         # fewer messages than are stored: it drops the edited prompt and

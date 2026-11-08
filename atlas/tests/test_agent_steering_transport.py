@@ -1,9 +1,10 @@
-"""Tests for the agent steering transport routing and leftover handling.
+"""Tests for the agent steering channel bounds and leftover handling.
 
 Issue #824. The loop-level injection is covered in ``test_agentic_loop.py``;
-this file covers the transport routing decision (``should_steer``) and the
-runner's leftover surfacing, which the review flagged as the untested hop
-between the WebSocket endpoint and the loop.
+the routing of a chat frame into a run's channel is covered by the run
+addressing table. This file covers the channel's bounds and the runner's
+leftover surfacing, which the review flagged as the untested hop between the
+WebSocket endpoint and the loop.
 """
 
 import asyncio
@@ -20,81 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from atlas.application.chat.agent.steering import (
     STEERING_QUEUE_MAXSIZE,
     SteeringChannel,
-    should_steer,
 )
-
-
-class _FakeTask:
-    """Minimal stand-in for an asyncio.Task with a controllable done() flag."""
-
-    def __init__(self, done: bool = False) -> None:
-        self._done = done
-
-    def done(self) -> bool:
-        return self._done
-
-
-def _active(steering=None, task=None, conversation_id="conv-A"):
-    return {
-        "task": task if task is not None else _FakeTask(done=False),
-        "steering": steering,
-        "conversation_id": conversation_id,
-    }
-
-
-class TestShouldSteer:
-    def test_no_task_does_not_steer(self):
-        channel = SteeringChannel()
-        channel.activate()
-        assert not should_steer({"task": None, "steering": channel}, "conv-A")
-
-    def test_done_task_does_not_steer(self):
-        channel = SteeringChannel()
-        channel.activate()
-        state = _active(steering=channel, task=_FakeTask(done=True))
-        assert not should_steer(state, "conv-A")
-
-    def test_inactive_channel_does_not_steer(self):
-        # A turn that requested agent mode but fell back to a non-agent turn
-        # never activates the channel, so a message must start a fresh turn.
-        channel = SteeringChannel()  # active stays False
-        state = _active(steering=channel)
-        assert not should_steer(state, "conv-A")
-
-    def test_no_channel_does_not_steer(self):
-        state = {"task": _FakeTask(done=False), "steering": None, "conversation_id": "x"}
-        assert not should_steer(state, "x")
-
-    def test_active_channel_same_conversation_steers(self):
-        channel = SteeringChannel()
-        channel.activate()
-        state = _active(steering=channel)
-        assert should_steer(state, "conv-A")
-
-    def test_different_conversation_does_not_steer(self):
-        # A message typed after the user switched conversations must start a
-        # fresh turn in the new conversation, not inject into the old one.
-        channel = SteeringChannel()
-        channel.activate()
-        state = _active(steering=channel, conversation_id="conv-A")
-        assert not should_steer(state, "conv-B")
-
-    def test_both_none_conversation_ids_steer(self):
-        # No conversation binding on either side is the normal first-turn case.
-        channel = SteeringChannel()
-        channel.activate()
-        state = {"task": _FakeTask(done=False), "steering": channel,
-                 "conversation_id": None}
-        assert should_steer(state, None)
-
-    def test_stale_channel_after_turn_ends_does_not_steer(self):
-        # After the runner deactivates the channel in its finally, a later
-        # message must not route into the finished loop.
-        channel = SteeringChannel()
-        channel.activate()
-        channel.deactivate()
-        state = _active(steering=channel)
-        assert not should_steer(state, "conv-A")
 
 
 class TestSteeringChannelBounds:

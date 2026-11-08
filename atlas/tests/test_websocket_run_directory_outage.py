@@ -242,18 +242,17 @@ async def test_stop_to_an_owner_that_does_not_answer_still_stops_the_local_follo
     assert registry.cancelled == ["follow-up"] and ws.send_json.await_count == 0
 
 
-async def test_conversation_stop_to_an_owner_that_does_not_answer_stops_the_untracked_turn():
+async def test_conversation_stop_to_an_owner_that_does_not_answer_is_reported():
     unreachable = {"ok": False, "code": "owner_unavailable", "message": "", "payload": {}}
     bus = _StopBus(by_conversation=_entry("r9"), answer=unreachable)
-    task = MagicMock()
-    task.done.return_value = False
     set_run_control_bus(bus)
     try:
         ws = MagicMock()
         ws.send_json = AsyncMock()
-        await stop_addressed_run(ws, _Registry(follow_up=False), USER, {"conversation_id": CONV},
-                                 {"task": task})
+        await stop_addressed_run(ws, _Registry(follow_up=False), USER, {"conversation_id": CONV})
     finally:
         set_run_control_bus(None)
-    task.cancel.assert_called_once()
-    assert ws.send_json.await_count == 0
+    # The run is known to be elsewhere and cannot be reached: the client keeps
+    # its running state, with the run id to stop later.
+    frame = ws.send_json.await_args.args[0]
+    assert frame["error_type"] == "run_control_unavailable" and frame["run_id"] == "r9"

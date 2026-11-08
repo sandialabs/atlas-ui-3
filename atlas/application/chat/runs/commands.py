@@ -40,40 +40,28 @@ _DIRECTORY_UNAVAILABLE_MESSAGE = "The shared run directory could not be read."
 _APPROVAL_NUDGES: "set[asyncio.Task]" = set()
 
 
-def cancel_superseded_leftovers(active_chat_task: dict) -> int:
-    """Cancel superseded turns that outlived their bounded wait; drop done ones.
-
-    Returns how many were still running.
-    """
-    leftovers = [t for t in active_chat_task.get("superseded", ()) if not t.done()]
-    for task in leftovers:
-        task.cancel()
-    if "superseded" in active_chat_task:
-        active_chat_task["superseded"] = leftovers
-    return len(leftovers)
-
-
 async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
-                             active_chat_task: Optional[dict] = None) -> None:
+                             connection_session_id: Any = None) -> None:
     """Stop the run a ``stop_streaming`` / ``agent_control`` stop frame names.
 
     The run is the user's own, by ``run_id`` and then ``conversation_id``, on
-    this replica or on its owner. A frame that names a run but finds none is a
-    no-op: a stale id must never stop an unrelated untracked turn. Only a frame
-    that names no run (an older client), or names a conversation nothing is
-    running in, falls back to the connection's untracked turn.
+    this replica or on its owner. A frame that finds no run is a no-op: it
+    finished, was reaped, or the id is stale, and a stale id must never stop an
+    unrelated run. A frame that names nothing (an older client, or New Chat's
+    stop before its reset) means the plain turn running on this connection's
+    own session, when there is one.
     """
     address = Address(data.get("run_id"), data.get("conversation_id"))
-    # Turns this connection superseded and could not unwind are the user's
-    # work too: Stop ends them whichever run it addresses.
-    cancel_superseded_leftovers(active_chat_task or {})
+    if not address.run_id and not address.conversation_id and connection_session_id is not None:
+        bound = registry.active_bound_to(connection_session_id)
+        if bound:
+            address = Address(bound[0].run_id, None)
     resolution = await resolve(registry, user_actor(user_email), address, include_terminal=True)
 
     if isinstance(resolution, Local):
         logger.info("Cancelling run %s on user request", resolution.record.run_id)
         registry.cancel(resolution.record.run_id, user_email)
         return
-    unavailable: Optional[Dict[str, Any]] = None
     if isinstance(resolution, Remote) and resolution.entry.get("user_email") == normalize_user_email(user_email):
         # Another replica owns it; the client sees the frames a local stop sends.
         answer = await route_stop(resolution.entry, user_email)
@@ -90,25 +78,10 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
             logger.info("Cancelling run %s on user request (owner unavailable)", local.run_id)
             registry.cancel(local.run_id, user_email)
             return
-        unavailable = answer
+        await websocket.send_json(stop_frame(answer, data))
     elif isinstance(resolution, Unknown):
-        unavailable = reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
-
-    task = (active_chat_task or {}).get("task")
-    task_live = task is not None and not task.done()
-    if unavailable is not None:
-        # The owner is unknown. A frame naming a run id is told so; a
-        # conversation-only frame still stops the untracked turn it may mean.
-        if address.run_id or not task_live:
-            await websocket.send_json(stop_frame(unavailable, data))
-            return
-    elif address.run_id:
-        # Addressed a run that is finished, reaped, or not the user's.
-        return
-    # Nothing addressed: the untracked turn (removed once every turn is a run).
-    if task_live:
-        logger.info("Cancelling active chat task (stop frame)")
-        task.cancel()
+        await websocket.send_json(stop_frame(reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE), data))
+    # Anything else is no such run (finished, reaped, another user's): nothing to stop.
 
 
 async def steer_addressed_run(websocket, registry, user_email: str, data: dict) -> bool:
