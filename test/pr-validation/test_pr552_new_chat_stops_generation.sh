@@ -81,7 +81,7 @@ print_result $? "Header.jsx gates follow-up side-effects in both click and hotke
 # ==========================================
 # 4. Backend: reset_session cancels active chat task
 # ==========================================
-print_header "4. reset_session cancels active_chat_task"
+print_header "4. reset_session cancels connection_turn"
 
 RESULT=$(python3 - <<'PYEOF' 2>&1 | tail -1
 import asyncio
@@ -89,7 +89,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 # Simulate the endpoint's reset_session branch in isolation.
 async def main():
-    active_chat_task = {"task": None}
+    connection_turn = {"task": None}
 
     async def long_task():
         try:
@@ -98,12 +98,12 @@ async def main():
             raise
 
     task = asyncio.create_task(long_task())
-    active_chat_task["task"] = task
+    connection_turn["task"] = task
     # Give the task a chance to start.
     await asyncio.sleep(0)
 
     # Replicate main.py lines 623-626 behavior.
-    t = active_chat_task.get("task")
+    t = connection_turn.get("task")
     if t and not t.done():
         t.cancel()
 
@@ -118,7 +118,7 @@ print(asyncio.run(main()))
 PYEOF
 )
 [ "$RESULT" = "OK" ]
-print_result $? "reset_session branch cancels active_chat_task (got: $RESULT)"
+print_result $? "reset_session branch cancels connection_turn (got: $RESULT)"
 
 # ==========================================
 # 5. Backend: websocket_endpoint routes agent_control:stop to cancel

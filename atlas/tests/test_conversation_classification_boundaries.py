@@ -483,7 +483,8 @@ async def test_in_flight_view_carries_the_run_binding():
 
     session = Session(id=uuid4(), user_email=USER)
     session.context[conv_class.SESSION_BINDING_KEY] = conv_class.make_binding("classified", "CUI")
-    record = MagicMock(session_id=session.id, run_id="r1", created_at=0.0, updated_at=0.0)
+    record = MagicMock(session_id=session.id, run_id="r1", created_at=0.0, updated_at=0.0,
+                       off_record=False, connection_bound=False)
     record.stream.text.return_value = ""
     registry = MagicMock()
     registry.active_for_conversation.return_value = record

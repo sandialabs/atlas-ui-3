@@ -369,6 +369,9 @@ class RunLeaseGuard:
             await self._mirror(run_id, lease)
 
     async def _write_snapshot(self, lease: _Lease, record: RunRecord) -> bool:
+        if record.off_record:
+            # Owner, generation and status only: the script sets the status.
+            return await self._scripts.mirror(lease.claim, record.status.value, "{}", "", "")
         return await self._scripts.mirror(
             lease.claim,
             record.status.value,

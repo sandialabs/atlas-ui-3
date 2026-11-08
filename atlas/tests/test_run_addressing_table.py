@@ -53,30 +53,15 @@ def gap(reason):
 # ---------------------------------------------------------------------------
 
 
-class _Untracked:
-    """The connection's untracked turn (``active_chat_task``)."""
-
-    def __init__(self, live=True):
-        self.task = MagicMock()
-        self.task.done.return_value = not live
-        self.slot = {"task": self.task}
-
-    @property
-    def cancelled(self):
-        return self.task.cancel.called
-
-
 # Rows with no ``cluster`` argument run with no run-control bus bound, as a
 # single-instance deployment does: nothing is read from a directory.
-async def ws_stop(local, data, untracked=None):
+async def ws_stop(local, data, session_id=None):
     """The stop branch of ``websocket_endpoint`` (``stop_streaming`` and
-    ``agent_control`` stop both call ``stop_addressed_run``): returns (frames
-    sent, untracked turn cancelled)."""
-    untracked = untracked or _Untracked(live=False)
+    ``agent_control`` stop both call ``stop_addressed_run``): the frames sent."""
     ws = MagicMock()
     ws.send_json = AsyncMock()
-    await stop_addressed_run(ws, local, OWNER, data, untracked.slot)
-    return [c.args[0] for c in ws.send_json.await_args_list], untracked.cancelled
+    await stop_addressed_run(ws, local, OWNER, data, session_id)
+    return [c.args[0] for c in ws.send_json.await_args_list]
 
 
 def _local_run(local, conversation_id=CONV, **kwargs):
@@ -143,14 +128,14 @@ def _is_unavailable(frames, run_id=None):
 
 async def test_S01_run_id_only_tracked_local(local):
     run = _local_run(local)
-    frames, untracked = await ws_stop(local, {"run_id": run.run_id}, _Untracked())
-    assert local.get(run.run_id).status is RunStatus.CANCELLED and not frames and not untracked
+    frames = await ws_stop(local, {"run_id": run.run_id})
+    assert local.get(run.run_id).status is RunStatus.CANCELLED and not frames
 
 
 async def test_S02_run_id_only_tracked_remote_live(cluster, local):
     run = await cluster.run()
-    frames, untracked = await ws_stop(local, {"run_id": run.run_id}, _Untracked())
-    assert [f["type"] for f in frames] == ["run_status"] and not untracked
+    frames = await ws_stop(local, {"run_id": run.run_id})
+    assert [f["type"] for f in frames] == ["run_status"]
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
 
@@ -158,7 +143,7 @@ async def test_S03_run_id_only_tracked_remote_terminal(cluster, local):
     run = await cluster.run()
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    frames, _ = await ws_stop(local, {"run_id": run.run_id})
+    frames = await ws_stop(local, {"run_id": run.run_id})
     assert [f["type"] for f in frames] == ["run_status"]
     assert cluster.registry.get(run.run_id).status is RunStatus.COMPLETED
 
@@ -166,22 +151,13 @@ async def test_S03_run_id_only_tracked_remote_terminal(cluster, local):
 async def test_S04_run_id_only_tracked_unreadable(cluster, local):
     run = await cluster.run()
     await _unreadable(cluster)
-    frames, _ = await ws_stop(local, {"run_id": run.run_id})
+    frames = await ws_stop(local, {"run_id": run.run_id})
     _is_unavailable(frames, run.run_id)
     assert not cluster.registry.get(run.run_id).is_terminal
 
 
-async def test_S05_run_id_only_untracked_stale_id(local):
-    frames, untracked = await ws_stop(local, {"run_id": "stale"}, _Untracked())
-    # The id names a run, so it never reaches the connection's untracked turn.
-    assert frames == [] and not untracked
 
 
-async def test_S06_run_id_only_untracked_unreadable(cluster, local):
-    await _unreadable(cluster)
-    frames, untracked = await ws_stop(local, {"run_id": "stale"}, _Untracked())
-    _is_unavailable(frames, "stale")
-    assert not untracked
 
 
 async def test_S07_run_id_only_finished_parent_local(local):
@@ -194,7 +170,7 @@ async def test_S07_run_id_only_finished_parent_local(local):
 
 async def test_S08_run_id_only_finished_parent_remote_terminal(cluster, local):
     parent, child = await _finished_parent_with_live_child_on_a(cluster)
-    frames, _ = await ws_stop(local, {"run_id": parent.run_id})
+    frames = await ws_stop(local, {"run_id": parent.run_id})
     assert [f["type"] for f in frames] == ["run_status"]
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
@@ -211,7 +187,7 @@ async def test_S09_run_id_only_finished_parent_record_expired(cluster, local):
 async def test_S10_run_id_only_finished_parent_unreadable(cluster, local):
     parent, child = await _finished_parent_with_live_child_on_a(cluster)
     await _unreadable(cluster)
-    frames, _ = await ws_stop(local, {"run_id": parent.run_id})
+    frames = await ws_stop(local, {"run_id": parent.run_id})
     _is_unavailable(frames, parent.run_id)
     assert not cluster.registry.get(child.run_id).is_terminal
 
@@ -227,13 +203,13 @@ async def test_S11_run_id_only_api_follow_up_local(local):
 
 async def test_S12_conversation_only_tracked_local(local):
     run = _local_run(local)
-    frames, untracked = await ws_stop(local, {"conversation_id": CONV}, _Untracked())
-    assert local.get(run.run_id).status is RunStatus.CANCELLED and not frames and not untracked
+    frames = await ws_stop(local, {"conversation_id": CONV})
+    assert local.get(run.run_id).status is RunStatus.CANCELLED and not frames
 
 
 async def test_S13_conversation_only_tracked_remote_live(cluster, local):
     run = await cluster.run()
-    frames, _ = await ws_stop(local, {"conversation_id": run.conversation_id})
+    frames = await ws_stop(local, {"conversation_id": run.conversation_id})
     assert [f["type"] for f in frames] == ["run_status"]
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
@@ -242,7 +218,7 @@ async def test_S14_conversation_only_tracked_remote_terminal(cluster, local):
     run = await cluster.run()
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    frames, untracked = await ws_stop(local, {"conversation_id": run.conversation_id}, _Untracked())
+    frames = await ws_stop(local, {"conversation_id": run.conversation_id})
     # Nothing is running: no frame, and the status stays what the run ended as.
     assert frames == [] and cluster.registry.get(run.run_id).status is RunStatus.COMPLETED
 
@@ -250,32 +226,15 @@ async def test_S14_conversation_only_tracked_remote_terminal(cluster, local):
 async def test_S15_conversation_only_tracked_unreadable(cluster, local):
     run = await cluster.run()
     await _unreadable(cluster)
-    frames, _ = await ws_stop(local, {"conversation_id": run.conversation_id})
+    frames = await ws_stop(local, {"conversation_id": run.conversation_id})
     _is_unavailable(frames)
     assert not cluster.registry.get(run.run_id).is_terminal
 
 
-async def test_S16_conversation_only_untracked_local(local):
-    frames, untracked = await ws_stop(local, {"conversation_id": CONV}, _Untracked())
-    assert frames == [] and untracked
 
 
-@gap("a stop naming conversation X cancels the connection's untracked turn even when that turn "
-     "runs in conversation Y (the fallback never compares conversation ids)")
-async def test_S17_conversation_only_untracked_other_conversation(local):
-    untracked = _Untracked()
-    untracked.slot["conversation_id"] = "conv-other"
-    _frames, cancelled = await ws_stop(local, {"conversation_id": CONV}, untracked)
-    assert not cancelled
 
 
-async def test_S18_conversation_only_untracked_unreadable(cluster, local):
-    await _unreadable(cluster)
-    frames, untracked = await ws_stop(local, {"conversation_id": CONV}, _Untracked())
-    # A live untracked turn here is stopped; the unreadable directory is not asked about it.
-    assert frames == [] and untracked
-    frames, untracked = await ws_stop(local, {"conversation_id": CONV}, _Untracked(live=False))
-    _is_unavailable(frames)
 
 
 @gap("a conversation-only stop looks only for a live run, so a finished parent's live children "
@@ -320,7 +279,7 @@ async def test_S23_both_tracked_local_run_id_wins(local):
 
 async def test_S24_both_tracked_remote_live(cluster, local):
     run = await cluster.run()
-    frames, _ = await ws_stop(local, {"run_id": run.run_id, "conversation_id": run.conversation_id})
+    frames = await ws_stop(local, {"run_id": run.run_id, "conversation_id": run.conversation_id})
     assert [f["type"] for f in frames] == ["run_status"]
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
@@ -329,14 +288,14 @@ async def test_S25_both_tracked_remote_terminal(cluster, local):
     run = await cluster.run()
     cluster.registry.set_status(run.run_id, RunStatus.COMPLETED)
     await _release(cluster, run)
-    frames, _ = await ws_stop(local, {"run_id": run.run_id, "conversation_id": run.conversation_id})
+    frames = await ws_stop(local, {"run_id": run.run_id, "conversation_id": run.conversation_id})
     assert [f["type"] for f in frames] == ["run_status"]
 
 
 async def test_S26_both_tracked_unreadable(cluster, local):
     run = await cluster.run()
     await _unreadable(cluster)
-    frames, _ = await ws_stop(local, {"run_id": run.run_id, "conversation_id": run.conversation_id})
+    frames = await ws_stop(local, {"run_id": run.run_id, "conversation_id": run.conversation_id})
     _is_unavailable(frames, run.run_id)
 
 
@@ -348,14 +307,11 @@ async def test_S27_both_stale_run_id_falls_back_to_conversation_local(local):
 
 async def test_S28_both_stale_run_id_falls_back_to_conversation_remote(cluster, local):
     run = await cluster.run()
-    frames, _ = await ws_stop(local, {"run_id": "stale", "conversation_id": run.conversation_id})
+    frames = await ws_stop(local, {"run_id": "stale", "conversation_id": run.conversation_id})
     assert [f["type"] for f in frames] == ["run_status"]
     assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
 
 
-async def test_S29_both_untracked_stale_run_id(local):
-    frames, untracked = await ws_stop(local, {"run_id": "stale", "conversation_id": CONV}, _Untracked())
-    assert frames == [] and not untracked
 
 
 async def test_S30_both_finished_parent_remote_terminal(cluster, local):
@@ -385,13 +341,19 @@ async def test_S32_both_api_follow_up_remote(cluster, local):
     assert cluster.registry.get(follow_up.run_id).status is RunStatus.CANCELLED
 
 
-async def test_S33_neither_stops_only_the_untracked_turn(local):
-    run = _local_run(local)
-    frames, untracked = await ws_stop(local, {}, _Untracked())
-    assert untracked and frames == [] and not local.get(run.run_id).is_terminal
-    # With no untracked turn running the frame does nothing at all.
-    frames, untracked = await ws_stop(local, {}, _Untracked(live=False))
-    assert frames == [] and not untracked and not local.get(run.run_id).is_terminal
+async def test_S33_neither_stops_only_the_connections_plain_turn(local):
+    tracked = _local_run(local)
+    plain = local.start(conversation_id="conv-plain", user_email=OWNER, session_id="conn-1", connection_bound=True)
+    local.attach_task(plain.run_id, asyncio.create_task(asyncio.sleep(30)))
+    # With no connection to read the frame does nothing at all.
+    assert await ws_stop(local, {}) == []
+    assert not local.get(plain.run_id).is_terminal
+    assert await ws_stop(local, {}, session_id="conn-1") == []
+    assert local.get(plain.run_id).status is RunStatus.CANCELLED
+    assert not local.get(tracked.run_id).is_terminal
+    # With no plain turn running the frame does nothing.
+    assert await ws_stop(local, {}, session_id="conn-1") == []
+    assert not local.get(tracked.run_id).is_terminal
 
 
 # ---------------------------------------------------------------------------
@@ -570,8 +532,6 @@ def test_C09_local_tracked_run_not_draining_is_refused(chat_service):
     assert frame["error_type"] == "conversation_busy"
 
 
-@gap("a local steer queues incognito / not-saved content into a recorded run; the remote path "
-     "refuses the same frame with off_record")
 @pytest.mark.parametrize("off_record", [{"incognito": True}, {"save_mode": "local"}])
 def test_C10_local_off_record_steer_is_refused(chat_service, off_record):
     frame = _local_steer_frames(chat_service, off_record, _active_channel())
@@ -689,7 +649,7 @@ def test_every_tested_row_is_in_the_doc_and_every_doc_row_names_its_test():
             assert f"def {name}(" in corpus, f"{row_id}: {name} does not exist"
 
 
-UNTESTED_GAPS = {"C12"}  # needs two real processes; see the doc row
+UNTESTED_GAPS = set()
 
 
 def test_gap_rows_in_the_doc_are_exactly_the_strict_xfails():

@@ -193,7 +193,7 @@ Client to server:
 | Message | Purpose |
 |---|---|
 | `list_runs` | Ask for every run the user can still see. Sent on connect. |
-| `stop_streaming` / `agent_control` (`action: "stop"`) | Now accept `run_id` and/or `conversation_id`. A frame with neither falls back to the connection's untracked turn, which is what older clients send. |
+| `stop_streaming` / `agent_control` (`action: "stop"`) | Now accept `run_id` and/or `conversation_id`. A frame with neither stops the plain turn on the connection's own session, which is what older clients send. |
 | `tool_approval_response` / `elicitation_response` | May carry `run_id` so the right run is resumed when several are paused. |
 | `auto_approve_tools` | `{enabled: true}` or `{enabled: false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering. |
 
@@ -367,30 +367,24 @@ answer is logged and keeps its previous value. A turn that opted in keeps that
 choice after its socket closes, including when a later connection lands on
 another replica.
 
-A turn that is not admitted (incognito, local save, or chat history disabled)
-has no run record. The same message stores the switch on that connection's
-session, and the gate reads the live value on the next tool call, not the
-copy taken when the turn started. Turning the switch off asks again. The
-last value is kept if the socket drops while a tool is still in flight, so
-auto-approve stays on when that is how the user left it. A toggle that could
-not be sent because the socket was down is sent again when the page reconnects.
+Every chat turn is a run, including incognito, local-save and
+history-disabled turns, so the switch lives on the turn's run record and a
+toggle reaches it while the turn executes. Turning the switch off asks again.
+A toggle that could not be sent because the socket was down is sent again when
+the page reconnects.
 
 Some requests stay on the gate with the switch on: an admin-mandated tool, a
 call a policy hook escalated to "ask", and a tool call inside a launched child
 conversation (judged by launch lineage -- depth or launch spec -- since a child
-of an untracked turn has no `parent_run_id`). Each `tool_approval_request`
+of a plain turn has no `parent_run_id`). Each `tool_approval_request`
 carries `auto_approvable`; it is `false` for those, and the browser does not
 answer a request marked that way, in the open conversation or in the
 background. The user approves or rejects it by hand. Pending requests are
 replayed when the conversation is opened again, as described below.
 
-The live switch entry for an untracked turn is opened before the turn's task
-is scheduled, so an off-toggle that arrives while the turn is still starting
-is kept. Each untracked turn holds the entry until it finishes; a turn being
-torn down while the next starts on the same session does not drop the latest
-toggle. A page that reconnects announces the latest saved setting (tabs share
-it), not the value it last rendered, so a stale second tab does not turn
-auto-approve back on.
+A page that reconnects announces the latest saved setting (tabs share it), not
+the value it last rendered, so a stale second tab does not turn auto-approve
+back on.
 
 ### Pending approvals are replayed, not lost
 

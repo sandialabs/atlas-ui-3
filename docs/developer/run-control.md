@@ -95,8 +95,8 @@ earlier delivery.
   `run_control_unavailable` and never admitted, so an outage cannot start a
   second turn beside a run another replica is executing, or one under another
   user's run. A stop or API cancel answers `owner_unavailable` (WebSocket
-  `run_control_unavailable`, HTTP 503); only a stop naming no run id while
-  the socket has an untracked turn of its own still stops that turn locally.
+  `run_control_unavailable`, HTTP 503). A stop naming no run id and no
+  conversation stops the plain turn running on the socket's own session, if any.
 - **Pool-friendly.** The bus shares the process's Redis pool (20 connections
   by default) with sessions, admission and lease renewal. At most
   `MAX_CONCURRENT_SENDS` (6) senders hold a connection in a blocking reply

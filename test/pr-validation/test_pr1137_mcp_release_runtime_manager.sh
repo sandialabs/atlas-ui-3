@@ -266,7 +266,7 @@ async def check() -> int:
     manager._user_clients[(user_key, "pr1137-server", CONVERSATION_ID)] = http_client
 
     # The real disconnect cleanup path, against the real session repository.
-    await main.cleanup_disconnected_session(chat_service, session_id, USER, {"task": None})
+    await main.cleanup_disconnected_session(chat_service, session_id, USER, main._ConnectionWork())
 
     problems = []
     if session_key in manager._session_manager._sessions:

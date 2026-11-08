@@ -60,7 +60,7 @@ closing the Redis pool.
 
 Every admission refusal refuses the turn. On the WebSocket path an unexpected
 `RunRegistryError` subclass becomes an `error` frame (`run_not_admitted`)
-rather than an untracked turn, which would bypass the cap.
+rather than a turn that bypasses the cap.
 
 If the claim's reply is lost (a timeout after Redis applied it), the
 coordinator releases whatever this replica holds under that run id before

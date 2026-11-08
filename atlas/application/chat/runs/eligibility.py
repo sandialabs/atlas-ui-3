@@ -1,7 +1,11 @@
-"""Which chat turns are allowed to run as independent background runs (#884).
+"""Which chat turns get their own session and outlive the socket (#884, #1128).
 
-Parallel, browser-independent runs are deliberately *not* the behaviour for
-every turn. They are opt-in along three axes, and all three must hold:
+Every chat turn is a registry run. What differs is the session it runs on and
+whether closing the socket stops it. A turn that is eligible here runs on its
+own ``Session``, may run beside other conversations, and keeps going after the
+socket closes. Any other turn runs on the connection's session, whose live
+history carries the next turn, and ends with the socket. Three axes, all of
+which must hold for the first kind:
 
 1. ``FEATURE_CHAT_HISTORY_ENABLED`` -- a run that outlives the socket is only
    useful if its transcript is written somewhere the user can reopen. With
@@ -12,15 +16,11 @@ every turn. They are opt-in along three axes, and all three must hold:
 3. The turn asks for agent mode with at least one tool. Plain completions are
    short; the whole point of a background run is a loop that keeps working.
 
-When any axis fails the caller keeps the pre-#884 single-run behaviour
-unchanged, which is what makes this feature additive rather than a rewrite of
-every deployment's semantics.
-
 The agent-mode check here is on the *requested* turn. The orchestrator may
 still silently downgrade ``agent_mode`` to False (model without tool support,
-or tools that resolve to nothing); such a run is admitted but simply finishes
-as an ordinary turn would, so the downgrade costs a run slot for the length of
-one completion and nothing more.
+or tools that resolve to nothing); such a run simply finishes as an ordinary
+turn would, so the downgrade costs a run slot for the length of one completion
+and nothing more.
 """
 
 from __future__ import annotations

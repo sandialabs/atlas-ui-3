@@ -38,7 +38,8 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeVar
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, TypeVar
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
@@ -47,7 +48,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
-from atlas.application.chat.agent.steering import SteeringChannel, should_steer
+from atlas.application.chat.agent.steering import SteeringChannel
 from atlas.application.chat.runs import (
     ConcurrencyLimitError,
     ConversationBusyError,
@@ -61,7 +62,6 @@ from atlas.application.chat.runs.admission import (
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.commands import (
-    cancel_superseded_leftovers as _cancel_superseded_leftovers,
     nudge_approval,
     set_auto_approve,
     steer_addressed_run,
@@ -240,7 +240,7 @@ def _stream_replay_frame(record) -> Optional[Dict[str, Any]]:
     would put bookkeeping into its hot path -- so the race is accepted rather
     than papered over with a replay cursor (issue #760 owns live re-attach).
     """
-    if record is None:
+    if record is None or record.off_record:
         return None
     text = record.stream.text()
     if not text:
@@ -695,42 +695,96 @@ async def _release_finished_run(
         logger.debug("Error releasing MCP sessions for run %s: %s", run_id, e)
 
 
-# Seconds to wait for a superseded untracked turn to unwind after cancel.
+# Seconds to wait for a cancelled plain turn to unwind.
 SUPERSEDED_TURN_CANCEL_TIMEOUT = 5.0
 
 
-async def _cancel_superseded_untracked_turn(active_chat_task: dict) -> bool:
-    """Cancel the untracked turn this connection is still running, and wait.
+@dataclass
+class _ConnectionWork:
+    """Work that belongs to this socket's own session rather than to a run.
 
-    ``active_chat_task`` holds at most one task per connection: an untracked
-    chat turn or a compaction. Tracked runs live in the registry, not here,
-    so a background run in another conversation is never touched. A chat
-    frame for a different conversation used to overwrite the slot and leave
-    the old turn executing with nothing pointing at it: Stop reached only the
-    new task, and with the server-side switch on, the orphan kept executing
-    user-level tools on its own. Cancel it, and wait for it to unwind so its
-    session hold is released before the new turn opens one.
-
-    Returns True when a running turn was cancelled.
+    A manual compaction rewrites the connection session's history. The tasks of
+    plain turns are kept here too, because a Stop marks the run terminal and
+    drops the registry's reference to its task while the task is still
+    committing the interrupted turn; reset and compaction must still wait for
+    it. ``stragglers`` are the ones a bounded wait gave up on.
     """
-    previous = active_chat_task.get("task")
-    if previous is None or previous.done() or active_chat_task.get("kind") != "chat":
+
+    compaction: Optional["asyncio.Task"] = None
+    turns: List["asyncio.Task"] = field(default_factory=list)
+    stragglers: List["asyncio.Task"] = field(default_factory=list)
+
+    def track(self, task: "asyncio.Task") -> None:
+        self.turns = [t for t in self.turns if not t.done()]
+        self.turns.append(task)
+
+    def live_turns(self) -> List["asyncio.Task"]:
+        self.turns = [t for t in self.turns if not t.done()]
+        return list(self.turns)
+
+    def compacting(self) -> bool:
+        return self.compaction is not None and not self.compaction.done()
+
+    def cancel_stragglers(self) -> int:
+        """Cancel cancelled turns that did not unwind in time; drop finished ones."""
+        self.stragglers = [t for t in self.stragglers if not t.done()]
+        for task in self.stragglers:
+            task.cancel()
+        return len(self.stragglers)
+
+    def busy(self) -> bool:
+        return self.compacting() or bool(self.live_turns())
+
+
+async def _cancel_connection_turns(registry, session_id, user_email, work, *, include_compaction=False) -> bool:
+    """Cancel the plain turns running on this connection's session, and wait.
+
+    Two turns must not share one session: a chat frame for another conversation
+    used to start beside the running one, leaving it executing with nothing
+    pointing at it. Cancel it and wait for it to unwind so its session hold is
+    released before the new turn opens one. This includes a turn a Stop already
+    cancelled but that is still committing. Runs with their own session are
+    never touched, so a background run in another conversation keeps going.
+
+    Returns True when a turn was running or still unwinding.
+    """
+    work.cancel_stragglers()
+    for record in registry.active_bound_to(session_id):
+        registry.cancel(record.run_id, user_email)
+    tasks = work.live_turns()
+    for task in tasks:
+        task.cancel()
+    if include_compaction and work.compacting():
+        work.compaction.cancel()
+        tasks.append(work.compaction)
+    if not tasks:
         return False
-    previous.cancel()
     # ``wait`` reports completion without re-raising the task's own
     # CancelledError into this coroutine. Bounded: a tool that resists
     # cancellation must not hold this connection's receive loop, and with
     # it every later chat, Stop and approval frame.
-    _done, pending = await asyncio.wait([previous], timeout=SUPERSEDED_TURN_CANCEL_TIMEOUT)
+    _done, pending = await asyncio.wait(tasks, timeout=SUPERSEDED_TURN_CANCEL_TIMEOUT)
     if pending:
-        # Keep it reachable: Stop, reset and the disconnect cleanup cancel
-        # it again, so a late unwinding is still driven by this connection.
-        logger.warning(
-            "Superseded untracked turn did not unwind within %ss; continuing",
-            SUPERSEDED_TURN_CANCEL_TIMEOUT,
-        )
-        active_chat_task.setdefault("superseded", []).append(previous)
+        # Keep them reachable: Stop, reset and the disconnect cleanup cancel
+        # them again, so a late unwinding is still driven by this connection.
+        logger.warning("A cancelled turn did not unwind within %ss; continuing", SUPERSEDED_TURN_CANCEL_TIMEOUT)
+        work.stragglers.extend(pending)
     return True
+
+
+async def _connection_conversation_id(chat_service, session_id) -> str:
+    """The conversation a turn without an id runs in: the one its session holds.
+
+    ``handle_chat_message`` binds the same value, so the run and the saved
+    conversation are keyed by one id. A session that has none yet is keyed by
+    its own id, as the service does.
+    """
+    try:
+        session = await chat_service.session_repository.get(session_id)
+        current = session.context.get("conversation_id") if session else None
+    except Exception:
+        current = None
+    return current if isinstance(current, str) and current else str(session_id)
 
 
 def _conversation_access_error(chat_service, conversation_id, user_email):
@@ -1172,25 +1226,29 @@ async def cleanup_disconnected_session(
     chat_service,
     session_id,
     user_email,
-    active_chat_task,
+    work,
     connection_run_ids=None,
 ):
     """Tear down a session whose websocket has closed.
 
-    Cancels the in-flight *untracked* turn before releasing resources: without
-    this the background chat task keeps streaming tokens, calling tools and
-    holding MCP sessions against a session that end_session() is about to tear
-    down -- work nobody can receive.  Mirrors the stop_streaming/reset_session
-    paths.
+    Cancels the plain turns running on this socket's session before releasing
+    resources: without this the background chat task keeps streaming tokens,
+    calling tools and holding MCP sessions against a session that end_session()
+    is about to tear down -- work nobody can receive.  Mirrors the
+    stop_streaming/reset_session paths.
 
-    Tracked runs (issue #884) are the deliberate exception. A run owns its own
-    Session, its own conversation and its own MCP sessions, and it is not owned
-    by this socket: closing the tab must not stop the agent. Those runs are
-    marked detached and left executing, and this function must not release
-    resources belonging to a conversation one of them still owns -- otherwise
-    the run would keep going with its MCP clients pulled out from under it.
+    Runs with their own session (issue #884) are the deliberate exception. A
+    run owns its own Session, its own conversation and its own MCP sessions,
+    and it is not owned by this socket: closing the tab must not stop the
+    agent. Those runs are marked detached and left executing, and this function
+    must not release resources belonging to a conversation one of them still
+    owns -- otherwise the run would keep going with its MCP clients pulled out
+    from under it.
     """
     registry = get_run_registry()
+    for record in registry.active_bound_to(session_id):
+        logger.info("Cancelling run %s (client disconnected)", record.run_id)
+        registry.cancel(record.run_id, user_email or "")
     surviving = [
         r for r in registry.active_for_user(user_email or "")
         if connection_run_ids is None or r.run_id in connection_run_ids
@@ -1203,11 +1261,12 @@ async def cleanup_disconnected_session(
             len(surviving),
         )
 
-    _cancel_superseded_leftovers(active_chat_task)
-    task = active_chat_task.get("task")
-    if task and not task.done():
-        logger.info("Cancelling active chat task (client disconnected)")
+    work.cancel_stragglers()
+    for task in work.live_turns():
         task.cancel()
+    if work.compacting():
+        logger.info("Cancelling compaction (client disconnected)")
+        work.compaction.cancel()
 
     # Release MCP sessions for this conversation, unless a surviving run still
     # owns that conversation.
@@ -2013,13 +2072,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 "resumed": resumed_session is not None,
             },
         )
-    # ``active_chat_task`` tracks the in-flight turn for this connection. The
-    # ``steering`` channel (issue #824) lets a second chat message arrive while
-    # an agent loop is still running: instead of starting a second concurrent
-    # turn (which would race on the same session history), its content is
-    # pushed onto the running loop's channel and injected as a normal user turn
-    # at the next iteration boundary.
-    active_chat_task = {"task": None, "steering": None, "conversation_id": None, "kind": None}
+    # Every chat turn is a registry run. What belongs to this socket instead of
+    # a run (a manual compaction, a cancelled turn still unwinding) is here.
+    # Issue #824: a second chat message arriving while an agent loop runs is
+    # steered into the run's channel rather than starting a concurrent turn
+    # that would race on the same session history.
+    work = _ConnectionWork()
     # Issue #877: when this connection last answered a context_usage_request.
     # The meter asks on conversation open and model change. Requests inside
     # the window are coalesced: only the newest is answered, once the window
@@ -2061,6 +2119,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
     unsubscribe_run_status = run_registry.add_listener(user_email, _publish_run_status)
 
+    async def _stop_frame(data: dict) -> None:
+        """Stop what a stop frame addresses; a pending compaction ends with it."""
+        work.cancel_stragglers()
+        if work.compacting():
+            work.compaction.cancel()
+        await stop_addressed_run(websocket, run_registry, user_email, data, session_id)
+
     logger.info(f"WebSocket connection established for session {sanitize_for_logging(str(session_id))}")
 
     try:
@@ -2080,12 +2145,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Issue #877: a manual compaction rewrites what this
                 # conversation's next request carries and saves the session;
                 # a turn started under it would race on the same history.
-                compacting = active_chat_task.get("task")
-                if (
-                    active_chat_task.get("kind") == "compact"
-                    and compacting is not None
-                    and not compacting.done()
-                ):
+                if work.compacting():
                     await websocket.send_json({
                         "type": "error",
                         "message": "The conversation is being compacted. Send your message once it has finished.",
@@ -2093,15 +2153,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         "conversation_id": data.get("conversation_id"),
                     })
                     continue
-                # Issue #824: if an agent loop is already running for this
-                # connection, steer it instead of starting a second concurrent
-                # turn (which would race on the same session history). The
-                # user's message is injected as a normal user turn at the next
-                # iteration boundary; the loop is not stopped. ``should_steer``
-                # also gates on conversation identity so a message typed after
-                # the user switched conversations starts a fresh turn in the
-                # new conversation rather than being injected into the old
-                # one's context. The channel's ``active`` flag is set by the
+                # Issue #824: a chat frame for a conversation whose agent loop is
+                # running is steered into that loop, never started as a second
+                # concurrent turn. The channel's ``active`` flag is set by the
                 # agent runner, so this only routes when a loop is genuinely
                 # consuming -- a turn that requested agent mode but fell back
                 # to a non-agent turn never activates the channel.
@@ -2142,6 +2196,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 tracked_run = run_registry.active_for_conversation(
                     frame_conversation_id, user_email
                 )
+                if tracked_run is None and frame_conversation_id is None:
+                    # A frame that names no conversation continues the plain
+                    # turn this connection is already running.
+                    bound_runs = run_registry.active_bound_to(session_id)
+                    tracked_run = bound_runs[0] if bound_runs else None
                 if tracked_run is not None:
                     # A chat or steer frame must not rewrite the switch on a
                     # run that is already going. A second tab, or a steer the
@@ -2150,6 +2209,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     # the auto_approve_tools message is what changes it later.
                     steering = tracked_run.steering
                     if steering is not None and steering.active:
+                        if turn_is_off_record(data) and not tracked_run.off_record:
+                            # Not-saved text must not be queued into a run that
+                            # is recorded; the routed path refuses the same frame.
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "This run is recorded, so a message that is not saved cannot steer it.",
+                                "error_type": "off_record",
+                                "steering": True,
+                                "run_id": tracked_run.run_id,
+                                "conversation_id": tracked_run.conversation_id,
+                            })
+                            continue
                         refusal = await chat_service.steering_classification_refusal(
                             tracked_run.session_id, data.get("compliance_level_filter")
                         )
@@ -2212,47 +2283,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 if tracked_run is None and frame_conversation_id:
                     if await steer_addressed_run(websocket, run_registry, user_email, data):
                         continue
-
-                if should_steer(active_chat_task, data.get("conversation_id")):
-                    refusal = await chat_service.steering_classification_refusal(
-                        session_id, data.get("compliance_level_filter")
-                    )
-                    if refusal:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": refusal,
-                            "error_type": CONVERSATION_CLASSIFICATION_ERROR,
-                            "steering": True,
-                        })
-                        continue
-                    content = data.get("content", "")
-                    steering = active_chat_task["steering"]
-                    try:
-                        steering.queue.put_nowait(content)
-                    except asyncio.QueueFull:
-                        # Bounded queue (STEERING_QUEUE_MAXSIZE): a flood of
-                        # steers would otherwise stack into history and every
-                        # later prompt. Tell the user instead of blocking the
-                        # receive loop on a full put.
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": (
-                                "The agent steering queue is full. Please wait "
-                                "for the agent to make progress before sending "
-                                "another steering message."
-                            ),
-                            "error_type": "steering_queue_full",
-                        })
-                        continue
-                    logger.info("Steered running agent loop with a new user message")
-                    # Acknowledge the steer so "queued" is distinguishable from
-                    # "dropped" at the client (issue #824 review). The frontend
-                    # can render this; unknown update types are ignored.
-                    await websocket.send_json({
-                        "type": "agent_update",
-                        "update_type": "steering_queued",
-                    })
-                    continue
 
                 # Authoritative server-side gate for system-prompt overrides.
                 # The frontend already withholds custom_system_prompt when the
@@ -2320,45 +2350,42 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 steering_channel = SteeringChannel() if is_agent_turn else None
 
-                # Issue #884: decide whether this turn is a *tracked run* --
-                # an execution that owns its own Session, may run alongside
-                # other conversations, and survives this socket closing -- or
-                # a plain turn with the historical one-at-a-time semantics.
-                # Everything downstream keys off ``run_record`` being set, so
-                # a deployment without chat history (or a user in local /
-                # incognito save mode) follows exactly the pre-#884 path.
+                # Every turn is a registry run (issues #884, #1128): one admission
+                # path, one claim per conversation cluster-wide, one Stop. Two
+                # kinds differ only in the session they run on. A turn that is
+                # eligible (history on, saved to the server, agent mode with
+                # tools) gets its own Session and survives this socket closing.
+                # Any other turn runs on this connection's session, whose live
+                # history carries the next turn, and ends with the socket.
                 # A brand-new chat has no conversation id yet: the client only
                 # learns one from `conversation_saved`, which arrives *after*
-                # the turn. Requiring the client to supply one would exclude
-                # the single most common case -- the first agent turn in a new
-                # conversation -- from background execution entirely. Mint one
-                # here instead and tell the client (see `run_started` below);
-                # the turn is then saved under the same id the run is keyed by.
+                # the turn. Mint one for an agent turn and tell the client (see
+                # `run_started` below); a plain turn is keyed by the one its
+                # session already holds, which is what the service saves under.
                 turn_conversation_id = frame_conversation_id
                 if turn_conversation_id is None and is_agent_turn:
                     turn_conversation_id = str(uuid4())
                 if turn_conversation_id:
                     data["conversation_id"] = turn_conversation_id
 
-                run_record = None
-                if turn_is_eligible_for_background_run(
+                own_session = turn_is_eligible_for_background_run(
                     chat_history_enabled=config_manager.app_settings.feature_chat_history_enabled,
                     save_mode=data.get("save_mode", "server"),
                     incognito=data.get("incognito", False),
                     agent_mode=is_agent_turn,
                     selected_tools=data.get("selected_tools"),
                     conversation_id=turn_conversation_id,
-                ):
+                )
+                if turn_conversation_id:
                     # Issue #958: ownership of a *stored* conversation is
                     # settled before a run is admitted. The service performs
                     # the same check once the turn starts, but by then the
-                    # run already exists: `run_started` and `run_status`
-                    # frames have gone out, and the refused turn leaves a
-                    # `failed` run in the caller's snapshot for a conversation
-                    # they never owned. Refusing here keeps the check ahead
-                    # of admission; the error the caller sees is the one the
-                    # service would have raised, just without the run around
-                    # it.
+                    # run already exists: `run_started` and `run_status` frames
+                    # have gone out, and the refused turn leaves a `failed` run
+                    # in the caller's snapshot for a conversation they never
+                    # owned. Refusing here keeps the check ahead of admission;
+                    # the error the caller sees is the one the service would
+                    # have raised, just without the run around it.
                     refusal = _conversation_access_error(
                         chat_service, turn_conversation_id, user_email
                     )
@@ -2370,103 +2397,107 @@ async def websocket_endpoint(websocket: WebSocket):
                         log_metric("error", user_email, error_type=refusal["error_type"])
                         await websocket.send_json(refusal)
                         continue
-                    try:
-                        # One admission path for every transport (#1128):
-                        # applies MAX_CONCURRENT_RUNS_PER_USER and claims the
-                        # conversation and a user slot cluster-wide.
-                        run_record = await admit_run(
-                            conversation_id=turn_conversation_id,
-                            user_email=user_email,
-                            app_settings=config_manager.app_settings,
-                            steering=steering_channel,
-                            # Multimodal turns carry a list as `content`; the
-                            # title wants the first text part, never a crash
-                            # at admission.
-                            title=_run_title_from_frame(data),
-                        )
-                        # Record the switch before the task can call a tool.
-                        # The run keeps this after the socket closes.
-                        run_record.note_auto_approve(data)
-                    except ConcurrencyLimitError as e:
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e),
-                            "error_type": "run_limit_exceeded",
-                            "conversation_id": data.get("conversation_id"),
-                        })
-                        continue
-                    except ConversationBusyError as e:
-                        # Lost a race with another socket of the same user
-                        # between the steer check above and here.
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e),
-                            "error_type": "conversation_busy",
-                            "conversation_id": data.get("conversation_id"),
-                        })
-                        continue
-                    except RunCoordinationUnavailableError as e:
-                        # Fail closed: an untracked turn here would bypass the
-                        # cluster-wide cap for as long as Redis is down.
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e),
-                            "error_type": "run_coordination_unavailable",
-                            "conversation_id": data.get("conversation_id"),
-                        })
-                        continue
-                    except RunRegistryError as e:
-                        # Any other admission refusal (a future subclass)
-                        # refuses the turn too: running it untracked would
-                        # bypass the cluster-wide cap.
-                        # The details stay in the server log; the client gets
-                        # a fixed message that cannot leak internals.
-                        logger.warning(
-                            "Run could not be started: %s: %s",
-                            type(e).__name__,
-                            sanitize_for_logging(str(e)),
-                        )
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": "The run could not be started. Try again in a moment.",
-                            "error_type": "run_not_admitted",
-                            "conversation_id": data.get("conversation_id"),
-                        })
-                        continue
+                run_conversation_id = turn_conversation_id or await _connection_conversation_id(
+                    chat_service, session_id
+                )
+                if await _cancel_connection_turns(run_registry, session_id, user_email, work):
+                    # A turn for another conversation supersedes the plain turn
+                    # still running on this connection, whichever session the
+                    # new one runs on: left alone it would keep generating, and
+                    # executing auto-approved tools, for a chat nobody is
+                    # watching, and hold a concurrency slot.
+                    logger.info("Cancelled the previous turn on this connection before starting a new one")
+                try:
+                    # One admission path for every transport (#1128): applies
+                    # MAX_CONCURRENT_RUNS_PER_USER and claims the conversation
+                    # and a user slot cluster-wide.
+                    run_record = await admit_run(
+                        conversation_id=run_conversation_id,
+                        user_email=user_email,
+                        app_settings=config_manager.app_settings,
+                        steering=steering_channel,
+                        # Multimodal turns carry a list as `content`; the
+                        # title wants the first text part, never a crash
+                        # at admission.
+                        title=_run_title_from_frame(data),
+                        # Incognito and not-saved turns claim the conversation
+                        # and share nothing else (no title, snapshot or result).
+                        off_record=turn_is_off_record(data),
+                        **({} if own_session else {"session_id": session_id, "connection_bound": True}),
+                    )
+                    # Record the switch before the task can call a tool.
+                    # The run keeps this after the socket closes.
+                    run_record.note_auto_approve(data)
+                except ConcurrencyLimitError as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e),
+                        "error_type": "run_limit_exceeded",
+                        "conversation_id": data.get("conversation_id"),
+                    })
+                    continue
+                except ConversationBusyError as e:
+                    # Lost a race with another socket of the same user
+                    # between the steer check above and here.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e),
+                        "error_type": "conversation_busy",
+                        "conversation_id": data.get("conversation_id"),
+                    })
+                    continue
+                except RunCoordinationUnavailableError as e:
+                    # Fail closed: a turn here would bypass the cluster-wide
+                    # cap for as long as Redis is down.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e),
+                        "error_type": "run_coordination_unavailable",
+                        "conversation_id": data.get("conversation_id"),
+                    })
+                    continue
+                except RunRegistryError as e:
+                    # Any other admission refusal (a future subclass) refuses
+                    # the turn too: running it would bypass the cluster-wide
+                    # cap. The details stay in the server log; the client gets
+                    # a fixed message that cannot leak internals.
+                    logger.warning(
+                        "Run could not be started: %s: %s",
+                        type(e).__name__,
+                        sanitize_for_logging(str(e)),
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "The run could not be started. Try again in a moment.",
+                        "error_type": "run_not_admitted",
+                        "conversation_id": data.get("conversation_id"),
+                    })
+                    continue
 
-                if run_record is None:
-                    # Untracked turn: keep the single-slot behaviour, including
-                    # steering, cancel-on-reset and cancel-on-disconnect.
-                    active_chat_task["steering"] = steering_channel
-                    active_chat_task["conversation_id"] = data.get("conversation_id")
-                    turn_session_id = session_id
+                # The run's own session id keeps two conversations executing at
+                # once from sharing one Session/history object; a plain turn's
+                # is the connection's. Files are seeded below, inside the
+                # admission guard.
+                turn_session_id = run_record.session_id
 
-                    async def turn_update_callback(message):
-                        await websocket_update_callback(websocket, message)
-                else:
-                    # The run gets its own session id, so two conversations
-                    # executing at once never share one Session/history object.
-                    # Its files are seeded below, inside the admission guard.
-                    turn_session_id = run_record.session_id
-
-                    async def turn_update_callback(
-                        message,
-                        _run_id=run_record.run_id,
-                        _conv=run_record.conversation_id,
-                    ):
-                        # A run that asks for tool approval is paused, not
-                        # working: reflect that in its status so the client can
-                        # show "waiting for you" on a conversation the user is
-                        # not currently looking at.
-                        # Keep the frame itself when it asks for input. If the
-                        # user is looking at another conversation (or is not
-                        # here at all) the client discards it, and nothing else
-                        # holds the request id and arguments needed to answer
-                        # it. A settling tool clears a stale pause -- the case
-                        # where nobody answers and the request times out.
-                        tagged = tag_run_event(message, _run_id, _conv)
-                        run_registry.note_event(_run_id, tagged)
-                        await websocket_update_callback(websocket, tagged)
+                async def turn_update_callback(
+                    message,
+                    _run_id=run_record.run_id,
+                    _conv=run_record.conversation_id,
+                ):
+                    # A run that asks for tool approval is paused, not working:
+                    # reflect that in its status so the client can show
+                    # "waiting for you" on a conversation the user is not
+                    # currently looking at.
+                    # Keep the frame itself when it asks for input. If the user
+                    # is looking at another conversation (or is not here at
+                    # all) the client discards it, and nothing else holds the
+                    # request id and arguments needed to answer it. A settling
+                    # tool clears a stale pause -- the case where nobody
+                    # answers and the request times out.
+                    tagged = tag_run_event(message, _run_id, _conv)
+                    run_registry.note_event(_run_id, tagged)
+                    await websocket_update_callback(websocket, tagged)
 
                 # Bind the per-turn values as defaults: the loop reassigns them
                 # on the next message, and a still-running task must keep the
@@ -2670,9 +2701,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 # one as failed with another turn's error -- and a task that had
                 # not started yet would execute the newer turn's handler.
                 async def handle_chat_guarded(
-                    run_id=(run_record.run_id if run_record else None),
-                    run_conversation_id=(run_record.conversation_id if run_record else None),
-                    run_session_id=(run_record.session_id if run_record else None),
+                    run_id=run_record.run_id,
+                    run_conversation_id=run_record.conversation_id,
+                    run_session_id=run_record.session_id,
+                    bound=run_record.connection_bound,
                     turn_failure=turn_failure,
                     handle_chat=handle_chat,
                 ):
@@ -2691,12 +2723,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     """
                     outcome = RunStatus.COMPLETED
                     error_message = None
-                    if run_id is not None:
-                        # Bind before the first await so every frame the agent
-                        # loop publishes -- including the ones that go through
-                        # the shared event publisher rather than this turn's
-                        # callback -- carries this run's identity.
-                        set_current_run(run_id, run_conversation_id)
+                    # Bind before the first await so every frame the agent loop
+                    # publishes -- including the ones that go through the
+                    # shared event publisher rather than this turn's callback
+                    # -- carries this run's identity.
+                    set_current_run(run_id, run_conversation_id)
                     try:
                         await handle_chat()
                     except asyncio.CancelledError:
@@ -2722,8 +2753,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             # returned normally; the run still did not succeed.
                             outcome = RunStatus.FAILED
                             error_message = turn_failure[0]
-                        if run_id is not None:
-                            run_registry.set_status(run_id, outcome, error=error_message)
+                        run_registry.set_status(run_id, outcome, error=error_message)
+                        # A plain turn's session and MCP sessions belong to the
+                        # connection and carry the next turn; its teardown
+                        # (reset, restore, disconnect) releases them.
+                        if not bound:
                             # This `finally` often runs while the task is
                             # already unwinding from a cancellation. A *second*
                             # cancellation delivered during the await below
@@ -2752,110 +2786,70 @@ async def websocket_endpoint(websocket: WebSocket):
                             except asyncio.CancelledError:
                                 pass
 
-                if run_record is None:
-                    # A turn for another conversation supersedes the untracked
-                    # turn still running on this connection. Cancel it first;
-                    # otherwise it runs on unreachable by Stop, and with the
-                    # switch on it keeps approving its own tool calls.
-                    if await _cancel_superseded_untracked_turn(active_chat_task):
-                        logger.info(
-                            "Cancelled the previous untracked turn on this "
-                            "connection before starting a new one"
-                        )
-                    # Open the live switch entry before the task exists. The
-                    # service only reaches the tool loop after several awaits;
-                    # an off-toggle received in that window must update this
-                    # entry, not be overwritten by the admission value later.
-                    from atlas.application.chat.auto_approve_state import (
-                        begin_untracked_turn,
+                # From a granted admission until the task is attached the
+                # run holds a cluster-wide claim (its conversation lock and
+                # one of the user's slots) that nothing would ever release:
+                # no task exists to finish the run, and the lease heartbeat
+                # keeps renewing a live record. Any exit from this window,
+                # including the socket being cancelled, marks the run
+                # failed, which releases the claim (#1128).
+                chat_task = None
+                started = False
+                try:
+                    # Files attached via `attach_file` land on the
+                    # *connection* session's context, which the run's fresh
+                    # session cannot see -- the tool that needs them would
+                    # report the file as missing. Create the run session
+                    # here (the same path handle_chat_message would take
+                    # lazily) and carry the file map across. Copied, not
+                    # shared, so the run and the connection cannot mutate
+                    # each other's state.
+                    await _seed_run_session_files(
+                        chat_service,
+                        session_id,
+                        turn_session_id,
+                        user_email,
+                        conversation_id=run_record.conversation_id,
                     )
-                    begin_untracked_turn(
-                        turn_session_id, data.get("auto_approve_tools") is True
-                    )
+                    # Announce the run before its task can emit anything.
+                    # The task's first frames are tagged with the run's
+                    # conversation id, and a client that has not yet
+                    # adopted that id (a new chat has none) would file them
+                    # as background activity and drop them from the
+                    # transcript it is showing.
+                    await websocket.send_json({
+                        "type": "run_started",
+                        "run_id": run_record.run_id,
+                        "conversation_id": run_record.conversation_id,
+                        "title": run_record.title,
+                        # Lets the client tell a model-launched child
+                        # (atlas_launch) from a run the user started --
+                        # auto-approve is scoped to the latter -- and place
+                        # it under its parent in the history tree
+                        # (issue #1081) before either conversation is saved.
+                        "parent_run_id": run_record.parent_run_id,
+                        "parent_conversation_id": run_record.parent_conversation_id,
+                        "connection_bound": run_record.connection_bound,
+                    })
                     chat_task = asyncio.create_task(handle_chat_guarded())
-                    # Release the hold when the task is done, however it ends.
-                    # A done callback also runs for a task cancelled before
-                    # its first step, where a ``finally`` inside it would not.
-                    # An overlapping turn on the same session keeps the entry,
-                    # and the latest toggle, until it finishes too.
-                    from atlas.application.chat.auto_approve_state import (
-                        end_untracked_turn,
-                    )
-                    chat_task.add_done_callback(
-                        lambda _task, _sid=turn_session_id: end_untracked_turn(_sid)
-                    )
-                    active_chat_task["task"] = chat_task
-                    active_chat_task["kind"] = "chat"
-                else:
-                    # The same supersession applies before a tracked run: an
-                    # untracked turn left running here would sit outside the
-                    # new run's Stop control.
-                    if await _cancel_superseded_untracked_turn(active_chat_task):
-                        logger.info(
-                            "Cancelled the previous untracked turn on this "
-                            "connection before starting a tracked run"
+                    if run_record.connection_bound:
+                        work.track(chat_task)
+                    run_registry.attach_task(run_record.run_id, chat_task)
+                    started = True
+                finally:
+                    if not started:
+                        # Whatever ended the window (an error, a cancelled
+                        # socket) still propagates, so a disconnect tears
+                        # the connection down normally; the terminal record
+                        # makes ``mark_detached`` a no-op.
+                        if chat_task is not None and not chat_task.done():
+                            chat_task.cancel()
+                        run_registry.set_status(
+                            run_record.run_id,
+                            RunStatus.FAILED,
+                            error="The run could not be started",
                         )
-                    # From a granted admission until the task is attached the
-                    # run holds a cluster-wide claim (its conversation lock and
-                    # one of the user's slots) that nothing would ever release:
-                    # no task exists to finish the run, and the lease heartbeat
-                    # keeps renewing a live record. Any exit from this window,
-                    # including the socket being cancelled, marks the run
-                    # failed, which releases the claim (#1128).
-                    chat_task = None
-                    started = False
-                    try:
-                        # Files attached via `attach_file` land on the
-                        # *connection* session's context, which the run's fresh
-                        # session cannot see -- the tool that needs them would
-                        # report the file as missing. Create the run session
-                        # here (the same path handle_chat_message would take
-                        # lazily) and carry the file map across. Copied, not
-                        # shared, so the run and the connection cannot mutate
-                        # each other's state.
-                        await _seed_run_session_files(
-                            chat_service,
-                            session_id,
-                            turn_session_id,
-                            user_email,
-                            conversation_id=run_record.conversation_id,
-                        )
-                        # Announce the run before its task can emit anything.
-                        # The task's first frames are tagged with the run's
-                        # conversation id, and a client that has not yet
-                        # adopted that id (a new chat has none) would file them
-                        # as background activity and drop them from the
-                        # transcript it is showing.
-                        await websocket.send_json({
-                            "type": "run_started",
-                            "run_id": run_record.run_id,
-                            "conversation_id": run_record.conversation_id,
-                            "title": run_record.title,
-                            # Lets the client tell a model-launched child
-                            # (atlas_launch) from a run the user started --
-                            # auto-approve is scoped to the latter -- and place
-                            # it under its parent in the history tree
-                            # (issue #1081) before either conversation is saved.
-                            "parent_run_id": run_record.parent_run_id,
-                            "parent_conversation_id": run_record.parent_conversation_id,
-                        })
-                        chat_task = asyncio.create_task(handle_chat_guarded())
-                        run_registry.attach_task(run_record.run_id, chat_task)
-                        started = True
-                    finally:
-                        if not started:
-                            # Whatever ended the window (an error, a cancelled
-                            # socket) still propagates, so a disconnect tears
-                            # the connection down normally; the terminal record
-                            # makes ``mark_detached`` a no-op.
-                            if chat_task is not None and not chat_task.done():
-                                chat_task.cancel()
-                            run_registry.set_status(
-                                run_record.run_id,
-                                RunStatus.FAILED,
-                                error="The run could not be started",
-                            )
-                    connection_run_ids.add(run_record.run_id)
+                connection_run_ids.add(run_record.run_id)
 
             elif message_type == "context_usage_request":
                 # Issue #877: the context meter's estimate for a conversation
@@ -2863,8 +2857,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # turn. Read-only, and skipped while a turn is running: that
                 # turn reports its own usage when it ends.
                 async def answer_usage(request: dict) -> None:
-                    running = active_chat_task.get("task")
-                    if running is not None and not running.done():
+                    if work.busy():
                         return
                     last_usage_request["at"] = time.monotonic()
                     try:
@@ -2906,10 +2899,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # conversation: compaction rewrites what the next request
                 # carries, and a running turn owns that.
                 compact_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
-                running = active_chat_task.get("task")
-                busy = (running is not None and not running.done()) or any(
-                    not t.done() for t in active_chat_task.get("superseded", ())
-                ) or (
+                busy = work.busy() or (
                     compact_conversation_id
                     and run_registry.active_for_conversation_any_owner(compact_conversation_id)
                 )
@@ -2987,10 +2977,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "error": "Context compaction failed unexpectedly.",
                         })
 
-                active_chat_task["steering"] = None
-                active_chat_task["conversation_id"] = compact_conversation_id
-                active_chat_task["task"] = asyncio.create_task(handle_compact())
-                active_chat_task["kind"] = "compact"
+                work.compaction = asyncio.create_task(handle_compact())
 
             elif message_type == "download_file":
                 # Handle file download (use authenticated user from connection).
@@ -3023,13 +3010,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "restore_conversation":
-                # Issue #824: dropping the steering channel here means a
-                # message typed after switching conversations starts a fresh
-                # turn in the new conversation instead of being injected into
-                # the previous conversation's (possibly still-running) agent.
-                active_chat_task["steering"] = None
-                active_chat_task["conversation_id"] = None
-
                 # Release MCP sessions for the current conversation before restoring
                 session = await chat_service.session_repository.get(session_id)
                 if session:
@@ -3125,40 +3105,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json(replay_frame)
 
             elif message_type == "reset_session":
-                # Issue #884: only the *untracked* turn is cancelled here.
-                # Tracked runs are not owned by the visible conversation, so
-                # "New Chat" must not stop one -- that was precisely the
-                # behaviour this issue removes. They keep executing, keep their
-                # MCP sessions (see below), and keep reporting status to the
-                # client through run_status frames.
+                # Issue #884: only the plain turn on this connection's session
+                # is cancelled here. Runs with their own session are not owned
+                # by the visible conversation, so "New Chat" must not stop one
+                # -- that was precisely the behaviour this issue removes. They
+                # keep executing, keep their MCP sessions (see below), and keep
+                # reporting status to the client through run_status frames.
                 #
                 # If a chat is still generating when the user starts a new chat,
                 # cancel it first so tokens don't keep streaming into the fresh
                 # session (defense-in-depth; the frontend also sends
                 # stop_streaming before reset_session when it knows generation
-                # is in progress).
-                _cancel_superseded_leftovers(active_chat_task)
-                task = active_chat_task.get("task")
-                if task and not task.done():
-                    logger.info("Cancelling active chat task (reset_session)")
-                    task.cancel()
-                    # Let the cancelled turn finish committing before the reset
-                    # (issue #755). Its cleanup now persists the interrupted
-                    # turn and emits conversation_saved for the *old*
-                    # conversation; arriving after session_reset, that event
-                    # would re-point the fresh empty chat at the abandoned
-                    # conversation id. Bounded so a wedged task cannot block the
-                    # reset the user asked for.
-                    try:
-                        await asyncio.wait([task], timeout=5)
-                    except Exception as e:  # pragma: no cover - defensive
-                        logger.warning("Error waiting for cancelled chat task: %s", e)
-
-                # Issue #824: drop the steering channel so a message typed after
-                # the reset steers the next turn (or starts fresh) rather than a
-                # channel whose loop was just cancelled.
-                active_chat_task["steering"] = None
-                active_chat_task["conversation_id"] = None
+                # is in progress). Let the cancelled turn finish committing
+                # before the reset (issue #755): its cleanup persists the
+                # interrupted turn and emits conversation_saved for the *old*
+                # conversation, which arriving after session_reset would
+                # re-point the fresh empty chat at the abandoned conversation
+                # id. Bounded so a wedged task cannot block the reset.
+                await _cancel_connection_turns(
+                    run_registry, session_id, user_email, work, include_compaction=True
+                )
 
                 # Handle session reset (use authenticated user from connection).
                 # handle_reset_session itself releases the old conversation's
@@ -3200,17 +3166,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "auto_approve_tools":
-                # The switch changed while work is in flight. Tracked runs
-                # keep the bit on the owning record, which is what a closed
-                # browser still executes against. Turns with no record
-                # (incognito, local save, history disabled) keep it on the
-                # session, and the gate reads that live value rather than
-                # the copy taken when the turn started. Only a real boolean
+                # The switch changed while work is in flight. Every run keeps
+                # the bit on its record, which is what the tool gate reads, and
+                # a closed browser still executes against. Only a real boolean
                 # True opts in.
-                from atlas.application.chat.auto_approve_state import set_session_auto_approve
-                enabled = data.get("enabled") is True
-                await set_auto_approve(run_registry, user_email, enabled)
-                set_session_auto_approve(session_id, enabled)
+                await set_auto_approve(run_registry, user_email, data.get("enabled") is True)
 
             elif message_type == "tool_approval_response":
                 # Handle tool approval response. Arguments stay out of the
@@ -3258,9 +3218,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Issue #884: Stop addresses one run. A client that names a
                 # run_id (or the conversation it is looking at) stops exactly
                 # that run and nothing else -- stopping A must never stop B.
-                # A frame with neither falls back to the untracked slot, which
-                # is what an older client sends.
-                await stop_addressed_run(websocket, run_registry, user_email, data, active_chat_task)
+                # A frame with neither means this connection's own plain turn,
+                # which is what an older client sends.
+                await _stop_frame(data)
 
             elif message_type == "agent_control":
                 # `agent_control` with action="stop" cancels the active agent
@@ -3268,7 +3228,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the message is always handled here as a plain task cancel.
                 action = data.get("action")
                 if action == "stop":
-                    await stop_addressed_run(websocket, run_registry, user_email, data, active_chat_task)
+                    await _stop_frame(data)
 
             elif message_type == "elicitation_response":
                 # Handle elicitation response
@@ -3354,7 +3314,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # every reconnect is refused until the TTL expires (issue #1091).
         try:
             await cleanup_disconnected_session(
-                chat_service, session_id, user_email, active_chat_task, connection_run_ids
+                chat_service, session_id, user_email, work, connection_run_ids
             )
         except Exception as e:  # pragma: no cover - teardown must not mask the exit
             logger.warning("Error tearing down session on socket exit: %s", type(e).__name__)

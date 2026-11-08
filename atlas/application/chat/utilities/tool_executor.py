@@ -223,7 +223,7 @@ def user_switch_covers_turn() -> bool:
     """Whether the user's auto-approve switch may answer for this turn at all.
 
     False for a launched child, judged by launch lineage on its run record
-    (``RunRecord.follows_user_auto_approve``), so a child of an untracked
+    (``RunRecord.follows_user_auto_approve``), so a child of a plain
     turn, which has no ``parent_run_id``, is excluded too. The approval
     frame carries this so the browser does not answer a request the server
     deliberately left on the gate.
@@ -245,17 +245,16 @@ def user_switch_covers_turn() -> bool:
 def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) -> bool:
     """Whether this call can skip the browser approval gate.
 
-    A tracked run stores the switch on its record, which outlives the socket,
-    so a closed browser does not park a user-level tool. Admin-mandated tools
-    are filtered by the caller (they stay on the gate). A launched child is
-    excluded even when the flag is set: its arguments are model-chosen, and
-    only the launch approval covers its user-level tools.
+    A run stores the switch on its record, which outlives the socket, so a
+    closed browser does not park a user-level tool and a toggle reaches a turn
+    already in flight. Admin-mandated tools are filtered by the caller (they
+    stay on the gate). A launched child is excluded even when the flag is set:
+    its arguments are model-chosen, and only the launch approval covers its
+    user-level tools.
 
-    A turn with no run record (incognito, local save, history disabled) reads
-    the live session bit. That bit moves when the user toggles the switch, so
-    the copy taken into ``AgentContext`` at admission is not the decision.
+    A call with no run (a direct service call, the CLI) reads the bit the
+    service copied onto the session.
     """
-    from atlas.application.chat.auto_approve_state import session_auto_approve
     from atlas.application.chat.runs.context import get_current_run
     from atlas.application.chat.runs.registry import get_run_registry
 
@@ -263,17 +262,14 @@ def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) ->
     if run is not None:
         record = get_run_registry().get(run.run_id)
         if record is None:
-            # Bound to a run this process has no record of: do not fall back
-            # to the session bit, which belongs to untracked turns.
+            # Bound to a run this process has no record of: not the user's
+            # switch to answer.
             return False
         if not record.follows_user_auto_approve():
             return False
         return record.auto_approve_user_tools is True
     if not session_context:
         return False
-    live = session_auto_approve(session_context.get("session_id"))
-    if live is not None:
-        return live is True
     return session_context.get("auto_approve_tools") is True
 
 
@@ -575,7 +571,7 @@ async def execute_single_tool(
             # Publish the invocation before the first await that can block
             # (hooks, approval). Parallel tools in one step are all visible
             # before any of them finishes. The wrapper is a no-op when this
-            # call has no run, so untracked turns keep their payload shape.
+            # call has no run (or an off-record one), so its payload keeps its shape.
             identity = execution_identity(
                 session_context, tool_call.id, tool_call.function.name,
             )

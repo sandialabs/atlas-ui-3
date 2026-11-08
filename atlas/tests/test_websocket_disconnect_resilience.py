@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from main import cleanup_disconnected_session, websocket_update_callback
+from main import _ConnectionWork, cleanup_disconnected_session, websocket_update_callback
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from atlas.domain.messages.models import Message, MessageRole
@@ -141,6 +141,28 @@ async def test_adapter_swallows_closed_socket_errors(error):
 # --- disconnect cancels the in-flight turn ------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _fresh_registry():
+    from atlas.application.chat.runs.registry import reset_run_registry
+
+    reset_run_registry()
+    yield
+    reset_run_registry()
+
+
+def _turn_running(session_id, task):
+    """Register ``task`` as the plain turn running on this connection's session."""
+    from atlas.application.chat.runs.registry import get_run_registry
+
+    registry = get_run_registry()
+    record = registry.start(
+        conversation_id=f"conv-{session_id}", user_email="alice@example.com",
+        session_id=session_id, connection_bound=True,
+    )
+    registry.attach_task(record.run_id, task)
+    return record
+
+
 def _chat_service_double():
     service = MagicMock()
     service.end_session = AsyncMock()
@@ -169,10 +191,11 @@ async def test_disconnect_cancels_in_flight_turn():
 
     task = asyncio.create_task(never_ending())
     await started.wait()
+    _turn_running("session-1", task)
 
     service = _chat_service_double()
     await cleanup_disconnected_session(
-        service, "session-1", "alice@example.com", {"task": task}
+        service, "session-1", "alice@example.com", _ConnectionWork()
     )
 
     await asyncio.wait_for(cancelled.wait(), timeout=1)
@@ -195,6 +218,7 @@ async def test_disconnect_cancels_before_tearing_down_the_session():
 
     task = asyncio.create_task(never_ending())
     await asyncio.sleep(0)  # let the task reach its first await
+    _turn_running("session-1", task)
 
     def record_end_session(*args, **kwargs):
         observed["cancel_requested"] = task.cancelling() > 0
@@ -203,7 +227,7 @@ async def test_disconnect_cancels_before_tearing_down_the_session():
     service.end_session = AsyncMock(side_effect=record_end_session)
 
     await cleanup_disconnected_session(
-        service, "session-1", "alice@example.com", {"task": task}
+        service, "session-1", "alice@example.com", _ConnectionWork()
     )
 
     assert observed.get("cancel_requested") is True, (
@@ -217,7 +241,7 @@ async def test_disconnect_cleanup_tolerates_no_active_turn():
     service = _chat_service_double()
 
     await cleanup_disconnected_session(
-        service, "session-1", "alice@example.com", {"task": None}
+        service, "session-1", "alice@example.com", _ConnectionWork()
     )
 
     service.end_session.assert_awaited_once_with("session-1")
@@ -232,10 +256,14 @@ async def test_disconnect_cleanup_leaves_finished_turn_alone():
 
     task = asyncio.create_task(already_done())
     await task
+    from atlas.application.chat.runs.registry import RunStatus, get_run_registry
+
+    record = _turn_running("session-1", task)
+    get_run_registry().set_status(record.run_id, RunStatus.COMPLETED)
 
     service = _chat_service_double()
     await cleanup_disconnected_session(
-        service, "session-1", "alice@example.com", {"task": task}
+        service, "session-1", "alice@example.com", _ConnectionWork()
     )
 
     assert not task.cancelled()
@@ -357,12 +385,13 @@ async def test_disconnect_persists_in_flight_turn():
             )
         )
         await started.wait()
+        _turn_running(session_id, chat_task)
 
         # Release lands on the service's tool_manager (AsyncMock), so cleanup
         # can run end-to-end without any MCP plumbing.
         await cleanup_disconnected_session(
             service, session_id, "alice@example.com",
-            {"task": chat_task},
+            _ConnectionWork(),
         )
 
     # cleanup_disconnected_session does not await the cancelled task, so let

@@ -101,6 +101,16 @@ def approval_storage_key(
     return f"{email}:{invocation_id_value}"
 
 
+def run_is_off_record(run_id: Optional[str]) -> bool:
+    """Whether ``run_id`` is a run on this replica that shares nothing (#1128)."""
+    if not run_id:
+        return False
+    from atlas.application.chat.runs.registry import get_run_registry
+
+    record = get_run_registry().get(str(run_id))
+    return record is not None and record.off_record
+
+
 def execution_identity(session_context: Optional[dict], tool_call_id: str, tool_name: Optional[str] = None) -> dict:
     """Identity fields stamped on a tool frame and on the projection."""
     from atlas.application.chat.runs.context import get_current_run
@@ -122,7 +132,9 @@ def execution_identity(session_context: Optional[dict], tool_call_id: str, tool_
     }
     if tool_name:
         identity["tool_name"] = tool_name
-    if run_id and tool_call_id:
+    # An off-record run has no invocation id: the id keys the projection row and
+    # the shared approval outcome, so without it both stay process-local.
+    if run_id and tool_call_id and not run_is_off_record(run_id):
         identity["invocation_id"] = invocation_id(str(run_id), step, str(tool_call_id))
     return identity
 
@@ -1037,6 +1049,10 @@ async def publish_execution_event(event: dict) -> Optional[dict]:
     try:
         from atlas.application.chat.runs.leases import may_publish_for_run
 
+        # Defence in depth: an off-record run's frames carry no invocation id
+        # (see ``execution_identity``), and nothing it emits is stored.
+        if isinstance(event, dict) and run_is_off_record(event.get("run_id")):
+            return None
         if not await may_publish_for_run(event.get("run_id") if isinstance(event, dict) else None):
             logger.info("dropped a projection write from a run this replica no longer owns")
             return None
@@ -1208,8 +1224,8 @@ def stamp_callback_identity(inner, identity: dict):
 def observe_tool_callback(inner, identity: dict):
     """Publish tool frames into the projection, then forward them.
 
-    No-op wrapper when this call has no run identity, so untracked turns keep
-    the payload shape they had before.
+    No-op wrapper when this call has no invocation identity (no run, or an
+    off-record one), so its payload keeps the shape it had before.
     """
     if not identity.get("invocation_id"):
         return inner

@@ -21,7 +21,7 @@ be silently lost.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 
 # Bound on how many steering messages may be queued for one agent turn. The
 # channel is drained at each iteration boundary, so in normal use this holds at
@@ -79,32 +79,3 @@ class SteeringChannel:
             except asyncio.QueueEmpty:
                 break
         return leftovers
-
-
-def should_steer(
-    active_chat_task: Dict[str, Any],
-    frame_conversation_id: Optional[str],
-) -> bool:
-    """Whether a new chat frame should be routed into the running agent's channel.
-
-    Pure and transport-agnostic so the routing decision is unit-testable. The
-    transport keys ``active_chat_task`` with ``task`` (an ``asyncio.Task`` or
-    ``None``), ``steering`` (a ``SteeringChannel`` or ``None``), and
-    ``conversation_id`` (the running turn's conversation id, or ``None``).
-
-    Only steer when a loop is genuinely consuming (task live, channel active)
-    AND the frame is for the same conversation the loop is running in -- so a
-    message typed after the user switched conversations starts a fresh turn in
-    the new conversation instead of being injected into the old one's context
-    and persisted in its transcript (issue #824 review).
-    """
-    task = active_chat_task.get("task")
-    steering = active_chat_task.get("steering")
-    if task is None or steering is None or not steering.active:
-        return False
-    done = getattr(task, "done", None)
-    if done is not None and done():
-        return False
-    if active_chat_task.get("conversation_id") != frame_conversation_id:
-        return False
-    return True

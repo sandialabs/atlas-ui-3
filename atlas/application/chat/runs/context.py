@@ -88,6 +88,16 @@ def tag_event(
     """
     if not isinstance(data, dict):
         return data
+    if (
+        data.get("type") == "conversation_saved"
+        and data.get("conversation_id") not in (None, conversation_id)
+    ):
+        # The save moved the thread to a new conversation (an incognito
+        # interlude in a restored conversation branches it). That is a rebind
+        # of the conversation the client is showing, not an event of this run's
+        # own: tagged, the client would file it as background activity and
+        # never adopt the new id.
+        return data
     if "run_id" in data and data["run_id"] != run_id:
         logger.debug(
             "Event run_id %s overrides ambient run_id %s",

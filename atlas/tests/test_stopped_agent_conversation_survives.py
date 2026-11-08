@@ -84,10 +84,7 @@ def _make_service(repo):
 
 async def _stop_and_await(task, stop_frame):
     """Press Stop the way the transport does, then wait -- with a deadline."""
-    untracked = MagicMock()
-    untracked.done.return_value = False
-    await stop_addressed_run(MagicMock(), get_run_registry(), USER, stop_frame, {"task": untracked})
-    assert not untracked.cancel.called, "the stop frame did not resolve to a tracked run"
+    await stop_addressed_run(MagicMock(), get_run_registry(), USER, stop_frame)
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, CANCEL_DEADLINE_SECONDS)
 

@@ -1,7 +1,7 @@
 """Registry of conversation-scoped chat/agent runs (issue #884).
 
 Before this module the transport tracked exactly one in-flight turn per
-WebSocket connection (a single ``active_chat_task`` slot). That made
+WebSocket connection (a single per-socket task slot, since removed). That made
 "navigate away" and "stop executing" the same action: starting a new chat, or
 restoring another conversation, cancelled whatever was running.
 
@@ -204,6 +204,15 @@ class RunRecord:
     # another replica declared it interrupted, so nothing this process does
     # for the run may reach shared state any more.
     fenced: bool = False
+    # An incognito or not-saved turn (issue #1128). The run still claims its
+    # conversation cluster-wide, but nothing about the turn is shared: the
+    # claim carries owner, generation and status, and no snapshot, title,
+    # error text, launch spec, projection row or approval outcome is written.
+    off_record: bool = False
+    # The turn executes on the socket's own session, so it ends with the
+    # socket (a plain chat turn, or an agent turn without history). A run with
+    # its own session is detached when the socket closes and keeps going.
+    connection_bound: bool = False
 
     @property
     def is_terminal(self) -> bool:
@@ -212,7 +221,7 @@ class RunRecord:
     def follows_user_auto_approve(self) -> bool:
         """Whether the user's switch applies to this run.
 
-        A launched child does not follow it. A child started from an untracked
+        A launched child does not follow it. A child started from a plain
         turn has no ``parent_run_id``, but its depth is greater than zero and
         it carries a launch spec. An agent-runs API run also carries a launch
         spec: the browser switch does not approve its tools.
@@ -262,6 +271,8 @@ class RunRecord:
             "parent_conversation_id": self.parent_conversation_id,
             "depth": self.depth,
             "title": self.title,
+            # Ends with the socket that started it: nothing to rediscover.
+            "connection_bound": self.connection_bound,
         }
 
 
@@ -415,6 +426,13 @@ class RunRegistry:
             if r.user_email == owner and not r.is_terminal
         ]
 
+    def active_bound_to(self, session_id: Any) -> List[RunRecord]:
+        """Live runs executing on this connection's own session."""
+        return [
+            r for r in self._runs.values()
+            if r.connection_bound and r.session_id == session_id and not r.is_terminal
+        ]
+
     def records_for_user(self, user_email: str) -> List[RunRecord]:
         """Every retained run for this user, newest first, terminal included.
 
@@ -480,6 +498,8 @@ class RunRegistry:
         depth: int = 0,
         title: Optional[str] = None,
         run_id: Optional[str] = None,
+        off_record: bool = False,
+        connection_bound: bool = False,
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -506,7 +526,10 @@ class RunRegistry:
             parent_run_id=parent_run_id,
             parent_conversation_id=parent_conversation_id,
             depth=max(0, int(depth or 0)),
-            title=(str(title)[:RUN_TITLE_MAX_CHARS] or None) if title else None,
+            # An off-record run has no title: it is the prompt.
+            title=(str(title)[:RUN_TITLE_MAX_CHARS] or None) if title and not off_record else None,
+            off_record=bool(off_record),
+            connection_bound=bool(connection_bound),
         )
         self._runs[record.run_id] = record
         if record.parent_run_id:
@@ -528,12 +551,13 @@ class RunRegistry:
         # write (a lost publish, a dead replica). This run replaces it, so a
         # text-only run that publishes no tool frame still clears a stale
         # pending card. The store ignores it when there is no document.
-        self._publish_projection({
-            "type": "run_started",
-            "run_id": record.run_id,
-            "conversation_id": record.conversation_id,
-            "user_email": record.user_email,
-        })
+        if not record.off_record:
+            self._publish_projection({
+                "type": "run_started",
+                "run_id": record.run_id,
+                "conversation_id": record.conversation_id,
+                "user_email": record.user_email,
+            })
         self._notify(record)
         return record
 
@@ -631,7 +655,7 @@ class RunRegistry:
         until the document expired. A fenced run's outcome was already
         published by the replica that took it over.
         """
-        if not record.status.is_terminal or record.fenced:
+        if not record.status.is_terminal or record.fenced or record.off_record:
             return
         event = {
             "type": "run_status",

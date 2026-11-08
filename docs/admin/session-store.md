@@ -206,7 +206,8 @@ The shared store moves **session state**. It does not move live work:
   first one until it finishes and its conversation is saved. Deployments that
   rely on tracked runs should keep sticky sessions until distributed run
   coordination (issue #1091, later phases) lands.
-- **An in-flight untracked turn** is cancelled when its socket closes, and its
+- **An in-flight plain turn** (one that runs on the connection's own session,
+  not a background run) is cancelled when its socket closes, and its
   completed work committed, as before; the resumed session carries the
   committed state.
 - **MCP client sessions** in the backend are per process; a resumed session

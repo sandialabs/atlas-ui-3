@@ -133,6 +133,26 @@ describe('useConversationRuns', () => {
     expect(result.current.runsByConversation['conv-a'].run_id).toBe('run-a')
   })
 
+  it('remembers that a plain turn ends with the socket', () => {
+    const { result } = renderHook(() => useConversationRuns())
+
+    act(() => {
+      result.current.handleRunFrame({ type: 'run_started', run_id: 'run-p', conversation_id: 'conv-p', connection_bound: true })
+      result.current.handleRunFrame({ type: 'run_started', run_id: 'run-d', conversation_id: 'conv-d' })
+    })
+
+    expect(result.current.runsByConversation['conv-p'].connection_bound).toBe(true)
+    expect(result.current.runsByConversation['conv-d'].connection_bound).toBe(false)
+    // A later status frame carries the flag from the server record.
+    act(() => {
+      result.current.handleRunFrame({
+        type: 'run_status',
+        run: { run_id: 'run-p', conversation_id: 'conv-p', status: 'running', connection_bound: true },
+      })
+    })
+    expect(result.current.runsByConversation['conv-p'].connection_bound).toBe(true)
+  })
+
   it('stops counting a run once it reaches a terminal state', () => {
     const { result } = renderHook(() => useConversationRuns())
 
