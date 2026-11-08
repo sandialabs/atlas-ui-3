@@ -45,9 +45,12 @@ logger = logging.getLogger(__name__)
 # Redis round trip) never loses a claim that is still being worked on.
 RUN_LEASE_SECONDS = 30
 RUN_LEASE_RENEW_INTERVAL_SECONDS = 10
-# How long a released run record stays readable after the run ended, so a
-# replica asked about it shortly afterwards still finds the outcome.
-RUN_RECORD_RETENTION_SECONDS = 300
+# The one retention window: how long a finished run stays answerable after it
+# ended. The shared run record (once no descendant of it is live), the local
+# registry's terminal runs, the execution projection of a finished run and the
+# control bus's dedup records all keep it. The other control-bus TTLs derive
+# from it and from the lease; the table is in docs/developer/run-coordination.md.
+RUN_RETENTION_SECONDS = 30 * 60
 
 
 class RunCoordinationUnavailableError(RunRegistryError):
@@ -98,8 +101,15 @@ class RunCoordinator(Protocol):
         conversation_id: str,
         user_email: str,
         max_runs_per_user: int,
+        source: str = "",
+        parent_run_id: Optional[str] = None,
+        follow_up_of: Optional[str] = None,
     ) -> Optional[RunClaim]:
         """Claim the conversation and one of the user's run slots, atomically.
+
+        ``source``, ``parent_run_id`` and ``follow_up_of`` are known at
+        admission and written into the shared record with the claim, so any
+        replica can route by them from the first moment.
 
         Returns the claim, or ``None`` when this coordinator does not track
         claims (the in-process default). Raises ``ConversationBusyError``,

@@ -43,9 +43,10 @@ class Replica:
         self.coordinator = RedisRunCoordinator(manager, replica_id=replica_id)
         self.bus = RedisRunControlBus(manager, self.coordinator)
 
-    async def claim(self, run_id, conversation_id, user_email=OWNER):
+    async def claim(self, run_id, conversation_id, user_email=OWNER, parent_run_id=None):
         return await self.coordinator.claim(run_id=run_id, conversation_id=conversation_id,
-                                            user_email=user_email, max_runs_per_user=50)
+                                            user_email=user_email, max_runs_per_user=50,
+                                            parent_run_id=parent_run_id)
 
 
 class Cluster:

@@ -45,7 +45,7 @@ from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
 )
-from atlas.application.chat.runs.coordination import release_claim_soon
+from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS, release_claim_soon
 from atlas.application.chat.runs.stream_replay import StreamReplay
 from atlas.core.coordination_metrics import (
     EndReason,
@@ -69,12 +69,10 @@ def _current_task() -> Optional[asyncio.Task]:
 # them here keeps each task alive until its write lands.
 _PROJECTION_TASKS: "set[asyncio.Task]" = set()
 
-# How long a run that reached a terminal state stays queryable. Long enough
-# that a browser reopened a few minutes later still learns "that finished" /
-# "that failed" instead of silently showing nothing; short enough that an
-# always-on server does not accumulate run records forever.
-TERMINAL_RETENTION_SECONDS = 30 * 60
-
+# A run that reached a terminal state stays queryable for RUN_RETENTION_SECONDS
+# (coordination.py): long enough that a browser reopened a few minutes later
+# still learns "that finished" / "that failed", short enough that an always-on
+# server does not accumulate run records forever.
 # Cap on retained terminal runs per user, so a scripted client that starts and
 # finishes thousands of runs inside the retention window cannot grow the
 # registry without bound.
@@ -1024,7 +1022,7 @@ class RunRegistry:
                 # children -- a finished child can itself have a live one.
                 continue
             ended = record.ended_at or record.updated_at
-            if now - ended > TERMINAL_RETENTION_SECONDS:
+            if now - ended > RUN_RETENTION_SECONDS:
                 self.remove(run_id)
                 removed += 1
             else:

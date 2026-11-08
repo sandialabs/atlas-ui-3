@@ -35,7 +35,7 @@ exists yet.
   rows) are not reused.
 - **Location.** `local` is this replica's registry. `remote live` is another
   replica, run live. `remote terminal` is another replica, run finished, its
-  directory record still kept (300 s). `unreadable` is the directory (Redis)
+  directory record still kept (the retention window, and while a descendant is live). `unreadable` is the directory (Redis)
   failing. Record expiry is its own row where it changes the answer.
 
 Expected outcomes are what the user observes. "No frame" means the client gets
@@ -84,7 +84,7 @@ this connection's session. The tests call it in `ws_stop`.
 | `S04` ws stop | run_id only | tracked | unreadable | unavailable, run untouched | `route_stop` -> `owner_unavailable` -> `stop_frame` | `atlas/tests/test_run_addressing_table.py` |
 | `S07` ws stop | run_id only | finished parent | local | children stopped | `registry.cancel` cascade above the terminal check | `atlas/tests/test_run_addressing_table.py` |
 | `S08` ws stop | run_id only | finished parent | remote terminal | children stopped on owner, status frame | `route_stop` include_terminal, owner cascade | `atlas/tests/test_run_addressing_table.py` |
-| `S09` ws stop | run_id only | finished parent | remote terminal, record expired | children stopped on owner | GAP: `owner_entry` finds nothing after 300 s, `resolve` returns Nothing and `stop_addressed_run` no-ops, while the owner's registry keeps the parent 30 min (`run_directory.py:42`) | `atlas/tests/test_run_addressing_table.py` |
+| `S09` ws stop | run_id only | finished parent | remote terminal, past the old 300 s window | children stopped on owner | the record outlives its live children, so `resolve` still finds it | `atlas/tests/test_run_addressing_table.py` |
 | `S10` ws stop | run_id only | finished parent | unreadable | unavailable, children untouched | as `S04` | `atlas/tests/test_run_addressing_table.py` |
 | `S11` ws stop | run_id only | API follow-up | local | the named run and its children only; the follow-up keeps running | `get_for_user` hit on the finished run | `atlas/tests/test_run_addressing_table.py` |
 | `S12` ws stop | conversation only | tracked | local | run cancelled | `active_for_conversation` | `atlas/tests/test_run_addressing_table.py` |
@@ -122,7 +122,7 @@ finished named run.
 | `R04` REST cancel | run_id only | UI-started, plain, off-record | remote live | 404 `run_not_found`, run untouched | owner `cancel_api_run_here` refuses a non-API id | `atlas/tests/test_run_addressing_table.py` |
 | `R05` REST cancel | run_id only | any | unknown everywhere | 404 | `resolve` Nothing, `cancel_api_run` refusal | `atlas/tests/test_run_addressing_table.py` |
 | `R06` REST cancel | run_id only | any | unreadable, id unknown | 503, never 404 | `route_api_cancel` -> `owner_unavailable` | `atlas/tests/test_run_addressing_table.py` |
-| `R07` REST cancel | run_id only | finished API run | remote terminal, record expired | run and its children stopped on owner | GAP: same cause as `S09`; `resolve` Nothing, 404 | `atlas/tests/test_run_addressing_table.py` |
+| `R07` REST cancel | run_id only | finished API run | remote terminal, past the old 300 s window | run and its children stopped on owner | same as `S09` | `atlas/tests/test_run_addressing_table.py` |
 | `R08` REST cancel | run_id only | finished parent (API-started) | remote terminal | children stopped | owner cascade; the cited test drives the user-actor stop, the API-sourced REST case has no test yet | n/a: untested; see `test_stopping_a_finished_parent_stops_its_live_child_on_the_owner` for the cascade |
 | `R09` REST cancel | run_id only | API follow-up | named run local, follow-up remote | follow-up stopped on its owner | `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_held_here_stops_its_follow_up_elsewhere` |
 | `R10` REST cancel | run_id only | API follow-up | named run remote terminal, follow-up here | follow-up stopped | `route_api_cancel`, then `route_api_follow_up_cancel` | `test_api_cancel_of_a_finished_run_stops_its_follow_up_elsewhere` |
@@ -170,5 +170,5 @@ and `nudge_approval` resolves the run and calls `route_approval` to wake a remot
 
 Rows `S01-S34`, `R01-R12`, `C01-C14` and `P01-P08`, less the eight retired
 `untracked turn` ids (`S05`, `S06`, `S16`, `S17`, `S18`, `S29`, `C11`, `C12`):
-60 rows. `GAP` rows (6): `S09`, `S19`, `S20`, `S31`, `S32`, `R07`. All are
+60 rows. `GAP` rows (4): `S19`, `S20`, `S31`, `S32`. All are
 strict `xfail` tests.

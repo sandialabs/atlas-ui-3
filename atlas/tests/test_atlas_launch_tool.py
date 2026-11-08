@@ -855,13 +855,13 @@ def test_a_finished_parent_is_not_reaped_while_a_child_is_still_running():
 
     import time as _time
 
-    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
+    from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 
-    assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 0
+    assert registry.reap_terminal(now=_time.time() + RUN_RETENTION_SECONDS + 60) == 0
     assert registry.get(parent.run_id) is not None
 
     registry.set_status(child.run_id, RunStatus.COMPLETED)
-    assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 2
+    assert registry.reap_terminal(now=_time.time() + RUN_RETENTION_SECONDS + 60) == 2
 
 
 @pytest.mark.asyncio
@@ -1058,9 +1058,9 @@ def test_a_terminal_child_does_not_hide_a_running_grandchild():
     # The finished middle run must not be reaped out from under its live child.
     import time as _time
 
-    from atlas.application.chat.runs.registry import TERMINAL_RETENTION_SECONDS
+    from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 
-    assert registry.reap_terminal(now=_time.time() + TERMINAL_RETENTION_SECONDS + 60) == 0
+    assert registry.reap_terminal(now=_time.time() + RUN_RETENTION_SECONDS + 60) == 0
 
     registry.cancel(parent.run_id, "u@example.com")
     assert registry.get(grandchild.run_id).status is RunStatus.CANCELLED
