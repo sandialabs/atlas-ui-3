@@ -61,9 +61,19 @@ earlier delivery.
   way a steer is queued, local or routed. It remembers (bounded, in process,
   256 per run) the request ids it has queued, so a client that retries one
   `request_id` against any replica, in any order, queues the message once.
-  Refusals changed nothing and are not remembered. The browser sends a fresh
-  `request_id` on every chat frame and repeats a steer once, with the same
-  id, when its owner did not answer.
+  Refusals changed nothing and are not remembered. The remembered ids win
+  over the terminal guard (a retry after the run ended answers the same
+  outcome; a finished run keeps the ids, not the queued text), and
+  `drain_leftovers` forgets the ids of the texts it discards, so a retry is
+  never acknowledged for a message nobody will read. For that reason a
+  routed steer's success is not written to `ctl-done`: the registry answers
+  the repeat. Local refusals carry `steering: true` and echo `request_id`,
+  like the routed frames. The browser sends a fresh `request_id` on every
+  chat frame and repeats a steer once, with the same id, when its owner did
+  not answer (`run_control_unavailable`). A frame is repeatable for 15 s
+  (`STEER_RETRY_WINDOW_MS` in `steerRetry.js`: the 5 s command timeout plus
+  margin); after that the first attempt's fate is unknown and it is not
+  repeated.
 - **Correlated.** A sender reads only the reply carrying its own attempt id,
   so a retry never picks up an answer an earlier attempt left in the stream.
 - **Fenced.** Before anything is recorded or executed, the owner reads the

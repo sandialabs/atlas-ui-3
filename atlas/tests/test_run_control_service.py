@@ -192,8 +192,34 @@ async def test_steer_is_queued_once_per_request_id(cluster):
     entry = await _remote_run_for_conversation(record.conversation_id)
     first = await run_control.route_steer(entry, OWNER, "go left", None, request_id="s1")
     second = await run_control.route_steer(entry, OWNER, "go left", None, request_id="s1")
-    assert first["ok"] and second["ok"] and second.get("duplicate") is True
+    # The run's own seen-set answers the repeat, not the bus's done cache.
+    assert first["ok"] and second["ok"]
+    assert "uncached" not in first and "uncached" not in second
     assert channel.queue.qsize() == 1 and channel.queue.get_nowait() == "go left"
+
+
+async def test_a_routed_steer_discarded_by_the_drain_is_not_acknowledged_on_retry(cluster):
+    channel = SteeringChannel()
+    channel.activate()
+    record = await cluster.run(steering=channel)
+    entry = await _remote_run_for_conversation(record.conversation_id)
+    assert (await run_control.route_steer(entry, OWNER, "late", None, request_id="s1"))["ok"]
+    assert channel.drain_leftovers() == ["late"]
+    channel.deactivate()
+    retry = await run_control.route_steer(entry, OWNER, "late", None, request_id="s1")
+    assert retry["ok"] is False and retry["code"] == "conversation_busy"
+    assert channel.queue.qsize() == 0
+
+
+async def test_a_routed_retry_after_the_run_ended_answers_the_remembered_outcome(cluster):
+    channel = SteeringChannel()
+    channel.activate()
+    record = await cluster.run(steering=channel)
+    entry = await _remote_run_for_conversation(record.conversation_id)
+    assert (await run_control.route_steer(entry, OWNER, "go", None, request_id="s1"))["ok"]
+    cluster.registry.set_status(record.run_id, RunStatus.COMPLETED)
+    assert record.steering is None and record.steer_seen == {"s1": "steering_queued"}
+    assert (await run_control.route_steer(entry, OWNER, "go", None, request_id="s1"))["ok"]
 
 
 async def test_steer_refusals(cluster):
