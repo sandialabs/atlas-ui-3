@@ -117,3 +117,17 @@ def test_conversation_id_is_normalized_before_any_check():
     assert _normalize_conversation_id(None) is None
     assert _normalize_conversation_id(123) is None
     assert _normalize_conversation_id({"id": "x"}) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [{"off_record": True}, {"connection_bound": True}])
+async def test_a_run_on_the_connection_session_is_not_readable_by_another_socket(kind):
+    """A plain or off-record turn may sit on a session holding unsaved (incognito) turns."""
+    registry = RunRegistry()
+    repo = InMemorySessionRepository()
+    record = registry.start(conversation_id="conv-1", user_email=OWNER, **kind)
+    session = Session(id=record.session_id, user_email=OWNER)
+    session.history.messages.append(Message(role=MessageRole.USER, content="unsaved"))
+    await repo.create(session)
+
+    assert await in_flight_conversation(repo, registry, "conv-1", OWNER) is None
