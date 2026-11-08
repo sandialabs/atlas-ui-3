@@ -151,6 +151,9 @@ class _Registry:
     def active_for_conversation(self, conversation_id, user_email):
         return self.follow_up if conversation_id == CONV else None
 
+    def stoppable_for_conversation(self, conversation_id, user_email):
+        return [self.follow_up] if self.follow_up is not None and conversation_id == CONV else []
+
     def cancel(self, run_id, user_email):
         self.cancelled.append(run_id)
         return True
@@ -176,6 +179,10 @@ class _StopBus:
         self.lookups.append(("conversation", conversation_id))
         return self.by_conversation
 
+    async def stoppable_for_conversation(self, conversation_id, user_email):
+        self.lookups.append(("conversation", conversation_id))
+        return [self.by_conversation] if self.by_conversation else []
+
     async def send(self, owner_replica, command, run_id, actor, args=None, **kwargs):
         self.sent.append((owner_replica, command, run_id))
         return self.answer
@@ -197,12 +204,13 @@ async def _stop(registry, data, bus):
     return ws
 
 
-async def test_stop_naming_a_remote_parent_reaches_it_before_the_local_follow_up():
+async def test_stop_naming_a_remote_parent_stops_it_and_the_local_follow_up():
     ok = {"ok": True, "code": "ok", "message": "", "payload": {"run": {"run_id": "parent"}}}
     bus = _StopBus(by_run={"parent": _entry("parent")}, answer=ok)
     registry = _Registry()
     ws = await _stop(registry, {"run_id": "parent", "conversation_id": CONV}, bus)
-    assert bus.sent == [("replica-a", "stop", "parent")] and registry.cancelled == []
+    # The named run and the conversation's live follow-up (rows S31, S32).
+    assert bus.sent == [("replica-a", "stop", "parent")] and registry.cancelled == ["follow-up"]
     ws.send_json.assert_awaited_once_with({"type": "run_status", "run": {"run_id": "parent"}})
 
 
@@ -211,7 +219,7 @@ async def test_stop_naming_an_unknown_run_falls_back_to_the_local_follow_up():
     registry = _Registry()
     await _stop(registry, {"run_id": "gone", "conversation_id": CONV}, bus)
     # Nobody owns "gone": the conversation's run here is stopped locally.
-    assert bus.lookups == [("run", "gone")] and bus.sent == []
+    assert bus.lookups == [("run", "gone"), ("conversation", CONV)] and bus.sent == []
     assert registry.cancelled == ["follow-up"]
 
 

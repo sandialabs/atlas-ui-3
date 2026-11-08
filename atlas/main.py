@@ -65,6 +65,7 @@ from atlas.application.chat.runs.commands import (
     nudge_approval,
     set_auto_approve,
     steer_addressed_run,
+    steer_retry_for_named_run,
     stop_addressed_run,
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
@@ -77,6 +78,7 @@ from atlas.application.chat.runs.eligibility import (
     turn_is_off_record,
 )
 from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
+from atlas.application.chat.runs.remote_run_frames import steer_finished_frame
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.auth_mode import validate_auth_modes
@@ -2194,7 +2196,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         "conversation_id": frame_conversation_id,
                     })
                     continue
-                tracked_run = run_registry.active_for_conversation(
+                # A steer retry names the run its first attempt targeted
+                # (issue #1184): it is applied there or answered as finished,
+                # never steered into a successor run of the conversation.
+                bound_run = None
+                if data.get("steer_only") is True and data.get("run_id"):
+                    answered, bound_run = await steer_retry_for_named_run(
+                        websocket, run_registry, user_email, data
+                    )
+                    if answered:
+                        continue
+                tracked_run = bound_run or run_registry.active_for_conversation(
                     frame_conversation_id, user_email
                 )
                 if tracked_run is None and frame_conversation_id is None:
@@ -2305,17 +2317,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # become a new turn: the first attempt may have been applied
                 # and only its reply lost, and the run has since finished.
                 if data.get("steer_only") is True:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": (
-                            "The run finished before this message could be resent. "
-                            "It may already have been received; check the transcript."
-                        ),
-                        "error_type": "steer_run_finished",
-                        "steering": True,
-                        "request_id": data.get("request_id"),
-                        "conversation_id": frame_conversation_id,
-                    })
+                    await websocket.send_json(steer_finished_frame(
+                        frame_conversation_id, data.get("request_id"), data.get("run_id")
+                    ))
                     continue
 
                 # Authoritative server-side gate for system-prompt overrides.

@@ -3,7 +3,7 @@
 Issue #1128. Which run does a control frame reach, on which replica, and what
 does the user see? One table, written before the resolver (`runs/resolve.py`) that replaced the
 per-handler fallback chains in `atlas/main.py`. It describes today's behaviour;
-rows marked `GAP` are where that behaviour disagrees with the expected outcome.
+rows marked `GAP` are where that behaviour disagrees with the expected outcome (none are open).
 
 The tests are `atlas/tests/test_run_addressing_table.py`. A row tested there
 cites that file in its last column and its id is in the test name (`S09` is
@@ -69,6 +69,53 @@ run id, so the client ends the turn it started (rows `S15`, `S18`, `C04`).
   missing nudge delays the tool by one poll and never loses the answer.
 - A finished parent has no `remote live` row (live would make it `tracked`).
 
+## Conversation address
+
+A run id names one run. A conversation id can name several, so `resolve()` keeps
+its single answer for a run id and `resolve_all()` (`runs/resolve.py`) answers a
+conversation address with every run the operation must reach. Only stop fans out;
+steer and approval stay single-target (`resolve()`), because a message or a
+decision belongs to one run.
+
+A conversation address resolves to:
+
+1. **The conversation's live run**, on this replica or another (the directory's
+   conversation key holds at most one).
+2. **Every finished run of the conversation that still has a live descendant.**
+   Stopping a finished parent cascades to the sub-conversations it launched (#925),
+   and those usually outlive the turn that started them, so "stop this conversation"
+   reaches them. Rows `S19`, `S20`, `S38`.
+
+A run id *together with* a conversation is the named run plus the conversation's runs
+(1 and 2), deduplicated, named run first: a finished API run whose conversation holds a
+live follow-up stops both (`S31`, `S32`, as REST cancel already did). The conversation's
+runs are added only when the named run belongs to that conversation; a named run of
+another conversation stands alone (`S23`, `S37`), and a run id nobody knows falls back to
+the conversation alone (`S27`, `S28`). Only the actor's own runs are returned.
+
+One frame answers the stop. Every target is stopped; if any could not be reached the
+frame is that error (`run_control_unavailable`, naming the run), otherwise it is the
+`run_status` of the first run stopped on another replica, with the others' ids in
+`also_stopped`. A directory that cannot be read adds an unavailable answer after what was
+found locally, which is still stopped (`S39`).
+
+**Finding a finished parent by conversation.** The directory's conversation key is
+released with the run on purpose (a finished parent must not block the next turn,
+`C05`), so keeping it while descendants live would change admission. Walking
+`run-kids:<run_id>` does not help either: it is keyed by the parent, which is the run
+being looked for. The smaller change is no write-path change at all: the user's live runs
+(`run-user:<user>`, already read for the live-run listing) are followed up their
+`parent_run_id` chain (route-complete since #1182; a parent's record outlives its live
+descendants) to the first run in the conversation. It costs a read per live run of the
+user, at most the per-user run cap, on a stop addressed by conversation.
+
+**Steer retries.** A browser retry carries the `run_id` its first attempt was routed to
+(the error frame names it) and is `steer_only`. The server binds it to that run: a live
+local run takes it through the normal local steer path, a run on another replica gets it
+routed there, and a run that has finished answers its remembered outcome
+(`steering_queued`) or `steer_run_finished`. It is never steered into a successor run of
+the conversation and never starts a turn (`C18` to `C22`).
+
 ## ws stop (stop_streaming, agent_control stop)
 
 Code path: `stop_addressed_run` (`runs/commands.py`): `resolve` locates the run
@@ -91,8 +138,8 @@ this connection's session. The tests call it in `ws_stop`.
 | `S13` ws stop | conversation only | tracked | remote live | owner cancels, status frame | `resolve` Remote via `run_for_conversation`, `route_stop` | `atlas/tests/test_run_addressing_table.py` |
 | `S14` ws stop | conversation only | tracked | remote terminal | nothing to stop, no frame | conversation key released with the run | `atlas/tests/test_run_addressing_table.py` |
 | `S15` ws stop | conversation only | tracked | unreadable | unavailable | `route_stop` -> `owner_unavailable` | `atlas/tests/test_run_addressing_table.py` |
-| `S19` ws stop | conversation only | finished parent | local | children stopped | GAP: `active_for_conversation` skips terminal records (`registry.py:274-288`, `resolve` step 3) and `children_of_conversation` is never used | `atlas/tests/test_run_addressing_table.py` |
-| `S20` ws stop | conversation only | finished parent | remote terminal | children stopped on owner | GAP: `run_for_conversation` returns live runs only (`run_directory.py:81-90`), so `resolve` finds nothing | `atlas/tests/test_run_addressing_table.py` |
+| `S19` ws stop | conversation only | finished parent | local | children stopped | `resolve_all` adds finished runs with a live descendant (`registry.stoppable_for_conversation`); `registry.cancel` cascades | `atlas/tests/test_run_addressing_table.py` |
+| `S20` ws stop | conversation only | finished parent | remote terminal | children stopped on owner | `resolve_all` finds the parent from its live descendants (`bus.stoppable_for_conversation`); `route_stop` cascades on the owner | `atlas/tests/test_run_addressing_table.py` |
 | `S21` ws stop | conversation only | API follow-up | local | follow-up stopped | `active_for_conversation` finds it | `atlas/tests/test_run_addressing_table.py` |
 | `S22` ws stop | conversation only | API follow-up | remote live | follow-up stopped on owner | `resolve` Remote by conversation, `route_stop` | `atlas/tests/test_run_addressing_table.py` |
 | `S23` ws stop | both | tracked | local | the named run only, never the other conversation's | run id wins in `resolve` | `atlas/tests/test_run_addressing_table.py` |
@@ -102,8 +149,13 @@ this connection's session. The tests call it in `ws_stop`.
 | `S27` ws stop | both, run id stale | tracked | local | the conversation's run is stopped | `resolve` step 3 falls back to the local conversation run | `atlas/tests/test_run_addressing_table.py` |
 | `S28` ws stop | both, run id stale | tracked | remote live | the conversation's run is stopped on its owner | `resolve` misses the run id, finds the conversation, `route_stop` | `atlas/tests/test_run_addressing_table.py` |
 | `S30` ws stop | both | finished parent | remote terminal | children stopped on owner | as `S08` | `atlas/tests/test_run_addressing_table.py` |
-| `S31` ws stop | both | API follow-up | local | named run and the conversation's live follow-up stopped (REST cancel does) | GAP: the run id wins and the conversation is ignored once it resolves (`resolve` returns one run) | `atlas/tests/test_run_addressing_table.py` |
-| `S32` ws stop | both | API follow-up | remote live | as `S31`, on the owner | GAP: `resolve` returns the named run only, so `stop_addressed_run` stops that run only | `atlas/tests/test_run_addressing_table.py` |
+| `S31` ws stop | both | API follow-up | local | named run and the conversation's live follow-up stopped (REST cancel does) | `resolve_all` returns the named run and the conversation's live follow-up | `atlas/tests/test_run_addressing_table.py` |
+| `S32` ws stop | both | API follow-up | remote live | as `S31`, on the owner | as `S31`: both targets are routed, one aggregate frame | `atlas/tests/test_run_addressing_table.py` |
+| `S35` ws stop | conversation only | tracked and finished parent | remote live and remote terminal | the live run and the live child stopped, one status frame (`also_stopped`) | `resolve_all` returns both, `route_stop` each | `atlas/tests/test_run_addressing_table.py` |
+| `S36` ws stop | conversation only | finished parent and tracked | remote terminal and local | both stopped | `resolve_all` returns Remote and Local | `atlas/tests/test_run_addressing_table.py` |
+| `S37` ws stop | both, run of another conversation | tracked | remote live | the named run only | conversation runs only added for the named run's conversation | `atlas/tests/test_run_addressing_table.py` |
+| `S38` ws stop | conversation only | finished parent, finished child, live grandchild | remote terminal | grandchild stopped | the `parent_run_id` walk passes the finished child | `atlas/tests/test_run_addressing_table.py` |
+| `S39` ws stop | conversation only | tracked | local, directory unreadable | local run stopped, unavailable frame for the rest | `resolve_all` appends Unknown | `atlas/tests/test_run_addressing_table.py` |
 | `S33` ws stop | neither | any | any (never read) | only the connection's plain turn is stopped; other runs untouched | `stop_addressed_run` addresses the connection's `connection_bound` run | `atlas/tests/test_run_addressing_table.py` |
 | `S34` ws stop | run_id | tracked | remote live, two real replicas | owner stops, other users refused | via `route_stop` | `test_websocket_stop_via_non_owner_and_other_users_are_refused` |
 
@@ -144,8 +196,13 @@ Code path: local run (`main.py`), then `steer_addressed_run`
 | `C06` ws chat | conversation | API follow-up | remote live | steered like any tracked run | `route_steer` | `atlas/tests/test_run_addressing_table.py` |
 | `C07` ws chat | conversation | off-record turn | remote live | refused `off_record`, nothing written | off-record guard in `RedisRunControlBus.send` | `atlas/tests/test_run_addressing_table.py` |
 | `C08` ws chat | conversation | tracked | local, loop draining | message queued, `steering_queued` | the local tracked-run branch of `chat` | `atlas/tests/test_run_addressing_table.py` |
-| `C09` ws chat | conversation | tracked | local, loop not draining | refused `conversation_busy`; unlike the routed refusal (`steer_frame`) the local frame carries no `steering: true` | the local not-draining branch of `chat` | `atlas/tests/test_run_addressing_table.py` |
+| `C09` ws chat | conversation | tracked | local, loop not draining | refused `conversation_busy`, carrying `steering: true` and the echoed `request_id` like the routed frame (`steer_frame`) | the local not-draining branch of `chat` | `atlas/tests/test_run_addressing_table.py` |
 | `C10` ws chat | conversation | off-record turn | local | refused `off_record`, as the remote path does, unless the run is itself off-record | the local run branch of `chat` compares `turn_is_off_record` with `RunRecord.off_record` | `atlas/tests/test_run_addressing_table.py` |
+| `C18` ws chat | retry naming the first run | tracked | finished, successor live, local | remembered outcome `steering_queued`, or `steer_run_finished`; the successor is untouched | `steer_retry_for_named_run` binds to `run_id` | `atlas/tests/test_run_addressing_table.py` |
+| `C19` ws chat | retry naming the first run | tracked | finished, successor live, remote terminal | as `C18`, answered by the owner | `route_steer` to the retained record | `atlas/tests/test_run_addressing_table.py` |
+| `C20` ws chat | retry naming the first run | tracked | live, local | steered through the local path | `steer_retry_for_named_run` hands the record back | `atlas/tests/test_run_addressing_table.py` |
+| `C21` ws chat | retry naming a run nobody knows | any | none | `steer_run_finished`, no turn | resolves Nothing | `atlas/tests/test_run_addressing_table.py` |
+| `C22` ws chat | retry naming the first run | tracked | remote live | routed there, queued once | `route_steer`, owner dedup | `atlas/tests/test_run_addressing_table.py` |
 | `C13` ws chat | run_id only, neither | any | any | starts a new turn, except that a frame naming no conversation continues the plain turn this connection runs (steered into it, or refused `conversation_busy`) | the `chat` branch looks up `active_bound_to` when the frame has no conversation | n/a: not exercised here |
 | `C14` ws chat | conversation | tracked | remote live, two real replicas | steer reaches the loop once | via `route_steer` | `test_steer_via_non_owner_reaches_the_loop_once` |
 | `C15` ws chat | conversation | tracked | retry lands on the owner after a routed attempt, same `request_id` | queued once | owner `_steer` and the local branch of `chat` both call `RunRegistry.steer` | `atlas/tests/test_run_addressing_table.py` |
@@ -172,7 +229,6 @@ and `nudge_approval` resolves the run and calls `route_approval` to wake a remot
 
 ## Counts
 
-Rows `S01-S34`, `R01-R12`, `C01-C17` and `P01-P09`, less the eight retired
+Rows `S01-S39`, `R01-R12`, `C01-C22` and `P01-P09`, less the eight retired
 `untracked turn` ids (`S05`, `S06`, `S16`, `S17`, `S18`, `S29`, `C11`, `C12`):
-64 rows. `GAP` rows (4): `S19`, `S20`, `S31`, `S32`. All are
-strict `xfail` tests.
+74 rows. No `GAP` rows remain: `S19`, `S20`, `S31` and `S32` were the last four.

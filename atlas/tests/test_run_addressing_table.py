@@ -239,8 +239,6 @@ async def test_S15_conversation_only_tracked_unreadable(cluster, local):
 
 
 
-@gap("a conversation-only stop looks only for a live run, so a finished parent's live children "
-     "are not stopped (the registry's children_of_conversation is never consulted)")
 async def test_S19_conversation_only_finished_parent_local(local):
     parent = local.start(conversation_id=CONV, user_email=OWNER)
     child = _local_run(local, "conv-child", parent_run_id=parent.run_id, depth=1)
@@ -249,8 +247,6 @@ async def test_S19_conversation_only_finished_parent_local(local):
     assert local.get(child.run_id).status is RunStatus.CANCELLED
 
 
-@gap("the directory's conversation key is released with the parent, so a conversation-only stop "
-     "finds nothing to route and the children on the owner keep running")
 async def test_S20_conversation_only_finished_parent_remote_terminal(cluster, local):
     parent, child = await _finished_parent_with_live_child_on_a(cluster)
     await ws_stop(local, {"conversation_id": parent.conversation_id})
@@ -322,8 +318,6 @@ async def test_S30_both_finished_parent_remote_terminal(cluster, local):
     assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
 
 
-@gap("run_id wins over conversation_id, so naming a finished run stops its cascade but never the "
-     "live follow-up the same frame's conversation holds (REST cancel does stop it)")
 async def test_S31_both_api_follow_up_local(local):
     from atlas.application.chat.runs.external_runs import API_SOURCE
 
@@ -336,11 +330,60 @@ async def test_S31_both_api_follow_up_local(local):
     assert local.get(follow_up.run_id).status is RunStatus.CANCELLED
 
 
-@gap("as S31, on the owner: the stop reaches the finished run and the follow-up keeps running")
 async def test_S32_both_api_follow_up_remote(cluster, local):
     first, follow_up = await _finished_with_follow_up_on_a(cluster)
     await ws_stop(local, {"run_id": first.run_id, "conversation_id": first.conversation_id})
     assert cluster.registry.get(follow_up.run_id).status is RunStatus.CANCELLED
+
+
+async def test_S35_conversation_only_live_run_and_finished_parent_remote(cluster, local):
+    """The conversation's live run and a finished earlier turn's live child: both stopped,
+    one frame for the lot."""
+    parent, child = await _finished_parent_with_live_child_on_a(cluster)
+    live = cluster.registry.start(conversation_id=parent.conversation_id, user_email=OWNER)
+    cluster.registry.attach_task(live.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await cluster.a.claim(live.run_id, parent.conversation_id)
+    frames = await ws_stop(local, {"conversation_id": parent.conversation_id})
+    assert [f["type"] for f in frames] == ["run_status"]
+    assert frames[0]["also_stopped"]
+    assert cluster.registry.get(live.run_id).status is RunStatus.CANCELLED
+    assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
+
+
+async def test_S36_conversation_only_stops_local_and_remote_targets_together(cluster, local):
+    parent, child = await _finished_parent_with_live_child_on_a(cluster)
+    here = _local_run(local, parent.conversation_id)
+    await ws_stop(local, {"conversation_id": parent.conversation_id})
+    assert local.get(here.run_id).status is RunStatus.CANCELLED
+    assert cluster.registry.get(child.run_id).status is RunStatus.CANCELLED
+
+
+async def test_S37_both_named_run_of_another_conversation_stands_alone(cluster, local):
+    run = await cluster.run()
+    other, _child = await _finished_parent_with_live_child_on_a(cluster)
+    await ws_stop(local, {"run_id": run.run_id, "conversation_id": other.conversation_id})
+    assert cluster.registry.get(run.run_id).status is RunStatus.CANCELLED
+    assert not cluster.registry.get(_child.run_id).is_terminal
+
+
+async def test_S38_a_grandchild_below_a_finished_parent_is_found_from_the_directory(cluster, local):
+    parent, child = await _finished_parent_with_live_child_on_a(cluster)
+    cluster.registry.set_status(child.run_id, RunStatus.COMPLETED)
+    await _release(cluster, child)
+    grand = cluster.registry.start(conversation_id="conv-grand", user_email=OWNER,
+                                   parent_run_id=child.run_id, depth=2)
+    cluster.registry.attach_task(grand.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await cluster.a.claim(grand.run_id, grand.conversation_id, parent_run_id=child.run_id)
+    await ws_stop(local, {"conversation_id": parent.conversation_id})
+    assert cluster.registry.get(grand.run_id).status is RunStatus.CANCELLED
+
+
+async def test_S39_conversation_only_unreadable_stops_what_is_local_and_reports_the_rest(cluster, local):
+    here = _local_run(local, "conv-both")
+    await _unreadable(cluster)
+    frames = await ws_stop(local, {"conversation_id": "conv-both"})
+    assert local.get(here.run_id).status is RunStatus.CANCELLED
+    _is_unavailable(frames)
 
 
 async def test_S33_neither_stops_only_the_connections_plain_turn(local):
@@ -518,6 +561,73 @@ async def test_C16_retry_is_routed_after_a_local_attempt_on_the_owner(cluster):
     handled, frames = await _steer(run.conversation_id, request_id="r16")
     assert handled and frames[0]["update_type"] == "steering_queued"
     assert channel.queue.qsize() == 1
+
+
+async def _retry(registry, run_id, request_id, conversation_id):
+    """The named-run step of a steer retry in the ``chat`` branch: (answered, record, frames)."""
+    from atlas.application.chat.runs.commands import steer_retry_for_named_run
+
+    ws = MagicMock()
+    ws.send_json = AsyncMock()
+    data = {"type": "chat", "content": "go left", "conversation_id": conversation_id, "request_id": request_id,
+            "run_id": run_id, "steer_only": True}
+    answered, record = await steer_retry_for_named_run(ws, registry, OWNER, data)
+    return answered, record, [c.args[0] for c in ws.send_json.await_args_list]
+
+
+async def test_C18_retry_after_a_successor_started_is_bound_to_the_first_run_local(local):
+    first_channel, second_channel = _active_channel(), _active_channel()
+    first = local.start(conversation_id=CONV, user_email=OWNER, steering=first_channel)
+    assert local.steer(first.run_id, "go left", "r18") == "steering_queued"
+    local.set_status(first.run_id, RunStatus.COMPLETED)
+    second = local.start(conversation_id=CONV, user_email=OWNER, steering=second_channel)
+    # The first attempt was applied: the retry is told so, and the successor is untouched.
+    answered, record, frames = await _retry(local, first.run_id, "r18", CONV)
+    assert answered and record is None and frames[0]["update_type"] == "steering_queued"
+    assert frames[0]["run_id"] == first.run_id
+    # An id the first run never queued is reported finished, never queued on the successor.
+    answered, record, frames = await _retry(local, first.run_id, "r18-new", CONV)
+    assert answered and frames[0]["error_type"] == "steer_run_finished" and frames[0]["steering"] is True
+    assert frames[0]["request_id"] == "r18-new" and second_channel.queue.qsize() == 0
+    assert second.run_id != first.run_id
+
+
+async def test_C19_retry_after_a_successor_started_is_bound_to_the_first_run_remote(cluster):
+    first_channel, second_channel = _active_channel(), _active_channel()
+    first = await cluster.run(steering=first_channel)
+    assert cluster.registry.steer(first.run_id, "go left", "r19") == "steering_queued"
+    cluster.registry.set_status(first.run_id, RunStatus.COMPLETED)
+    await _release(cluster, first)
+    second = cluster.registry.start(conversation_id=first.conversation_id, user_email=OWNER,
+                                    steering=second_channel)
+    cluster.registry.attach_task(second.run_id, asyncio.create_task(asyncio.sleep(30)))
+    await cluster.a.claim(second.run_id, first.conversation_id)
+    registry_b = RunRegistry()
+    answered, record, frames = await _retry(registry_b, first.run_id, "r19", first.conversation_id)
+    assert answered and frames[0]["update_type"] == "steering_queued" and frames[0]["run_id"] == first.run_id
+    answered, record, frames = await _retry(registry_b, first.run_id, "r19-new", first.conversation_id)
+    assert answered and frames[0]["error_type"] == "steer_run_finished"
+    assert second_channel.queue.qsize() == 0 and first_channel.queue.qsize() == 1
+
+
+async def test_C20_retry_naming_a_live_local_run_is_left_to_the_local_steer(local):
+    run = local.start(conversation_id=CONV, user_email=OWNER, steering=_active_channel())
+    answered, record, frames = await _retry(local, run.run_id, "r20", CONV)
+    assert not answered and record is run and frames == []
+
+
+async def test_C21_retry_naming_an_unknown_run_is_reported_finished(local):
+    answered, record, frames = await _retry(local, "no-such-run", "r21", CONV)
+    assert answered and frames[0]["error_type"] == "steer_run_finished"
+
+
+async def test_C22_retry_naming_a_live_remote_run_is_routed_there(cluster):
+    channel = _active_channel()
+    run = await cluster.run(steering=channel)
+    answered, record, frames = await _retry(RunRegistry(), run.run_id, "r22", run.conversation_id)
+    assert answered and frames[0]["update_type"] == "steering_queued" and channel.queue.qsize() == 1
+    answered, record, frames = await _retry(RunRegistry(), run.run_id, "r22", run.conversation_id)
+    assert frames[0]["update_type"] == "steering_queued" and channel.queue.qsize() == 1
 
 
 def _local_steer_frames(chat_service, extra, steering):

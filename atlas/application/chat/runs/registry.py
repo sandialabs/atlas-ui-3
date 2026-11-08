@@ -422,6 +422,34 @@ class RunRegistry:
                 return record
         return None
 
+    def stoppable_for_conversation(
+        self, conversation_id: Optional[str], user_email: str
+    ) -> List[RunRecord]:
+        """Every run of the user's conversation that a stop must reach.
+
+        The conversation's live run, and any finished run of it that still has
+        a live descendant (stopping it cascades to the sub-conversations it
+        launched, which usually outlive the turn that started them).
+        """
+        if not conversation_id:
+            return []
+        owner = normalize_user_email(user_email)
+        found = []
+        for record in list(self._runs.values()):
+            if record.conversation_id != conversation_id or record.user_email != owner:
+                continue
+            if not record.is_terminal or self._has_live_descendant(record.run_id, 0):
+                found.append(record)
+        return found
+
+    def _has_live_descendant(self, run_id: str, depth: int) -> bool:
+        if depth > MAX_SUBTREE_DEPTH:
+            return False
+        return any(
+            not child.is_terminal or self._has_live_descendant(child.run_id, depth + 1)
+            for child in self.children_of(run_id, include_terminal=True)
+        )
+
     def active_for_conversation_any_owner(
         self, conversation_id: Optional[str]
     ) -> Optional[str]:

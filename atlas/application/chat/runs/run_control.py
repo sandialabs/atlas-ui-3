@@ -285,6 +285,22 @@ async def conversation_entry(conversation_id: Optional[str]) -> Optional[Dict[st
         raise RunDirectoryUnavailable(str(exc)) from exc
 
 
+async def stoppable_entries(conversation_id: Optional[str], user_email: str) -> "list[Dict[str, Any]]":
+    """The user's runs of ``conversation_id`` on other replicas that a stop must reach.
+
+    Raises :class:`RunDirectoryUnavailable` when the directory cannot be read.
+    """
+    bus = get_run_control_bus()
+    if bus is None or not conversation_id:
+        return []
+    try:
+        entries = await bus.stoppable_for_conversation(str(conversation_id), user_email)
+    except Exception as exc:
+        logger.warning("run directory lookup failed", exc_info=True)
+        raise RunDirectoryUnavailable(str(exc)) from exc
+    return [e for e in entries if e.get("replica") != bus.replica_id]
+
+
 async def _send(entry: Dict[str, Any], command: str, actor: Dict[str, Any], args=None, request_id=None,
                 off_record: bool = False):
     """Send to the entry's owner, carrying the generation it was routed by.
