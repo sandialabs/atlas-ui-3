@@ -492,11 +492,13 @@ async def _sleep_forever():
     await asyncio.sleep(3600)
 
 
-def _bound_turn(registry, session_id, conversation_id):
+def _bound_turn(registry, session_id, conversation_id, work=None):
     record = registry.start(
         conversation_id=conversation_id, user_email=USER, session_id=session_id, connection_bound=True
     )
     task = asyncio.create_task(_sleep_forever())
+    if work is not None:
+        work.track(task)  # as the endpoint does when it starts the turn
     registry.attach_task(record.run_id, task)
     return record, task
 
@@ -505,10 +507,10 @@ def _bound_turn(registry, session_id, conversation_id):
 async def test_superseded_turn_is_cancelled_and_awaited(registry):
     import atlas.main as main_module
 
-    record, task = _bound_turn(registry, "s-sup", "c1")
+    work = main_module._ConnectionWork()
+    record, task = _bound_turn(registry, "s-sup", "c1", work)
     other_session, other_task = _bound_turn(registry, "s-other", "c2")
     await asyncio.sleep(0)
-    work = main_module._ConnectionWork()
 
     assert await main_module._cancel_connection_turns(registry, "s-sup", USER, work) is True
     assert task.cancelled()
@@ -525,9 +527,10 @@ async def test_superseded_turn_cancel_leaves_finished_and_other_work_alone(regis
     work = main_module._ConnectionWork()
     assert await main_module._cancel_connection_turns(registry, "s-idle", USER, work) is False
 
-    record, task = _bound_turn(registry, "s-done", "c1")
+    record, task = _bound_turn(registry, "s-done", "c1", work)
     registry.set_status(record.run_id, main_module.RunStatus.COMPLETED)
     task.cancel()
+    await asyncio.wait([task])
     assert await main_module._cancel_connection_turns(registry, "s-done", USER, work) is False
 
     # A run with its own session is not bound to the connection.
@@ -565,10 +568,11 @@ async def test_superseded_turn_cancel_is_bounded(registry, monkeypatch):
     record = registry.start(
         conversation_id="c-stubborn", user_email=USER, session_id="s-stubborn", connection_bound=True
     )
+    work = main_module._ConnectionWork()
     stubborn = asyncio.create_task(_resists_cancel())
+    work.track(stubborn)
     registry.attach_task(record.run_id, stubborn)
     await asyncio.sleep(0)
-    work = main_module._ConnectionWork()
     try:
         started = asyncio.get_running_loop().time()
         assert await main_module._cancel_connection_turns(registry, "s-stubborn", USER, work) is True
@@ -581,3 +585,41 @@ async def test_superseded_turn_cancel_is_bounded(registry, monkeypatch):
         stubborn.cancel()
         stubborn.cancel()
         await asyncio.wait([stubborn], timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_reset_waits_for_a_turn_that_stop_already_cancelled(registry):
+    """Stop marks the run terminal and drops its task; the turn may still be committing."""
+    import atlas.main as main_module
+
+    committing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def commits_after_cancel():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            committing.set()
+            while not release.is_set():  # the interrupted turn being written
+                try:
+                    await asyncio.sleep(0.01)
+                except asyncio.CancelledError:
+                    pass
+
+    work = main_module._ConnectionWork()
+    record = registry.start(
+        conversation_id="c-stop", user_email=USER, session_id="s-stop", connection_bound=True
+    )
+    task = asyncio.create_task(commits_after_cancel())
+    work.track(task)
+    registry.attach_task(record.run_id, task)
+    await asyncio.sleep(0)
+    registry.cancel(record.run_id, USER)  # the Stop frame
+    await committing.wait()
+    assert registry.active_bound_to("s-stop") == [] and not task.done() and work.busy()
+
+    reset = asyncio.create_task(main_module._cancel_connection_turns(registry, "s-stop", USER, work))
+    await asyncio.sleep(0.05)
+    assert not reset.done(), "reset did not wait for the turn that is still committing"
+    release.set()
+    assert await reset is True and task.done()

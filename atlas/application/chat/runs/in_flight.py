@@ -76,7 +76,10 @@ async def in_flight_conversation(
     if not conversation_id or not user_email or session_repository is None:
         return None
     record = run_registry.active_for_conversation(conversation_id, user_email)
-    if record is None:
+    if record is None or record.off_record or record.connection_bound:
+        # A plain turn runs on its socket's own session, which can hold turns
+        # that were never saved (an incognito prefix); only a run with a
+        # session of its own has a transcript another socket may read.
         return None
     try:
         session = await session_repository.get(record.session_id)

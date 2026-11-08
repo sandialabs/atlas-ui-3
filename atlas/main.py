@@ -240,7 +240,7 @@ def _stream_replay_frame(record) -> Optional[Dict[str, Any]]:
     would put bookkeeping into its hot path -- so the race is accepted rather
     than papered over with a replay cursor (issue #760 owns live re-attach).
     """
-    if record is None:
+    if record is None or record.off_record:
         return None
     text = record.stream.text()
     if not text:
@@ -703,13 +703,24 @@ SUPERSEDED_TURN_CANCEL_TIMEOUT = 5.0
 class _ConnectionWork:
     """Work that belongs to this socket's own session rather than to a run.
 
-    A manual compaction rewrites the connection session's history, and a plain
-    turn that was cancelled can outlive its bounded wait. Turns themselves are
-    registry runs: they are found with ``RunRegistry.active_bound_to``.
+    A manual compaction rewrites the connection session's history. The tasks of
+    plain turns are kept here too, because a Stop marks the run terminal and
+    drops the registry's reference to its task while the task is still
+    committing the interrupted turn; reset and compaction must still wait for
+    it. ``stragglers`` are the ones a bounded wait gave up on.
     """
 
     compaction: Optional["asyncio.Task"] = None
+    turns: List["asyncio.Task"] = field(default_factory=list)
     stragglers: List["asyncio.Task"] = field(default_factory=list)
+
+    def track(self, task: "asyncio.Task") -> None:
+        self.turns = [t for t in self.turns if not t.done()]
+        self.turns.append(task)
+
+    def live_turns(self) -> List["asyncio.Task"]:
+        self.turns = [t for t in self.turns if not t.done()]
+        return list(self.turns)
 
     def compacting(self) -> bool:
         return self.compaction is not None and not self.compaction.done()
@@ -722,7 +733,7 @@ class _ConnectionWork:
         return len(self.stragglers)
 
     def busy(self) -> bool:
-        return self.compacting() or any(not t.done() for t in self.stragglers)
+        return self.compacting() or bool(self.live_turns())
 
 
 async def _cancel_connection_turns(registry, session_id, user_email, work, *, include_compaction=False) -> bool:
@@ -731,17 +742,18 @@ async def _cancel_connection_turns(registry, session_id, user_email, work, *, in
     Two turns must not share one session: a chat frame for another conversation
     used to start beside the running one, leaving it executing with nothing
     pointing at it. Cancel it and wait for it to unwind so its session hold is
-    released before the new turn opens one. Runs with their own session are
+    released before the new turn opens one. This includes a turn a Stop already
+    cancelled but that is still committing. Runs with their own session are
     never touched, so a background run in another conversation keeps going.
 
-    Returns True when a running turn was cancelled.
+    Returns True when a turn was running or still unwinding.
     """
     work.cancel_stragglers()
-    tasks = []
     for record in registry.active_bound_to(session_id):
-        if record.task is not None:
-            tasks.append(record.task)
         registry.cancel(record.run_id, user_email)
+    tasks = work.live_turns()
+    for task in tasks:
+        task.cancel()
     if include_compaction and work.compacting():
         work.compaction.cancel()
         tasks.append(work.compaction)
@@ -1250,6 +1262,8 @@ async def cleanup_disconnected_session(
         )
 
     work.cancel_stragglers()
+    for task in work.live_turns():
+        task.cancel()
     if work.compacting():
         logger.info("Cancelling compaction (client disconnected)")
         work.compaction.cancel()
@@ -2386,12 +2400,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 run_conversation_id = turn_conversation_id or await _connection_conversation_id(
                     chat_service, session_id
                 )
-                if not own_session and await _cancel_connection_turns(
-                    run_registry, session_id, user_email, work
-                ):
+                if await _cancel_connection_turns(run_registry, session_id, user_email, work):
                     # A turn for another conversation supersedes the plain turn
-                    # still running on this session. Cancel it first; two turns
-                    # must not write one history.
+                    # still running on this connection, whichever session the
+                    # new one runs on: left alone it would keep generating, and
+                    # executing auto-approved tools, for a chat nobody is
+                    # watching, and hold a concurrency slot.
                     logger.info("Cancelled the previous turn on this connection before starting a new one")
                 try:
                     # One admission path for every transport (#1128): applies
@@ -2818,6 +2832,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         "connection_bound": run_record.connection_bound,
                     })
                     chat_task = asyncio.create_task(handle_chat_guarded())
+                    if run_record.connection_bound:
+                        work.track(chat_task)
                     run_registry.attach_task(run_record.run_id, chat_task)
                     started = True
                 finally:
@@ -2841,7 +2857,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # turn. Read-only, and skipped while a turn is running: that
                 # turn reports its own usage when it ends.
                 async def answer_usage(request: dict) -> None:
-                    if work.busy() or run_registry.active_bound_to(session_id):
+                    if work.busy():
                         return
                     last_usage_request["at"] = time.monotonic()
                     try:
@@ -2883,7 +2899,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # conversation: compaction rewrites what the next request
                 # carries, and a running turn owns that.
                 compact_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
-                busy = work.busy() or run_registry.active_bound_to(session_id) or (
+                busy = work.busy() or (
                     compact_conversation_id
                     and run_registry.active_for_conversation_any_owner(compact_conversation_id)
                 )
