@@ -154,7 +154,7 @@ retention window only if nothing below it in the launch tree is live; otherwise
 they keep it for lease + retention, and each live descendant's `RENEW` pushes a
 finished ancestor's expiry out again. A descendant ending starts the retention
 window for every finished ancestor it was the last live descendant of (the walk
-is capped at the registry's launch depth). So a stop or cancel of a finished
+is capped at 64 levels, as in the registry). So a stop or cancel of a finished
 parent through any replica finds its record for as long as its children run.
 
 Rules every script follows:

@@ -79,13 +79,13 @@ local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 # prefix (``<p>:``), because the keys of a run's ancestors and descendants are
 # not known to the caller. A run with a live descendant keeps its record, so a
 # stop or cancel through another replica still finds it; the ancestor walk is
-# bounded like the registry's launch depth.
+# bounded like the registry's (``MAX_SUBTREE_DEPTH``).
 _SUBTREE = """
 local function terminal(status)
   return status == 'completed' or status == 'failed' or status == 'cancelled'
 end
 local function live_below(p, id, depth)
-  if depth > 10 then return false end
+  if depth > 64 then return false end
   local kids_key = p .. 'run-kids:' .. id
   for _, kid in ipairs(redis.call('SMEMBERS', kids_key)) do
     local rec = p .. 'run:' .. kid
@@ -118,7 +118,7 @@ local function end_run(p, id, retention, lease)
   expire_both(p, id, retention)
   local cur = redis.call('HGET', p .. 'run:' .. id, 'parent_run_id')
   local hops = 0
-  while cur and cur ~= '' and hops < 10 do
+  while cur and cur ~= '' and hops < 64 do
     local rec = p .. 'run:' .. cur
     local status = redis.call('HGET', rec, 'status')
     if (not status) or (not terminal(status)) or live_below(p, cur, 0) then break end
@@ -231,7 +231,7 @@ redis.call('ZADD', KEYS[4], expires, ARGV[1])
 -- A finished ancestor stays readable while this run is live.
 local cur = redis.call('HGET', KEYS[1], 'parent_run_id')
 local hops = 0
-while cur and cur ~= '' and hops < 10 do
+while cur and cur ~= '' and hops < 64 do
   local rec = ARGV[7] .. 'run:' .. cur
   local status = redis.call('HGET', rec, 'status')
   if not status then break end

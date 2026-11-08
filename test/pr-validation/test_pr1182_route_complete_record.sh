@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for the route-complete run record and one retention window (issue #1128)
+# Test script for PR #1182: the route-complete run record and one retention window (issue #1128)
 #
 # Test plan:
 # - The run record carries source, parent_run_id and follow_up_of from claim time.
@@ -25,4 +25,6 @@ echo "== record fields, subtree retention, addressing table"
 (cd atlas && PYTHONPATH="$PROJECT_ROOT" python -m pytest -q -p no:cacheprovider \
     tests/test_redis_run_coordinator.py tests/test_run_addressing_table.py \
     tests/test_run_leases.py tests/test_run_control_service.py) || fail "unit tests"
+echo "== multi-replica harness (two real replicas on shared Redis)"
+bash test/multireplica_tests.sh || fail "multi-replica harness"
 echo "PASSED: route-complete run record"

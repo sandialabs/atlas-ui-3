@@ -1179,3 +1179,14 @@ async def test_lost_claim_records_fenced_on_the_stopped_run(server):
     assert local.fenced and local.end_reason == "fenced"
     assert outcome_for(local.status.value, local.end_reason) == "interrupted"
     task.cancel()
+
+
+def test_shared_view_carries_admission_relations_before_the_first_snapshot():
+    from atlas.application.chat.runs.leases import shared_view
+
+    view = shared_view({"run_id": "r2", "status": "queued", "source": API_SOURCE,
+                        "parent_run_id": "p", "follow_up_of": "r1"})
+    assert (view["parent_run_id"], view["previous_run_id"]) == ("p", "r1")
+    plain = shared_view({"run_id": "r3", "status": "queued", "source": "",
+                         "parent_run_id": "", "follow_up_of": ""})
+    assert plain["parent_run_id"] is None and plain["previous_run_id"] is None
