@@ -573,3 +573,27 @@ async def test_api_cancel_of_a_live_run_held_here_needs_no_directory(cluster, mo
     # unreadable directory cannot turn a cancel that took effect into a 503.
     answer = await cancel_api_run_addressed(record.run_id)
     assert answer["ok"] is True and answer["payload"]["status"]["cancelled"] is True
+
+
+async def test_auto_approve_toggle_on_another_replica_reaches_the_owned_run(cluster):
+    from atlas.application.chat.runs.commands import set_auto_approve
+
+    record = await cluster.run()
+    other = await cluster.run()
+    assert record.auto_approve_user_tools is False
+    # Replica B received the toggle; its own registry holds none of the runs.
+    await set_auto_approve(RunRegistry(), OWNER, True)
+    assert cluster.registry.get(record.run_id).auto_approve_user_tools is True
+    assert cluster.registry.get(other.run_id).auto_approve_user_tools is True
+    # Idempotent, and switching off follows the same path.
+    await set_auto_approve(RunRegistry(), OWNER, True)
+    await set_auto_approve(RunRegistry(), OWNER, False)
+    assert cluster.registry.get(record.run_id).auto_approve_user_tools is False
+
+
+async def test_auto_approve_toggle_never_reaches_another_users_run(cluster):
+    from atlas.application.chat.runs.commands import set_auto_approve
+
+    mine = await cluster.run()
+    await set_auto_approve(RunRegistry(), OTHER, True)
+    assert cluster.registry.get(mine.run_id).auto_approve_user_tools is False

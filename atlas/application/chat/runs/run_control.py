@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 STOP = "stop"
 STEER = "steer"
 APPROVAL = "approval"
+AUTO_APPROVE = "auto_approve"
 
 RefusalCheck = Callable[[UUID, Any], Awaitable[Optional[str]]]
 
@@ -101,6 +102,8 @@ class RunControlService:
             return await self._steer(run_id, actor, args, envelope.get("deadline"))
         if command == APPROVAL:
             return await self._approval(run_id, actor, args)
+        if command == AUTO_APPROVE:
+            return self._auto_approve(actor, args)
         return reply(False, "unknown_command", "Unknown run-control command.")
 
     def _owned_record(self, run_id: str, actor: Dict[str, Any]):
@@ -120,6 +123,18 @@ class RunControlService:
         cancelled = self._registry().cancel(record.run_id, actor["email"])
         logger.info("Run %s stopped by a command from another replica", record.run_id)
         return reply(True, run=record.to_public_dict(), cancelled=cancelled)
+
+    def _auto_approve(self, actor: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the user's auto-approve switch to the runs this replica owns.
+
+        The switch is the user's, not one run's, so the command sets it on
+        every user-started run of the actor here. Idempotent: a repeat finds
+        the flag already set.
+        """
+        if actor.get("kind") != "user" or not actor.get("email"):
+            return reply(False, "run_not_found", "No such run.")
+        changed = self._registry().set_auto_approve_user_tools(actor["email"], args.get("enabled") is True)
+        return reply(True, changed=changed)
 
     async def _steer(self, run_id: str, actor: Dict[str, Any], args: Dict[str, Any],
                      deadline: Any = None) -> Dict[str, Any]:
@@ -392,3 +407,14 @@ async def route_approval(entry: Dict[str, Any], user_email: str, invocation_id: 
     args = {"invocation_id": invocation_id, "tool_call_id": tool_call_id}
     request_id = f"approval:{invocation_id or tool_call_id}"
     return await _send(entry, APPROVAL, user_actor(user_email), args, request_id=request_id)
+
+
+async def route_auto_approve(entry: Dict[str, Any], user_email: str, enabled: bool) -> Dict[str, Any]:
+    """Send the user's auto-approve switch to the owner of ``entry``'s run.
+
+    ``entry`` is one of the user's live runs there; it addresses the replica
+    and fences the command, and the owner applies the switch to all of the
+    user's runs it holds. A fresh request id per send: each toggle is its own
+    command, and the owner applying it twice changes nothing.
+    """
+    return await _send(entry, AUTO_APPROVE, user_actor(user_email), {"enabled": enabled is True})

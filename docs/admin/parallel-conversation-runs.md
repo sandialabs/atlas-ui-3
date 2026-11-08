@@ -195,6 +195,7 @@ Client to server:
 | `list_runs` | Ask for every run the user can still see. Sent on connect. |
 | `stop_streaming` / `agent_control` (`action: "stop"`) | Now accept `run_id` and/or `conversation_id`. A frame with neither falls back to the connection's untracked turn, which is what older clients send. |
 | `tool_approval_response` / `elicitation_response` | May carry `run_id` so the right run is resumed when several are paused. |
+| `auto_approve_tools` | `{enabled: true}` or `{enabled: false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering. |
 
 Server to client:
 
@@ -349,11 +350,47 @@ The poll is deliberately cheap to run and cheap to stop:
 
 ### Auto-approve covers background runs
 
-Auto-approve is a client setting. The client answers an approval request for
-a conversation it is **not** displaying immediately when the setting is on and
-the tool is not pinned to mandatory approval, so a multi-step run keeps going
-while the user works elsewhere. Requests the client does not answer are still
-deferred and replayed as described below.
+Auto-approve is the user's switch. The browser sends it on the chat frame
+that admits the run (`auto_approve_tools: true`) and again, as
+`auto_approve_tools`, when the switch changes or the page connects. A later
+chat or steer frame does not change a run that is already going: that frame
+can come from a stale tab. The server stores the bit on the run and, for a
+tool that is not admin-mandated, approves the call itself. No browser has to
+be connected, and navigating away does not park the run on the approval gate.
+
+The preference lives on the run record in the replica that owns the run --
+the process that executes the tools. A change received on any replica is
+applied to the user's runs it owns and sent as an `auto_approve` command to
+every other replica that owns one of the user's live runs, found through the
+shared per-user run set. The send is best effort: an owner that does not
+answer is logged and keeps its previous value. A turn that opted in keeps that
+choice after its socket closes, including when a later connection lands on
+another replica.
+
+A turn that is not admitted (incognito, local save, or chat history disabled)
+has no run record. The same message stores the switch on that connection's
+session, and the gate reads the live value on the next tool call, not the
+copy taken when the turn started. Turning the switch off asks again. The
+last value is kept if the socket drops while a tool is still in flight, so
+auto-approve stays on when that is how the user left it. A toggle that could
+not be sent because the socket was down is sent again when the page reconnects.
+
+Some requests stay on the gate with the switch on: an admin-mandated tool, a
+call a policy hook escalated to "ask", and a tool call inside a launched child
+conversation (judged by launch lineage -- depth or launch spec -- since a child
+of an untracked turn has no `parent_run_id`). Each `tool_approval_request`
+carries `auto_approvable`; it is `false` for those, and the browser does not
+answer a request marked that way, in the open conversation or in the
+background. The user approves or rejects it by hand. Pending requests are
+replayed when the conversation is opened again, as described below.
+
+The live switch entry for an untracked turn is opened before the turn's task
+is scheduled, so an off-toggle that arrives while the turn is still starting
+is kept. Each untracked turn holds the entry until it finishes; a turn being
+torn down while the next starts on the same session does not drop the latest
+toggle. A page that reconnects announces the latest saved setting (tabs share
+it), not the value it last rendered, so a stale second tab does not turn
+auto-approve back on.
 
 ### Pending approvals are replayed, not lost
 

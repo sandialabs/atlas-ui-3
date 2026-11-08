@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 
 const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
@@ -23,12 +23,16 @@ const h = vi.hoisted(() => ({
   selectedTools: new Set(),
   ragEnabled: false,
   setAgentPendingQuestion: vi.fn(),
+  connected: true,
+  settingsLoaded: false,
+  autoApprove: false,
+  updateSettings: vi.fn((patch) => patch),
 }))
 
 vi.mock('../contexts/WSContext', () => ({
   useWS: () => ({
     sendMessage: h.sendMessage,
-    isConnected: true,
+    isConnected: h.connected,
     addMessageHandler: () => () => {},
   }),
 }))
@@ -98,7 +102,12 @@ vi.mock('../hooks/chat/useFiles', () => ({
 }))
 
 vi.mock('../hooks/useSettings', () => ({
-  useSettings: () => ({ settings: {}, updateSettings: vi.fn() }),
+  useSettings: () => ({
+    settings: { autoApproveTools: h.autoApprove },
+    updateSettings: h.updateSettings,
+    isLoaded: h.settingsLoaded,
+    readLatestSettings: () => h.latest || { autoApproveTools: h.autoApprove },
+  }),
 }))
 
 vi.mock('../hooks/chat/usePersistentState', () => ({
@@ -115,6 +124,10 @@ beforeEach(() => {
   h.sendMessage.mockImplementation(() => true)
   h.selectedTools = new Set()
   h.ragEnabled = false
+  h.connected = true
+  h.settingsLoaded = false
+  h.autoApprove = false
+  h.latest = null
 })
 
 describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
@@ -129,6 +142,8 @@ describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_mode).toBe(true)
     expect(payload.selected_tools).toEqual([])
+    // The server stores this on the run. Absent means off, never a truthy string.
+    expect(payload.auto_approve_tools).toBe(false)
     // No RAG toggle and no hand-picked sources: the frame must not claim
     // the source list was expanded on the user's behalf.
     expect(payload.data_sources_auto).toBe(false)
@@ -156,6 +171,87 @@ describe('Agent mode with no tools sends anyway (real ChatProvider)', () => {
     const payload = h.sendMessage.mock.calls[0][0]
     expect(payload.agent_mode).toBe(true)
     expect(payload.selected_tools).toEqual(['server_tool1'])
+  })
+})
+
+describe('auto-approve is announced when the socket connects', () => {
+  it('sends the saved switch after settings load, and retries a failed send', async () => {
+    h.connected = false
+    h.settingsLoaded = true
+    h.autoApprove = false
+    let attempts = 0
+    h.sendMessage.mockImplementation(() => {
+      attempts += 1
+      return attempts > 1
+    })
+    const { rerender } = renderChat()
+    expect(h.sendMessage).not.toHaveBeenCalled()
+
+    h.connected = true
+    rerender()
+
+    await waitFor(() => {
+      const announces = h.sendMessage.mock.calls.filter(
+        (call) => call[0]?.type === 'auto_approve_tools',
+      )
+      expect(announces.length).toBeGreaterThan(1)
+      expect(announces[0][0]).toEqual({ type: 'auto_approve_tools', enabled: false })
+    })
+    expect(attempts).toBeGreaterThan(1)
+  })
+
+  it('announces the latest persisted value rather than render state', async () => {
+    h.connected = true
+    h.settingsLoaded = true
+    h.autoApprove = true
+    h.latest = { autoApproveTools: false }
+    renderChat()
+    await waitFor(() => {
+      const announces = h.sendMessage.mock.calls.filter(
+        (call) => call[0]?.type === 'auto_approve_tools',
+      )
+      expect(announces[0][0]).toEqual({ type: 'auto_approve_tools', enabled: false })
+    })
+  })
+
+  it('forwards a change another tab made on this socket', async () => {
+    h.connected = true
+    h.settingsLoaded = true
+    h.autoApprove = true
+    const { rerender } = renderChat()
+    await waitFor(() => {
+      expect(h.sendMessage).toHaveBeenCalledWith({ type: 'auto_approve_tools', enabled: true })
+    })
+    h.sendMessage.mockClear()
+
+    // useSettings adopted another tab's write (storage event).
+    h.autoApprove = false
+    rerender()
+
+    await waitFor(() => {
+      expect(h.sendMessage).toHaveBeenCalledWith({ type: 'auto_approve_tools', enabled: false })
+    })
+    // Re-rendering with the same value sends nothing more.
+    h.sendMessage.mockClear()
+    rerender()
+    expect(h.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'auto_approve_tools' }))
+  })
+
+  it('stops retrying a failing announcement after a bounded number of tries', async () => {
+    vi.useFakeTimers()
+    try {
+      h.connected = true
+      h.settingsLoaded = true
+      h.sendMessage.mockImplementation(() => false)
+      renderChat()
+      await vi.advanceTimersByTimeAsync(120000)
+      const announces = h.sendMessage.mock.calls.filter(
+        (call) => call[0]?.type === 'auto_approve_tools',
+      )
+      expect(announces.length).toBe(8)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

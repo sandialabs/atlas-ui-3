@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from atlas.core.user_identity import normalize_user_email
+
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -76,6 +78,24 @@ class RunDirectory:
 
     async def owner_of(self, run_id: str, *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
         return owner_entry(await self.record(run_id), include_terminal=include_terminal)
+
+    async def live_runs_for_user(self, user_email: str) -> "list[Dict[str, Any]]":
+        """Routing entries for the user's live runs, on any replica.
+
+        Read from ``<p>:run-user:<user>`` (scored by lease expiry), keeping
+        only members whose lease has not passed and whose record is live and
+        the user's own. Raises when Redis cannot be read.
+        """
+        client = self._redis.client
+        seconds, micros = await client.time()
+        now_ms = int(seconds) * 1000 + int(micros) // 1000
+        members = await client.zrangebyscore(self.keys.user(user_email), now_ms, "+inf")
+        entries = []
+        for member in members:
+            entry = await self.owner_of(_text(member))
+            if entry is not None and entry.get("user_email") == normalize_user_email(user_email):
+                entries.append(entry)
+        return entries
 
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """The live run holding ``conversation_id``, whoever owns it."""

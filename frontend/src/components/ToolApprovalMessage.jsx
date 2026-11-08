@@ -88,9 +88,19 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     // Do not auto-send again in either case.
     if (typeof message.auto_approved === 'boolean') return
     if (autoApprovalSentRef.current) return
-    if (settings?.autoApproveTools && !message.admin_required && message.status === 'pending') {
+    // Same rule as clientMayAutoApprove, spelled out so the effect's
+    // dependencies stay checkable. `auto_approvable: false` is a request the
+    // server kept on the gate on purpose (hook escalation, launched child).
+    if (settings?.autoApproveTools && !message.admin_required && message.auto_approvable !== false && message.status === 'pending') {
       const timer = setTimeout(() => {
         if (autoApprovalSentRef.current) return
+        // Another tab may have persisted Off after this row rendered.
+        try {
+          const saved = JSON.parse(localStorage.getItem('chatui-settings') || 'null')
+          if (saved && saved.autoApproveTools === false) return
+        } catch {
+          // Unreadable storage: keep this tab's value.
+        }
         // Only record a successful auto-approve once the server has actually
         // been told. `sendApprovalResponse` returns false when the WebSocket
         // isn't open; persisting `auto_approved: true` before the send would
@@ -124,7 +134,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [settings?.autoApproveTools, message.admin_required, message.status, message.auto_approved, message.tool_call_id, message.arguments, message.run_id, message.conversation_id, message.invocation_id, message.step, sendApprovalResponse, updateToolResult])
+  }, [settings?.autoApproveTools, message.admin_required, message.auto_approvable, message.status, message.auto_approved, message.tool_call_id, message.arguments, message.run_id, message.conversation_id, message.invocation_id, message.step, sendApprovalResponse, updateToolResult])
 
   const handleApprove = () => {
     if (resolvedStatus !== 'pending') return

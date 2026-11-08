@@ -11,6 +11,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from atlas.core.capabilities import create_download_url
+from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.chat.citation_register import CITATION_REGISTER_KEY
 from atlas.domain.errors import ToolError
 from atlas.domain.messages.models import ToolCall, ToolResult
@@ -216,6 +217,64 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
     return (True, True, False)  # Default to user-level approval on error
+
+
+def user_switch_covers_turn() -> bool:
+    """Whether the user's auto-approve switch may answer for this turn at all.
+
+    False for a launched child, judged by launch lineage on its run record
+    (``RunRecord.follows_user_auto_approve``), so a child of an untracked
+    turn, which has no ``parent_run_id``, is excluded too. The approval
+    frame carries this so the browser does not answer a request the server
+    deliberately left on the gate.
+    """
+    from atlas.application.chat.runs.context import get_current_run
+    from atlas.application.chat.runs.registry import get_run_registry
+
+    run = get_current_run()
+    if run is None:
+        return True
+    record = get_run_registry().get(run.run_id)
+    if record is None:
+        # A run id with no record here cannot be checked for lineage, so it
+        # is not the user's switch to answer.
+        return False
+    return record.follows_user_auto_approve()
+
+
+def server_auto_approves_user_tool(session_context: Optional[Dict[str, Any]]) -> bool:
+    """Whether this call can skip the browser approval gate.
+
+    A tracked run stores the switch on its record, which outlives the socket,
+    so a closed browser does not park a user-level tool. Admin-mandated tools
+    are filtered by the caller (they stay on the gate). A launched child is
+    excluded even when the flag is set: its arguments are model-chosen, and
+    only the launch approval covers its user-level tools.
+
+    A turn with no run record (incognito, local save, history disabled) reads
+    the live session bit. That bit moves when the user toggles the switch, so
+    the copy taken into ``AgentContext`` at admission is not the decision.
+    """
+    from atlas.application.chat.auto_approve_state import session_auto_approve
+    from atlas.application.chat.runs.context import get_current_run
+    from atlas.application.chat.runs.registry import get_run_registry
+
+    run = get_current_run()
+    if run is not None:
+        record = get_run_registry().get(run.run_id)
+        if record is None:
+            # Bound to a run this process has no record of: do not fall back
+            # to the session bit, which belongs to untracked turns.
+            return False
+        if not record.follows_user_auto_approve():
+            return False
+        return record.auto_approve_user_tools is True
+    if not session_context:
+        return False
+    live = session_auto_approve(session_context.get("session_id"))
+    if live is not None:
+        return live is True
+    return session_context.get("auto_approve_tools") is True
 
 
 def tool_accepts_mcp_data(tool_name: str, tool_manager) -> bool:
@@ -552,6 +611,10 @@ async def execute_single_tool(
             # approval no longer covers what will actually run, so it is revoked and
             # the gate falls back to the pre-hook decision.
             _perm_auto_approved = False
+            # A hook that escalates to "ask" wants a person to look at this
+            # call. The user's auto-approve switch, on the server or in the
+            # browser, does not answer it.
+            _hook_forced_approval = False
             _needs_approval_before_hooks = bool(needs_approval)
             if hook_mgr is not None:
                 _sc = {
@@ -596,6 +659,7 @@ async def execute_single_tool(
                             # approve", which a non-admin user cannot satisfy. The
                             # tool's own admin_required stays authoritative.
                             needs_approval = True
+                            _hook_forced_approval = True
                         elif perm_outcome.modified and perm_outcome.payload.get("needs_approval") is False:
                             needs_approval = False
                             _perm_auto_approved = True
@@ -643,10 +707,38 @@ async def execute_single_tool(
                             # As above: escalate to the gate without escalating to
                             # admin-only.
                             needs_approval = True
+                            _hook_forced_approval = True
 
             if _hook_denied_result is not None:
                 await event_notifier.notify_tool_error(tool_call, _hook_denied_result.error or "blocked", update_callback)
                 return _finalize_span(_hook_denied_result)
+
+            # The browser used to be the only thing that could answer a
+            # user-level approval. Once the turn has opted in, approve here
+            # so closing the page cannot park the run on the gate. Admin
+            # mandated tools, calls a policy hook escalated to "ask", and
+            # tools a launched child still has to ask about keep the wait
+            # below. The same verdict goes out on the approval frame, so the
+            # browser's auto-approve does not answer what the server kept.
+            user_auto_approvable = (
+                not admin_required
+                and not _hook_forced_approval
+                and user_switch_covers_turn()
+            )
+            if (
+                needs_approval
+                and user_auto_approvable
+                and server_auto_approves_user_tool(session_context)
+            ):
+                logger.info(
+                    "Tool %s auto-approved on the server for user %s "
+                    "(run_id=%s, conversation_id=%s); no client is required",
+                    sanitize_for_logging(tool_call.function.name),
+                    sanitize_for_logging(session_context.get("user_email") or ""),
+                    sanitize_for_logging(identity.get("run_id") or ""),
+                    sanitize_for_logging(session_context.get("conversation_id") or ""),
+                )
+                needs_approval = False
 
             # If approval is required, request it from the user
             if needs_approval:
@@ -686,7 +778,11 @@ async def execute_single_tool(
                             "tool_name": tool_call.function.name,
                             "arguments": display_args,
                             "allow_edit": allow_edit,
-                            "admin_required": admin_required
+                            "admin_required": admin_required,
+                            # False when the user's auto-approve switch must
+                            # not answer this request: an admin-required
+                            # tool, a hook escalation, or a launched child.
+                            "auto_approvable": user_auto_approvable,
                         })
 
                     try:
