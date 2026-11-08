@@ -92,6 +92,26 @@ class RedisSettings:
         )
 
 
+def is_redis_connectivity_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means Redis could not be reached, not that a command failed."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    if is_redis_pool_exhaustion(exc):
+        return False
+    return isinstance(exc, (RedisConnectionError, RedisTimeoutError, TimeoutError, OSError, asyncio.TimeoutError))
+
+
+def is_redis_pool_exhaustion(exc: BaseException) -> bool:
+    """This replica's own pool ran out of connections; Redis itself may be fine."""
+    from redis import exceptions
+
+    max_connections = getattr(exceptions, "MaxConnectionsError", None)
+    if max_connections is not None and isinstance(exc, max_connections):
+        return True
+    return isinstance(exc, exceptions.ConnectionError) and "No connection available" in str(exc)
+
+
 @dataclass
 class RedisStats:
     """Counters exposed through the health endpoint and logs."""
@@ -101,10 +121,26 @@ class RedisStats:
     last_error_at: Optional[float] = None
     extra: Dict[str, int] = field(default_factory=dict)
 
-    def record_error(self, exc: BaseException) -> None:
+    def record_error(self, exc: BaseException, op: str = "command") -> None:
         self.command_errors += 1
         self.last_error = type(exc).__name__
         self.last_error_at = time.time()
+        # Per-replica dependency state (issue #1129): a connectivity failure
+        # marks Redis down (logged once per outage); a command error from a
+        # reachable server (ResponseError, OOM) is counted but is not an outage.
+        # Pool exhaustion is counted as "PoolExhausted". Bookkeeping must never
+        # replace the caller's own error handling.
+        try:
+            from atlas.core.coordination_metrics import coordination_metrics
+
+            metrics = coordination_metrics()
+            if is_redis_connectivity_error(exc):
+                metrics.dependency_failed("redis", exc, op=op)
+            else:
+                error = "PoolExhausted" if is_redis_pool_exhaustion(exc) else type(exc).__name__
+                metrics.incr("atlas_dependency_command_errors_total", dependency="redis", op=op, error=error)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("recording a Redis error failed", exc_info=True)
 
     def incr(self, name: str, amount: int = 1) -> None:
         self.extra[name] = self.extra.get(name, 0) + amount
@@ -163,7 +199,7 @@ class RedisClientManager:
         try:
             await self._client.ping()
         except Exception as exc:
-            self.stats.record_error(exc)
+            self.stats.record_error(exc, op="startup")
             raise RuntimeError(
                 f"Redis at {redact_redis_url(self.settings.url)} is unreachable "
                 f"({type(exc).__name__}). SESSION_REPOSITORY_TYPE=redis requires it; "
@@ -211,7 +247,7 @@ class RedisClientManager:
         try:
             await asyncio.wait_for(self._client.ping(), timeout)
         except Exception as exc:
-            self.stats.record_error(exc)
+            self.stats.record_error(exc, op="probe")
             report["command_errors"] = self.stats.command_errors
             report["last_error"] = self.stats.last_error
             report["status"] = "unavailable"
@@ -219,4 +255,7 @@ class RedisClientManager:
             return report
         report["status"] = "ok"
         report["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        from atlas.core.coordination_metrics import coordination_metrics
+
+        coordination_metrics().dependency_ok("redis")
         return report

@@ -37,6 +37,10 @@ class SharedInfra:
     redis_url: str
     postgres_url: str
     redis_key_prefix: str
+    # Container names when the harness started the server itself (None for a
+    # supplied URL). The failure exercises freeze these to simulate an outage.
+    redis_container: Optional[str] = None
+    postgres_container: Optional[str] = None
     _cleanups: List[Callable[[], None]] = field(default_factory=list)
 
     def close(self) -> None:
@@ -134,6 +138,7 @@ def start_shared_infra() -> SharedInfra:
             name = f"atlas-mr-redis-{tag}"
             port = _run_container(name, REDIS_IMAGE, 6379, {})
             infra._cleanups.append(_remove_container(name))
+            infra.redis_container = name
             redis_url = f"redis://127.0.0.1:{port}/0"
         _wait(lambda: _redis_ready(redis_url), "Redis")
         infra.redis_url = redis_url
@@ -154,6 +159,7 @@ def start_shared_infra() -> SharedInfra:
                 args=["-c", "max_connections=200", "-c", "fsync=off"],
             )
             infra._cleanups.append(_remove_container(name))
+            infra.postgres_container = name
             admin_url = f"postgresql://atlas:atlas@127.0.0.1:{port}/postgres"
         # Postgres accepts a connection briefly during init and then restarts;
         # require two successes a moment apart.
@@ -188,3 +194,20 @@ def start_shared_infra() -> SharedInfra:
     except BaseException:
         infra.close()
         raise
+
+
+def freeze_container(name: str) -> None:
+    """``podman pause``: every process in the container stops answering.
+
+    A frozen server keeps its TCP port open and never replies, which is the
+    harder outage to detect (a black hole, not a refused connection).
+    """
+    result = subprocess.run([_podman(), "pause", name], capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise InfraUnavailable(f"podman pause {name} failed: {result.stderr.strip()}")
+
+
+def thaw_container(name: str) -> None:
+    result = subprocess.run([_podman(), "unpause", name], capture_output=True, text=True, timeout=60)
+    if result.returncode != 0 and "not paused" not in result.stderr:
+        raise InfraUnavailable(f"podman unpause {name} failed: {result.stderr.strip()}")

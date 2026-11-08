@@ -111,7 +111,7 @@ class TestUnavailableReason:
 
 
 class _FakeUnreachableRedis:
-    async def health(self):
+    async def health(self, timeout: float = 1.0):  # same signature as RedisClientManager.health
         return {"backend": "redis", "status": "unavailable"}
 
 

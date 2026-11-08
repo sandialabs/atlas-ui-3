@@ -58,7 +58,6 @@ from atlas.application.chat.runs import (
 from atlas.application.chat.runs.admission import (
     admit_run,
     apply_run_limit,
-    shut_down_live_runs,
     stop_lease_heartbeat,
 )
 from atlas.application.chat.runs.commands import (
@@ -111,6 +110,11 @@ from atlas.domain.errors import (
 
 # Import from atlas.infrastructure
 from atlas.infrastructure.app_factory import app_factory
+from atlas.infrastructure.replica_lifecycle import (
+    coordination_tick,
+    interrupt_runs_for_shutdown,
+    on_replica_started,
+)
 from atlas.infrastructure.sessions.codec import decode_session, encode_session
 from atlas.infrastructure.transport.websocket_connection_adapter import WebSocketConnectionAdapter
 from atlas.modules.config.settings import agent_mode_available, warn_removed_agent_portal_settings
@@ -123,6 +127,7 @@ from atlas.routes.agent_run_routes import router as agent_run_router
 from atlas.routes.capture_routes import capture_router
 from atlas.routes.config_routes import router as config_router
 from atlas.routes.conversation_routes import router as conversation_router
+from atlas.routes.coordination_routes import coordination_router
 from atlas.routes.feedback_routes import feedback_router
 from atlas.routes.files_routes import (
     find_oversized_inline_file,
@@ -1276,6 +1281,8 @@ async def _run_limit_sweeper(config):
             await asyncio.sleep(RUN_SWEEP_INTERVAL_SECONDS)
             registry.enforce_wall_clock(config.app_settings.max_run_wall_clock_seconds)
             registry.reap_terminal()
+            # Dependency probes and the [COORD] summary line (issue #1129).
+            await coordination_tick(app_factory)
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover - the sweeper must never die
@@ -1478,16 +1485,21 @@ async def lifespan(app: FastAPI):
         )
 
     start_run_control(_steering_refusal)
+    on_replica_started(config.app_settings)
 
     yield
 
     logger.info("Shutting down Chat UI Backend")
     run_reaper_task.cancel()
     # Runs still live would die with this process anyway: refuse new ones,
-    # stop these, and only then free their conversations and slots, so no
-    # other replica admits a run while one of ours is still executing. The
-    # heartbeat keeps renewing until then.
-    await shut_down_live_runs()
+    # record them interrupted (issue #1129), stop them, and only then free
+    # their conversations and slots, so no other replica admits a run while
+    # one of ours is still executing. The heartbeat keeps renewing until
+    # then. Bounded, and never allowed to skip the cleanup below.
+    try:
+        await asyncio.wait_for(interrupt_runs_for_shutdown(), timeout=15)
+    except (Exception, asyncio.CancelledError):
+        logger.warning("Shutdown: reporting interrupted runs failed", exc_info=True)
     await stop_lease_heartbeat()
     # Releases scheduled by runs that just ended must reach Redis before the
     # pool closes, or their slots stay held until the lease expires.
@@ -1623,6 +1635,7 @@ app.include_router(config_router)
 app.include_router(help_router)
 app.include_router(admin_router)
 app.include_router(telemetry_router)
+app.include_router(coordination_router)
 app.include_router(files_router)
 app.include_router(mcp_files_router)
 app.include_router(health_router)

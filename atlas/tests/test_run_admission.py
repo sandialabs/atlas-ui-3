@@ -376,7 +376,8 @@ async def test_shutdown_stops_live_runs_before_releasing_their_claims(coord):
     assert await _slots(coord) == 0
     assert await _conversation_holder(coord, "c1") is None
     assert await _conversation_holder(coord, "c2") is None
-    assert (await coord.read(running.run_id))["status"] == "cancelled"
+    # Recorded interrupted before the unwind, so Redis agrees with the projection.
+    assert (await coord.read(running.run_id))["status"] == "failed"
     assert (await coord.read(queued.run_id))["status"] == "failed"
     # Admission is closed for the rest of the process.
     with pytest.raises(RunCoordinationUnavailableError):
