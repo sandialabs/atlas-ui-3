@@ -62,7 +62,11 @@ SERVICE_ACTOR: Dict[str, Any] = {"kind": "service"}
 
 def _steer_reply(outcome: str, record: Any) -> Dict[str, Any]:
     if outcome == STEER_QUEUED:
-        return reply(True, run_id=record.run_id, conversation_id=record.conversation_id)
+        answer = reply(True, run_id=record.run_id, conversation_id=record.conversation_id)
+        # The run remembers the request id itself, and forgets it if the text
+        # is discarded; a bus-level cached success would outlive that.
+        answer["uncached"] = True
+        return answer
     if outcome == STEER_QUEUE_FULL:
         return reply(
             False,
@@ -164,10 +168,12 @@ class RunControlService:
     async def _steer(self, run_id: str, actor: Dict[str, Any], args: Dict[str, Any],
                      deadline: Any = None, request_id: Optional[str] = None) -> Dict[str, Any]:
         record = self._owned_record(run_id, actor)
-        if record is None or record.is_terminal:
+        if record is None:
             return reply(False, "run_not_found", "The run has finished.")
         registry = self._registry()
         prior = registry.prior_steer(record.run_id, request_id)
+        if prior is None and record.is_terminal:
+            return reply(False, "run_not_found", "The run has finished.")
         if prior is None:
             steering = record.steering
             if steering is None or not steering.active:

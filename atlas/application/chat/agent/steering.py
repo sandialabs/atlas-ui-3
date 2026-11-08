@@ -83,6 +83,10 @@ class SteeringChannel:
         while len(self._seen) > STEERING_SEEN_MAXSIZE:
             self._seen.popitem(last=False)
 
+    def seen_ids(self) -> "OrderedDict[str, str]":
+        """The remembered ids, without the queue: what a finished run keeps."""
+        return self._seen
+
     def activate(self) -> None:
         """Mark a loop as actively consuming this channel.
 

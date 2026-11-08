@@ -41,7 +41,6 @@ from uuid import UUID, uuid4
 
 # The admission errors live in their own module so the coordinator can raise
 # them without importing the registry.
-from atlas.application.chat.agent.steering import QueuedSteer
 from atlas.application.chat.runs.admission_errors import (
     ConcurrencyLimitError,
     ConversationBusyError,
@@ -140,8 +139,9 @@ class RunRecord:
     status: RunStatus = RunStatus.QUEUED
     task: Optional["asyncio.Task"] = None
     steering: Optional[Any] = None
-    # Request ids a steer queued on this run, kept after the channel is
-    # released at the end so a late retry still gets its remembered answer.
+    # Request ids a steer queued on this run (id -> outcome), kept after the
+    # channel is released at the end so a late retry still gets its remembered
+    # answer. Ids only: the queued text is not retained.
     steer_seen: Optional[Any] = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -350,7 +350,7 @@ class RunRegistry:
     def _release_steering(record: "RunRecord") -> None:
         """Drop the channel at the end of a run but keep its remembered ids."""
         if record.steering is not None:
-            record.steer_seen = record.steering
+            record.steer_seen = record.steering.seen_ids()
         record.steering = None
 
     def prior_steer(self, run_id: Optional[str], request_id: Optional[str]) -> Optional[str]:
@@ -358,8 +358,11 @@ class RunRegistry:
         record = self.get(run_id)
         if record is None:
             return None
-        steering = record.steering or record.steer_seen
-        return steering.recall_outcome(request_id) if steering is not None else None
+        if record.steering is not None:
+            return record.steering.recall_outcome(request_id)
+        if isinstance(request_id, str) and record.steer_seen:
+            return record.steer_seen.get(request_id)
+        return None
 
     def steer(self, run_id: Optional[str], text: str, request_id: Optional[str] = None) -> str:
         """Queue a steering message on a run this replica owns: the only way in.
@@ -388,7 +391,14 @@ class RunRegistry:
         if not steering.active:
             return STEER_NOT_DRAINING
         try:
-            steering.queue.put_nowait(QueuedSteer(text, request_id))
+            # Imported here: the agent package imports this module's run state.
+            from atlas.application.chat.agent.steering import QueuedSteer
+
+            # A non-text payload (a null frame) goes in as it came, so the
+            # loop skips it as before.
+            steering.queue.put_nowait(
+                QueuedSteer(text, request_id) if isinstance(text, str) else text
+            )
         except asyncio.QueueFull:
             # Nothing was queued, so nothing is remembered: a retry of this
             # request may succeed once the loop has drained.

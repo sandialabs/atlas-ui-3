@@ -143,6 +143,18 @@ def test_a_drained_leftover_is_not_acknowledged_again():
     assert channel.queue.qsize() == 1
 
 
+def test_a_null_payload_is_queued_as_none_and_a_finished_run_keeps_ids_only():
+    registry = RunRegistry()
+    record, channel = _run(registry)
+    assert registry.steer(record.run_id, None, "r1") == STEER_QUEUED
+    assert channel.queue.get_nowait() is None
+    assert registry.steer(record.run_id, "kept", "r2") == STEER_QUEUED
+    registry.set_status(record.run_id, RunStatus.CANCELLED)
+    # The queued text is not retained with the finished run, only the ids.
+    assert record.steering is None
+    assert record.steer_seen == {"r1": STEER_QUEUED, "r2": STEER_QUEUED}
+
+
 def _local_run(_chat_service=None, active=True):
     registry = get_run_registry()
     run = registry.start(conversation_id=CONV, user_email=USER)

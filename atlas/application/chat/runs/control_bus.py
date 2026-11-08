@@ -444,12 +444,15 @@ class RedisRunControlBus:
         except BaseException:
             await client.delete(done_key)
             raise
-        if answer.get("ok"):
+        uncached = answer.pop("uncached", False)
+        if answer.get("ok") and not uncached:
             # Remembered: a retry gets this reply instead of acting again.
             await self._remember_done(done_key, json.dumps({"state": "done", **identity, "reply": answer}))
         else:
             # Handlers refuse before acting, so a refusal changed nothing and
-            # a retry (once the queue drained, say) must be allowed to run.
+            # a retry (once the queue drained, say) must be allowed to run. An
+            # ``uncached`` success is idempotent on the owner (a steer: the
+            # run remembers its request id), so a repeat is answered there.
             await client.delete(done_key)
         return answer
 
