@@ -76,23 +76,16 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
             if target.entry.get("user_email") != normalize_user_email(user_email):
                 continue
             # Another replica owns it; the client sees the frames a local stop sends.
+            # An error names this target, not the run the frame named: the client
+            # keeps the running state of the run that could not be reached.
             answer = await route_stop(target.entry, user_email)
-            if answer.get("code") != OWNER_UNAVAILABLE:
-                frame = stop_frame(answer, data)
-                if frame is not None:
-                    statuses.append(frame)
+            frame = stop_frame(answer, {**data, "run_id": target.entry.get("run_id")})
+            if frame is None:
                 continue
-            # The owner did not answer: the same as an unreadable directory, except
-            # that the run named is known to be elsewhere. A frame that named it
-            # still stops the conversation's run held here rather than nothing.
-            local = registry.active_for_conversation(address.conversation_id, user_email) if address.run_id else None
-            if local is not None:
-                if local.run_id not in cancelled:
-                    logger.info("Cancelling run %s on user request (owner unavailable)", local.run_id)
-                    registry.cancel(local.run_id, user_email)
-                    cancelled.add(local.run_id)
-                continue
-            failure = failure or stop_frame(answer, data)
+            if frame.get("type") == "error":
+                failure = failure or frame
+            else:
+                statuses.append(frame)
         else:
             failure = failure or stop_frame(reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE), data)
     # Anything else is no such run (finished, reaped, another user's): nothing to stop.

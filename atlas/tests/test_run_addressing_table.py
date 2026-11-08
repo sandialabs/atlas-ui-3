@@ -37,6 +37,7 @@ from atlas.application.chat.runs.commands import (
     steer_addressed_run,
     stop_addressed_run,
 )
+from atlas.application.chat.runs.control_bus import OWNER_UNAVAILABLE, reply
 from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 from atlas.application.chat.runs.launcher import LaunchRefused
 from atlas.application.chat.runs.registry import RunRegistry, RunStatus
@@ -376,6 +377,21 @@ async def test_S38_a_grandchild_below_a_finished_parent_is_found_from_the_direct
     await cluster.a.claim(grand.run_id, grand.conversation_id, parent_run_id=child.run_id)
     await ws_stop(local, {"conversation_id": parent.conversation_id})
     assert cluster.registry.get(grand.run_id).status is RunStatus.CANCELLED
+
+
+async def test_S40_a_follow_up_that_cannot_be_reached_is_reported_by_its_own_run_id(cluster, local):
+    first, follow_up = await _finished_with_follow_up_on_a(cluster)
+    real = cluster.b.bus.send
+
+    async def send(owner, command, run_id, *args, **kwargs):
+        if run_id == follow_up.run_id:
+            return reply(False, OWNER_UNAVAILABLE, "no answer")
+        return await real(owner, command, run_id, *args, **kwargs)
+
+    cluster.b.bus.send = send
+    frames = await ws_stop(local, {"run_id": first.run_id, "conversation_id": first.conversation_id})
+    # The named run answered, the follow-up did not: one error, naming the follow-up.
+    _is_unavailable(frames, follow_up.run_id)
 
 
 async def test_S39_conversation_only_unreadable_stops_what_is_local_and_reports_the_rest(cluster, local):

@@ -94,7 +94,7 @@ another conversation stands alone (`S23`, `S37`), and a run id nobody knows fall
 the conversation alone (`S27`, `S28`). Only the actor's own runs are returned.
 
 One frame answers the stop. Every target is stopped; if any could not be reached the
-frame is that error (`run_control_unavailable`, naming the run), otherwise it is the
+frame is that error (`run_control_unavailable`, naming the run that could not be reached), otherwise it is the
 `run_status` of the first run stopped on another replica, with the others' ids in
 `also_stopped`. A directory that cannot be read adds an unavailable answer after what was
 found locally, which is still stopped (`S39`).
@@ -156,6 +156,7 @@ this connection's session. The tests call it in `ws_stop`.
 | `S37` ws stop | both, run of another conversation | tracked | remote live | the named run only | conversation runs only added for the named run's conversation | `atlas/tests/test_run_addressing_table.py` |
 | `S38` ws stop | conversation only | finished parent, finished child, live grandchild | remote terminal | grandchild stopped | the `parent_run_id` walk passes the finished child | `atlas/tests/test_run_addressing_table.py` |
 | `S39` ws stop | conversation only | tracked | local, directory unreadable | local run stopped, unavailable frame for the rest | `resolve_all` appends Unknown | `atlas/tests/test_run_addressing_table.py` |
+| `S40` ws stop | both | API follow-up | named run answers, follow-up remote unreachable | one unavailable frame naming the follow-up | the error frame is built from each target's own run id | `atlas/tests/test_run_addressing_table.py` |
 | `S33` ws stop | neither | any | any (never read) | only the connection's plain turn is stopped; other runs untouched | `stop_addressed_run` addresses the connection's `connection_bound` run | `atlas/tests/test_run_addressing_table.py` |
 | `S34` ws stop | run_id | tracked | remote live, two real replicas | owner stops, other users refused | via `route_stop` | `test_websocket_stop_via_non_owner_and_other_users_are_refused` |
 
@@ -229,6 +230,6 @@ and `nudge_approval` resolves the run and calls `route_approval` to wake a remot
 
 ## Counts
 
-Rows `S01-S39`, `R01-R12`, `C01-C22` and `P01-P09`, less the eight retired
+Rows `S01-S40`, `R01-R12`, `C01-C22` and `P01-P09`, less the eight retired
 `untracked turn` ids (`S05`, `S06`, `S16`, `S17`, `S18`, `S29`, `C11`, `C12`):
-74 rows. No `GAP` rows remain: `S19`, `S20`, `S31` and `S32` were the last four.
+75 rows. No `GAP` rows remain: `S19`, `S20`, `S31` and `S32` were the last four.

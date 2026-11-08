@@ -239,15 +239,17 @@ async def test_local_run_named_by_id_is_not_routed():
     assert bus.lookups == [] and registry.cancelled == ["follow-up"]
 
 
-async def test_stop_to_an_owner_that_does_not_answer_still_stops_the_local_follow_up():
+async def test_stop_to_an_owner_that_does_not_answer_still_stops_the_local_follow_up_and_reports_it():
     unreachable = {"ok": False, "code": "owner_unavailable", "message": "", "payload": {}}
     bus = _StopBus(by_run={"parent": _entry("parent")}, answer=unreachable)
     registry = _Registry()
     ws = await _stop(registry, {"run_id": "parent", "conversation_id": CONV}, bus)
     # The parent's owner never answered: the conversation's run held here is
-    # stopped rather than nothing, and the client is not told of an outage.
+    # still stopped, and the client is told which run could not be reached.
     assert bus.sent == [("replica-a", "stop", "parent")]
-    assert registry.cancelled == ["follow-up"] and ws.send_json.await_count == 0
+    assert registry.cancelled == ["follow-up"]
+    frame = ws.send_json.await_args.args[0]
+    assert frame["error_type"] == "run_control_unavailable" and frame["run_id"] == "parent"
 
 
 async def test_conversation_stop_to_an_owner_that_does_not_answer_is_reported():
