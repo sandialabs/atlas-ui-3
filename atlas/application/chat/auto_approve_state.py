@@ -30,6 +30,9 @@ def begin_untracked_turn(session_id, enabled: bool) -> None:
     A fresh entry records the admission value. An entry another turn still
     holds keeps its live value: a toggle that arrived while that turn ran is
     newer than the bit the new chat frame carries, which a stale tab can send.
+    The exception is Off: a frame that says Off always clears the bit, so a
+    retained predecessor can never leave a new turn approving against its
+    own payload.
     """
     if session_id is None:
         return
@@ -38,6 +41,8 @@ def begin_untracked_turn(session_id, enabled: bool) -> None:
     if entry is None:
         _by_session[key] = [enabled is True, 1]
         return
+    if enabled is not True:
+        entry[0] = False
     entry[1] += 1
 
 

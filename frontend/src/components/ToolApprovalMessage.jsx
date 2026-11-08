@@ -94,6 +94,13 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     if (settings?.autoApproveTools && !message.admin_required && message.auto_approvable !== false && message.status === 'pending') {
       const timer = setTimeout(() => {
         if (autoApprovalSentRef.current) return
+        // Another tab may have persisted Off after this row rendered.
+        try {
+          const saved = JSON.parse(localStorage.getItem('chatui-settings') || 'null')
+          if (saved && saved.autoApproveTools === false) return
+        } catch {
+          // Unreadable storage: keep this tab's value.
+        }
         // Only record a successful auto-approve once the server has actually
         // been told. `sendApprovalResponse` returns false when the WebSocket
         // isn't open; persisting `auto_approved: true` before the send would

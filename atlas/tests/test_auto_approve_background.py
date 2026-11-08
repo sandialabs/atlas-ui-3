@@ -656,3 +656,16 @@ def test_overlapping_admission_keeps_the_live_toggle():
     end_untracked_turn("s-stale")
     end_untracked_turn("s-stale")
     assert session_auto_approve("s-stale") is None
+
+
+def test_an_off_admission_clears_a_retained_on_bit():
+    from atlas.application.chat import auto_approve_state as state
+
+    state.clear_session_auto_approve()
+    state.begin_untracked_turn("s-off", True)
+    state.begin_untracked_turn("s-off", False)
+    assert state.session_auto_approve("s-off") is False
+    # An On admission never re-enables a bit a live toggle turned off.
+    state.begin_untracked_turn("s-off", True)
+    assert state.session_auto_approve("s-off") is False
+    state.clear_session_auto_approve()

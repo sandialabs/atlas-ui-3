@@ -2894,7 +2894,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 # carries, and a running turn owns that.
                 compact_conversation_id = _normalize_conversation_id(data.get("conversation_id"))
                 running = active_chat_task.get("task")
-                busy = (running is not None and not running.done()) or (
+                busy = (running is not None and not running.done()) or any(
+                    not t.done() for t in active_chat_task.get("superseded", ())
+                ) or (
                     compact_conversation_id
                     and run_registry.active_for_conversation_any_owner(compact_conversation_id)
                 )

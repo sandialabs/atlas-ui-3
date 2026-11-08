@@ -64,6 +64,9 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
     running in, falls back to the connection's untracked turn.
     """
     address = Address(data.get("run_id"), data.get("conversation_id"))
+    # Turns this connection superseded and could not unwind are the user's
+    # work too: Stop ends them whichever run it addresses.
+    cancel_superseded_leftovers(active_chat_task or {})
     resolution = await resolve(registry, user_actor(user_email), address, include_terminal=True)
 
     if isinstance(resolution, Local):
@@ -103,7 +106,6 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
         # Addressed a run that is finished, reaped, or not the user's.
         return
     # Nothing addressed: the untracked turn (removed once every turn is a run).
-    cancel_superseded_leftovers(active_chat_task or {})
     if task_live:
         logger.info("Cancelling active chat task (stop frame)")
         task.cancel()
