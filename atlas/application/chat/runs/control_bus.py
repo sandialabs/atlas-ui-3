@@ -51,6 +51,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from atlas.application.chat.runs.coordination import RUN_LEASE_SECONDS, RUN_RETENTION_SECONDS
 from atlas.application.chat.runs.run_directory import RunDirectory
+from atlas.core.user_identity import normalize_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,36 @@ class RedisRunControlBus:
 
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         return await self.directory.run_for_conversation(conversation_id)
+
+    async def stoppable_for_conversation(self, conversation_id: str, user_email: str) -> "list[Dict[str, Any]]":
+        """Runs of the user's conversation a stop must reach, on any replica.
+
+        The live run holding the conversation, and any run of it that has
+        finished but still has a live descendant. The conversation key is
+        released with the run, so a finished parent is found from below: the
+        user's live runs (``run-user``), each followed up its ``parent_run_id``
+        chain (records outlive their live descendants) to the first run of this
+        conversation. Raises when Redis cannot be read.
+        """
+        found: Dict[str, Dict[str, Any]] = {}
+        live = await self.run_for_conversation(conversation_id)
+        if live is not None and live.get("user_email") == normalize_user_email(user_email):
+            found[live["run_id"]] = live
+        known: Dict[str, Optional[Dict[str, Any]]] = {}
+        for entry in await self.runs_for_user(user_email):
+            current, hops = entry, 0
+            while current.get("parent_run_id") and hops < 64:
+                parent_id = current["parent_run_id"]
+                if parent_id not in known:
+                    known[parent_id] = await self.owner_of(parent_id, include_terminal=True)
+                current = known[parent_id]
+                if current is None:
+                    break
+                if current.get("conversation_id") == conversation_id:
+                    found.setdefault(current["run_id"], current)
+                    break
+                hops += 1
+        return list(found.values())
 
     async def runs_for_user(self, user_email: str) -> "list[Dict[str, Any]]":
         return await self.directory.live_runs_for_user(user_email)

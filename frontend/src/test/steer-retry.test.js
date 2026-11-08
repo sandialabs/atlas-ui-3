@@ -21,8 +21,20 @@ describe('steer retry (issue #1128)', () => {
     const frames = new Map()
     const frame = { type: 'chat', request_id: 'r1', content: 'go left' }
     rememberSteerFrame(frames, 'r1', frame)
-    expect(takeSteerRetry(frames, unavailable('r1'))).toEqual({ ...frame, steer_only: true })
+    expect(takeSteerRetry(frames, unavailable('r1'))).toEqual({ ...frame, steer_only: true, run_id: 'run-1' })
     expect(takeSteerRetry(frames, unavailable('r1'))).toBeNull()
+  })
+
+  it('binds the repeat to the run the first attempt was routed to', () => {
+    const frames = new Map()
+    rememberSteerFrame(frames, 'r1', { type: 'chat', request_id: 'r1', conversation_id: 'conv-1' })
+    rememberSteerFrame(frames, 'r2', { type: 'chat', request_id: 'r2', conversation_id: 'conv-1' })
+    expect(takeSteerRetry(frames, unavailable('r1'))).toEqual({
+      type: 'chat', request_id: 'r1', conversation_id: 'conv-1', steer_only: true, run_id: 'run-1',
+    })
+    // An error frame that names no run leaves the frame unbound.
+    const unbound = takeSteerRetry(frames, unavailable('r2', { run_id: undefined }))
+    expect(unbound).not.toHaveProperty('run_id')
   })
 
   it('retries only an unanswered steer, not a refusal or a timeout code', () => {
@@ -85,7 +97,7 @@ describe('steer retry (issue #1128)', () => {
       },
     })
     handler(unavailable('r1'))
-    expect(sent).toEqual([{ type: 'chat', request_id: 'r1', content: 'x', steer_only: true }])
+    expect(sent).toEqual([{ type: 'chat', request_id: 'r1', content: 'x', steer_only: true, run_id: 'run-1' }])
     expect(addMessage).not.toHaveBeenCalled()
     handler(unavailable('r1'))
     expect(sent).toHaveLength(1)

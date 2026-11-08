@@ -44,6 +44,26 @@ def directory_unavailable_frame(conversation_id: Any) -> Dict[str, Any]:
     }
 
 
+def steer_finished_frame(conversation_id: Any, request_id: Optional[str] = None,
+                         run_id: Optional[str] = None) -> Dict[str, Any]:
+    """The answer to a steer retry whose run has finished: never a new turn.
+
+    The first attempt may have been applied and only its reply lost.
+    """
+    return {
+        "type": "error",
+        "message": (
+            "The run finished before this message could be resent. "
+            "It may already have been received; check the transcript."
+        ),
+        "error_type": "steer_run_finished",
+        "steering": True,
+        "request_id": request_id,
+        "run_id": run_id,
+        "conversation_id": conversation_id,
+    }
+
+
 def steer_frame(
     answer: Dict[str, Any], entry: Dict[str, Any], request_id: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:

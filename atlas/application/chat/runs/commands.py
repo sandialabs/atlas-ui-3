@@ -17,10 +17,11 @@ from atlas.application.chat.runs.control_bus import OWNER_UNAVAILABLE, get_run_c
 from atlas.application.chat.runs.eligibility import turn_is_off_record
 from atlas.application.chat.runs.remote_run_frames import (
     directory_unavailable_frame,
+    steer_finished_frame,
     steer_frame,
     stop_frame,
 )
-from atlas.application.chat.runs.resolve import Address, Local, Remote, Unknown, resolve
+from atlas.application.chat.runs.resolve import Address, Local, Remote, Unknown, resolve, resolve_all
 from atlas.application.chat.runs.run_control import (
     SERVICE_ACTOR,
     route_api_cancel,
@@ -56,32 +57,45 @@ async def stop_addressed_run(websocket, registry, user_email: str, data: dict,
         bound = registry.active_bound_to(connection_session_id)
         if bound:
             address = Address(bound[0].run_id, None)
-    resolution = await resolve(registry, user_actor(user_email), address, include_terminal=True)
+    targets = await resolve_all(registry, user_actor(user_email), address, include_terminal=True)
 
-    if isinstance(resolution, Local):
-        logger.info("Cancelling run %s on user request", resolution.record.run_id)
-        registry.cancel(resolution.record.run_id, user_email)
-        return
-    if isinstance(resolution, Remote) and resolution.entry.get("user_email") == normalize_user_email(user_email):
-        # Another replica owns it; the client sees the frames a local stop sends.
-        answer = await route_stop(resolution.entry, user_email)
-        if answer.get("code") != OWNER_UNAVAILABLE:
-            frame = stop_frame(answer, data)
-            if frame is not None:
-                await websocket.send_json(frame)
-            return
-        # The owner did not answer: the same as an unreadable directory, except
-        # that the run named is known to be elsewhere. A frame that named it
-        # still stops the conversation's run held here rather than nothing.
-        local = registry.active_for_conversation(address.conversation_id, user_email) if address.run_id else None
-        if local is not None:
-            logger.info("Cancelling run %s on user request (owner unavailable)", local.run_id)
-            registry.cancel(local.run_id, user_email)
-            return
-        await websocket.send_json(stop_frame(answer, data))
-    elif isinstance(resolution, Unknown):
-        await websocket.send_json(stop_frame(reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE), data))
+    # Every target is stopped; the client gets one frame for the lot: the
+    # error of the first target that could not be reached, else the status of
+    # the first run stopped on another replica (the others in ``also_stopped``).
+    cancelled = set()
+    statuses: list = []
+    failure: Optional[Dict[str, Any]] = None
+    for target in targets:
+        if isinstance(target, Local):
+            if target.record.run_id in cancelled:
+                continue
+            logger.info("Cancelling run %s on user request", target.record.run_id)
+            registry.cancel(target.record.run_id, user_email)
+            cancelled.add(target.record.run_id)
+        elif isinstance(target, Remote):
+            if target.entry.get("user_email") != normalize_user_email(user_email):
+                continue
+            # Another replica owns it; the client sees the frames a local stop sends.
+            # An error names this target, not the run the frame named: the client
+            # keeps the running state of the run that could not be reached.
+            answer = await route_stop(target.entry, user_email)
+            frame = stop_frame(answer, {**data, "run_id": target.entry.get("run_id")})
+            if frame is None:
+                continue
+            if frame.get("type") == "error":
+                failure = failure or frame
+            else:
+                statuses.append(frame)
+        else:
+            failure = failure or stop_frame(reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE), data)
     # Anything else is no such run (finished, reaped, another user's): nothing to stop.
+    if failure is not None:
+        await websocket.send_json(failure)
+    elif statuses:
+        frame = statuses[0]
+        if len(statuses) > 1:
+            frame = {**frame, "also_stopped": [f["run"].get("run_id") for f in statuses[1:] if "run" in f]}
+        await websocket.send_json(frame)
 
 
 async def steer_addressed_run(websocket, registry, user_email: str, data: dict) -> bool:
@@ -130,6 +144,47 @@ async def steer_addressed_run(websocket, registry, user_email: str, data: dict) 
         return False
     await websocket.send_json(frame)
     return True
+
+
+async def steer_retry_for_named_run(websocket, registry, user_email: str, data: dict):
+    """A steer retry names the run its first attempt targeted: bind it there.
+
+    Returns ``(answered, record)``. ``record`` is that run when it is live
+    here, for the caller's local steer path to apply (same checks as any local
+    steer). Otherwise the frame is answered here: a run on another replica
+    gets the retry routed to it, and a run that has finished or is unknown
+    answers with its remembered outcome or the finished notice. A retry is
+    never steered into a successor run of the conversation and never starts a
+    turn.
+    """
+    request_id = data.get("request_id")
+    conversation_id = data.get("conversation_id")
+    run_id = data.get("run_id")
+    resolution = await resolve(registry, user_actor(user_email), Address(run_id, None), include_terminal=True)
+    if isinstance(resolution, Local):
+        record = resolution.record
+        if not record.is_terminal:
+            return False, record
+        if registry.prior_steer(record.run_id, request_id) is None:
+            await websocket.send_json(steer_finished_frame(conversation_id, request_id, run_id))
+        else:
+            await websocket.send_json({"type": "agent_update", "update_type": "steering_queued",
+                                       "run_id": record.run_id, "conversation_id": record.conversation_id})
+        return True, None
+    if isinstance(resolution, Remote):
+        entry = resolution.entry
+        answer = await route_steer(
+            entry, user_email, data.get("content", ""), data.get("compliance_level_filter"),
+            request_id=request_id, off_record=turn_is_off_record(data),
+        )
+        frame = steer_frame(answer, entry, request_id) or steer_finished_frame(conversation_id, request_id, run_id)
+    elif isinstance(resolution, Unknown):
+        answer = reply(False, OWNER_UNAVAILABLE, _DIRECTORY_UNAVAILABLE_MESSAGE)
+        frame = steer_frame(answer, {"run_id": run_id, "conversation_id": conversation_id}, request_id)
+    else:
+        frame = steer_finished_frame(conversation_id, request_id, run_id)
+    await websocket.send_json(frame)
+    return True, None
 
 
 async def cancel_api_run_addressed(run_id: str) -> Dict[str, Any]:

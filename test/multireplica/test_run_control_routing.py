@@ -194,3 +194,30 @@ def test_approval_via_non_owner_runs_the_tool_once(cluster):
     time.sleep(1)
     records = cluster.side_effects(key)
     assert len(records) == 1 and records[0]["replica"] == "A", records
+
+
+def test_stop_naming_a_finished_run_also_stops_the_live_follow_up_via_another_replica(cluster):
+    """Rows S31/S32: the frame reaches replica B, names run 1 (finished) and its
+    conversation, whose live follow-up executes on A. B routes both stops to A and
+    answers with one frame."""
+    user = cluster.new_user()
+    first = cluster.launch_ok(cluster.a, user, directive("first", sleep=0))
+    cluster.wait_terminal(cluster.a, first["run_id"], timeout=45)
+    status, follow = cluster.call(
+        cluster.a, "POST", f"/api/agent-runs/{first['run_id']}/follow-up", service=True,
+        json_body={"message": directive("second", sleep=20)},
+    )
+    assert status in (200, 202), (status, follow)
+    follow_id = follow["run_id"]
+    try:
+        assert follow["conversation_id"] == first["conversation_id"]
+        cluster.wait_status(cluster.a, follow_id, "running")
+        with WsClient(cluster.b, user) as tab:
+            tab.send({"type": "agent_control", "action": "stop", "run_id": first["run_id"],
+                      "conversation_id": first["conversation_id"]})
+            frame = tab.recv_until(_is("run_status"), 20)
+        assert frame["run"]["run_id"] == first["run_id"], frame
+        assert frame.get("also_stopped") == [follow_id], frame
+        assert cluster.wait_terminal(cluster.a, follow_id, timeout=15)["status"] == "cancelled"
+    finally:
+        cluster.cancel_everywhere(follow_id)

@@ -44,5 +44,10 @@ export function takeSteerRetry(frames, errorFrame, now = Date.now()) {
   // steer_only: if the run finished meanwhile (the first attempt may have been
   // applied, only its reply was lost), the server answers with a notice instead
   // of starting a new turn that would repeat the message.
-  return { ...frame, steer_only: true }
+  // run_id: the run the first attempt was routed to. The server applies the
+  // retry there or reports it finished; it is never steered into a successor
+  // run of the conversation.
+  const retry = { ...frame, steer_only: true }
+  if (errorFrame.run_id) retry.run_id = errorFrame.run_id
+  return retry
 }
