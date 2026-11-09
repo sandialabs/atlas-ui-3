@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-11-05
+Last updated: 2026-11-08
 
 Issue #884.
 
@@ -171,6 +171,13 @@ same field so the tree updates immediately while the child is running.
 Because the link lives on the conversation record, the hierarchy survives a
 reload, the 30-minute registry retention window and a backend restart even
 though run *status* does not.
+
+A conversation launched by the Agent Runs REST API is a root with no parent.
+It is marked by a separate, equally durable metadata field, `launch_origin`,
+and a distinct **API** tag in the sidebar; see
+[Agent Runs REST API](agent-runs-api.md#how-the-user-sees-an-api-conversation).
+The two markers are independent: an API conversation that launches
+sub-conversations shows the tag and the tree controls together.
 
 ### Privacy and authorization
 

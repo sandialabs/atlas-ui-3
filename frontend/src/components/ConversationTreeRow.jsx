@@ -32,6 +32,31 @@ export function RunIndicator({ run, count = 0 }) {
   )
 }
 
+// How a conversation was launched (issue #1187), from its saved metadata or,
+// before the first save, from its live run. Only origins listed here are
+// marked: a conversation the user started in the browser has none.
+const LAUNCH_ORIGINS = {
+  agent_runs_api: { label: 'API', description: 'Launched by the Agent Runs REST API' },
+}
+
+// Deliberately unlike the neighbouring markers: an outlined uppercase tag
+// before the title, where the sub-conversation count and the classification
+// are filled grey pills and a run state is a coloured dot with a word.
+export function LaunchOriginBadge({ origin }) {
+  const style = LAUNCH_ORIGINS[origin]
+  if (!style) return null
+  return (
+    <span
+      className="text-[10px] leading-4 font-semibold tracking-wide uppercase border border-cyan-700 text-cyan-300 px-1 rounded-sm flex-shrink-0"
+      data-testid="conversation-launch-origin"
+      title={style.description}
+      aria-label={style.description}
+    >
+      {style.label}
+    </span>
+  )
+}
+
 export function ConversationTreeRow({
   conv,
   isActive,
@@ -98,6 +123,7 @@ export function ConversationTreeRow({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v9a3 3 0 0 0 3 3h6m-4-4 4 4-4 4" />
             </svg>
           ) : null}
+          <LaunchOriginBadge origin={conv.launch_origin} />
           <div className="text-sm text-gray-200 truncate" title={conv.title}>
             {conv.title || 'Untitled'}
           </div>

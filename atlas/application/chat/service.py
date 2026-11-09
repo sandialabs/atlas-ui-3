@@ -18,6 +18,7 @@ from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
 from atlas.domain.conversation_lineage import parent_conversation_id_from_metadata
+from atlas.domain.conversation_origin import ORIGIN_METADATA_KEY, origin_for_run_source
 from atlas.domain.errors import (
     AuthorizationError,
     DomainError,
@@ -577,6 +578,7 @@ class ChatService:
         update_callback: Optional[UpdateCallback] = None,
         steering: Optional[Any] = None,
         parent_conversation_id: Optional[str] = None,
+        launch_origin: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -729,6 +731,14 @@ class ChatService:
         # parent; the argument must not overwrite what the record owns.
         if parent_conversation_id and not session.context.get("parent_conversation_id"):
             session.context["parent_conversation_id"] = str(parent_conversation_id)
+
+        # How the conversation was launched (issue #1187). Server-side only,
+        # like the parent link: the launch path passes it, never a client
+        # frame. Assigned on every turn, so a session that moves on to another
+        # conversation cannot carry it along. A later turn that does not pass
+        # it loses nothing: the repository keeps the origin a stored
+        # conversation was created with.
+        session.context[ORIGIN_METADATA_KEY] = origin_for_run_source(launch_origin)
 
         # The active workspace (issue #829): the frontend sends the workspace
         # id whose selections are loaded for this turn so the conversation can
@@ -2089,6 +2099,11 @@ class ChatService:
         parent_conversation_id = session.context.get("parent_conversation_id")
         if parent_conversation_id:
             metadata["parent_conversation_id"] = str(parent_conversation_id)
+        # Launched by the Agent Runs REST API (issue #1187). Written on the
+        # first save; the repository carries it through every later one.
+        launch_origin = origin_for_run_source(session.context.get(ORIGIN_METADATA_KEY))
+        if launch_origin:
+            metadata[ORIGIN_METADATA_KEY] = launch_origin
         # Server-managed classification record (issue #1042), from the binding
         # the turn gate checked -- never from a client field. Legacy history
         # is written without one; the repository refuses any change.

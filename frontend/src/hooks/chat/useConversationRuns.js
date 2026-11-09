@@ -97,12 +97,16 @@ export function useConversationRuns() {
 				const parentConversationId = data.run.parent_conversation_id
 					|| prior?.parent_conversation_id
 					|| null
+				// How the run was launched (issue #1187). Like the parent link it
+				// is fixed for the conversation, so a frame without it keeps it.
+				const launchOrigin = data.run.launch_origin || prior?.launch_origin || null
 				return {
 					...prev,
 					[data.run.conversation_id]: {
 						...data.run,
 						...(title ? { title } : {}),
 						parent_conversation_id: parentConversationId,
+						launch_origin: launchOrigin,
 					},
 				}
 			})

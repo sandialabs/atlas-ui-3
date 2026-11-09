@@ -79,6 +79,9 @@ export function getDisplayConversations({
         // parent link lets the sidebar nest it immediately instead of waiting
         // for the first save to persist the relationship (issue #1081).
         parent_conversation_id: run.parent_conversation_id || null,
+        // Likewise how the run was launched (issue #1187): an Agent Runs API
+        // run is marked in the list before its first save records the origin.
+        launch_origin: run.launch_origin || null,
       })
     }
   }

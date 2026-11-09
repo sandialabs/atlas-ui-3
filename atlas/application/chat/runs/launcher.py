@@ -57,6 +57,7 @@ from atlas.core.model_access import (
     check_model_access,
     filter_authorized_models,
 )
+from atlas.domain.conversation_origin import origin_for_run_source
 from atlas.domain.messages.models import ToolResult
 from atlas.modules.mcp_tools.atlas_server import (
     GET_RUNS_TOOL_NAME,
@@ -649,6 +650,9 @@ async def _run_child(
             # The registry record carries it for the live tree; the stored
             # metadata is what keeps the tree after a restart.
             parent_conversation_id=record.parent_conversation_id,
+            # Likewise how the conversation was launched (issue #1187): set
+            # for an Agent Runs API run, nothing for a sub-conversation.
+            launch_origin=origin_for_run_source(getattr(record, "source", "")),
         )
         if isinstance(response, dict) and response.get("type") == "error":
             outcome = RunStatus.FAILED

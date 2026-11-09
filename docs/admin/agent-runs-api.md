@@ -1,6 +1,6 @@
 # Agent Runs REST API
 
-Last updated: 2026-11-04
+Last updated: 2026-11-08
 
 The agent-runs API lets one trusted external service -- a scheduler, a CI job, a webhook
 relay -- start an ATLAS agent conversation on behalf of a user, with no browser or CLI session,
@@ -84,6 +84,9 @@ and `data_sources`, and `tools_needing_approval`. The run keeps going after the 
   conversation -- follow-ups always run at it.
 - The run is a top-level conversation in the user's history (no parent), titled by its message,
   and shows in their sidebar while it runs. The user can open it, watch it, and continue it.
+- The sidebar marks the conversation with a small **API** tag (tooltip "Launched by the Agent
+  Runs REST API") so the user can tell it from one they started themselves. See
+  [How the user sees an API conversation](#how-the-user-sees-an-api-conversation).
 
 ### Poll, follow up, cancel
 
@@ -137,6 +140,36 @@ A body that fails schema validation (a wrong type, a missing `message`, a body t
 before any of the above with FastAPI's standard `422`, whose `detail` is a **list** of
 `{"loc", "msg", "type"}` objects rather than a `{code, message}` object. Clients should branch on
 the type of `detail`.
+
+## How the user sees an API conversation
+
+A conversation this API launched carries an **API** tag before its title in the history sidebar
+(issue #1187). The tag is there while the run is in flight and stays after the run has finished,
+the page is reloaded, the run registry has forgotten the run, or the backend has restarted.
+
+The origin is recorded in the conversation's metadata when its first turn is saved:
+
+```json
+{"launch_origin": "agent_runs_api"}
+```
+
+- It is server-written. Only this API's launch path supplies it; no websocket frame or request
+  body can set it.
+- It is fixed at creation. The user continuing the conversation in the browser does not remove
+  it, and no later save can add it to a conversation that was not launched here.
+- It names the launch surface only. The calling service, its key and its request are not stored
+  in it.
+- `GET /api/conversations`, `/api/conversations/search`, `/api/conversations/{id}` and
+  `/api/conversations/export` publish it as `launch_origin` (`null` for every other
+  conversation). The run snapshot and `run_status` frames carry the same field, which is what
+  marks a run that has not been saved yet. This API's own responses are unchanged.
+- A sub-conversation that an API run starts with `atlas_launch` has no origin of its own. It is
+  nested under the API conversation by its parent link, like any other sub-conversation.
+
+On a multi-replica deployment, a browser attached to a replica that does not hold the run learns
+the run from the shared execution projection, which does not carry the origin. That row shows
+its run state straight away and gains the tag at the conversation's first save. The saved record
+is in PostgreSQL, so every replica shows the tag from then on.
 
 ## Approvals
 

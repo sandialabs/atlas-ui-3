@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-11-06
+Last updated: 2026-11-08
 
 ## Overview
 
@@ -385,7 +385,10 @@ without creating a server record.
 ## Frontend
 
 The sidebar shows:
-- **Conversation list** with title, preview, timestamp, message count, and tags
+- **Conversation list** with title, preview, timestamp, message count, and tags.
+  A conversation launched by the
+  [Agent Runs REST API](agent-runs-api.md#how-the-user-sees-an-api-conversation)
+  carries an **API** tag before its title
 - **Search bar** for filtering by title or content
 - **Tag filter** buttons for quick filtering
 - **Load more** at the bottom of the list, which appends the next page of

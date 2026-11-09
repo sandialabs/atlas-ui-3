@@ -34,6 +34,7 @@ from atlas.domain.conversation_lineage import (
     lineage_fields,
     parent_conversation_id_from_metadata,
 )
+from atlas.domain.conversation_origin import carry_recorded_origin, origin_fields
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
 
@@ -198,6 +199,11 @@ class ConversationRepository:
                 existing.updated_at = datetime.now(timezone.utc)
                 existing.message_count = len(messages)
                 if metadata:
+                    # The launch origin (issue #1187) is fixed at creation:
+                    # the stored record decides it for every later save.
+                    metadata = carry_recorded_origin(
+                        _load_metadata(existing.metadata_json), metadata
+                    )
                     existing.metadata_json = json.dumps(metadata)
 
                 # Delete old messages
@@ -359,6 +365,7 @@ class ConversationRepository:
                     "preview": preview,
                     "tags": tag_names,
                     **public_fields(metadata),
+                    **origin_fields(metadata),
                     **lineage_by_id[conv.id],
                 })
 
@@ -437,6 +444,7 @@ class ConversationRepository:
                 # still fails closed as "invalid"; ``conv_metadata`` has been
                 # normalized to a dict for the response payload.
                 **public_fields(_load_metadata(conv.metadata_json)),
+                **origin_fields(conv_metadata),
                 **lineage,
             }
 
@@ -538,6 +546,7 @@ class ConversationRepository:
                     "metadata": conv_metadata,
                     "tags": self._get_tag_names(session, conv.id),
                     "messages": messages,
+                    **origin_fields(conv_metadata),
                     **lineage_by_id[conv.id],
                 })
 
@@ -619,6 +628,7 @@ class ConversationRepository:
                     "preview": preview,
                     "tags": self._get_tag_names(session, conv.id),
                     **public_fields(metadata),
+                    **origin_fields(metadata),
                     **lineage_by_id[conv.id],
                 })
 

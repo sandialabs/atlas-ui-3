@@ -139,6 +139,7 @@ async def admit_run(
             release_claim_soon(claim, "failed")
         raise
     record.claim = claim
+    record.source = source or ""
     if claim is not None:
         ensure_lease_heartbeat()
     return record
