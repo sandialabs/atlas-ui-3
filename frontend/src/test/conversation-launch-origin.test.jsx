@@ -185,6 +185,32 @@ describe('launch origin on in-flight rows (#1187)', () => {
     expect(rows.find(r => r.id === 'user').launch_origin).toBeNull()
   })
 
+  it('keeps the origin while the unsaved conversation is the one on screen', () => {
+    // Opening an in-flight API conversation loads its prompt and makes it
+    // active, so the bridge row replaces the run placeholder.
+    const rows = getDisplayConversations({
+      ...base,
+      messages: [{ role: 'user', content: 'Summarize the build' }],
+      activeConversationId: 'api',
+      runsByConversation: {
+        api: { run_id: 'r1', conversation_id: 'api', status: 'running', launch_origin: API },
+      },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id: 'api', _current: true, launch_origin: API })
+  })
+
+  it('does not give a run origin to a saved row that has none', () => {
+    const rows = getDisplayConversations({
+      ...base,
+      conversations: [conv('saved', 'Saved')],
+      runsByConversation: {
+        saved: { run_id: 'r1', conversation_id: 'saved', status: 'running', launch_origin: API },
+      },
+    })
+    expect(rows[0].launch_origin).toBeNull()
+  })
+
   it('leaves a saved row to its own stored origin', () => {
     const rows = getDisplayConversations({
       ...base,

@@ -67,7 +67,17 @@ export function getDisplayConversations({
     for (const run of Object.values(runsByConversation)) {
       if (!run || !run.conversation_id) continue
       if (['completed', 'failed', 'cancelled'].includes(run.status)) continue
-      if (list.some(c => c.id === run.conversation_id)) continue
+      const listed = list.findIndex(c => c.id === run.conversation_id)
+      if (listed !== -1) {
+        // The conversation is open before its first save: the bridge row
+        // above stands in for it and knows nothing about how it was launched.
+        // A saved row is left alone; its stored origin is authoritative.
+        const row = list[listed]
+        if (row._current && run.launch_origin) {
+          list[listed] = { ...row, launch_origin: run.launch_origin }
+        }
+        continue
+      }
       list.unshift({
         id: run.conversation_id,
         title: run.title || 'Conversation in progress',
