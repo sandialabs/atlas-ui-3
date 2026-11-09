@@ -320,3 +320,46 @@ def test_matcher_candidates_cover_every_spelling_without_duplicates():
     assert matcher_candidates("atlas_launch_subagent") == ("atlas_launch_subagent", "atlas_launch")
     assert matcher_candidates("pptx_generator_create") == ("pptx_generator_create",)
     assert matcher_candidates(None) == ()
+
+
+def _approvals(*required):
+    """A config manager whose mcp.json mandates approval for ``required``."""
+    from atlas.modules.config.models import ToolApprovalConfig, ToolApprovalsConfig
+
+    return SimpleNamespace(
+        app_settings=SimpleNamespace(force_tool_approval_globally=False),
+        tool_approvals_config=ToolApprovalsConfig(
+            tools={name: ToolApprovalConfig(require_approval=True) for name in required}
+        ),
+    )
+
+
+@pytest.mark.parametrize("old, new", sorted(RENAMES.items()))
+def test_an_approval_rule_on_the_old_name_still_binds_the_renamed_tool(old, new):
+    """``atlas.require_approval: ["launch"]`` must not lapse with the rename."""
+    from atlas.application.chat.utilities.tool_executor import requires_approval
+
+    config = _approvals(old)
+
+    assert requires_approval(new, config) == (True, True, True)
+    assert requires_approval(old, config) == (True, True, True)
+
+
+@pytest.mark.parametrize("old, new", sorted(RENAMES.items()))
+def test_an_approval_rule_on_the_new_name_binds_a_deprecated_call(old, new):
+    """The alias still executes, so it must not dodge a mandatory approval."""
+    from atlas.application.chat.utilities.tool_executor import requires_approval
+
+    config = _approvals(new)
+
+    assert requires_approval(old, config) == (True, True, True)
+    assert requires_approval(new, config) == (True, True, True)
+
+
+def test_an_approval_rule_does_not_spill_onto_other_tools():
+    from atlas.application.chat.utilities.tool_executor import requires_approval
+
+    config = _approvals("atlas_launch")
+
+    assert requires_approval("atlas_get_subagent_runs", config) == (True, True, False)
+    assert requires_approval("pptx_generator_create", config) == (True, True, False)

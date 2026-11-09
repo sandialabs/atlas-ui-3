@@ -182,6 +182,20 @@ describe('ToolsPanel - Subagents group', () => {
     expect(screen.getByRole('button', { name: 'canvas' })).toBeInTheDocument()
   })
 
+  it('finds the server when searching by a displayed title or a raw name', () => {
+    renderPanel()
+    const search = screen.getByPlaceholderText(/Search installed tools/i)
+
+    fireEvent.change(search, { target: { value: 'launch subagent' } })
+    expect(screen.getByRole('button', { name: 'Launch Subagent' })).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'get_subagent_result' } })
+    expect(screen.getByRole('button', { name: 'Get Subagent Result' })).toBeInTheDocument()
+
+    fireEvent.change(search, { target: { value: 'no such tool' } })
+    expect(screen.queryByRole('button', { name: 'Launch Subagent' })).toBeNull()
+  })
+
   it('still selects the tool by its real name', () => {
     renderPanel()
 

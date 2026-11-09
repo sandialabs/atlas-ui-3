@@ -21,6 +21,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
     LEGACY_SERVER_NAMES,
+    matcher_candidates,
     normalize_tool_name,
 )
 from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
@@ -202,11 +203,15 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
 
         approvals_config = config_manager.tool_approvals_config
 
-        # Per-tool explicit requirement (admin-enforced)
-        if tool_name in approvals_config.tools:
-            tool_config = approvals_config.tools[tool_name]
+        # Per-tool explicit requirement (admin-enforced). A built-in tool is
+        # looked up under every name it answers to: a rule written for
+        # ``atlas_launch`` must keep covering ``atlas_launch_subagent`` after
+        # the rename, and a rule on the new name must cover a call made under
+        # the deprecated one, which still executes (#1141).
+        for spelling in matcher_candidates(tool_name) or (tool_name,):
+            tool_config = approvals_config.tools.get(spelling)
             # Only treat as admin-required if explicitly required
-            if getattr(tool_config, "require_approval", False):
+            if tool_config is not None and getattr(tool_config, "require_approval", False):
                 return (True, True, True)
             # Explicit false falls through to default behavior
 

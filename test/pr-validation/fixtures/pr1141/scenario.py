@@ -145,11 +145,11 @@ async def subagent_round_trip(ws, label, called, selected):
     launched = by_name(results, called["launch"])
     check((launched or {}).get("success") is True,
           f"[{label}] {called['launch']} starts a subagent", text_of(launched))
-    handle = {}
     try:
         handle = json.loads(text_of(launched).splitlines()[-1])
     except (ValueError, IndexError):
-        pass
+        # A refused launch has no handle line; the checks below report it.
+        handle = {}
     check(bool(handle.get("run_id")) and bool(handle.get("conversation_id")),
           f"[{label}] the launch returns the same handle schema (run_id, conversation_id)",
           text_of(launched))

@@ -741,8 +741,11 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       return true
     }
     
-    // Search in tool names
-    if (server.tools.some(tool => tool.toLowerCase().includes(searchLower))) {
+    // Search in tool names, and in the title a subagent tool is shown by
+    if (server.tools.some(tool =>
+      tool.toLowerCase().includes(searchLower)
+      || (subagentToolLabel(`${server.server}_${tool}`) || '').toLowerCase().includes(searchLower)
+    )) {
       return true
     }
     

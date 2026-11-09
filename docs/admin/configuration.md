@@ -144,6 +144,8 @@ changes:
 - A [hook](hooks.md) matcher written against either spelling fires for a call under the
   other one, so a deny or approval policy is neither retired by the rename nor bypassed
   through an alias.
+- A mandatory-approval rule (`require_approval` in `mcp.json`) written under either spelling
+  applies to a call under the other one.
 - Hook *payloads* carry the tool name as it was called or selected. A hook script that
   compares names itself (for example a copy of
   `hook-examples/user_prompt_submit_strip_implied_search.py` with its own list of built-in
