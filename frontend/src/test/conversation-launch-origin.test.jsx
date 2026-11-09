@@ -201,6 +201,29 @@ describe('launch origin on in-flight rows (#1187)', () => {
     expect(rows[0]).toMatchObject({ id: 'api', _current: true, launch_origin: API })
   })
 
+  it('keeps the origin on the open unsaved row after its run has ended', () => {
+    const rows = getDisplayConversations({
+      ...base,
+      messages: [{ role: 'user', content: 'Summarize the build' }],
+      activeConversationId: 'api',
+      runsByConversation: {
+        api: { run_id: 'r1', conversation_id: 'api', status: 'completed', launch_origin: API },
+      },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id: 'api', _current: true, launch_origin: API })
+  })
+
+  it('does not add a row for a finished run that is not on screen', () => {
+    const rows = getDisplayConversations({
+      ...base,
+      runsByConversation: {
+        api: { run_id: 'r1', conversation_id: 'api', status: 'completed', launch_origin: API },
+      },
+    })
+    expect(rows).toHaveLength(0)
+  })
+
   it('does not give a run origin to a saved row that has none', () => {
     const rows = getDisplayConversations({
       ...base,
@@ -254,5 +277,20 @@ describe('useConversationRuns launch origin (#1187)', () => {
       run: { run_id: 'r2', conversation_id: 'user', status: 'completed' },
     }))
     expect(result.current.runsByConversation.user.launch_origin).toBeNull()
+  })
+
+  it('keeps a known origin when a later snapshot lists the same run without one', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    const snapshot = (runs) => act(() => result.current.handleRunFrame({ type: 'runs_snapshot', runs }))
+
+    snapshot([{ run_id: 'r1', conversation_id: 'api', status: 'running', created_at: 1, launch_origin: API }])
+    // A replica that does not hold the run serves it from the shared
+    // projection, which has no origin.
+    snapshot([{ run_id: 'r1', conversation_id: 'api', status: 'running' }])
+    expect(result.current.runsByConversation.api.launch_origin).toBe(API)
+
+    // A different run on the same conversation does not inherit it.
+    snapshot([{ run_id: 'r9', conversation_id: 'api', status: 'running' }])
+    expect(result.current.runsByConversation.api.launch_origin).toBeNull()
   })
 })

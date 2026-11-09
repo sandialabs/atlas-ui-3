@@ -132,6 +132,7 @@ async def admit_run(
             conversation_id=conversation_id,
             user_email=user_email,
             run_id=run_id,
+            source=source,
             **start_kwargs,
         )
     except BaseException:
@@ -139,7 +140,6 @@ async def admit_run(
             release_claim_soon(claim, "failed")
         raise
     record.claim = claim
-    record.source = source or ""
     if claim is not None:
         ensure_lease_heartbeat()
     return record

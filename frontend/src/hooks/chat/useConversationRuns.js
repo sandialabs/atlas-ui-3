@@ -55,7 +55,17 @@ export function useConversationRuns() {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.
 					const prior = runsRef.current[run.conversation_id]
-					next[run.conversation_id] = (!run.title && prior?.title) ? { ...run, title: prior.title } : run
+					// Likewise how the run was launched (issue #1187): a replica that
+					// does not hold the run lists it without the origin, and that
+					// must not erase one this tab already learned for the same run.
+					const origin = run.launch_origin
+						|| (prior?.run_id === run.run_id ? prior?.launch_origin : null)
+						|| null
+					next[run.conversation_id] = {
+						...run,
+						...((!run.title && prior?.title) ? { title: prior.title } : {}),
+						launch_origin: origin,
+					}
 				}
 			}
 			runsRef.current = next

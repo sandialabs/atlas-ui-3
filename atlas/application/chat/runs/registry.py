@@ -611,6 +611,7 @@ class RunRegistry:
         run_id: Optional[str] = None,
         off_record: bool = False,
         connection_bound: bool = False,
+        source: str = "",
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -639,6 +640,9 @@ class RunRegistry:
             depth=max(0, int(depth or 0)),
             # An off-record run has no title: it is the prompt.
             title=(str(title)[:RUN_TITLE_MAX_CHARS] or None) if title and not off_record else None,
+            # Set here, not after the insert: listeners are notified at the
+            # end of this method and their first frame must carry the origin.
+            source=str(source or ""),
             off_record=bool(off_record),
             connection_bound=bool(connection_bound),
         )

@@ -1879,6 +1879,11 @@ class ChatService:
         prevents an un-hydrated turn from overwriting the stored record.
         """
         if is_incognito or self.conversation_repository is None or not user_email:
+            # Nothing is loaded, but the session is still leaving the
+            # conversation whose launch origin it carried (issue #1187). Left
+            # in place, a later saving turn would create a new conversation
+            # marked as launched by the API.
+            session.context.pop(ORIGIN_METADATA_KEY, None)
             return 0
 
         # The caller only gets here when the session's bound conversation
@@ -2090,6 +2095,9 @@ class ChatService:
         if start_index > 0 and session.context.get("_restored"):
             conv_id = str(uuid4())
             session.context["conversation_id"] = conv_id
+            # ... which the user started, whatever launched the conversation
+            # it branched from (issue #1187).
+            session.context.pop(ORIGIN_METADATA_KEY, None)
             # The segment is a new conversation, so it gets a title from its
             # own first prompt rather than inheriting the original's.
             session.context.pop("_restored", None)

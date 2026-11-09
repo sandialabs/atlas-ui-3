@@ -150,6 +150,16 @@ def test_the_public_run_dict_carries_the_origin_only_for_api_runs():
     assert plain.to_public_dict()["launch_origin"] is None
 
 
+def test_the_first_frame_listeners_see_already_carries_the_origin():
+    """``start`` notifies listeners itself, so the source cannot be set after."""
+    registry = RunRegistry()
+    seen = []
+    registry.add_listener(USER, lambda record: seen.append(record.to_public_dict()))
+    registry.start(conversation_id="api-conv", user_email=USER, source=API_SOURCE)
+
+    assert seen and seen[0]["launch_origin"] == ORIGIN_AGENT_RUNS_API
+
+
 # ---------------------------------------------------------------------------
 # Durable record
 # ---------------------------------------------------------------------------
@@ -268,6 +278,53 @@ async def test_a_browser_turn_carries_the_stored_origin_while_it_runs(chat_servi
 
     assert seen[ORIGIN_METADATA_KEY] == ORIGIN_AGENT_RUNS_API
     assert repo.get_conversation("api-conv", USER)["launch_origin"] == ORIGIN_AGENT_RUNS_API
+
+
+@pytest.mark.asyncio
+async def test_an_incognito_interlude_does_not_tag_the_users_new_conversation(chat_service, repo):
+    """Saving resumes after incognito as a *new* conversation the user started.
+
+    The session still holds the API conversation it restored, so its origin
+    must not be written onto the new record.
+    """
+    from atlas.domain.conversation_origin import ORIGIN_METADATA_KEY as KEY
+
+    await _run_turn(chat_service, "api-conv", launch_origin=API_SOURCE)
+    session_id = uuid4()
+    session = await chat_service.create_session(session_id, USER)
+    await chat_service._hydrate_session_from_store(
+        session, "api-conv", USER, is_incognito=False
+    )
+    assert session.context[KEY] == ORIGIN_AGENT_RUNS_API
+    session.context["conversation_id"] = "api-conv"
+    session.context["_restored"] = True
+    session.history.add_message(Message(role=MessageRole.USER, content="private"))
+    session.history.add_message(Message(role=MessageRole.ASSISTANT, content="ok"))
+    floor = len(session.history.messages)
+    session.history.add_message(Message(role=MessageRole.USER, content="saved again"))
+    session.history.add_message(Message(role=MessageRole.ASSISTANT, content="ok"))
+
+    assert chat_service._save_conversation(session, USER, "gpt-4", start_index=floor)
+
+    new_id = session.context["conversation_id"]
+    assert new_id != "api-conv"
+    assert repo.get_conversation(new_id, USER)["launch_origin"] is None
+    assert repo.get_conversation("api-conv", USER)["launch_origin"] == ORIGIN_AGENT_RUNS_API
+
+
+@pytest.mark.asyncio
+async def test_an_incognito_switch_drops_the_carried_origin(chat_service, repo):
+    await _run_turn(chat_service, "api-conv", launch_origin=API_SOURCE)
+    session = await chat_service.create_session(uuid4(), USER)
+    await chat_service._hydrate_session_from_store(
+        session, "api-conv", USER, is_incognito=False
+    )
+    assert session.context[ORIGIN_METADATA_KEY] == ORIGIN_AGENT_RUNS_API
+
+    await chat_service._hydrate_session_from_store(
+        session, "another-conv", USER, is_incognito=True
+    )
+    assert not session.context.get(ORIGIN_METADATA_KEY)
 
 
 @pytest.mark.asyncio
