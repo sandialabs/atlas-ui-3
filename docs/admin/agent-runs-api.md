@@ -84,8 +84,8 @@ and `data_sources`, and `tools_needing_approval`. The run keeps going after the 
   conversation -- follow-ups always run at it.
 - The run is a top-level conversation in the user's history (no parent), titled by its message,
   and shows in their sidebar while it runs. The user can open it, watch it, and continue it.
-- The sidebar marks the conversation with a small **API** tag (tooltip "Launched by the Agent
-  Runs REST API") so the user can tell it from one they started themselves. See
+- The sidebar marks the conversation with a small **AUTO** tag (tooltip "Started
+  programmatically via the Agent Runs API.") so the user can tell it from one they started themselves. See
   [How the user sees an API conversation](#how-the-user-sees-an-api-conversation).
 
 ### Poll, follow up, cancel
@@ -143,11 +143,11 @@ the type of `detail`.
 
 ## How the user sees an API conversation
 
-A conversation this API launched carries an **API** tag before its title in the history sidebar
+A conversation this API launched carries an **AUTO** tag before its title in the history sidebar
 (issue #1187). The tag is there while the run is in flight and stays after the run has finished,
 the page is reloaded, the run registry has forgotten the run, or the backend has restarted.
 
-![History sidebar: two conversations launched by the API carry an API tag before the title; a sub-conversation tree and an ordinary conversation do not](agent-runs-api-history-tag.png)
+![History sidebar: two conversations launched by the API carry an AUTO tag before the title; a sub-conversation tree and an ordinary conversation do not](agent-runs-api-history-tag.png)
 
 In the screenshot, "Weekly build health report" and "Nightly PR reminder" were launched by the
 API. The first also launched a sub-conversation, so it shows the tag next to the tree controls.

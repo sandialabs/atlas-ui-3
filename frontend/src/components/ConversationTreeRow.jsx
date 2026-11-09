@@ -34,9 +34,11 @@ export function RunIndicator({ run, count = 0 }) {
 
 // How a conversation was launched (issue #1187), from its saved metadata or,
 // before the first save, from its live run. Only origins listed here are
-// marked: a conversation the user started in the browser has none.
+// marked: a conversation the user started in the browser has none. The label
+// says what the user cares about (it was started programmatically), not which
+// interface did it; the tooltip names the interface.
 const LAUNCH_ORIGINS = {
-  agent_runs_api: { label: 'API', description: 'Launched by the Agent Runs REST API' },
+  agent_runs_api: { label: 'AUTO', description: 'Started programmatically via the Agent Runs API.' },
 }
 
 // Deliberately unlike the neighbouring markers: an outlined uppercase tag

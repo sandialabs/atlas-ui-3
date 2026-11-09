@@ -174,7 +174,7 @@ though run *status* does not.
 
 A conversation launched by the Agent Runs REST API is a root with no parent.
 It is marked by a separate, equally durable metadata field, `launch_origin`,
-and a distinct **API** tag in the sidebar; see
+and a distinct **AUTO** tag in the sidebar; see
 [Agent Runs REST API](agent-runs-api.md#how-the-user-sees-an-api-conversation).
 The two markers are independent: an API conversation that launches
 sub-conversations shows the tag and the tree controls together.

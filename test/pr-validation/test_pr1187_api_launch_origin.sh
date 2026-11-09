@@ -7,7 +7,7 @@
 #   sub-conversations publish null, and the parent link is unaffected.
 # - The origin is fixed at creation: a browser turn keeps it, a later save cannot add it.
 # - A real launch over HTTP hands the origin to the turn and reports it in the run status.
-# - The sidebar renders the API tag for saved and in-flight rows, next to the tree markers.
+# - The sidebar renders the AUTO tag for saved and in-flight rows, next to the tree markers.
 # - Two real replicas on shared Redis and PostgreSQL still pass the coordination harness.
 set -uo pipefail
 

@@ -99,8 +99,9 @@ describe('Sidebar launch-origin marker (#1187)', () => {
     render(<Sidebar />)
 
     const badge = within(rowOf('Nightly report')).getByTestId(BADGE)
-    expect(badge).toHaveTextContent('API')
-    expect(badge).toHaveAttribute('title', 'Launched by the Agent Runs REST API')
+    expect(badge).toHaveTextContent('AUTO')
+    expect(badge).toHaveAttribute('title', 'Started programmatically via the Agent Runs API.')
+    expect(badge).toHaveAttribute('aria-label', 'Started programmatically via the Agent Runs API.')
     expect(within(rowOf('Typed by the user')).queryByTestId(BADGE)).toBeNull()
     expect(screen.getAllByTestId(BADGE)).toHaveLength(1)
   })
@@ -122,7 +123,7 @@ describe('Sidebar launch-origin marker (#1187)', () => {
     render(<Sidebar />)
 
     const apiRow = rowOf('Summarize the build')
-    expect(within(apiRow).getByTestId(BADGE)).toHaveTextContent('API')
+    expect(within(apiRow).getByTestId(BADGE)).toHaveTextContent('AUTO')
     // The run state is still shown, separately from the origin.
     expect(within(apiRow).getByText('Running')).toBeTruthy()
     expect(within(rowOf('Started in another tab')).queryByTestId(BADGE)).toBeNull()
