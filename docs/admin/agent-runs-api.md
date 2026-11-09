@@ -147,6 +147,13 @@ A conversation this API launched carries an **API** tag before its title in the 
 (issue #1187). The tag is there while the run is in flight and stays after the run has finished,
 the page is reloaded, the run registry has forgotten the run, or the backend has restarted.
 
+![History sidebar: two conversations launched by the API carry an API tag before the title; a sub-conversation tree and an ordinary conversation do not](agent-runs-api-history-tag.png)
+
+In the screenshot, "Weekly build health report" and "Nightly PR reminder" were launched by the
+API. The first also launched a sub-conversation, so it shows the tag next to the tree controls.
+"Plan the release checklist" is an ordinary conversation with a sub-conversation, and "How do I
+rotate the service keys?" is an ordinary conversation.
+
 The origin is recorded in the conversation's metadata when its first turn is saved:
 
 ```json
