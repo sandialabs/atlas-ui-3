@@ -289,7 +289,7 @@ async def test_child_without_a_parent_record_is_not_auto_approved(
     """
     _patch_gate(monkeypatch, admin_required=False, timeout=0.2)
     child = registry.start(conversation_id="conv-orphan-child", user_email=USER, depth=1)
-    child.launch_spec = {"source": "atlas_launch", "model": "m"}
+    child.launch_spec = {"source": "atlas_launch_subagent", "model": "m"}
     child.note_auto_approve({"auto_approve_tools": True})
     assert child.auto_approve_user_tools is False
     assert registry.set_auto_approve_user_tools(USER, True) == 0
@@ -416,7 +416,7 @@ async def test_approval_frame_tells_the_browser_whether_it_may_auto_answer(
 
     # A launched child of an untracked turn: no parent_run_id, still excluded.
     child = registry.start(conversation_id="conv-frame-child", user_email=USER, depth=1)
-    child.launch_spec = {"source": "atlas_launch", "model": "m"}
+    child.launch_spec = {"source": "atlas_launch_subagent", "model": "m"}
     set_current_run(child.run_id, child.conversation_id)
     assert child.parent_run_id is None
     frames = []

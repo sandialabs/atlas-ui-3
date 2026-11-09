@@ -970,13 +970,13 @@ class AppSettings(BaseSettings):
                     "cancelled, which means the user stopped it). 0 disables the limit.",
         validation_alias=AliasChoices("MAX_RUN_WALL_CLOCK_SECONDS"),
     )
-    # Sub-conversations launched by the built-in ``atlas_launch`` tool (#925).
+    # Sub-conversations launched by the built-in ``atlas_launch_subagent`` tool (#925).
     # Off by default: a conversation that can start other conversations is a
     # real spend and concurrency multiplier, so a deployment opts into it.
     feature_atlas_launch_enabled: bool = Field(
         False,
         description=(
-            "Expose the built-in atlas_launch tool, which lets a conversation "
+            "Expose the built-in atlas_launch_subagent tool, which lets a conversation "
             "start sub-conversations (Atlas's subagents). Requires chat history "
             "and agent mode, since a launched run is a background run."
         ),
@@ -986,7 +986,7 @@ class AppSettings(BaseSettings):
         2,
         ge=1,
         description=(
-            "How deep atlas_launch may nest. A run started by the user is depth "
+            "How deep atlas_launch_subagent may nest. A run started by the user is depth "
             "0, the sub-conversation it launches is depth 1; a launch that "
             "would exceed this depth is refused. Bounds runaway recursion."
         ),

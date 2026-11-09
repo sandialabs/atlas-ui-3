@@ -21,6 +21,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_SERVER_NAME,
     CANVAS_TOOL_NAME,
     LEGACY_SERVER_NAMES,
+    matcher_candidates,
     normalize_tool_name,
 )
 from atlas.modules.mcp_tools.mcp_discovery import UNSCOPED
@@ -166,6 +167,22 @@ def _same_arguments(edited: Any, original: Any) -> bool:
         return edited == original
 
 
+def _hook_tool_identity(called_name: Any) -> Dict[str, Any]:
+    """How a tool call names its tool in a hook payload.
+
+    ``tool_name`` is the tool's current name even when the call used a retired
+    one. A retired name still executes, so a policy script that compares
+    ``tool_name`` against ``atlas_launch_subagent`` has to see that name for a
+    model that called ``atlas_launch`` -- otherwise the alias is a way around
+    the policy (#1141). ``tool_name_called`` keeps the spelling actually used,
+    for audit. The two are equal for every tool that has no retired name.
+    """
+    return {
+        "tool_name": normalize_tool_name(called_name),
+        "tool_name_called": called_name,
+    }
+
+
 def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
     """
     Check if a tool requires approval before execution.
@@ -202,11 +219,15 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
 
         approvals_config = config_manager.tool_approvals_config
 
-        # Per-tool explicit requirement (admin-enforced)
-        if tool_name in approvals_config.tools:
-            tool_config = approvals_config.tools[tool_name]
+        # Per-tool explicit requirement (admin-enforced). A built-in tool is
+        # looked up under every name it answers to: a rule written for
+        # ``atlas_launch`` must keep covering ``atlas_launch_subagent`` after
+        # the rename, and a rule on the new name must cover a call made under
+        # the deprecated one, which still executes (#1141).
+        for spelling in matcher_candidates(tool_name) or (tool_name,):
+            tool_config = approvals_config.tools.get(spelling)
             # Only treat as admin-required if explicitly required
-            if getattr(tool_config, "require_approval", False):
+            if tool_config is not None and getattr(tool_config, "require_approval", False):
                 return (True, True, True)
             # Explicit false falls through to default behavior
 
@@ -622,7 +643,7 @@ async def execute_single_tool(
                     perm_outcome = await hook_mgr.run_event(
                         HookEvent.PERMISSION_REQUEST,
                         {
-                            "tool_name": tool_call.function.name,
+                            **_hook_tool_identity(tool_call.function.name),
                             "tool_args": dict(filtered_args),
                             "tool_call_id": tool_call.id,
                             "needs_approval": bool(needs_approval),
@@ -664,7 +685,7 @@ async def execute_single_tool(
                     pre_outcome = await hook_mgr.run_event(
                         HookEvent.PRE_TOOL_USE,
                         {
-                            "tool_name": tool_call.function.name,
+                            **_hook_tool_identity(tool_call.function.name),
                             "tool_args": dict(filtered_args),
                             "tool_call_id": tool_call.id,
                         },
@@ -915,7 +936,7 @@ async def execute_single_tool(
                     # or remove it.
                     "compliance_level": session_context.get("compliance_level"),
                     # Whether this turn's transcript is kept off the server.
-                    # atlas_launch refuses to start a sub-conversation from an
+                    # atlas_launch_subagent refuses to start a sub-conversation from an
                     # incognito turn, since the child would persist one (#925).
                     "incognito": session_context.get("incognito", False),
                     # pass update callback so MCP client can emit progress
@@ -948,7 +969,7 @@ async def execute_single_tool(
                 post_outcome = await hook_mgr.run_event(
                     HookEvent.POST_TOOL_USE,
                     {
-                        "tool_name": tool_call.function.name,
+                        **_hook_tool_identity(tool_call.function.name),
                         "tool_args": dict(filtered_args),
                         "tool_call_id": tool_call.id,
                         "result_content": result.content if isinstance(result.content, str) else str(result.content),

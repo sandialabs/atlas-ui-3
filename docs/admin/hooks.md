@@ -106,6 +106,14 @@ A JSON object with a stable envelope plus an event-specific `payload`:
 }
 ```
 
+For the tool-call events (`PreToolUse`, `PermissionRequest`, `PostToolUse`), `tool_name` is
+the tool's current name. A built-in tool that was renamed still answers to its old name
+(`atlas_launch` runs `atlas_launch_subagent`); such a call is reported with the current
+name in `tool_name` and the spelling the model used in `tool_name_called`, so a script that
+compares `tool_name` cannot be sidestepped through an alias. A `matcher` written against
+either spelling fires for both. See
+[the subagent tool names](configuration.md#tool-names-and-the-deprecated-aliases).
+
 `user_email` and `compliance_level` are **informational** — they are stamped
 server-side and re-asserted after the hook returns regardless of what the hook
 says (a hook can never widen or spoof identity/compliance). `compliance_level`

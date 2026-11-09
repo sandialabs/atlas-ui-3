@@ -1,8 +1,8 @@
 """End-to-end scenario for PR #949 against a running backend.
 
-PR #949: ``atlas_discover_launch_options`` publishes the caller's authorized
+PR #949: ``atlas_discover_subagent_options`` publishes the caller's authorized
 workspaces and models, and a successful discovery is a hard precondition for
-``atlas_launch``.
+``atlas_launch_subagent``.
 
 Everything here goes through the real WebSocket chat endpoint and the real
 workspaces REST API, against a real backend with launch enabled. The model is
@@ -24,7 +24,7 @@ PORT = os.environ["ATLAS_PORT"]
 WS = f"ws://127.0.0.1:{PORT}/ws"
 API = f"http://127.0.0.1:{PORT}"
 USER = "owner@example.com"
-LAUNCH_TOOLS = ["atlas_launch"]
+LAUNCH_TOOLS = ["atlas_launch_subagent"]
 FAILED = 0
 
 
@@ -179,18 +179,18 @@ async def main():
         if isinstance(server, dict) and server.get("server") == "atlas":
             atlas_tools = server.get("tools") or []
     check(
-        "discover_launch_options" in atlas_tools,
+        "discover_subagent_options" in atlas_tools,
         "the discovery tool is advertised by /api/config when launch is enabled",
         atlas_tools,
     )
     check(
-        "launch" in atlas_tools,
-        "atlas_launch is advertised alongside it",
+        "launch_subagent" in atlas_tools,
+        "atlas_launch_subagent is advertised alongside it",
         atlas_tools,
     )
 
     ws = await connect(USER)
-    LAUNCH, DISCOVER = "atlas_launch", "atlas_discover_launch_options"
+    LAUNCH, DISCOVER = "atlas_launch_subagent", "atlas_discover_subagent_options"
 
     # ------------------------------------ 1. launch without discovery first
     results, answer, frames = await run_turn(ws, "plan=launch_only")
@@ -199,11 +199,11 @@ async def main():
     text = result_text(launched)
     check(
         (launched or {}).get("success") is False,
-        "atlas_launch with no prior discovery is refused",
+        "atlas_launch_subagent with no prior discovery is refused",
         text,
     )
     check(
-        "discover_launch_options" in text,
+        "discover_subagent_options" in text,
         "the refusal names the discovery tool the model must run first",
         text,
     )
@@ -221,7 +221,7 @@ async def main():
         "no sub-conversation run was started by the refused launch",
     )
     check(
-        "discover_launch_options" in answer,
+        "discover_subagent_options" in answer,
         "the refusal reached the model, not just the transcript",
         answer,
     )
@@ -233,7 +233,7 @@ async def main():
     check((discovered or {}).get("success") is True, "discovery succeeds", discovered)
     check(
         (launched or {}).get("success") is True,
-        "atlas_launch after discovery starts the sub-conversation",
+        "atlas_launch_subagent after discovery starts the sub-conversation",
         result_text(launched),
     )
     check(

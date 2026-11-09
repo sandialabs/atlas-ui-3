@@ -1,4 +1,4 @@
-"""Scripted OpenAI-compatible mock LLM for ``atlas_follow_up`` testing.
+"""Scripted OpenAI-compatible mock LLM for ``atlas_follow_up_subagent`` testing.
 
 A puppet, as in the PR #949 fixture it is copied from: a directive in the last
 user message names the exact tool calls the parent conversation emits, so the
@@ -8,16 +8,16 @@ backend does with those calls is the real code path.
 Directives (whitespace separated, key=value) in the last user message:
 
   plan=NAME    which scripted sequence to run
-  run=ID       run_id passed to atlas_follow_up / atlas_result
+  run=ID       run_id passed to atlas_follow_up_subagent / atlas_get_subagent_result
   task=NAME    the sub-conversation's launch prompt (default CHILDTASK)
-  ws=NAME      the workspace passed to atlas_launch (default Research)
+  ws=NAME      the workspace passed to atlas_launch_subagent (default Research)
 
 Plans (the parent conversation):
 
-  launch       atlas_discover_launch_options, then atlas_launch with prompt
+  launch       atlas_discover_subagent_options, then atlas_launch_subagent with prompt
                ``<task> alpha``.
-  follow_up    atlas_follow_up(run, "FOLLOWUPMSG beta").
-  result       atlas_result(run).
+  follow_up    atlas_follow_up_subagent(run, "FOLLOWUPMSG beta").
+  result       atlas_get_subagent_result(run).
 
 When a plan's rounds are done the mock answers ``TOOLSAID<<<...>>>`` with the
 tool messages it was handed, verbatim.
@@ -44,10 +44,10 @@ app = FastAPI()
 LOG = []
 LOCK = threading.Lock()
 
-DISCOVER = "atlas_discover_launch_options"
-LAUNCH = "atlas_launch"
-FOLLOW_UP = "atlas_follow_up"
-RESULT = "atlas_result"
+DISCOVER = "atlas_discover_subagent_options"
+LAUNCH = "atlas_launch_subagent"
+FOLLOW_UP = "atlas_follow_up_subagent"
+RESULT = "atlas_get_subagent_result"
 
 # Each plan is the list of tool-call rounds to emit, in order. A round is a
 # list so a single assistant turn can carry more than one call.

@@ -721,7 +721,7 @@ async def test_follow_up_after_the_workspace_is_revoked_is_refused(factory):
     message = response.json()["detail"]["message"]
     assert "/api/agent-runs/options" in message
     assert "sub-conversation" not in message
-    assert "atlas_discover_launch_options" not in message
+    assert "atlas_discover_subagent_options" not in message
 
 
 async def test_follow_up_is_refused_while_waiting_for_the_user(factory):

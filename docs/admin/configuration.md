@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-10-29
+Last updated: 2026-11-08
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -105,15 +105,68 @@ AGENT_SLEEP_MAX_TURN_SECONDS=7200
 - **Deploys**: a turn parked in a long sleep delays graceful shutdown; expect such turns to be
   killed by a rolling restart.
 
-### Sub-Conversations (`atlas_launch`)
+### Subagents / Sub-Conversations (`atlas_launch_subagent`)
 
-A conversation can start other conversations through the built-in `atlas_launch` tool, ATLAS's
-equivalent of subagents (issue #925). The model supplies a `workspace`, a `model` and a
-`prompt`; the call returns the new conversation's id immediately and does not wait for it to
-finish. The child's transcript is its own conversation in the user's history.
+A conversation can delegate work to subagents through the built-in `atlas_launch_subagent`
+tool (issue #925). A subagent is a sub-conversation: the model supplies a `workspace`, a
+`model` and a `prompt`; the call returns the new conversation's id and a run id immediately
+and does not wait for it to finish. The child's transcript is its own conversation in the
+user's history.
+
+#### Tool names and the deprecated aliases
+
+The subagent tools were renamed in issue #1141, because `atlas_launch` read as starting an
+ATLAS instance rather than delegating a task. The tools panel lists them under a
+**Subagents** heading:
+
+| Tool | Shown as | Deprecated alias |
+|---|---|---|
+| `atlas_launch_subagent` | Launch Subagent | `atlas_launch` |
+| `atlas_get_subagent_runs` | Get Subagent Runs | `atlas_get_runs` |
+| `atlas_get_subagent_result` | Get Subagent Result | `atlas_result` |
+| `atlas_follow_up_subagent` | Follow Up Subagent | `atlas_follow_up` |
+| `atlas_discover_subagent_options` | Discover Subagent Options | `atlas_discover_launch_options` |
+
+Parameters and return values are unchanged. The `get_subagent_*` tools only ever cover the
+sub-conversations the calling conversation launched, which is why they carry the subagent
+name; runs started from the browser or through the [agent-runs API](agent-runs-api.md) are
+not subagents and are not reachable through them.
+
+**Transition.** The old names remain callable as deprecated aliases, so existing agents,
+saved prompts, stored tool selections, saved workspaces and API clients keep working without
+changes:
+
+- A tool call under an old name runs the renamed tool. Each such call is logged at INFO as
+  `Deprecated tool name <old> called; running it as <new>`, so you can see what still
+  depends on an alias.
+- A tool selection that carries an old name enables the renamed tool. Only the new names
+  are advertised to the model and listed in the tools panel.
+- A [hook](hooks.md) matcher written against either spelling fires for a call under the
+  other one, so a deny or approval policy is neither retired by the rename nor bypassed
+  through an alias.
+- A mandatory-approval rule written under either spelling applies to a call under the other
+  one. In `mcp.json` these rules use the tool's short name under its server, not the
+  fully qualified name in the table above: `"atlas": {"require_approval": ["launch_subagent"]}`
+  (an existing `["launch"]` keeps working).
+- Tool-call hook payloads (`PreToolUse`, `PermissionRequest`, `PostToolUse`) report the
+  tool's current name in `tool_name` even when the model called a deprecated alias, and
+  the spelling actually used in `tool_name_called`. A hook script that compares
+  `tool_name` against an old name should be updated to the new one.
+- `UserPromptSubmit` payloads list `selected_tools` as the client sent them, so they may
+  hold either spelling. A script that keeps its own list of built-in tools (for example a
+  copy of `hook-examples/user_prompt_submit_strip_implied_search.py`) should add the new
+  names; until it does it treats them as unknown tools.
+
+Move prompts, hook scripts and clients to the new names when convenient. No removal is
+scheduled; if the aliases are ever retired, the release that does it will list the removal
+under Breaking Changes.
+
+The settings below keep their existing names (`FEATURE_ATLAS_LAUNCH_ENABLED`,
+`ATLAS_LAUNCH_MAX_DEPTH`, `ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN`); no configuration change is
+needed.
 
 ```bash
-# Expose the atlas_launch tool (default: false). Only effective when chat history and
+# Expose the atlas_launch_subagent tool (default: false). Only effective when chat history and
 # agent mode are also enabled, since a launched run is a background run.
 FEATURE_ATLAS_LAUNCH_ENABLED=false
 
@@ -135,14 +188,14 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
   does not raise a user's ceiling on concurrent runs.
 - **Stopping a conversation stops the ones it launched**, including deeper descendants, and the
   same cascade applies when a run is stopped by `MAX_RUN_WALL_CLOCK_SECONDS`.
-- **Tool approval**: approving the `atlas_launch` call is the approval for the sub-conversation's
+- **Tool approval**: approving the `atlas_launch_subagent` call is the approval for the sub-conversation's
   own tool calls - and a launched run now appears in the history list while it executes (titled
   by its prompt), so an approval that does pause it has a visible place to be answered from.
   Tools an admin has pinned to mandatory approval (`FORCE_TOOL_APPROVAL_GLOBALLY` or
   per-tool config) are exempt from that approval and from the client's auto-approve: they still
   prompt inside the sub-conversation, which pauses until the user opens it. Keep such tools out
   of workspaces you expect to hand off.
-- **Follow-ups**: the same flag also exposes `atlas_follow_up`, which sends the next message
+- **Follow-ups**: the same flag also exposes `atlas_follow_up_subagent`, which sends the next message
   to a finished sub-conversation. It runs as a new turn of that sub-conversation on the model,
   tools and data sources it was launched with, re-checked against the user's access at that
   moment (a tool it loses stays lost; a data source that cannot be authorized for one turn is

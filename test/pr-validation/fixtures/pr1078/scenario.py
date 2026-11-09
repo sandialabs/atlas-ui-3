@@ -1,4 +1,4 @@
-"""End-to-end scenario for ``atlas_follow_up`` against a running backend.
+"""End-to-end scenario for ``atlas_follow_up_subagent`` against a running backend.
 
 The launching conversation sends a follow-up message to a sub-conversation it
 launched. Everything goes through the real WebSocket chat endpoint and the
@@ -22,7 +22,7 @@ WS = f"ws://127.0.0.1:{PORT}/ws"
 API = f"http://127.0.0.1:{PORT}"
 USER = "owner@example.com"
 OTHER = "intruder@example.com"
-TOOLS = ["atlas_discover_launch_options", "atlas_launch", "atlas_follow_up", "atlas_result"]
+TOOLS = ["atlas_discover_subagent_options", "atlas_launch_subagent", "atlas_follow_up_subagent", "atlas_get_subagent_result"]
 FAILED = 0
 
 
@@ -154,7 +154,7 @@ async def main():
     if not [w for w in (body or {}).get("workspaces", []) if w.get("name") == "Research"]:
         status, body = request("/api/workspaces", USER, "POST", {
             "name": "Research",
-            "description": "atlas_follow_up validation workspace",
+            "description": "atlas_follow_up_subagent validation workspace",
             "config": {"selected_tools": ["atlas_sleep"], "selected_data_sources": []},
         })
         check(status == 200, "a saved workspace can be created over the REST API", status)
@@ -164,13 +164,13 @@ async def main():
     for server in (body or {}).get("tools") or []:
         if isinstance(server, dict) and server.get("server") == "atlas":
             atlas_tools = server.get("tools") or []
-    check("follow_up" in atlas_tools, "/api/config advertises atlas_follow_up", atlas_tools)
+    check("follow_up_subagent" in atlas_tools, "/api/config advertises atlas_follow_up_subagent", atlas_tools)
 
     ws = await websockets.connect(WS, additional_headers={"X-User-Email": USER})
 
     # --------------------------------------------------- 1. launch a child
     results, parent, _ = await run_turn(ws, "plan=launch")
-    launched = handle_from(result_text(result_for(results, "atlas_launch")))
+    launched = handle_from(result_text(result_for(results, "atlas_launch_subagent")))
     check(bool(launched.get("run_id")), "the parent launches a sub-conversation", launched)
     child_conv = launched.get("conversation_id")
     parent_conv = (parent or {}).get("conversation_id")
@@ -185,9 +185,9 @@ async def main():
     results, parent2, frames = await run_turn(
         ws, f"plan=follow_up run={launched['run_id']}", conversation_id=parent_conv,
     )
-    frame = result_for(results, "atlas_follow_up")
+    frame = result_for(results, "atlas_follow_up_subagent")
     followed = handle_from(result_text(frame))
-    check((frame or {}).get("success") is True, "atlas_follow_up succeeds", result_text(frame))
+    check((frame or {}).get("success") is True, "atlas_follow_up_subagent succeeds", result_text(frame))
     check(
         followed.get("conversation_id") == child_conv,
         "the follow-up continues the SAME sub-conversation",
@@ -228,26 +228,26 @@ async def main():
             reply,
         )
 
-    # ------------------------------------- 3. read the reply with atlas_result
+    # ------------------------------------- 3. read the reply with atlas_get_subagent_result
     results, _, _ = await run_turn(
         ws, f"plan=result run={followed.get('run_id')}", conversation_id=parent_conv,
     )
-    text = result_text(result_for(results, "atlas_result"))
+    text = result_text(result_for(results, "atlas_get_subagent_result"))
     check("FOLLOWUPMSG beta" in text and '"result_status": "available"' in text,
-          "atlas_result on the new run id returns the follow-up's reply", text)
+          "atlas_get_subagent_result on the new run id returns the follow-up's reply", text)
 
     results, _, _ = await run_turn(
         ws, f"plan=result run={launched['run_id']}", conversation_id=parent_conv,
     )
-    text = result_text(result_for(results, "atlas_result"))
+    text = result_text(result_for(results, "atlas_get_subagent_result"))
     check("ECHO: CHILDTASK alpha" in text and "FOLLOWUPMSG" not in text,
-          "atlas_result on the ORIGINAL run id still returns that run's own reply", text)
+          "atlas_get_subagent_result on the ORIGINAL run id still returns that run's own reply", text)
 
     # ----------------------------------- 4. a second follow-up chains on
     results, _, _ = await run_turn(
         ws, f"plan=follow_up run={followed.get('run_id')}", conversation_id=parent_conv,
     )
-    again = handle_from(result_text(result_for(results, "atlas_follow_up")))
+    again = handle_from(result_text(result_for(results, "atlas_follow_up_subagent")))
     check(again.get("conversation_id") == child_conv,
           "a follow-up addressed by the previous follow-up's run id reaches the same child", again)
     messages = wait_for_messages(child_conv, 6)
@@ -256,12 +256,12 @@ async def main():
 
     # -------------------------------- 5. refused while the child is running
     results, slow_parent, _ = await run_turn(ws, "plan=launch task=SLOWCHILD")
-    slow = handle_from(result_text(result_for(results, "atlas_launch")))
+    slow = handle_from(result_text(result_for(results, "atlas_launch_subagent")))
     results, _, _ = await run_turn(
         ws, f"plan=follow_up run={slow.get('run_id')}",
         conversation_id=(slow_parent or {}).get("conversation_id"),
     )
-    frame = result_for(results, "atlas_follow_up")
+    frame = result_for(results, "atlas_follow_up_subagent")
     check(
         (frame or {}).get("success") is False and "still working" in result_text(frame),
         "a follow-up to a sub-conversation that is still running is refused",
@@ -270,7 +270,7 @@ async def main():
 
     # -------------------------------------------- 6. foreign / bogus run ids
     results, _, _ = await run_turn(ws, "plan=follow_up run=not-a-real-run")
-    frame = result_for(results, "atlas_follow_up")
+    frame = result_for(results, "atlas_follow_up_subagent")
     check(
         (frame or {}).get("success") is False and "not a sub-conversation" in result_text(frame),
         "an unknown run id is refused",
@@ -278,7 +278,7 @@ async def main():
     )
     # A fresh parent conversation cannot reach the first parent's child.
     results, _, _ = await run_turn(ws, f"plan=follow_up run={launched['run_id']}")
-    frame = result_for(results, "atlas_follow_up")
+    frame = result_for(results, "atlas_follow_up_subagent")
     check(
         (frame or {}).get("success") is False and "not a sub-conversation" in result_text(frame),
         "another conversation cannot follow up on a child it did not launch",
@@ -288,7 +288,7 @@ async def main():
 
     intruder = await websockets.connect(WS, additional_headers={"X-User-Email": OTHER})
     results, _, _ = await run_turn(intruder, f"plan=follow_up run={launched['run_id']}")
-    frame = result_for(results, "atlas_follow_up")
+    frame = result_for(results, "atlas_follow_up_subagent")
     check(
         frame is not None and frame.get("success") is False
         and "not a sub-conversation" in result_text(frame),

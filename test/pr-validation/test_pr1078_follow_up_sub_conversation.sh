@@ -1,19 +1,19 @@
 #!/bin/bash
-# Test script for PR #1078 (atlas_follow_up): the launching conversation sends a
+# Test script for PR #1078 (atlas_follow_up_subagent): the launching conversation sends a
 # follow-up message to a sub-conversation it launched.
 #
-#   1. /api/config advertises atlas_follow_up when FEATURE_ATLAS_LAUNCH_ENABLED
+#   1. /api/config advertises atlas_follow_up_subagent when FEATURE_ATLAS_LAUNCH_ENABLED
 #      is on.
 #   2. A parent launches a sub-conversation, which answers and is saved.
-#   3. A later parent turn sends atlas_follow_up: it continues the SAME child
+#   3. A later parent turn sends atlas_follow_up_subagent: it continues the SAME child
 #      conversation as a new run hung off the sending turn, the child answers
 #      with its earlier transcript in context, and both messages are saved.
-#   4. atlas_result on the new run id returns the follow-up's reply.
+#   4. atlas_get_subagent_result on the new run id returns the follow-up's reply.
 #   5. A second follow-up, addressed by the first follow-up's run id, appends.
 #   6. A follow-up to a child that is still running is refused.
 #   7. Unknown run ids, another conversation's child and another user's child
 #      are all refused.
-#   8. With the flag off, atlas_follow_up is not advertised.
+#   8. With the flag off, atlas_follow_up_subagent is not advertised.
 #   9. Backend unit suite.
 #
 # A real backend is started on a free port with a scripted OpenAI-compatible
@@ -111,7 +111,7 @@ print_header "Starting backend on :$ATLAS_PORT with FEATURE_ATLAS_LAUNCH_ENABLED
 start_backend true "$WORK/backend.log"
 print_result $? "backend is up with launch enabled"
 
-print_header "1-7. atlas_follow_up, over the real WebSocket and REST API"
+print_header "1-7. atlas_follow_up_subagent, over the real WebSocket and REST API"
 SCENARIO_OUT="$(PYTHONPATH="$PROJECT_ROOT" python "$FIXTURES/scenario.py" 2>&1)"
 SCENARIO_RC=$?
 echo "$SCENARIO_OUT"
@@ -120,7 +120,7 @@ if [ $SCENARIO_RC -ne 0 ]; then
 fi
 print_result $SCENARIO_RC "end-to-end scenario"
 
-print_header "8. With the feature flag off, atlas_follow_up is not offered"
+print_header "8. With the feature flag off, atlas_follow_up_subagent is not offered"
 stop_backend
 rm -f "$WORK/data/chat_history.db"
 start_backend false "$WORK/backend-off.log"
@@ -138,7 +138,7 @@ else
         *) RC=0 ;;
     esac
 fi
-print_result $RC "atlas_follow_up is not advertised when the flag is off"
+print_result $RC "atlas_follow_up_subagent is not advertised when the flag is off"
 stop_backend
 
 print_header "9. Backend unit suite"

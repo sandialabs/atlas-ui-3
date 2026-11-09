@@ -78,7 +78,7 @@ export function useConversationRuns() {
 					title: data.title || prev[data.conversation_id]?.title || null,
 					// A plain turn ends with the socket: nothing to rediscover.
 					connection_bound: data.connection_bound === true,
-					// Set for a run launched by atlas_launch: the client scopes
+					// Set for a run launched by atlas_launch_subagent: the client scopes
 					// background auto-approve to runs the user started.
 					parent_run_id: data.parent_run_id || prev[data.conversation_id]?.parent_run_id || null,
 					// The launching conversation, so the history tree can nest

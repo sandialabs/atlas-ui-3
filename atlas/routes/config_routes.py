@@ -23,6 +23,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     LAUNCH_GATED_TOOL_NAMES,
     SEARCH_TOOL_NAME,
     launch_tool_enabled,
+    normalize_tool_name,
     search_tools_enabled,
 )
 from atlas.modules.mcp_tools.atlas_server import (
@@ -509,11 +510,17 @@ async def get_config(
 
     # Only include approval settings for tools the user has access to
     for tool_name, approval_config in tool_approvals_config.tools.items():
-        if tool_name in authorized_tool_names:
-            filtered_tool_approvals[tool_name] = {
-                "require_approval": approval_config.require_approval,
-                "allow_edit": approval_config.allow_edit
-            }
+        # A rule written under a built-in's retired name (``atlas_launch``) is
+        # reported under the name the client now lists the tool by (#1141).
+        listed_name = normalize_tool_name(tool_name)
+        if listed_name in authorized_tool_names:
+            entry = filtered_tool_approvals.setdefault(listed_name, {
+                "require_approval": False,
+                "allow_edit": approval_config.allow_edit,
+            })
+            entry["require_approval"] = bool(
+                entry["require_approval"] or approval_config.require_approval
+            )
 
     return {
         "app_name": app_settings.app_name,

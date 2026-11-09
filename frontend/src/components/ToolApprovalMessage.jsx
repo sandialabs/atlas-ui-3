@@ -3,6 +3,7 @@ import { useChat } from '../contexts/ChatContext'
 import { useToast } from './ui/toastContext'
 import { approvalReason, resolveAutoApproved } from '../utils/toolApproval'
 import { FOCUS_RING } from '../utils/focusRing'
+import ToolNameLabel from './ToolNameLabel'
 
 // Inline tool-approval prompt rendered as a chat message. Extracted from
 // Message.jsx. `compact` (default true) renders the dense single-line row added
@@ -231,7 +232,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             }`}>
               {settledLabel}
             </span>
-            <span className="font-medium">{message.tool_name}</span>
+            <ToolNameLabel toolName={message.tool_name} className="font-medium" />
           </div>
           {isRejected && resolvedReason && (
             <div className="text-sm text-gray-400">Reason: {resolvedReason}</div>
@@ -246,7 +247,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-600">
             APPROVAL REQUIRED
           </span>
-          <span className="font-medium">{message.tool_name}</span>
+          <ToolNameLabel toolName={message.tool_name} className="font-medium" />
         </div>
         <p className="text-xs text-gray-400 -mt-2 mb-3">{approvalReason(message, settings)}</p>
 
@@ -335,7 +336,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         }`}>
           {settledLabel}
         </span>
-        <span className="font-medium text-sm">{message.tool_name}</span>
+        <ToolNameLabel toolName={message.tool_name} className="font-medium text-sm" />
         {isRejected && resolvedReason && (
           <span className="text-sm text-gray-400">— {resolvedReason}</span>
         )}
@@ -361,7 +362,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-600">
             APPROVAL REQUIRED
           </span>
-          <span className="font-medium text-sm">{message.tool_name}</span>
+          <ToolNameLabel toolName={message.tool_name} className="font-medium text-sm" />
           {!isExpanded && argCount > 0 && (
             <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
           )}

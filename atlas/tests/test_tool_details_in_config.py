@@ -151,7 +151,7 @@ def test_atlas_pseudo_server_includes_observation_tools_when_launch_is_enabled()
         sleep_enabled=True, search_enabled=True, launch_enabled=True
     )
 
-    assert {"launch", "get_runs", "result"} <= set(tools_info["tools"])
+    assert {"launch_subagent", "get_subagent_runs", "get_subagent_result"} <= set(tools_info["tools"])
 
 
 def test_atlas_pseudo_server_drops_disabled_tools():

@@ -35,7 +35,7 @@ PORT = os.environ["ATLAS_PORT"]
 WS = f"ws://127.0.0.1:{PORT}/ws"
 API = f"http://127.0.0.1:{PORT}"
 USER = "owner@example.com"
-TOOLS = ["atlas_discover_launch_options", "atlas_launch", "atlas_follow_up"]
+TOOLS = ["atlas_discover_subagent_options", "atlas_launch_subagent", "atlas_follow_up_subagent"]
 FAILED = 0
 
 
@@ -180,7 +180,7 @@ def wait_for_messages(conversation_id, count, timeout=60):
 async def launch_child(ws, ws_name, task="CHILDTASK"):
     """One parent turn that launches a sub-conversation and waits for it."""
     results, parent = await run_turn(ws, f"plan=launch task={task} ws={ws_name}")
-    handle = handle_from(result_text(result_for(results, "atlas_launch")))
+    handle = handle_from(result_text(result_for(results, "atlas_launch_subagent")))
     parent_conv = (parent or {}).get("conversation_id")
     return handle, parent_conv
 
@@ -189,7 +189,7 @@ async def follow_up(ws, run_id, conversation_id):
     results, _ = await run_turn(
         ws, f"plan=follow_up run={run_id}", conversation_id=conversation_id,
     )
-    return result_for(results, "atlas_follow_up")
+    return result_for(results, "atlas_follow_up_subagent")
 
 
 async def main():

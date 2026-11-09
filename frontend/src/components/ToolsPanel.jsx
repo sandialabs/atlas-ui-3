@@ -8,7 +8,7 @@ import { classificationsDisplayLabel } from '../utils/complianceDisplay'
 import UnsavedChangesDialog from './UnsavedChangesDialog'
 import TokenInputModal from './TokenInputModal'
 import { useServerAuthStatus } from '../hooks/useServerAuthStatus'
-import { sortAtlasFirst } from '../constants/atlasTools'
+import { sortAtlasFirst, atlasToolGroup, subagentToolLabel } from '../constants/atlasTools'
 import {
   SEARCH_AUTO_ENABLED_NOTE,
   SEARCH_EXPLICIT_NOTE,
@@ -741,8 +741,11 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       return true
     }
     
-    // Search in tool names
-    if (server.tools.some(tool => tool.toLowerCase().includes(searchLower))) {
+    // Search in tool names, and in the title a subagent tool is shown by
+    if (server.tools.some(tool =>
+      tool.toLowerCase().includes(searchLower)
+      || (subagentToolLabel(`${server.server}_${tool}`) || '').toLowerCase().includes(searchLower)
+    )) {
       return true
     }
     
@@ -1214,8 +1217,19 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                       <span className="text-sm font-bold text-gray-50">Tools</span>
                                     </div>
                                     <div className="flex flex-wrap gap-1">
-                {server.tools.map(tool => {
+                {server.tools.map((tool, toolIndex) => {
                                     const toolKey = `${server.server}_${tool}`
+                                    // The subagent tools sit together under
+                                    // one heading and are titled by what they
+                                    // do (#1141); the tool name stays visible
+                                    // in the chip's tooltip and details.
+                                    const toolGroup = atlasToolGroup(toolKey)
+                                    const previousTool = server.tools[toolIndex - 1]
+                                    const startsGroup = Boolean(toolGroup) && (
+                                      toolIndex === 0
+                                      || atlasToolGroup(`${server.server}_${previousTool}`) !== toolGroup
+                                    )
+                                    const toolLabel = subagentToolLabel(toolKey) || tool
                                     // The built-in search tool is on because the
                                     // user selected data sources (#1102). It is
                                     // shown as on and cannot be switched off
@@ -1229,6 +1243,14 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
 
                                     return (
                                       <div key={tool} className="flex flex-col gap-1 w-full">
+                                        {startsGroup && (
+                                          <p
+                                            className="text-xs font-semibold uppercase tracking-wide text-gray-300 mt-2"
+                                            data-testid={`tool-group-${toolGroup}`}
+                                          >
+                                            {toolGroup}
+                                          </p>
+                                        )}
                                         <div className="flex items-center gap-1">
                                           <button
                                             type="button"
@@ -1245,10 +1267,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                               ? (explicit
                                                 ? SEARCH_EXPLICIT_REMOVE_TITLE
                                                 : SEARCH_AUTO_ENABLED_SELECT_TITLE)
-                                              : `Click to ${isSelected ? 'disable' : 'enable'} ${tool}`}
+                                              : `Click to ${isSelected ? 'disable' : 'enable'} ${toolLabel === tool ? tool : `${toolLabel} (${toolKey})`}`}
                                           >
                                             <SelectionMark selected={isSelected} />
-                                            {tool}
+                                            {toolLabel}
                                           </button>
                                           {toolDetail && (
                                             <button

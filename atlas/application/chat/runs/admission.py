@@ -1,6 +1,6 @@
 """The one admission path for tracked runs (issues #884, #1128).
 
-Every way a run starts -- a WebSocket turn, ``atlas_launch`` from inside a run,
+Every way a run starts -- a WebSocket turn, ``atlas_launch_subagent`` from inside a run,
 the agent-runs REST API -- goes through :func:`admit_run`. That is what makes
 ``MAX_CONCURRENT_RUNS_PER_USER`` apply the same way to all of them: before
 #1128 only the WebSocket handler copied the setting onto the registry, so a

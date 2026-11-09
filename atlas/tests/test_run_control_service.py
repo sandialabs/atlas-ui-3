@@ -329,7 +329,7 @@ async def test_stopping_a_finished_parent_stops_its_live_child_on_the_owner(clus
                                    parent_run_id=parent.run_id, depth=1)
     cluster.registry.attach_task(child.run_id, asyncio.create_task(asyncio.sleep(30)))
     await cluster.a.claim(child.run_id, child.conversation_id)
-    # atlas_launch returns a handle, so the parent usually finishes first.
+    # atlas_launch_subagent returns a handle, so the parent usually finishes first.
     cluster.registry.set_status(parent.run_id, RunStatus.COMPLETED)
     await _release(cluster, parent)
     answer = await _route_stop(OWNER, parent.run_id, parent.conversation_id)

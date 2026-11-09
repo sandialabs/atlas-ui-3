@@ -753,7 +753,7 @@ async def test_the_requesting_user_reaches_schema_scoping_with_unstreamed_conten
 
 @pytest.mark.asyncio
 async def test_a_retried_discovery_reports_its_real_options_not_the_cached_note():
-    """A failed ``atlas_discover_launch_options`` is exempt from the anti-loop
+    """A failed ``atlas_discover_subagent_options`` is exempt from the anti-loop
     guard so the model can retry it. The exemption is only worth having if the
     retry's result actually reaches the model: the launch that follows needs the
     discovered workspaces and models. Before #949's review fix the retry was

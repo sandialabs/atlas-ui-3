@@ -1,7 +1,7 @@
-"""The ``atlas_follow_up`` built-in tool: talking back to a sub-conversation.
+"""The ``atlas_follow_up_subagent`` built-in tool: talking back to a sub-conversation.
 
-``atlas_launch`` starts a sub-conversation and hands back a handle; the
-observation tools (``atlas_get_runs``, ``atlas_result``) let the launching
+``atlas_launch_subagent`` starts a sub-conversation and hands back a handle; the
+observation tools (``atlas_get_subagent_runs``, ``atlas_get_subagent_result``) let the launching
 conversation read what it said. This closes the loop: the launching
 conversation can send the sub-conversation its next message -- a correction,
 a clarifying question, the next step -- without starting over in a fresh child
@@ -46,7 +46,7 @@ def _revalidate_saved_workspace(
 
     A follow-up runs on the workspace the child was launched under -- the model
     never re-chooses one -- so the saved id is re-resolved here the way
-    ``atlas_launch`` resolves the workspace it is handed: scoped to the caller
+    ``atlas_launch_subagent`` resolves the workspace it is handed: scoped to the caller
     at the repository, so a workspace deleted, revoked, or reassigned since the
     launch is simply not found. Unlike the launch lookup there is no name
     fallback: a follow-up continues the child under its saved workspace or not
@@ -80,7 +80,7 @@ def _revalidate_saved_workspace(
         workspace = repository.get_workspace(workspace_id, user_email)
     except Exception:
         logger.warning(
-            "Workspace re-validation failed during atlas_follow_up", exc_info=True
+            "Workspace re-validation failed during atlas_follow_up_subagent", exc_info=True
         )
         raise LaunchRefused(
             f"The workspace '{saved_name}' that sub-conversation was launched "
@@ -98,7 +98,7 @@ def _revalidate_saved_workspace(
             "under is no longer available to you -- it was deleted, or its "
             "access was revoked, since the launch -- so the sub-conversation "
             "cannot be continued. Launch a new sub-conversation with a "
-            "workspace you can currently access (atlas_discover_launch_options "
+            "workspace you can currently access (atlas_discover_subagent_options "
             "lists them).",
             code="workspace_not_found",
         )
@@ -121,7 +121,7 @@ async def follow_up_sub_conversation(
     access now, exactly as a launch would be: a follow-up can only narrow
     what the sub-conversation may touch, never widen it.
 
-    Like ``atlas_launch`` it returns as soon as the run is admitted.
+    Like ``atlas_launch_subagent`` it returns as soon as the run is admitted.
     """
     if factory is None:
         from atlas.infrastructure.app_factory import app_factory as factory
@@ -155,7 +155,7 @@ async def follow_up_sub_conversation(
             f"{MAX_PROMPT_CHARS}. Summarize it for the sub-conversation."
         )
 
-    # Scoped exactly like ``atlas_result``: only direct children of this
+    # Scoped exactly like ``atlas_get_subagent_result``: only direct children of this
     # conversation, owned by this user. A guessed or foreign run id gets the
     # same answer as an unknown one.
     children = _scoped_children(context)
@@ -164,7 +164,7 @@ async def follow_up_sub_conversation(
         raise LaunchRefused(
             "That run is not a sub-conversation of this conversation, or it "
             "has expired (sub-conversations are kept for about 30 minutes "
-            "after they finish). Use a current run_id from atlas_get_runs, or "
+            "after they finish). Use a current run_id from atlas_get_subagent_runs, or "
             "launch a new sub-conversation."
         )
     # Continue from the sub-conversation's *latest* run, whichever of its run
@@ -190,7 +190,7 @@ async def follow_up_sub_conversation(
         raise LaunchRefused(
             f"Sub-conversation {target.conversation_id} is still working (run "
             f"{active.run_id}, status {active.status.value}). Wait for it with "
-            "atlas_sleep and check atlas_result before sending a follow-up."
+            "atlas_sleep and check atlas_get_subagent_result before sending a follow-up."
         )
 
     if not any(
@@ -260,7 +260,7 @@ async def follow_up_sub_conversation(
     )
 
     logger.info(
-        "atlas_follow_up started run %s on conversation %s (after run %s) for %s",
+        "atlas_follow_up_subagent started run %s on conversation %s (after run %s) for %s",
         record.run_id,
         sanitize_for_logging(record.conversation_id),
         sanitize_for_logging(target.run_id),
@@ -293,9 +293,9 @@ async def follow_up_sub_conversation(
 async def execute_follow_up_tool(
     tool_call: Any, context: Optional[Dict[str, Any]]
 ) -> ToolResult:
-    """``atlas_follow_up`` as the tool manager calls it.
+    """``atlas_follow_up_subagent`` as the tool manager calls it.
 
-    Refusals come back as unsuccessful results, as for ``atlas_launch``: "still
+    Refusals come back as unsuccessful results, as for ``atlas_launch_subagent``: "still
     working" or "not one of yours" is something the model can act on.
     """
     arguments = getattr(tool_call, "arguments", None) or {}
@@ -313,7 +313,7 @@ async def execute_follow_up_tool(
             error=str(e),
         )
     except Exception as e:  # pragma: no cover - defensive
-        logger.error("atlas_follow_up failed unexpectedly: %s", e, exc_info=True)
+        logger.error("atlas_follow_up_subagent failed unexpectedly: %s", e, exc_info=True)
         message = "The follow-up could not be sent due to an internal error."
         return ToolResult(
             tool_call_id=getattr(tool_call, "id", None),
@@ -325,7 +325,7 @@ async def execute_follow_up_tool(
     summary = (
         f"Sent the follow-up to sub-conversation {handle['conversation_id']}; "
         f"it is answering as run {handle['run_id']}. This call did not wait "
-        "for the reply -- read it with atlas_result using that run_id.\n"
+        "for the reply -- read it with atlas_get_subagent_result using that run_id.\n"
         + (
             "It will pause for approval on these tools until the user opens "
             f"that conversation: {', '.join(handle['tools_needing_approval'])}.\n"

@@ -5,8 +5,8 @@ Last updated: 2026-11-04
 The agent-runs API lets one trusted external service -- a scheduler, a CI job, a webhook
 relay -- start an ATLAS agent conversation on behalf of a user, with no browser or CLI session,
 then poll it, send it follow-up messages, and stop it (issue #1105). It is the REST form of the
-sub-conversation tools a conversation already has (`atlas_discover_launch_options`,
-`atlas_launch`, `atlas_get_runs`, `atlas_result`, `atlas_follow_up`), and runs on the same
+sub-conversation tools a conversation already has (`atlas_discover_subagent_options`,
+`atlas_launch_subagent`, `atlas_get_subagent_runs`, `atlas_get_subagent_result`, `atlas_follow_up_subagent`), and runs on the same
 machinery: the same workspace and model checks, the same re-filtering of tools and data sources
 through the user's ACLs, and the same run registry and concurrency caps.
 
@@ -49,11 +49,11 @@ server's OpenAPI document (`/openapi.json`, browsable at `/docs`) under the `age
 
 | Method and path | Mirrors | Purpose |
 |---|---|---|
-| `GET /api/agent-runs/options?user=` | `atlas_discover_launch_options` | Workspaces and models the user may launch with |
-| `POST /api/agent-runs` | `atlas_launch` | Start a run in a new top-level conversation |
-| `GET /api/agent-runs?user=` | `atlas_get_runs` | API-started runs still retained (optionally one user's) |
-| `GET /api/agent-runs/{run_id}` | `atlas_result` | Status, timestamps, error, `end_reason` and final reply |
-| `POST /api/agent-runs/{run_id}/follow-up` | `atlas_follow_up` | Next message in that run's conversation |
+| `GET /api/agent-runs/options?user=` | `atlas_discover_subagent_options` | Workspaces and models the user may launch with |
+| `POST /api/agent-runs` | `atlas_launch_subagent` | Start a run in a new top-level conversation |
+| `GET /api/agent-runs?user=` | `atlas_get_subagent_runs` | API-started runs still retained (optionally one user's) |
+| `GET /api/agent-runs/{run_id}` | `atlas_get_subagent_result` | Status, timestamps, error, `end_reason` and final reply |
+| `POST /api/agent-runs/{run_id}/follow-up` | `atlas_follow_up_subagent` | Next message in that run's conversation |
 | `POST /api/agent-runs/{run_id}/cancel` | Stop in the UI | Stop the run and anything it launched |
 
 ### Launch
@@ -106,7 +106,7 @@ launch never completed. Any of the conversation's run ids may be used; the newes
 capabilities are the ones carried forward.
 
 `POST /api/agent-runs/{run_id}/cancel` stops the run (and any sub-conversations it launched with
-`atlas_launch`), exactly like the stop button. `cancelled` says whether anything was still live.
+`atlas_launch_subagent`), exactly like the stop button. `cancelled` says whether anything was still live.
 As with follow-ups, any of the conversation's run ids may be used: if the run named has already
 finished, the conversation's in-progress API run (a later follow-up) is stopped instead, and the
 response describes that run. The named run's own sub-conversations are stopped either way. A turn
@@ -141,7 +141,7 @@ the type of `detail`.
 ## Approvals
 
 Ordinary tool approvals are given by the service: the request that names the task is the
-approval, the same way a user's approval of an `atlas_launch` call covers the sub-conversation's
+approval, the same way a user's approval of an `atlas_launch_subagent` call covers the sub-conversation's
 own tool calls. Tools an administrator has made approval-mandatory (`FORCE_TOOL_APPROVAL_GLOBALLY`
 or per-tool configuration) are **never** auto-approved:
 
@@ -168,7 +168,7 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
 ## Limits, replicas and restarts
 
 - `MAX_CONCURRENT_RUNS_PER_USER` and `MAX_RUN_WALL_CLOCK_SECONDS` apply to API runs as to any
-  other. With Redis the cap counts the user's runs on every replica, browser runs included; the `atlas_launch` depth and fan-out caps do not apply to the API run itself (it is a
+  other. With Redis the cap counts the user's runs on every replica, browser runs included; the `atlas_launch_subagent` depth and fan-out caps do not apply to the API run itself (it is a
   root, depth 0) but do apply to anything it launches. The global HTTP rate limiter applies to
   these endpoints. Messages are limited to 20,000 characters.
 - **Run state is per replica, status is shared.** Follow-up, cancel, listing and idempotency
@@ -186,7 +186,7 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
   retried. Saved transcripts are unaffected -- every completed turn is in the user's
   conversation history, where the user can read and continue it.
 - The API can see and act only on runs it started. A run the user started in the browser, or one
-  started by `atlas_launch`, answers `404 run_not_found` here even by its correct id.
+  started by `atlas_launch_subagent`, answers `404 run_not_found` here even by its correct id.
 
 ## Audit
 

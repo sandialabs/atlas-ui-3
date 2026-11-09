@@ -98,7 +98,7 @@ class ToolCallRecorder:
         self._user_email = user_email
         # The run this recorder belongs to, captured at construction. Since
         # issue #925 a turn's callback can carry frames that are not this
-        # turn's: a sub-conversation launched by ``atlas_launch`` emits over
+        # turn's: a sub-conversation launched by ``atlas_launch_subagent`` emits over
         # the same socket, tagged with its own run. Those rows belong in the
         # child's transcript, and persisting them here would splice a
         # sub-conversation's tool calls into its parent's saved history.

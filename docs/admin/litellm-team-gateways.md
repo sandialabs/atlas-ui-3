@@ -25,7 +25,7 @@ entry nor a gateway still fails validation. A gateway that is configured but
 unreachable (or rejects the credentials) is a discovery-time failure reported
 by the model picker and chat errors -- not a configuration-validation error.
 
-One limitation: sub-conversation launches (`atlas_launch` and the agent-runs
+One limitation: sub-conversation launches (`atlas_launch_subagent` and the agent-runs
 REST API) enumerate statically configured models, so a gateway-only deployment
 refuses launch discovery with a message asking for a static model. A gateway
 model names a LiteLLM team, which only the signed-in user's proxy session can
@@ -272,7 +272,7 @@ completion. Validate that path in staging before relying on it.
   request reaches LiteLLM. With a shared service key this check is what keeps
   users inside their teams, so removing a user from a team takes effect within
   `discovery_cache_seconds`.
-- **Not yet covered:** `atlas_launch` sub-conversations choose from the
+- **Not yet covered:** `atlas_launch_subagent` sub-conversations choose from the
   statically configured models only.
 - **Access control** (`groups`) and **compliance** (`compliance_level`) apply
   to every gateway model exactly as they do to configured models. A gateway a

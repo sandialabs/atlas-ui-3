@@ -8,7 +8,7 @@
  *
  * - Auto-approve answers a background run's tool approval request when the
  *   setting is on, never when it is off or the tool is admin-pinned.
- * - It does not answer for a conversation the model launched (atlas_launch
+ * - It does not answer for a conversation the model launched (atlas_launch_subagent
  *   child run): those arguments are model-chosen, and the on/off toggle must
  *   not silently broaden to approving them unattended.
  * - A failed send surfaces as a toast instead of leaving the run parked

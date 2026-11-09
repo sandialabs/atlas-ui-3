@@ -1,6 +1,6 @@
 """Parent-child conversation lineage (issue #1081).
 
-``atlas_launch`` starts a sub-conversation as a new conversation owned by the
+``atlas_launch_subagent`` starts a sub-conversation as a new conversation owned by the
 same user. The run registry knows that relationship while the runs are retained
 in memory, but the sidebar has to keep drawing the tree after the registry
 reaps a terminal run or the process restarts. The durable half of the

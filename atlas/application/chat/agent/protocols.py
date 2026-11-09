@@ -33,7 +33,7 @@ class AgentContext:
     citation_register: Optional[Any] = None
     # Whether this turn's transcript stays off the server (incognito or local
     # save mode). Carried so tools that would themselves persist something can
-    # honour it -- ``atlas_launch`` refuses to start a sub-conversation, whose
+    # honour it -- ``atlas_launch_subagent`` refuses to start a sub-conversation, whose
     # transcript is saved by definition (#925).
     incognito: bool = False
     # User opted into auto-approve for this turn. The tool gate reads the

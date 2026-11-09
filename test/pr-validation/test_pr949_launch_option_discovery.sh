@@ -1,15 +1,15 @@
 #!/bin/bash
 # Test script for PR #949: ATLAS launch option discovery.
 #
-# `atlas_discover_launch_options` publishes the caller's authorized workspaces
+# `atlas_discover_subagent_options` publishes the caller's authorized workspaces
 # and models, and a successful discovery is a hard precondition for
-# `atlas_launch`. Covers the PR's test plan end to end:
+# `atlas_launch_subagent`. Covers the PR's test plan end to end:
 #
 #   1. A saved workspace exists, and /api/config advertises the discovery tool
 #      when FEATURE_ATLAS_LAUNCH_ENABLED is on.
-#   2. atlas_launch with no prior discovery is refused, and the refusal tells
+#   2. atlas_launch_subagent with no prior discovery is refused, and the refusal tells
 #      the model to run discovery first -- no sub-conversation is started.
-#   3. Discovery followed by atlas_launch starts the sub-conversation under the
+#   3. Discovery followed by atlas_launch_subagent starts the sub-conversation under the
 #      discovered workspace.
 #   4. One step holding [launch, discovery] -- launch listed first -- still
 #      discovers first and launches (the pre-pass in execute_multiple_tools).
@@ -143,7 +143,7 @@ else
         *) RC=0 ;;
     esac
 fi
-print_result $RC "neither atlas_launch nor the discovery tool is advertised when the flag is off"
+print_result $RC "neither atlas_launch_subagent nor the discovery tool is advertised when the flag is off"
 stop_backend
 
 print_header "9. Backend unit suite"

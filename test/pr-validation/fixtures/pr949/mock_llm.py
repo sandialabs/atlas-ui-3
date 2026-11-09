@@ -2,27 +2,27 @@
 
 The model is a puppet: a directive in the last user message names the exact
 sequence of tool calls it should emit, one per round, so the scenario can drive
-the *order* of ``atlas_discover_launch_options`` and ``atlas_launch`` -- which
+the *order* of ``atlas_discover_subagent_options`` and ``atlas_launch_subagent`` -- which
 is the whole point of the feature under test -- rather than hoping a real model
 happens to call them the right way round.
 
 Directives (whitespace separated, key=value) in the last user message:
 
   plan=NAME    which scripted sequence to run (default ``echo``)
-  ws=NAME      workspace name passed to atlas_launch (default "Research")
-  model=NAME   model name passed to atlas_launch (default "scripted-mock")
+  ws=NAME      workspace name passed to atlas_launch_subagent (default "Research")
+  model=NAME   model name passed to atlas_launch_subagent (default "scripted-mock")
 
 Plans:
 
-  launch_only        atlas_launch, with no discovery first. The launch must be
+  launch_only        atlas_launch_subagent, with no discovery first. The launch must be
                      refused by the backend; the mock then answers with the
                      refusal text it was handed, so the scenario can assert on
                      what the model was actually told.
-  discover_launch    atlas_discover_launch_options, then atlas_launch.
-  same_step          both calls in ONE assistant turn, atlas_launch listed
+  discover_launch    atlas_discover_subagent_options, then atlas_launch_subagent.
+  same_step          both calls in ONE assistant turn, atlas_launch_subagent listed
                      first. Exercises the discovery-first pre-pass in
                      ``execute_multiple_tools``.
-  discover_only      atlas_discover_launch_options alone, then answer with the
+  discover_only      atlas_discover_subagent_options alone, then answer with the
                      raw options payload so the scenario can inspect its shape.
 
 Without a directive the mock answers immediately with "ECHO: <content>".
@@ -42,8 +42,8 @@ app = FastAPI()
 LOG = []
 LOCK = threading.Lock()
 
-DISCOVER = "atlas_discover_launch_options"
-LAUNCH = "atlas_launch"
+DISCOVER = "atlas_discover_subagent_options"
+LAUNCH = "atlas_launch_subagent"
 
 # Each plan is the list of tool-call rounds to emit, in order. A round is a
 # list so a single assistant turn can carry more than one call.

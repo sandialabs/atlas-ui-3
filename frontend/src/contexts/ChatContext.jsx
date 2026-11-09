@@ -684,7 +684,7 @@ export const ChatProvider = ({ children }) => {
 					// run would otherwise sit on every tool call until the user
 					// happened to open it -- the opposite of running unattended.
 					// Scoped to runs the user started: a child conversation the
-					// model launched (atlas_launch) runs on model-chosen
+					// model launched (atlas_launch_subagent) runs on model-chosen
 					// arguments, and an on/off toggle must not silently broaden
 					// to approving those unattended.
 					// The server also marks a request it kept on the gate on

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-11-04
+Last updated: 2026-11-08
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -234,7 +234,12 @@ Models can set `api_key_source: "globus"` with a `globus_scope` field. The Globu
   `atlas_canvas` is always available, and the server is pinned to the top of the tools panel.
   Defined in `atlas/modules/mcp_tools/atlas_server.py` / `frontend/src/constants/atlasTools.js`;
   pre-#855 names (`canvas_canvas`, `atlas_agent_sleep`, `atlas_rag_query`,
-  `atlas_rag_discover_data_sources`) still resolve
+  `atlas_rag_discover_data_sources`) still resolve. With sub-conversations enabled it also exposes the
+  subagent tools (`atlas_launch_subagent`, `atlas_get_subagent_runs`, `atlas_get_subagent_result`,
+  `atlas_follow_up_subagent`, `atlas_discover_subagent_options`); their pre-#1141 names
+  (`atlas_launch`, `atlas_get_runs`, `atlas_result`, `atlas_follow_up`,
+  `atlas_discover_launch_options`) are deprecated aliases in `DEPRECATED_TOOL_ALIASES` and must
+  keep resolving
 
 ### RAG Over MCP
 - Expected tools: `rag_discover_resources`, `rag_get_raw_results`, optional `rag_get_synthesized_results`
