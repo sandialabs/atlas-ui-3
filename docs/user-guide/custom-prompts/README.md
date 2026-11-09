@@ -5,6 +5,10 @@ per chat. When a custom prompt is active it **replaces** the default system
 prompt for that turn. Prompts are stored per-user in the chat-history database
 (DuckDB locally, PostgreSQL in production) and exposed via `/api/user-prompts`.
 
+To share a prompt with your groups, with versions, see the
+[Team Prompt Library](../team-prompt-library/README.md); the book icon next to
+a custom prompt copies it there as a private entry.
+
 This is distinct from MCP **selected prompts**, which are *prepended* to the
 conversation rather than replacing the default system prompt.
 

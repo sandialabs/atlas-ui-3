@@ -1,6 +1,6 @@
 # Chat History Persistence
 
-Last updated: 2026-11-08
+Last updated: 2026-11-09
 
 ## Overview
 
@@ -267,6 +267,14 @@ Four tables are created:
 | `conversation_messages` | Individual messages with role, content, sequence order, `message_type`, and a JSON `metadata` blob (carries tool-call detail) |
 | `tags` | User-defined tags for organizing conversations |
 | `conversation_tags` | Many-to-many junction between conversations and tags |
+
+The team prompt library (issue #1169, migration `004`) adds four more tables:
+`prompt_library_prompts` (entries and their drafts), `prompt_library_versions`
+(immutable published versions, unique on prompt and version number),
+`prompt_library_grants` (group and user sharing) and
+`prompt_library_audit_events` (governance events, no prompt text). The
+migration is additive; existing tables, including `user_prompts`, are not
+changed. See [Team Prompt Library](../user-guide/team-prompt-library/README.md).
 
 **DuckDB compatibility note**: No database-level foreign key constraints are used because DuckDB does not support CASCADE or UPDATE on FK-constrained tables. Referential integrity is enforced in the application layer.
 

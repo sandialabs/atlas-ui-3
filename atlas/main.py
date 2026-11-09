@@ -150,6 +150,7 @@ from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.oidc_auth_routes import api_router as oidc_api_router
 from atlas.routes.oidc_auth_routes import browser_router as oidc_browser_router
 from atlas.routes.persona_routes import router as persona_router
+from atlas.routes.prompt_library_routes import router as prompt_library_router
 from atlas.routes.suggestion_routes import suggestion_router
 from atlas.routes.telemetry_routes import telemetry_router
 from atlas.routes.user_prompt_routes import router as user_prompt_router
@@ -1709,6 +1710,7 @@ app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(agent_run_router)
 app.include_router(user_prompt_router)
+app.include_router(prompt_library_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
@@ -2597,6 +2599,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             # conversation's workspace binding for any client
                             # that does not send it.
                             workspace_id=data.get("workspace_id", UNSET),
+                            # Team prompt library reference (issue #1169):
+                            # resolved and authorized server-side; omitted
+                            # keeps a pinned conversation's version.
+                            library_prompt=data.get("library_prompt", UNSET),
                             steering=steering_channel,
                             # Per-conversation automatic compaction toggle
                             # (issue #877); a non-bool means the default.

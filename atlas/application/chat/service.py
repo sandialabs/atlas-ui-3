@@ -13,6 +13,7 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
+from atlas.application.chat import prompt_library_turn as library_turn
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
@@ -137,6 +138,7 @@ class ChatService:
         event_publisher: Optional[EventPublisher] = None,
         session_repository: Optional[SessionRepository] = None,
         conversation_repository: Optional[Any] = None,
+        prompt_library_service: Optional[Any] = None,
     ):
         """
         Initialize chat service with dependencies.
@@ -183,6 +185,9 @@ class ChatService:
 
         # Chat history persistence (None when feature disabled)
         self.conversation_repository = conversation_repository
+        # Team prompt library (issue #1169); None when the feature is off,
+        # which makes any library reference on a turn fail closed.
+        self.prompt_library_service = prompt_library_service
         if self.conversation_repository is not None and not callable(
             getattr(self.conversation_repository, "get_conversation_owner", None)
         ):
@@ -785,6 +790,22 @@ class ChatService:
             session, active_classification, user_email
         )
 
+        # Team prompt library (issue #1169): a shared entry is resolved here,
+        # server-side, from a reference -- never from client text -- after a
+        # fresh authorization check, and the exact version is pinned to the
+        # conversation. A refusal raises before the turn runs or is saved.
+        library_text = await library_turn.resolve_library_prompt_for_turn(
+            context=session.context,
+            user_email=user_email,
+            request=kwargs.pop("library_prompt", UNSET),
+            other_prompt_selected=bool(kwargs.get("custom_system_prompt")),
+            library=getattr(self, "prompt_library_service", None),
+            message_index=len(session.history.messages),
+            omitted=UNSET,
+        )
+        if library_text is not None:
+            kwargs["custom_system_prompt"] = library_text
+
         # Compliance for this turn. The active conversation classification --
         # the client-selected level, validated against the definitions -- is
         # the authority (issue #1032):
@@ -1345,6 +1366,7 @@ class ChatService:
         # display-only fallback and is NOT persisted back.
         canonical_messages = messages
         stored_workspace_id = None
+        stored_metadata = None
         binding = None
         if getattr(self, "conversation_repository", None) is not None:
             # A conversation with a run in flight is ahead of its stored
@@ -1374,6 +1396,7 @@ class ChatService:
             conv_metadata = conv.get("metadata")
             if isinstance(conv_metadata, dict):
                 stored_workspace_id = conv_metadata.get("workspace_id")
+                stored_metadata = conv_metadata
             binding = conv_class.binding_from_record(conv)
 
         if compliance_level is not UNSET:
@@ -1419,6 +1442,8 @@ class ChatService:
         # inherit whatever the session was carrying.
         session.context["workspace_id"] = stored_workspace_id
         session.context[conv_class.SESSION_BINDING_KEY] = binding
+        # The exact library version the conversation ran with (issue #1169).
+        library_turn.load_pin_from_metadata(session.context, stored_metadata)
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -1903,6 +1928,12 @@ class ChatService:
         # And for how the conversation was launched (issue #1187).
         previous_origin = session.context.get(ORIGIN_METADATA_KEY, UNSET)
         session.context[ORIGIN_METADATA_KEY] = None
+        # And for the pinned team-library prompt version (issue #1169).
+        previous_pin = {
+            key: session.context.get(key)
+            for key in (library_turn.PIN_CONTEXT_KEY, library_turn.PIN_HISTORY_CONTEXT_KEY)
+        }
+        library_turn.clear_pin(session.context)
 
         try:
             # Off the event loop: get_conversation issues several synchronous
@@ -1957,6 +1988,8 @@ class ChatService:
                 session.context[ORIGIN_METADATA_KEY] = previous_origin
             else:
                 session.context.pop(ORIGIN_METADATA_KEY, None)
+            if previous_conversation_id == conversation_id:
+                session.context.update(previous_pin)
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
@@ -1993,6 +2026,8 @@ class ChatService:
         # Likewise the recorded launch origin, so the live view of a turn on
         # an API conversation reports the same origin as its stored record.
         session.context[ORIGIN_METADATA_KEY] = origin_from_metadata(conv_metadata)
+        # The pinned library version travels with the stored record (#1169).
+        library_turn.load_pin_from_metadata(session.context, conv_metadata)
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
         # The history the session holds belongs to the previous conversation,
@@ -2120,6 +2155,8 @@ class ChatService:
             "agent_mode": bool(session.context.get("agent_mode")),
             "workspace_id": session.context.get("workspace_id"),
         }
+        # Server-managed pin of the team-library version in use (issue #1169).
+        metadata.update(library_turn.pin_metadata(session.context))
         # A launched sub-conversation's durable parent link (issue #1081).
         # Only the launch path sets this context key; a normal conversation has
         # none, and an unrelated conversation rehydrated into this session
