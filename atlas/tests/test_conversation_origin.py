@@ -237,6 +237,49 @@ async def test_a_session_moving_to_another_conversation_does_not_carry_the_origi
     assert ORIGIN_METADATA_KEY not in saves["next-conv"]
 
 
+@pytest.mark.asyncio
+async def test_a_browser_turn_carries_the_stored_origin_while_it_runs(chat_service, repo):
+    """The live view of a running turn must agree with the stored record.
+
+    ``GET /api/conversations/{id}`` prefers the run's live transcript, whose
+    metadata is built from the session context, so the context has to read
+    the origin back when it loads the conversation.
+    """
+    from atlas.application.chat.runs.in_flight import _live_metadata
+
+    await _run_turn(chat_service, "api-conv", launch_origin=API_SOURCE)
+    seen = {}
+    session_id = uuid4()
+
+    async def _execute(**_ignored):
+        session = await chat_service.session_repository.get(session_id)
+        seen.update(_live_metadata(session))
+        session.history.add_message(Message(role=MessageRole.USER, content="more"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
+        return {"type": "done"}
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(chat_service, "_get_orchestrator", return_value=orchestrator):
+        await chat_service.handle_chat_message(
+            session_id=session_id, content="more", model="gpt-4", user_email=USER,
+            conversation_id="api-conv",
+        )
+
+    assert seen[ORIGIN_METADATA_KEY] == ORIGIN_AGENT_RUNS_API
+    assert repo.get_conversation("api-conv", USER)["launch_origin"] == ORIGIN_AGENT_RUNS_API
+
+
+@pytest.mark.asyncio
+async def test_a_launch_argument_cannot_mark_a_stored_conversation(chat_service, repo):
+    await _run_turn(chat_service, "plain-conv")
+    await _run_turn(chat_service, "plain-conv", launch_origin=API_SOURCE)
+
+    saved = repo.get_conversation("plain-conv", USER)
+    assert saved["message_count"] == 4
+    assert saved["launch_origin"] is None
+
+
 def test_a_later_save_cannot_add_an_origin_to_an_existing_conversation(repo):
     _save(repo, "plain-conv", metadata={"agent_mode": False})
     _save(repo, "plain-conv", metadata={ORIGIN_METADATA_KEY: ORIGIN_AGENT_RUNS_API}, count=2)
