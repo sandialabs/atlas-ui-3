@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for PR #1079: atlas_follow_up revalidates the sub-conversation's
+# Test script for PR #1079: atlas_follow_up_subagent revalidates the sub-conversation's
 # saved workspace before admitting the follow-up turn.
 #
 #   1. A follow-up succeeds while the saved workspace still exists and is

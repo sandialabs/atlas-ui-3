@@ -167,6 +167,22 @@ def _same_arguments(edited: Any, original: Any) -> bool:
         return edited == original
 
 
+def _hook_tool_identity(called_name: Any) -> Dict[str, Any]:
+    """How a tool call names its tool in a hook payload.
+
+    ``tool_name`` is the tool's current name even when the call used a retired
+    one. A retired name still executes, so a policy script that compares
+    ``tool_name`` against ``atlas_launch_subagent`` has to see that name for a
+    model that called ``atlas_launch`` -- otherwise the alias is a way around
+    the policy (#1141). ``tool_name_called`` keeps the spelling actually used,
+    for audit. The two are equal for every tool that has no retired name.
+    """
+    return {
+        "tool_name": normalize_tool_name(called_name),
+        "tool_name_called": called_name,
+    }
+
+
 def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]:
     """
     Check if a tool requires approval before execution.
@@ -627,7 +643,7 @@ async def execute_single_tool(
                     perm_outcome = await hook_mgr.run_event(
                         HookEvent.PERMISSION_REQUEST,
                         {
-                            "tool_name": tool_call.function.name,
+                            **_hook_tool_identity(tool_call.function.name),
                             "tool_args": dict(filtered_args),
                             "tool_call_id": tool_call.id,
                             "needs_approval": bool(needs_approval),
@@ -669,7 +685,7 @@ async def execute_single_tool(
                     pre_outcome = await hook_mgr.run_event(
                         HookEvent.PRE_TOOL_USE,
                         {
-                            "tool_name": tool_call.function.name,
+                            **_hook_tool_identity(tool_call.function.name),
                             "tool_args": dict(filtered_args),
                             "tool_call_id": tool_call.id,
                         },
@@ -953,7 +969,7 @@ async def execute_single_tool(
                 post_outcome = await hook_mgr.run_event(
                     HookEvent.POST_TOOL_USE,
                     {
-                        "tool_name": tool_call.function.name,
+                        **_hook_tool_identity(tool_call.function.name),
                         "tool_args": dict(filtered_args),
                         "tool_call_id": tool_call.id,
                         "result_content": result.content if isinstance(result.content, str) else str(result.content),

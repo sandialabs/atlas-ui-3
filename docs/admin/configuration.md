@@ -144,12 +144,18 @@ changes:
 - A [hook](hooks.md) matcher written against either spelling fires for a call under the
   other one, so a deny or approval policy is neither retired by the rename nor bypassed
   through an alias.
-- A mandatory-approval rule (`require_approval` in `mcp.json`) written under either spelling
-  applies to a call under the other one.
-- Hook *payloads* carry the tool name as it was called or selected. A hook script that
-  compares names itself (for example a copy of
-  `hook-examples/user_prompt_submit_strip_implied_search.py` with its own list of built-in
-  tools) should add the new names; until it does it treats them as unknown tools.
+- A mandatory-approval rule written under either spelling applies to a call under the other
+  one. In `mcp.json` these rules use the tool's short name under its server, not the
+  fully qualified name in the table above: `"atlas": {"require_approval": ["launch_subagent"]}`
+  (an existing `["launch"]` keeps working).
+- Tool-call hook payloads (`PreToolUse`, `PermissionRequest`, `PostToolUse`) report the
+  tool's current name in `tool_name` even when the model called a deprecated alias, and
+  the spelling actually used in `tool_name_called`. A hook script that compares
+  `tool_name` against an old name should be updated to the new one.
+- `UserPromptSubmit` payloads list `selected_tools` as the client sent them, so they may
+  hold either spelling. A script that keeps its own list of built-in tools (for example a
+  copy of `hook-examples/user_prompt_submit_strip_implied_search.py`) should add the new
+  names; until it does it treats them as unknown tools.
 
 Move prompts, hook scripts and clients to the new names when convenient. No removal is
 scheduled; if the aliases are ever retired, the release that does it will list the removal

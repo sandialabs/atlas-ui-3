@@ -98,8 +98,8 @@ async def main():
         assert response.status == 200
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws", additional_headers=headers) as ws:
         for plan, tools in [
-            ("launch_only", ["atlas_launch"]),
-            ("same_step", ["atlas_launch", "atlas_discover_launch_options"]),
+            ("launch_only", ["atlas_launch_subagent"]),
+            ("same_step", ["atlas_launch_subagent", "atlas_discover_subagent_options"]),
         ]:
             await ws.send(json.dumps({
                 "type": "chat", "content": f"plan={plan}", "model": "scripted-mock",
@@ -127,15 +127,15 @@ async def main():
                             break
                     elif kind == "error":
                         raise AssertionError(frame)
-            launched = results.get("atlas_launch")
+            launched = results.get("atlas_launch_subagent")
             assert launched and launched.get("success"), results
             handle = json.loads(launched["result"].splitlines()[-1])
             assert handle["run_id"] and handle["conversation_id"], handle
             assert handle["workspace"] == "Research", handle
             if plan == "launch_only":
-                assert "atlas_discover_launch_options" not in results
+                assert "atlas_discover_subagent_options" not in results
             else:
-                discovered = results.get("atlas_discover_launch_options")
+                discovered = results.get("atlas_discover_subagent_options")
                 assert discovered and discovered.get("success"), results
             print(f"PASSED: {plan} launches with authorized discovery")
 

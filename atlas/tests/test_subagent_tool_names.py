@@ -363,3 +363,21 @@ def test_an_approval_rule_does_not_spill_onto_other_tools():
 
     assert requires_approval("atlas_get_subagent_runs", config) == (True, True, False)
     assert requires_approval("pptx_generator_create", config) == (True, True, False)
+
+
+def test_hook_payloads_name_the_tool_by_its_current_name():
+    """A policy script comparing ``tool_name`` must not be dodged via an alias."""
+    from atlas.application.chat.utilities.tool_executor import _hook_tool_identity
+
+    assert _hook_tool_identity("atlas_launch") == {
+        "tool_name": "atlas_launch_subagent",
+        "tool_name_called": "atlas_launch",
+    }
+    assert _hook_tool_identity("atlas_launch_subagent") == {
+        "tool_name": "atlas_launch_subagent",
+        "tool_name_called": "atlas_launch_subagent",
+    }
+    assert _hook_tool_identity("pptx_generator_create") == {
+        "tool_name": "pptx_generator_create",
+        "tool_name_called": "pptx_generator_create",
+    }
