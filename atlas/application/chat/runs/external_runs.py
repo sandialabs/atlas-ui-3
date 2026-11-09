@@ -1,8 +1,8 @@
 """Agent runs started from outside ATLAS by a trusted service (#1105).
 
 The REST API in ``atlas/routes/agent_run_routes.py`` is a thin transport over
-this module, which is in turn a thin layer over the ``atlas_launch`` /
-``atlas_follow_up`` machinery: the same workspace and model resolution, the
+this module, which is in turn a thin layer over the ``atlas_launch_subagent`` /
+``atlas_follow_up_subagent`` machinery: the same workspace and model resolution, the
 same re-filtering of tools and data sources through the target user's ACLs,
 the same atomic admission into the run registry. What differs is only what
 an external caller *is*:
@@ -12,7 +12,7 @@ an external caller *is*:
   history and the per-run fan-out cap does not apply. The per-user
   ``MAX_CONCURRENT_RUNS_PER_USER`` cap and the wall-clock limit still do.
 * **Nobody is watching it.** Ordinary tool approvals are given by the
-  caller, the way the user's approval of an ``atlas_launch`` call covers the
+  caller, the way the user's approval of an ``atlas_launch_subagent`` call covers the
   child. Tools an administrator has made approval-mandatory are never
   auto-approved: the launch is refused unless the caller asks for the run to
   pause until the user approves in the UI.
@@ -329,7 +329,7 @@ def _audit(action: str, record: Any, spec: Dict[str, Any], **extra: Any) -> None
 
 
 async def list_api_options(factory: Any, user_email: str) -> Dict[str, Any]:
-    """``atlas_discover_launch_options`` for ``user_email``."""
+    """``atlas_discover_subagent_options`` for ``user_email``."""
     _check_user_allowed(_require_ground(factory), user_email)
     return await list_launch_options(factory, user_email)
 
@@ -345,7 +345,7 @@ async def launch_api_run(
     allow_approval_pause: bool = False,
     idempotency_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """``atlas_launch`` for ``user_email``: a new top-level conversation.
+    """``atlas_launch_subagent`` for ``user_email``: a new top-level conversation.
 
     Returns the run handle, with ``idempotent_replay`` set when an earlier
     request with the same ``idempotency_key`` already launched it.
@@ -460,7 +460,7 @@ def _revalidate_api_workspace(factory: Any, spec: Dict[str, Any], user_email: st
 def _api_record(run_id: str) -> Any:
     """The API-started run ``run_id``, or a not-found refusal.
 
-    Runs started anywhere else -- the browser, ``atlas_launch`` -- answer
+    Runs started anywhere else -- the browser, ``atlas_launch_subagent`` -- answer
     exactly like ids that never existed, so the API cannot be used to probe
     or act on them.
     """
@@ -513,7 +513,7 @@ def _status(record: Any) -> Dict[str, Any]:
 
 
 def get_api_run(run_id: str) -> Dict[str, Any]:
-    """``atlas_result``: status, timestamps, error and final reply of one run."""
+    """``atlas_get_subagent_result``: status, timestamps, error and final reply of one run."""
     return _status(_api_record(run_id))
 
 
@@ -591,7 +591,7 @@ async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
 
 
 def list_api_runs(user_email: Optional[str] = None) -> List[Dict[str, Any]]:
-    """``atlas_get_runs``: API-started runs, optionally for one user, newest first."""
+    """``atlas_get_subagent_runs``: API-started runs, optionally for one user, newest first."""
     registry = get_run_registry()
     registry.reap_terminal()
     if user_email:
@@ -613,7 +613,7 @@ async def follow_up_api_run(
     allow_approval_pause: bool = False,
     idempotency_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """``atlas_follow_up``: the next user turn of an API run's conversation.
+    """``atlas_follow_up_subagent``: the next user turn of an API run's conversation.
 
     Runs as the conversation's owner, on the workspace, model and compliance
     level it was launched with -- the caller cannot re-choose any of them --

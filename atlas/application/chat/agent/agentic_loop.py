@@ -342,7 +342,7 @@ class AgenticLoop(AgentLoopProtocol):
                     # Trusted compliance level so RAG tools enforce the boundary;
                     # the model cannot set or change this.
                     "compliance_level": context.compliance_level,
-                    # Off-the-server turns: atlas_launch refuses to start a
+                    # Off-the-server turns: atlas_launch_subagent refuses to start a
                     # sub-conversation that would persist one (#925).
                     "incognito": context.incognito,
                     "auto_approve_tools": context.auto_approve_tools is True,

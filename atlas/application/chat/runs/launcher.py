@@ -1,4 +1,4 @@
-"""The ``atlas_launch`` built-in tool: a conversation starting conversations (#925).
+"""The ``atlas_launch_subagent`` built-in tool: a conversation starting conversations (#925).
 
 ATLAS already had the two hard halves of subagents. Issue #884 gave it a run
 registry that owns several concurrent runs on one connection, and #915 made
@@ -12,7 +12,7 @@ The contract, decided on the issue:
   child's whole capability surface -- its tools *and* its data sources -- so
   the thing that decides what a sub-conversation may touch is something the
   user already configures and can audit, not a list the model assembles.
-* **A handle, not an answer.** ``atlas_launch`` returns the child's ``run_id``
+* **A handle, not an answer.** ``atlas_launch_subagent`` returns the child's ``run_id``
   and ``conversation_id`` as soon as the run is admitted, and never blocks.
   Blocking would pin the parent's agent loop (and its model context) open for
   the length of the child, which is exactly the cost fanning out is meant to
@@ -147,7 +147,7 @@ def resolve_workspace(repository: Any, workspace: str, user_email: str) -> Dict[
     try:
         available = repository.list_workspaces(user_email) or []
     except Exception:  # pragma: no cover - defensive
-        logger.warning("Workspace listing failed during atlas_launch", exc_info=True)
+        logger.warning("Workspace listing failed during atlas_launch_subagent", exc_info=True)
         available = []
 
     wanted = workspace.casefold()
@@ -168,10 +168,10 @@ async def resolve_model(config_manager: Any, model: str, user_email: str) -> str
 
     ``UNKNOWN`` and ``DENIED`` deliberately produce the same message: telling
     the model that a name it guessed exists but is off-limits would make
-    ``atlas_launch`` a probe for the deployment's restricted model list.
+    ``atlas_launch_subagent`` a probe for the deployment's restricted model list.
     """
     decision = await check_model_access(
-        getattr(config_manager, "llm_config", None), model, user_email, context="atlas_launch"
+        getattr(config_manager, "llm_config", None), model, user_email, context="atlas_launch_subagent"
     )
     if decision is ModelAccessDecision.ALLOWED:
         return model
@@ -309,7 +309,7 @@ def _require_discovered_option(options: Optional[Dict[str, Any]], workspace: str
     if isinstance(options, dict) and options.get("_failed"):
         raise LaunchRefused(
             "Launch discovery previously failed in this turn. "
-            "Run atlas_discover_launch_options again after fixing the underlying issue."
+            "Run atlas_discover_subagent_options again after fixing the underlying issue."
         )
     if not _has_discovered_launch_options(options):
         raise LaunchRefused(
@@ -323,12 +323,12 @@ def _require_discovered_option(options: Optional[Dict[str, Any]], workspace: str
     if workspace.casefold() not in workspace_names and workspace not in workspace_ids:
         raise LaunchRefused(
             f"Workspace '{workspace}' was not returned by the latest launch discovery. "
-            "Run atlas_discover_launch_options again and use a returned workspace."
+            "Run atlas_discover_subagent_options again and use a returned workspace."
         )
     if model not in model_names:
         raise LaunchRefused(
             f"Model '{model}' was not returned by the latest launch discovery. "
-            "Run atlas_discover_launch_options again and use a returned model."
+            "Run atlas_discover_subagent_options again and use a returned model."
         )
 
 
@@ -764,7 +764,7 @@ async def launch_sub_conversation(
     )
 
     logger.info(
-        "atlas_launch started run %s (conversation %s, depth %d, parent %s) for %s",
+        "atlas_launch_subagent started run %s (conversation %s, depth %d, parent %s) for %s",
         record.run_id,
         sanitize_for_logging(record.conversation_id),
         record.depth,
@@ -812,7 +812,7 @@ async def _start_child_run(
 ) -> Tuple[Any, Dict[str, Any], List[str]]:
     """Admit a child run on ``conversation_id`` and schedule its task.
 
-    Shared by ``atlas_launch`` (a new conversation) and ``atlas_follow_up``
+    Shared by ``atlas_launch_subagent`` (a new conversation) and ``atlas_follow_up_subagent``
     (the next turn of an existing one), so both re-check the tools and data
     sources against the caller's access *now*, apply the same approval rule,
     and go through the same atomic admission. Returns the admitted record,
@@ -854,8 +854,8 @@ async def _start_child_run(
     # looking at the child's conversation -- and it is not in the user's
     # history until its first save, so a launched run would pause on its first
     # tool call with no way to answer. The approval that covers the child is
-    # the one the user already gave (or auto-gave) for *this* ``atlas_launch``
-    # (or ``atlas_follow_up``) call, which named the task. Tools an admin has
+    # the one the user already gave (or auto-gave) for *this* ``atlas_launch_subagent``
+    # (or ``atlas_follow_up_subagent``) call, which named the task. Tools an admin has
     # pinned to mandatory approval are exempt: those keep prompting inside
     # the child, which pauses it until the user opens that conversation.
     admin_gated = _admin_gated_tools(tools, config_manager)
@@ -884,7 +884,7 @@ async def _start_child_run(
         )
 
     # Admission is check-then-insert, and it must be atomic: several
-    # ``atlas_launch`` calls in one agent step run concurrently, and a check
+    # ``atlas_launch_subagent`` calls in one agent step run concurrently, and a check
     # separated from the insert by an await would let all of them pass a cap of
     # one. ``admit_run`` runs the precheck and the local insert synchronously,
     # after the cluster-wide claim (issue #1128), and releases the claim if
@@ -1130,7 +1130,7 @@ async def execute_observation_tool(
 
 
 async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]]) -> ToolResult:
-    """``atlas_launch`` as the tool manager calls it.
+    """``atlas_launch_subagent`` as the tool manager calls it.
 
     A refusal comes back as an unsuccessful ``ToolResult`` rather than an
     exception: the model is mid-loop and can act on "no workspace by that
@@ -1156,7 +1156,7 @@ async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]])
             error=str(e),
         )
     except Exception as e:  # pragma: no cover - defensive
-        logger.error("atlas_launch failed unexpectedly: %s", e, exc_info=True)
+        logger.error("atlas_launch_subagent failed unexpectedly: %s", e, exc_info=True)
         message = "The sub-conversation could not be started due to an internal error."
         return ToolResult(
             tool_call_id=getattr(tool_call, "id", None),

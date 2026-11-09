@@ -123,8 +123,14 @@ def test_a_hook_matcher_written_against_the_old_name_still_fires():
     assert not hook.matches("pptx_generator_create")
 
 
-def test_a_hook_matcher_on_the_new_name_does_not_widen():
-    """Alias matching runs one way: the old spelling is not a new wildcard."""
+def test_a_hook_matcher_on_the_new_name_covers_a_call_under_the_old_one():
+    """A retired name still executes, so it must not slip past the policy.
+
+    A model (or a replayed conversation) that calls ``canvas_canvas`` runs the
+    canvas tool. A deny hook written against ``atlas_canvas`` therefore has to
+    see that call too, or the alias is a way around it (#1141). It is not a
+    wildcard: only names that resolve to the same tool are added.
+    """
     hook = HookConfig(
         name="watch-canvas",
         event="PreToolUse",
@@ -133,7 +139,9 @@ def test_a_hook_matcher_on_the_new_name_does_not_widen():
     )
 
     assert hook.matches(CANVAS_TOOL_NAME)
-    assert not hook.matches("canvas_canvas")
+    assert hook.matches("canvas_canvas")
+    assert not hook.matches("atlas_agent_sleep")
+    assert not hook.matches("pptx_generator_create")
 
 
 def test_reserved_server_names_are_dropped_from_mcp_config():

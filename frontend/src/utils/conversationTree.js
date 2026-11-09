@@ -4,7 +4,7 @@
  *
  * The relationship is an id only: a conversation may carry
  * `parent_conversation_id`, either from its saved metadata (durable) or from a
- * live run record (a child launched by `atlas_launch` that has not been saved
+ * live run record (a child launched by `atlas_launch_subagent` that has not been saved
  * yet). The backend only publishes a parent id when the parent belongs to the
  * same user, so the UI never has to decide whether a link is allowed.
  *

@@ -58,7 +58,7 @@ With Redis configured (`SESSION_REPOSITORY_TYPE=redis`), the cap and the
 one-run-per-conversation rule hold **across all replicas**: every replica
 claims the run in Redis before starting it, atomically, so two replicas racing
 for a user's last slot cannot both win. The same cap applies to browser turns,
-`atlas_launch` and the agent-runs API alike. If Redis is unreachable, new runs
+`atlas_launch_subagent` and the agent-runs API alike. If Redis is unreachable, new runs
 are refused (`error_type: run_coordination_unavailable`) rather than admitted
 unchecked. A replica that dies holding runs frees their slots within 30
 seconds. See [Run coordination](../developer/run-coordination.md).
@@ -130,7 +130,7 @@ a run finished can still show how it ended.
 
 Issue #1081.
 
-A conversation started by `atlas_launch` is a real conversation in the same
+A conversation started by `atlas_launch_subagent` is a real conversation in the same
 user's history. The sidebar draws that relationship instead of listing the
 child as an unrelated entry:
 
@@ -418,7 +418,7 @@ foreign-id guard) normalize email casing, the same way the conversation
 repository does.
 
 Background auto-approve covers runs the *user* started. A conversation the
-model launched (`atlas_launch`) runs on model-chosen arguments, so its
+model launched (`atlas_launch_subagent`) runs on model-chosen arguments, so its
 approval requests are not answered off-screen; the child still appears in the
 history list -- titled by its prompt -- with its "Needs approval" marker, and
 admin-pinned tools pause it until it is opened.

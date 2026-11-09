@@ -32,19 +32,25 @@ BUILTIN_TOOLS = {
     "atlas_sleep",
     "atlas_search",
     "atlas_discover_sources",
-    "atlas_discover_launch_options",
-    "atlas_launch",
-    "atlas_get_runs",
-    "atlas_result",
-    "atlas_follow_up",
+    "atlas_discover_subagent_options",
+    "atlas_launch_subagent",
+    "atlas_get_subagent_runs",
+    "atlas_get_subagent_result",
+    "atlas_follow_up_subagent",
 }
-# The pre-#855 names of the built-ins (issue #855). A selection may still
-# carry them, and they are the same tools.
+# Retired names of the built-ins: the pre-#855 names, and the subagent tools'
+# names before issue #1141 renamed them. A selection may still carry them, and
+# they are the same tools.
 LEGACY_ALIASES = {
     "canvas_canvas": "atlas_canvas",
     "atlas_agent_sleep": "atlas_sleep",
     "atlas_rag_query": "atlas_search",
     "atlas_rag_discover_data_sources": "atlas_discover_sources",
+    "atlas_discover_launch_options": "atlas_discover_subagent_options",
+    "atlas_launch": "atlas_launch_subagent",
+    "atlas_get_runs": "atlas_get_subagent_runs",
+    "atlas_result": "atlas_get_subagent_result",
+    "atlas_follow_up": "atlas_follow_up_subagent",
 }
 # The search tool, under its current name and the one it had before the tools
 # were consolidated.

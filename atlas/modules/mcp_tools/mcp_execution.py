@@ -31,6 +31,7 @@ from atlas.modules.mcp_tools.atlas_server import (
     LAUNCH_TOOL_NAME,
     RESULT_TOOL_NAME,
     SEARCH_TOOL_NAME,
+    is_deprecated_tool_alias,
     launch_tool_enabled,
     normalize_tool_name,
     search_kwargs_for,
@@ -962,6 +963,15 @@ class ExecutionMixin:
         # tool selections and non-UI clients; resolve them to the consolidated
         # ``atlas`` tools before dispatch.
         resolved_name = normalize_tool_name(tool_call.name)
+        if is_deprecated_tool_alias(tool_call.name):
+            # Still runs (#1141): agents, saved prompts and API clients written
+            # against the old subagent tool names must not break. Logged so an
+            # operator can see who still depends on a name before it is retired.
+            logger.info(
+                "Deprecated tool name %s called; running it as %s",
+                sanitize_for_logging(tool_call.name),
+                resolved_name,
+            )
         # Handle canvas pseudo-tool
         if resolved_name == CANVAS_TOOL_NAME:
             # Canvas tool just returns the content - it's handled by frontend
@@ -1041,7 +1051,7 @@ class ExecutionMixin:
                 )
             return await execute_launch_tool(tool_call, context)
         if resolved_name == FOLLOW_UP_TOOL_NAME:
-            # Gated like atlas_launch: a follow-up starts a run, so it needs
+            # Gated like atlas_launch_subagent: a follow-up starts a run, so it needs
             # exactly the ground a launch does.
             from atlas.application.chat.runs.follow_up import execute_follow_up_tool
 

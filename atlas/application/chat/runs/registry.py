@@ -166,7 +166,7 @@ class RunRecord:
     # Free-form label for what the run is waiting on (e.g. "tool_approval"),
     # surfaced to the client alongside WAITING_FOR_INPUT.
     waiting_on: Optional[str] = None
-    # Set when this run was started by ``atlas_launch`` from another run
+    # Set when this run was started by ``atlas_launch_subagent`` from another run
     # (issue #925). ``parent_run_id`` is what makes stopping a parent stop its
     # children, and ``depth`` is what bounds recursion: a launched run is one
     # deeper than the run that launched it.
@@ -181,14 +181,14 @@ class RunRecord:
     # can give it in the meantime -- in this tab and in every other one.
     title: Optional[str] = None
     # What a launched run was started with -- model, tools, data sources,
-    # workspace, compliance level -- so ``atlas_follow_up`` can continue the
+    # workspace, compliance level -- so ``atlas_follow_up_subagent`` can continue the
     # sub-conversation on the same capability surface without the model
     # re-choosing it. Server-side only: never part of the public dict.
     launch_spec: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
     # The final assistant reply of *this* run, captured when it completes. A
     # sub-conversation that has received follow-ups holds several runs on one
     # conversation, so "the conversation's last assistant message" answers for
-    # the newest run only; ``atlas_result`` on an older run id reads this.
+    # the newest run only; ``atlas_get_subagent_result`` on an older run id reads this.
     result: Optional[str] = field(default=None, repr=False, compare=False)
     # The exact frames that asked for input, kept so they can be re-sent.
     # A request emitted while the user was looking at another conversation (or
@@ -1008,7 +1008,7 @@ class RunRegistry:
         # alone would leave them working -- and billing -- with nobody
         # watching.
         #
-        # This is deliberately *above* the terminal check. ``atlas_launch``
+        # This is deliberately *above* the terminal check. ``atlas_launch_subagent``
         # returns a handle rather than an answer, so the parent turn normally
         # finishes while its children are still working: by the time a user
         # stops the conversation, the parent run is usually already terminal.

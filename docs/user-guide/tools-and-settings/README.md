@@ -1,6 +1,6 @@
 # Tools and Settings Panel (issue #836)
 
-Last updated: 2026-11-05
+Last updated: 2026-11-08
 
 The top bar used to carry three separate entry points -- a wrench for tools and
 integrations, a gear for settings, and a sun/moon for the theme. They are now
@@ -245,14 +245,25 @@ question is worth a search, so it may answer without reading the sources. If
 the search tool is turned off in your deployment, Atlas says so instead of
 quietly leaving your sources unread.
 
-## Launching sub-conversations
+## Launching subagents (sub-conversations)
 
-When your administrator has enabled it, the built-in `atlas_launch` tool lets a
-conversation start other conversations to work on pieces of a task. Tick
-`atlas_launch` in the tools list, then ask for the work to be split up. ATLAS
-discovers the current authorized workspaces and model names inside `atlas_launch`
-when needed. You can separately select `atlas_discover_launch_options` to inspect
-those choices, but ticking `atlas_launch` does not add that tool automatically. Launch is
+When your administrator has enabled it, the built-in **Launch Subagent** tool
+(`atlas_launch_subagent`) lets a conversation delegate pieces of a task to
+subagents: independent conversations that each work on their own. The tools
+that do this are listed together under **Subagents** in the built-in `atlas`
+server. Tick **Launch Subagent** in the tools list, then ask for the work to be
+split up. In the transcript, a delegated run shows up as a **Launch Subagent**
+tool call, and reading its answer as **Get Subagent Result**.
+
+These tools used to be called `atlas_launch`, `atlas_get_runs`, `atlas_result`,
+`atlas_follow_up` and `atlas_discover_launch_options`. The old names still
+work, so a saved prompt or workspace that mentions them does not need to be
+changed, but new prompts should use the new names.
+
+ATLAS discovers the current authorized workspaces and model names inside `atlas_launch_subagent`
+when needed. You can separately select **Discover Subagent Options**
+(`atlas_discover_subagent_options`) to inspect
+those choices, but ticking **Launch Subagent** does not add that tool automatically. Launch is
 blocked with an actionable error if discovery fails, returns no choices, or the
 launch arguments are not in the discovered options.
 
@@ -271,13 +282,13 @@ made always-approve, which still prompt inside the sub-conversation and pause it
 until you open that conversation and answer.
 
 The conversation that launched a sub-conversation can also talk back to it. Tick
-`atlas_follow_up` as well, and the model can send a finished sub-conversation its
+`atlas_follow_up_subagent` as well, and the model can send a finished sub-conversation its
 next message -- a correction, a clarifying question, the next step -- instead of
 starting a fresh one that has forgotten everything. The follow-up and its reply
 appear in the sub-conversation's own transcript, and it carries on with the same
 workspace and model it was launched with: if that workspace has since been
 deleted or is no longer available to you, the follow-up is refused rather than
-quietly moved to a different one. Approving the `atlas_follow_up` call
+quietly moved to a different one. Approving the `atlas_follow_up_subagent` call
 approves that turn's tool calls, the same way approving a launch does.
 
 A sub-conversation can never use a tool, model or data source you could not use

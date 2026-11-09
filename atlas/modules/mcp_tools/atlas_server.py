@@ -8,11 +8,20 @@ built-ins look like a crowd of servers.
 
 They are now a single server, ``atlas``, exposing ``atlas_canvas``,
 ``atlas_sleep``, ``atlas_search``, ``atlas_discover_sources``,
-``atlas_discover_launch_options``, ``atlas_launch`` and the sub-conversation
-tools ``atlas_get_runs``, ``atlas_result`` and ``atlas_follow_up``. The old fully-qualified names are still
-accepted -- persisted tool selections, saved conversations and non-UI clients
-all carry them -- and are normalized to the new names at the edges via
-``normalize_tool_name``.
+and the subagent tools ``atlas_discover_subagent_options``,
+``atlas_launch_subagent``, ``atlas_get_subagent_runs``,
+``atlas_get_subagent_result`` and ``atlas_follow_up_subagent``. The old
+fully-qualified names are still accepted -- persisted tool selections, saved
+conversations and non-UI clients all carry them -- and are normalized to the
+new names at the edges via ``normalize_tool_name``.
+
+The subagent tools were first called ``atlas_launch``, ``atlas_get_runs``,
+``atlas_result``, ``atlas_follow_up`` and ``atlas_discover_launch_options``
+(issue #925). "Launch" on its own read as starting an ATLAS instance rather
+than delegating a task, so issue #1141 renamed them. The old names are
+deprecated aliases (``DEPRECATED_TOOL_ALIASES``): they still execute, still
+resolve in a tool selection and still satisfy a hook matcher, but they are no
+longer advertised to the model or listed in the tools panel.
 
 ``atlas_search`` requires exactly one argument, ``query``. The data sources it
 reads are the ones selected in the UI (falling back to everything the user is
@@ -24,7 +33,7 @@ stay outside the authorization boundary. They are honoured by v2 RAG sources
 (mapped onto the ``search_kwargs`` block of the ATLAS RAG v2 contract) and
 ignored by v1 sources, whose request body has no equivalent fields.
 
-``atlas_launch`` (issue #925) starts a sub-conversation -- ATLAS's own
+``atlas_launch_subagent`` (issue #925) starts a sub-conversation -- ATLAS's own
 subagents -- and returns a handle to it rather than waiting for its answer. Its
 three inputs are a ``workspace`` (which carries the child's tools *and* data
 sources, so the capability surface is something the user configured), a
@@ -44,11 +53,11 @@ CANVAS_TOOL_NAME = "atlas_canvas"
 SLEEP_TOOL_NAME = "atlas_sleep"
 SEARCH_TOOL_NAME = "atlas_search"
 DISCOVER_TOOL_NAME = "atlas_discover_sources"
-DISCOVER_LAUNCH_OPTIONS_TOOL_NAME = "atlas_discover_launch_options"
-LAUNCH_TOOL_NAME = "atlas_launch"
-GET_RUNS_TOOL_NAME = "atlas_get_runs"
-RESULT_TOOL_NAME = "atlas_result"
-FOLLOW_UP_TOOL_NAME = "atlas_follow_up"
+DISCOVER_LAUNCH_OPTIONS_TOOL_NAME = "atlas_discover_subagent_options"
+LAUNCH_TOOL_NAME = "atlas_launch_subagent"
+GET_RUNS_TOOL_NAME = "atlas_get_subagent_runs"
+RESULT_TOOL_NAME = "atlas_get_subagent_result"
+FOLLOW_UP_TOOL_NAME = "atlas_follow_up_subagent"
 
 ATLAS_TOOL_NAMES = (
     CANVAS_TOOL_NAME,
@@ -73,17 +82,31 @@ LAUNCH_GATED_TOOL_NAMES = (
     FOLLOW_UP_TOOL_NAME,
 )
 
-# Pre-#855 fully-qualified names -> consolidated names.
+# The subagent tools' original names (#925) -> the names that say what they do
+# (#1141). Deprecated, not removed: agents, saved prompts, stored selections,
+# hook matchers and API clients written against the old names keep working
+# through the documented transition (docs/admin/parallel-conversation-runs.md).
+DEPRECATED_TOOL_ALIASES = {
+    "atlas_discover_launch_options": DISCOVER_LAUNCH_OPTIONS_TOOL_NAME,
+    "atlas_launch": LAUNCH_TOOL_NAME,
+    "atlas_get_runs": GET_RUNS_TOOL_NAME,
+    "atlas_result": RESULT_TOOL_NAME,
+    "atlas_follow_up": FOLLOW_UP_TOOL_NAME,
+}
+
+# Every retired spelling -> its current name: the pre-#855 fully-qualified
+# names, plus the deprecated subagent names above.
 LEGACY_TOOL_ALIASES = {
     "canvas_canvas": CANVAS_TOOL_NAME,
     "atlas_agent_sleep": SLEEP_TOOL_NAME,
     "atlas_rag_query": SEARCH_TOOL_NAME,
     "atlas_rag_discover_data_sources": DISCOVER_TOOL_NAME,
+    **DEPRECATED_TOOL_ALIASES,
 }
 
-# Consolidated name -> the pre-#855 name(s) that resolved to it. Used where a
-# *value* has to be recognized under its old spelling too -- most importantly
-# hook matchers, which are operator-written regexes over the tool name.
+# Current name -> the retired name(s) that resolve to it. Used where a *value*
+# has to be recognized under its old spelling too -- most importantly hook
+# matchers, which are operator-written regexes over the tool name.
 LEGACY_NAMES_BY_TOOL: Dict[str, tuple] = {}
 for _legacy, _current in LEGACY_TOOL_ALIASES.items():
     LEGACY_NAMES_BY_TOOL[_current] = LEGACY_NAMES_BY_TOOL.get(_current, ()) + (_legacy,)
@@ -142,20 +165,22 @@ DISCOVER_TOOL_DESCRIPTION = (
 )
 
 DISCOVER_LAUNCH_OPTIONS_TOOL_DESCRIPTION = (
-    "Before using atlas_launch, list the saved workspaces and LLM model names "
+    "Before using atlas_launch_subagent, list the saved workspaces and LLM model names "
     "available to the current user. Use the returned model 'name' "
-    "exactly as the atlas_launch model argument; if discovery fails or returns "
+    "exactly as the atlas_launch_subagent model argument; if discovery fails or returns "
     "no choices, launch must not be attempted. Takes no arguments."
 )
 
 LAUNCH_TOOL_DESCRIPTION = (
-    "Start a sub-conversation that works on a task on its own, and return a "
-    "handle to it immediately -- this tool does not wait for the result. Give "
+    "Launch an independent AI subagent to execute a delegated task, and return "
+    "a handle to it immediately -- this tool does not wait for the result. The "
+    "subagent runs as a sub-conversation of this one. Give "
     "it a 'workspace' (one of the caller's saved workspaces, which decides "
-    "which tools and data sources the sub-conversation may use), a 'model' to "
-    "run it on, and the 'prompt' describing the task. Use it to fan work out: "
-    "several independent investigations at once, or a long job on a cheaper "
-    "model while this conversation continues. The sub-conversation appears in "
+    "which tools and data sources the subagent may use), a 'model' to "
+    "run it on, and the 'prompt' describing the task. Use it to parallelize or "
+    "delegate work: several independent investigations at once, or a long job "
+    "on a cheaper model while this conversation continues. The returned run id "
+    "tracks execution and retrieves the result. The sub-conversation appears in "
     "the user's history under its own conversation id, which is returned along "
     "with a run id; tell the user where to find it. It runs as the same user, "
     "so every tool, model and data source it touches is checked against that "
@@ -345,7 +370,7 @@ GET_RUNS_TOOL_SCHEMA = {
     "function": {
         "name": GET_RUNS_TOOL_NAME,
         "description": (
-            "List direct sub-conversations launched by this conversation. Returns "
+            "List the subagents (direct sub-conversations) launched by this conversation. Returns "
             "run_id, conversation_id, status, timestamps, waiting_on and errors. "
             "Statuses are queued, running, waiting_for_input, completed, failed "
             "or cancelled; this call does not wait."
@@ -359,9 +384,9 @@ RESULT_TOOL_SCHEMA = {
     "function": {
         "name": RESULT_TOOL_NAME,
             "description": (
-            "Return the current status and final assistant result of a direct child "
-            "launched by this conversation. Pass the run_id from atlas_launch, "
-            "atlas_get_runs or atlas_follow_up. This never waits; poll with "
+            "Return the current status and final assistant result of a subagent "
+            "(a direct sub-conversation) launched by this conversation. Pass the run_id from atlas_launch_subagent, "
+            "atlas_get_subagent_runs or atlas_follow_up_subagent. This never waits; poll with "
             "atlas_sleep between checks. "
             "Results are scoped to this conversation and user. result_status is "
             "pending, available, available_truncated, empty, unreadable or "
@@ -370,7 +395,7 @@ RESULT_TOOL_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "run_id": {"type": "string", "description": "The run_id returned by atlas_launch."}
+                "run_id": {"type": "string", "description": "The run_id returned by atlas_launch_subagent."}
             },
             "required": ["run_id"],
         },
@@ -382,18 +407,18 @@ FOLLOW_UP_TOOL_SCHEMA = {
     "function": {
         "name": FOLLOW_UP_TOOL_NAME,
         "description": (
-            "Send a follow-up message to a sub-conversation this conversation "
+            "Send a follow-up message to a subagent (a sub-conversation) this conversation "
             "launched, and return a handle to the new turn immediately -- this "
             "does not wait for the reply. The sub-conversation keeps its own "
             "history, so the message can build on its earlier answer (ask a "
             "clarifying question, request a correction, hand it the next step). "
             "It continues on the same model, tools and data sources it was "
             "launched with, re-checked against the user's current access. Pass "
-            "any run_id belonging to that sub-conversation (from atlas_launch, "
-            "atlas_get_runs or an earlier atlas_follow_up). The sub-conversation "
+            "any run_id belonging to that sub-conversation (from atlas_launch_subagent, "
+            "atlas_get_subagent_runs or an earlier atlas_follow_up_subagent). The sub-conversation "
             "must have finished its current turn; if it is still running, wait "
-            "with atlas_sleep and check atlas_result first. Read the reply with "
-            "atlas_result using the new run_id this call returns."
+            "with atlas_sleep and check atlas_get_subagent_result first. Read the reply with "
+            "atlas_get_subagent_result using the new run_id this call returns."
         ),
         "parameters": {
             "type": "object",
@@ -430,8 +455,8 @@ ATLAS_TOOL_SCHEMAS = {
 ATLAS_SERVER_DESCRIPTION = (
     "Built-in ATLAS tools: render final content in the canvas panel, wait "
     "between agent steps, search the selected data sources, list which "
-    "sources and launch options are available, and launch and follow up on "
-    "sub-conversations. These run inside ATLAS rather than on an MCP server."
+    "sources and subagent options are available, and launch and follow up on "
+    "subagents (sub-conversations). These run inside ATLAS rather than on an MCP server."
 )
 
 
@@ -456,7 +481,7 @@ def search_tools_enabled(app_settings: Any) -> bool:
 
 
 def launch_tool_enabled(app_settings: Any) -> bool:
-    """Whether ``atlas_launch`` is usable in this deployment.
+    """Whether ``atlas_launch_subagent`` is usable in this deployment.
 
     Lives beside the tool definition, like ``sleep_tool_enabled`` does for the
     wait, so the schema builder, tool authorization and the config payload can
@@ -478,7 +503,10 @@ def launch_tool_enabled(app_settings: Any) -> bool:
 
 
 def normalize_tool_name(tool_name: Any) -> Any:
-    """Map a pre-#855 built-in tool name onto its consolidated name.
+    """Map a retired built-in tool name onto its current name.
+
+    Covers the pre-#855 fully-qualified names and the deprecated subagent
+    names (#1141).
 
     Anything else (including non-strings, which reach this from model-supplied
     tool calls) is returned untouched so callers can keep their own handling.
@@ -545,8 +573,13 @@ def atlas_tool_schemas(
     return schemas
 
 
+def is_deprecated_tool_alias(tool_name: Any) -> bool:
+    """True for a subagent tool's deprecated name (#1141)."""
+    return isinstance(tool_name, str) and tool_name in DEPRECATED_TOOL_ALIASES
+
+
 def legacy_names_for(tool_name: Any) -> tuple:
-    """The pre-#855 name(s) a consolidated built-in used to be called.
+    """The retired name(s) a built-in used to be called.
 
     Hook matchers are operator-written regexes over the tool name, so renaming
     the tool would silently stop a hook targeting ``canvas_canvas`` from
@@ -560,10 +593,18 @@ def legacy_names_for(tool_name: Any) -> tuple:
 
 
 def matcher_candidates(tool_name: Any) -> tuple:
-    """Every spelling a matcher may reasonably use for ``tool_name``."""
+    """Every spelling a matcher may reasonably use for ``tool_name``.
+
+    That is the name as called, the current name it resolves to, and every
+    retired name of that tool. The current name matters when the call itself
+    used a retired one: a deprecated alias still executes, so a deny hook
+    written against ``atlas_launch_subagent`` has to fire for a model that
+    calls ``atlas_launch`` -- otherwise the alias would be a way around it.
+    """
     if not isinstance(tool_name, str):
         return ()
-    return (tool_name,) + tuple(n for n in legacy_names_for(tool_name) if n != tool_name)
+    candidates = (tool_name, normalize_tool_name(tool_name)) + legacy_names_for(tool_name)
+    return tuple(dict.fromkeys(candidates))
 
 
 def search_kwargs_for(

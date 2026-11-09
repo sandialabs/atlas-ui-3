@@ -641,7 +641,7 @@ class ChatService:
         turn_is_incognito = session_id in self._incognito_sessions
         turn_save_floor = self._incognito_save_floor.get(session_id, 0)
         # Carried on the session so it reaches the tool execution context,
-        # where atlas_launch needs it: a sub-conversation persists its own
+        # where atlas_launch_subagent needs it: a sub-conversation persists its own
         # transcript, which an incognito turn must not start (#925).
         session.context["incognito"] = turn_is_incognito
         # The copy a call with no run (a direct service call, the CLI) reads.

@@ -21,7 +21,7 @@ counts only runs admitted after the flush.
 
 ## Admission
 
-Every tracked run, from any transport (WebSocket turn, `atlas_launch`, the
+Every tracked run, from any transport (WebSocket turn, `atlas_launch_subagent`, the
 agent-runs REST API), is admitted by `admit_run`
 (`atlas/application/chat/runs/admission.py`):
 
@@ -37,7 +37,7 @@ agent-runs REST API), is admitted by `admit_run`
    transports map them as before (WebSocket `conversation_busy` /
    `run_limit_exceeded`; REST 409 / 429).
 4. Local insert, `RunRegistry.start(run_id=...)`, run synchronously together
-   with the caller's precheck (the `atlas_launch` depth and fan-out limits).
+   with the caller's precheck (the `atlas_launch_subagent` depth and fan-out limits).
 
 If step 4 refuses, or the caller is cancelled while step 3 is in flight, the
 claim is released before the error propagates. A failed admission holds no

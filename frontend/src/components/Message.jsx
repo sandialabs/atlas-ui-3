@@ -23,6 +23,7 @@ import { resolveAutoApproved } from '../utils/toolApproval'
 import { useIsPrinting } from '../hooks/useIsPrinting'
 import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
+import ToolNameLabel from './ToolNameLabel'
 import ContextCheckpointRow from './ContextCheckpointRow'
 
 // Feature flag: Perplexity-style inline citations & references for RAG.
@@ -322,7 +323,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                   {statusGlyph}
                 </span>
               )}
-              <span className="font-medium text-sm min-w-0 break-words">{message.tool_name}</span>
+              <ToolNameLabel toolName={message.tool_name} className="font-medium text-sm min-w-0 break-words" />
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} progressRaw={message.progressRaw} />}
             </button>
           ) : (
@@ -354,7 +355,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${statusColor}`}>
                 {statusLabel}
               </span>
-              <span className="font-medium min-w-0 break-words">{message.tool_name}</span>
+              <ToolNameLabel toolName={message.tool_name} className="font-medium min-w-0 break-words" />
               <span className="text-gray-400 text-sm min-w-0 break-words">({message.server_name})</span>
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} progressRaw={message.progressRaw} />}
             </button>

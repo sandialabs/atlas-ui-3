@@ -4,11 +4,11 @@ One master key (``AGENT_RUNS_API_KEY``) authenticates one trusted service,
 which may act on behalf of any user. The endpoints mirror the built-in
 sub-conversation tools a conversation already has:
 
-* ``GET  /api/agent-runs/options`` -- ``atlas_discover_launch_options``
-* ``POST /api/agent-runs`` -- ``atlas_launch``
-* ``GET  /api/agent-runs`` -- ``atlas_get_runs``
-* ``GET  /api/agent-runs/{run_id}`` -- ``atlas_result``
-* ``POST /api/agent-runs/{run_id}/follow-up`` -- ``atlas_follow_up``
+* ``GET  /api/agent-runs/options`` -- ``atlas_discover_subagent_options``
+* ``POST /api/agent-runs`` -- ``atlas_launch_subagent``
+* ``GET  /api/agent-runs`` -- ``atlas_get_subagent_runs``
+* ``GET  /api/agent-runs/{run_id}`` -- ``atlas_get_subagent_result``
+* ``POST /api/agent-runs/{run_id}/follow-up`` -- ``atlas_follow_up_subagent``
 * ``POST /api/agent-runs/{run_id}/cancel`` -- stop, as in the UI
 
 These paths are exempt from the browser auth middleware (identity header,

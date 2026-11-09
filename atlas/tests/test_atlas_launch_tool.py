@@ -1,4 +1,4 @@
-"""The ``atlas_launch`` built-in tool (issue #925).
+"""The ``atlas_launch_subagent`` built-in tool (issue #925).
 
 These pin the parts of "a conversation can launch sub-conversations" that are
 security or resource boundaries rather than plumbing: the child cannot reach a
@@ -216,7 +216,7 @@ async def test_discovery_publishes_workspace_ids_and_bare_model_names():
     """The tool description and the user guide promise exactly these keys.
 
     A model option is a ``name`` and nothing else -- that name is what
-    ``atlas_launch`` takes as its ``model`` argument -- so anything claiming
+    ``atlas_launch_subagent`` takes as its ``model`` argument -- so anything claiming
     discovery also reports a provider is wrong (#949 review).
     """
     factory = _Factory(lambda c: _ChatService(c))
@@ -293,7 +293,7 @@ async def test_discovery_execution_primes_the_same_context_for_launch():
     factory = _Factory(lambda c: _ChatService(c))
     context = {"user_email": "user@example.com", "factory": factory, "launch_discovery": {}}
     result = await execute_launch_discovery_tool(
-        ToolCall(id="discover-1", name="atlas_discover_launch_options", arguments={}),
+        ToolCall(id="discover-1", name="atlas_discover_subagent_options", arguments={}),
         context,
     )
 
@@ -1505,7 +1505,7 @@ async def test_real_chat_service_filters_child_tools_instead_of_refusing():
 
 
 # ---------------------------------------------------------------------------
-# atlas_follow_up: the launching conversation continues a sub-conversation
+# atlas_follow_up_subagent: the launching conversation continues a sub-conversation
 # ---------------------------------------------------------------------------
 
 
@@ -1528,8 +1528,8 @@ def test_the_config_payload_lists_follow_up_only_when_launch_is_enabled():
     enabled = _atlas_tools_info(sleep_enabled=True, search_enabled=True, launch_enabled=True)
     disabled = _atlas_tools_info(sleep_enabled=True, search_enabled=True, launch_enabled=False)
 
-    assert "follow_up" in enabled["tools"]
-    assert "follow_up" not in disabled["tools"]
+    assert "follow_up_subagent" in enabled["tools"]
+    assert "follow_up_subagent" not in disabled["tools"]
 
 
 class _Access:
@@ -2102,7 +2102,7 @@ async def test_follow_up_dispatches_through_the_manager(monkeypatch):
 
     assert result.success is True, result.content
     assert handle["conversation_id"] in result.content
-    assert "atlas_result" in result.content
+    assert "atlas_get_subagent_result" in result.content
     factory.services[-1].release.set()
 
 

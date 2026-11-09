@@ -14,6 +14,7 @@ import {
 } from '../utils/searchToolAvailability'
 import { useEscapeKey } from '../hooks/useEscapeKey'
 import { FOCUS_RING } from '../utils/focusRing'
+import { subagentToolLabel } from '../constants/atlasTools'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
 
 // Descriptions are the point of this menu -- the reviewer's complaint was a
@@ -122,11 +123,13 @@ const ToolSelector = () => {
       .map(server => {
         const detailed = server.tools_detailed || []
         const rows = (server.tools || []).map(name => ({
-          name,
+          // Subagent tools are listed by what they do (#1141).
+          name: subagentToolLabel(`${server.server}_${name}`) || name,
           key: `${server.server}_${name}`,
           description: summarize(detailed.find(t => t.name === name)?.description),
         })).filter(row => !needle
           || row.name.toLowerCase().includes(needle)
+          || row.key.toLowerCase().includes(needle)
           || row.description.toLowerCase().includes(needle)
           || String(server.server).toLowerCase().includes(needle))
         return { server: server.server, rows }

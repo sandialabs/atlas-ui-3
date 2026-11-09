@@ -2861,7 +2861,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "conversation_id": run_record.conversation_id,
                         "title": run_record.title,
                         # Lets the client tell a model-launched child
-                        # (atlas_launch) from a run the user started --
+                        # (atlas_launch_subagent) from a run the user started --
                         # auto-approve is scoped to the latter -- and place
                         # it under its parent in the history tree
                         # (issue #1081) before either conversation is saved.
