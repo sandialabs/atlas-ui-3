@@ -21,6 +21,11 @@ from typing import Any, Dict, Optional
 
 from atlas.application.chat.runs.registry import RunRegistry
 from atlas.domain import conversation_classification as conv_class
+from atlas.domain.conversation_origin import (
+    ORIGIN_METADATA_KEY,
+    origin_fields,
+    origin_for_run_source,
+)
 
 TITLE_MAX_CHARS = 200
 
@@ -58,6 +63,9 @@ def _live_metadata(session) -> Dict[str, Any]:
     )
     if classification is not ...:
         metadata[conv_class.CLASSIFICATION_METADATA_KEY] = classification
+    launch_origin = origin_for_run_source(session.context.get(ORIGIN_METADATA_KEY))
+    if launch_origin:
+        metadata[ORIGIN_METADATA_KEY] = launch_origin
     return metadata
 
 
@@ -121,6 +129,7 @@ async def in_flight_conversation(
         "messages": messages,
         "tags": [],
         **conv_class.public_fields(metadata),
+        **origin_fields(metadata),
         # Tells a client this is the run's live view, not a stored record.
         "in_flight": True,
         "run_id": record.run_id,

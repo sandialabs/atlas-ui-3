@@ -66,8 +66,20 @@ export function getDisplayConversations({
   if (chatHistoryEnabled && effectiveMode === 'server' && runsByConversation) {
     for (const run of Object.values(runsByConversation)) {
       if (!run || !run.conversation_id) continue
+      const listed = list.findIndex(c => c.id === run.conversation_id)
+      if (listed !== -1) {
+        // The conversation is open before its first save: the bridge row
+        // above stands in for it and knows nothing about how it was launched.
+        // That holds after the run has ended too, until the refetched list
+        // brings the saved row. A saved row is left alone; its stored origin
+        // is authoritative.
+        const row = list[listed]
+        if (row._current && run.launch_origin) {
+          list[listed] = { ...row, launch_origin: run.launch_origin }
+        }
+        continue
+      }
       if (['completed', 'failed', 'cancelled'].includes(run.status)) continue
-      if (list.some(c => c.id === run.conversation_id)) continue
       list.unshift({
         id: run.conversation_id,
         title: run.title || 'Conversation in progress',
@@ -79,6 +91,9 @@ export function getDisplayConversations({
         // parent link lets the sidebar nest it immediately instead of waiting
         // for the first save to persist the relationship (issue #1081).
         parent_conversation_id: run.parent_conversation_id || null,
+        // Likewise how the run was launched (issue #1187): an Agent Runs API
+        // run is marked in the list before its first save records the origin.
+        launch_origin: run.launch_origin || null,
       })
     }
   }

@@ -55,6 +55,7 @@ from atlas.core.coordination_metrics import (
 )
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
+from atlas.domain.conversation_origin import origin_for_run_source
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,11 @@ class RunRecord:
     # stored until the turn ends, so this is the only name the history list
     # can give it in the meantime -- in this tab and in every other one.
     title: Optional[str] = None
+    # The launch source given at admission (``atlas_launch``,
+    # ``agent_runs_api``, or empty for a turn the user sent). Known before
+    # ``launch_spec`` is attached, so the first public dict already says how
+    # the run's conversation was launched (issue #1187).
+    source: str = ""
     # What a launched run was started with -- model, tools, data sources,
     # workspace, compliance level -- so ``atlas_follow_up_subagent`` can continue the
     # sub-conversation on the same capability surface without the model
@@ -282,6 +288,10 @@ class RunRecord:
             # draws the tree from conversation ids, so it needs this while the
             # child is still only an in-memory run and has no stored record yet.
             "parent_conversation_id": self.parent_conversation_id,
+            # Set for a run started by the Agent Runs REST API (issue #1187),
+            # so the history list can mark its conversation before the first
+            # save records the same value in the conversation's metadata.
+            "launch_origin": origin_for_run_source(self.source),
             "depth": self.depth,
             "title": self.title,
             # Ends with the socket that started it: nothing to rediscover.
@@ -601,6 +611,7 @@ class RunRegistry:
         run_id: Optional[str] = None,
         off_record: bool = False,
         connection_bound: bool = False,
+        source: str = "",
     ) -> RunRecord:
         """Admit a new run, or raise if it would violate an invariant.
 
@@ -629,6 +640,9 @@ class RunRegistry:
             depth=max(0, int(depth or 0)),
             # An off-record run has no title: it is the prompt.
             title=(str(title)[:RUN_TITLE_MAX_CHARS] or None) if title and not off_record else None,
+            # Set here, not after the insert: listeners are notified at the
+            # end of this method and their first frame must carry the origin.
+            source=str(source or ""),
             off_record=bool(off_record),
             connection_bound=bool(connection_bound),
         )

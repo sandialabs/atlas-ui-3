@@ -18,6 +18,11 @@ from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
 from atlas.domain.conversation_lineage import parent_conversation_id_from_metadata
+from atlas.domain.conversation_origin import (
+    ORIGIN_METADATA_KEY,
+    origin_for_run_source,
+    origin_from_metadata,
+)
 from atlas.domain.errors import (
     AuthorizationError,
     DomainError,
@@ -577,6 +582,7 @@ class ChatService:
         update_callback: Optional[UpdateCallback] = None,
         steering: Optional[Any] = None,
         parent_conversation_id: Optional[str] = None,
+        launch_origin: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -729,6 +735,17 @@ class ChatService:
         # parent; the argument must not overwrite what the record owns.
         if parent_conversation_id and not session.context.get("parent_conversation_id"):
             session.context["parent_conversation_id"] = str(parent_conversation_id)
+
+        # How the conversation was launched (issue #1187). Server-side only,
+        # like the parent link, and applied the same way: hydration clears the
+        # key when the session moves to another conversation and restores it
+        # from a stored record, so a browser turn on an API conversation still
+        # carries the origin while it runs. The launch argument only fills it
+        # for a conversation the store does not have yet; the repository keeps
+        # a stored conversation's origin whatever a later save says.
+        launch_origin = origin_for_run_source(launch_origin)
+        if launch_origin and not session.context.get(ORIGIN_METADATA_KEY):
+            session.context[ORIGIN_METADATA_KEY] = launch_origin
 
         # The active workspace (issue #829): the frontend sends the workspace
         # id whose selections are loaded for this turn so the conversation can
@@ -1862,6 +1879,11 @@ class ChatService:
         prevents an un-hydrated turn from overwriting the stored record.
         """
         if is_incognito or self.conversation_repository is None or not user_email:
+            # Nothing is loaded, but the session is still leaving the
+            # conversation whose launch origin it carried (issue #1187). Left
+            # in place, a later saving turn would create a new conversation
+            # marked as launched by the API.
+            session.context.pop(ORIGIN_METADATA_KEY, None)
             return 0
 
         # The caller only gets here when the session's bound conversation
@@ -1878,6 +1900,9 @@ class ChatService:
         # must not inherit its parent.
         previous_parent_id = session.context.get("parent_conversation_id", UNSET)
         session.context["parent_conversation_id"] = None
+        # And for how the conversation was launched (issue #1187).
+        previous_origin = session.context.get(ORIGIN_METADATA_KEY, UNSET)
+        session.context[ORIGIN_METADATA_KEY] = None
 
         try:
             # Off the event loop: get_conversation issues several synchronous
@@ -1925,6 +1950,13 @@ class ChatService:
                 session.context["parent_conversation_id"] = previous_parent_id
             else:
                 session.context.pop("parent_conversation_id", None)
+            if (
+                previous_origin is not UNSET
+                and previous_conversation_id == conversation_id
+            ):
+                session.context[ORIGIN_METADATA_KEY] = previous_origin
+            else:
+                session.context.pop(ORIGIN_METADATA_KEY, None)
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
@@ -1958,6 +1990,9 @@ class ChatService:
         session.context["parent_conversation_id"] = (
             parent_conversation_id_from_metadata(conv_metadata)
         )
+        # Likewise the recorded launch origin, so the live view of a turn on
+        # an API conversation reports the same origin as its stored record.
+        session.context[ORIGIN_METADATA_KEY] = origin_from_metadata(conv_metadata)
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
         # The history the session holds belongs to the previous conversation,
@@ -2060,6 +2095,9 @@ class ChatService:
         if start_index > 0 and session.context.get("_restored"):
             conv_id = str(uuid4())
             session.context["conversation_id"] = conv_id
+            # ... which the user started, whatever launched the conversation
+            # it branched from (issue #1187).
+            session.context.pop(ORIGIN_METADATA_KEY, None)
             # The segment is a new conversation, so it gets a title from its
             # own first prompt rather than inheriting the original's.
             session.context.pop("_restored", None)
@@ -2089,6 +2127,11 @@ class ChatService:
         parent_conversation_id = session.context.get("parent_conversation_id")
         if parent_conversation_id:
             metadata["parent_conversation_id"] = str(parent_conversation_id)
+        # Launched by the Agent Runs REST API (issue #1187). Written on the
+        # first save; the repository carries it through every later one.
+        launch_origin = origin_for_run_source(session.context.get(ORIGIN_METADATA_KEY))
+        if launch_origin:
+            metadata[ORIGIN_METADATA_KEY] = launch_origin
         # Server-managed classification record (issue #1042), from the binding
         # the turn gate checked -- never from a client field. Legacy history
         # is written without one; the repository refuses any change.

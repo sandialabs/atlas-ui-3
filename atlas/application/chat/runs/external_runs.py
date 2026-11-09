@@ -51,6 +51,7 @@ from atlas.application.chat.runs.leases import publish_run_now
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
+from atlas.domain.conversation_origin import ORIGIN_AGENT_RUNS_API
 
 __all__ = [
     "API_SOURCE",
@@ -67,7 +68,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-API_SOURCE = "agent_runs_api"
+API_SOURCE = ORIGIN_AGENT_RUNS_API
 API_ACTOR = "service"
 
 # Idempotency keys outlive the run record on purpose: a retry that arrives

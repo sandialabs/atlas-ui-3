@@ -280,6 +280,11 @@ async def test_launch_returns_a_handle_and_the_run_outlives_the_request(factory)
         assert call["incognito"] is False
         assert call["agent_mode"] is True
         assert call["conversation_id"] == handle["conversation_id"]
+        # The turn is told how it was launched, so the conversation's first
+        # save records it for the history sidebar (issue #1187).
+        assert call["launch_origin"] == "agent_runs_api"
+        assert call["parent_conversation_id"] is None
+        assert record.to_public_dict()["launch_origin"] == "agent_runs_api"
         assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is True
 
         factory.release_all()
