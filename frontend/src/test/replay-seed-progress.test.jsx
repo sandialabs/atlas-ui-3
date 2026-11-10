@@ -176,6 +176,35 @@ describe('replay seed - notice lifecycle follows the step, not the run (issue #1
     expect(viaRefresh.current.messages.at(-1)._seed).toBe(true)
   })
 
+  it('a narration row appended after the reopen advances the seed', () => {
+    const viaAdd = reopened()
+    act(() => { viaAdd.current.addMessage({ role: 'assistant', content: 'Looking through the notebooks first.', type: 'agent_intermediate' }) })
+    expect(seedOf(viaAdd)._stepAdvanced).toBe(true)
+
+    const viaRefresh = reopened([userRow, toolRow(1, 'completed')])
+    act(() => { viaRefresh.current.refreshAppend([{ role: 'assistant', content: 'Now the tags.', type: 'chat' }], true) })
+    expect(seedOf(viaRefresh)._stepAdvanced).toBe(true)
+  })
+
+  it('a row dropped before the seed advanced lowers the mark, so the next step still retires the notice', () => {
+    const card = { role: 'system', type: 'tool_approval_request', tool_call_id: 'call_1', status: 'pending', content: 'Tool Approval Required' }
+    const result = reopened([userRow, card])
+    // The snapshot says the run is no longer waiting on the card.
+    act(() => { result.current.mapMessages(prev => prev.filter(m => m.type !== 'tool_approval_request')) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+    // The tool row that takes its place is a step, not a return to the mark.
+    act(() => { result.current.addMessage(toolRow(1, 'calling')) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('a user row that restarts the count does not strand the notice', () => {
+    const result = reopened([userRow, toolRow(1, 'completed'), toolRow(2, 'completed')])
+    act(() => { result.current.addMessage({ role: 'user', content: 'also check the archive' }) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+    act(() => { result.current.addMessage(toolRow(3, 'calling')) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
   it('a change that is not progress leaves the seed alone', () => {
     const result = reopened([userRow, toolRow(1, 'in_progress')])
     act(() => { result.current.updateToolResult('call_1', { invocation_id: 'inv_1', status: 'in_progress', progress: 0.5 }) })

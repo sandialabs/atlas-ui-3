@@ -22,12 +22,21 @@ function reseatSeed(state) {
 // that changes the transcript (live frames, the mid-run poll, a snapshot
 // reconcile) without each of them having to say so. It is sticky: a row that
 // is later dropped (a stale approval card) does not bring the notice back.
+//
+// The measure can also fall before the seed has advanced: a snapshot drops a
+// stale approval card, or a user row lands and starts the count over. The
+// baseline follows it down, so the next row still counts as a step instead
+// of having to climb back past a mark the transcript no longer reaches.
 function markSeedAdvanced(state) {
   const idx = state.findLastIndex(m => m._seed)
   if (idx < 0 || state[idx]._stepAdvanced) return state
-  if (currentTurnProgress(state) <= (state[idx]._seedProgress ?? 0)) return state
+  const progress = currentTurnProgress(state)
+  const baseline = state[idx]._seedProgress ?? 0
+  if (progress === baseline) return state
   const updated = [...state]
-  updated[idx] = { ...state[idx], _stepAdvanced: true }
+  updated[idx] = progress > baseline
+    ? { ...state[idx], _stepAdvanced: true }
+    : { ...state[idx], _seedProgress: progress }
   return updated
 }
 
