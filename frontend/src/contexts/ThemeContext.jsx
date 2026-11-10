@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react'
 import {
   DEFAULT_THEME_ID, RETRO_THEMES_IN_BUILD, effectiveThemeId, getRegisteredTheme, isKnownThemeId,
 } from '../themes/themeRegistry'
+import { forgetFailedRetroThemeCss, loadRetroThemeCss, retroThemeCssStatus } from '../themes/retroThemeCss'
 
 const ThemeContext = createContext()
 
@@ -63,8 +64,26 @@ export function ThemeProvider({ children }) {
   // answers they would replay the stale value; ignore them when stamped.
   const [stamped] = useState(getStampedRetroRuntime)
   const retroThemesAvailable = RETRO_THEMES_IN_BUILD && retroRuntime !== false
-  const theme = effectiveThemeId(selectedTheme, retroThemesAvailable)
+  const wanted = effectiveThemeId(selectedTheme, retroThemesAvailable)
+  // Retro CSS loads per theme on demand (themes/retroThemeCss.js). Until the
+  // wanted theme's sheet is in, keep showing the last theme whose CSS was
+  // ready, so a switch never paints an unstyled retro ID; if it fails, use
+  // the theme's light/dark base. On mount the bootstrap has already
+  // injected the saved theme's sheet, so the wanted theme shows directly.
+  const [, cssSettled] = useReducer(count => count + 1, 0)
+  const shown = useRef(null)
+  const cssStatus = retroThemeCssStatus(wanted)
+  const theme = cssStatus === 'loaded' ? wanted
+    : cssStatus === 'failed' ? getRegisteredTheme(wanted).mode
+      : (shown.current ?? wanted)
   const definition = getRegisteredTheme(theme)
+
+  useEffect(() => {
+    if (cssStatus !== 'pending') return undefined
+    let live = true
+    loadRetroThemeCss(wanted).then(() => { if (live) cssSettled() })
+    return () => { live = false }
+  }, [wanted, cssStatus])
 
   useEffect(() => {
     const root = document.documentElement
@@ -72,12 +91,18 @@ export function ThemeProvider({ children }) {
     // data-atlas-theme names the exact registered visual identity.
     root.setAttribute('data-theme', definition.mode)
     root.setAttribute('data-atlas-theme', theme)
+    shown.current = theme
     try {
       localStorage.setItem('atlas-theme', isKnownThemeId(selectedTheme) ? selectedTheme : theme)
     } catch { /* ignore */ }
   }, [theme, definition.mode, selectedTheme])
 
   const setTheme = useCallback(id => {
+    // Choosing a theme again retries a stylesheet that failed earlier.
+    if (typeof id === 'string' && isKnownThemeId(id)) {
+      forgetFailedRetroThemeCss(id)
+      cssSettled()
+    }
     setSelectedTheme(current => {
       const next = typeof id === 'function' ? id(current) : id
       return isKnownThemeId(next) ? next : current

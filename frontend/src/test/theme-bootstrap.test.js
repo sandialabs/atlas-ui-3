@@ -10,7 +10,10 @@ const bootstrap = readFileSync('public/theme-bootstrap.js', 'utf8')
  * script tag's data-retro-themes (VITE_FEATURE_RETRO_THEMES); `cachedConfig`
  * is the /api/config cache useChatConfig keeps in localStorage.
  */
-function firstPaint(saved, { blocked = false, retroBuild = 'true', cachedConfig = null, runtime = null } = {}) {
+function firstPaint(saved, {
+  blocked = false, retroBuild = 'true', cachedConfig = null, runtime = null, cssVersion = null,
+  readyState = 'loading', written = [], appended = [],
+} = {}) {
   const attributes = {}
   const storage = {
     'atlas-theme': saved,
@@ -25,9 +28,18 @@ function firstPaint(saved, { blocked = false, retroBuild = 'true', cachedConfig 
     },
     document: {
       currentScript: {
-        getAttribute: name => ({ 'data-retro-themes': retroBuild, 'data-retro-runtime': runtime })[name] ?? null,
+        getAttribute: name => ({
+          'data-retro-themes': retroBuild, 'data-retro-runtime': runtime, 'data-retro-css': cssVersion,
+        })[name] ?? null,
       },
       documentElement: { setAttribute(key, value) { attributes[key] = value } },
+      readyState,
+      write: html => written.push(html),
+      createElement: () => {
+        const link = { attributes: {}, setAttribute(key, value) { this.attributes[key] = value } }
+        return link
+      },
+      head: { appendChild: link => appended.push(link) },
     },
   })
   return attributes
@@ -47,7 +59,8 @@ describe('synchronous first-paint theme restoration', () => {
   })
   it('is a blocking head script, not a deferred module, carrying the build flag', () => {
     const html = readFileSync('index.html', 'utf8')
-    const tag = '<script src="/theme-bootstrap.js" data-retro-themes="%VITE_FEATURE_RETRO_THEMES%"></script>'
+    const tag = '<script src="/theme-bootstrap.js" data-retro-themes="%VITE_FEATURE_RETRO_THEMES%" ' +
+      'data-retro-css="%VITE_RETRO_CSS_VERSION%"></script>'
     expect(html).toContain(tag)
     expect(html.indexOf(tag)).toBeLessThan(html.indexOf('</head>'))
     expect(html.indexOf(tag)).toBeLessThan(html.indexOf('type="module"'))
@@ -103,5 +116,53 @@ describe('first paint with retro themes turned off (issue #1119)', () => {
       },
     })
     expect(attributes['data-theme']).toBe('light')
+  })
+})
+
+describe('first-paint per-theme retro CSS (issue #1119 lazy loading)', () => {
+  it.each(retroThemes)('writes a render-blocking <link> for a saved $id', ({ id }) => {
+    const written = []
+    firstPaint(id, { cssVersion: 'abc123', written })
+    expect(written).toEqual([
+      `<link rel="stylesheet" data-atlas-theme-css="${id}" href="/assets/retro/${id}.css?v=abc123">`,
+    ])
+  })
+  it('appends the <link> when the document is no longer parsing', () => {
+    const written = []
+    const appended = []
+    firstPaint('win95', { cssVersion: 'v1', readyState: 'complete', written, appended })
+    expect(written).toEqual([])
+    expect(appended).toHaveLength(1)
+    expect(appended[0]).toMatchObject({ rel: 'stylesheet', href: '/assets/retro/win95.css?v=v1',
+      attributes: { 'data-atlas-theme-css': 'win95' } })
+  })
+  it.each([
+    ['Dark', 'dark', {}],
+    ['Light', 'light', {}],
+    ['build flag off', 'win95', { retroBuild: 'false' }],
+    ['run-time flag off', 'win95', { runtime: 'false' }],
+    ['cached run-time flag off', 'win95', { cachedConfig: { features: { retro_themes: false } } }],
+    ['no CSS version (flag-off build)', 'win95', { cssVersion: '' }],
+    ['unsubstituted CSS version', 'win95', { cssVersion: '%VITE_RETRO_CSS_VERSION%' }],
+    ['missing CSS version attribute', 'win95', { cssVersion: null }],
+  ])('loads no retro CSS for %s', (_label, saved, options) => {
+    const written = []
+    const appended = []
+    firstPaint(saved, { cssVersion: 'v1', ...options, written, appended })
+    expect(written).toEqual([])
+    expect(appended).toEqual([])
+  })
+  it('a failing DOM call never breaks first paint', () => {
+    const attributes = {}
+    runInNewContext(bootstrap, {
+      localStorage: { getItem: key => (key === 'atlas-theme' ? 'beos' : null) },
+      document: {
+        currentScript: { getAttribute: name => (name === 'data-retro-css' ? 'v1' : 'true') },
+        documentElement: { setAttribute(key, value) { attributes[key] = value } },
+        readyState: 'loading',
+        write() { throw new Error('blocked') },
+      },
+    })
+    expect(attributes).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'beos' })
   })
 })

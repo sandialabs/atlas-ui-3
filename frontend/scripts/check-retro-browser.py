@@ -5,9 +5,10 @@ PR #1175 review: instead of styling hand-copied class names, this mounts the
 real React components (scripts/contrast-fixture/fixture.jsx: log bodies,
 system notices, tool-call and approval prompts, the agent-input card, header
 controls, the Settings panel and its caption, conversation metadata, retro
-window/button/input chrome) against the production stylesheet from
-`npm run build`, switches through every registered theme, and measures every
-rendered text node, at rest and in the hovered state.
+window/button/input chrome) against the production stylesheets from
+`npm run build` (the shared index-*.css plus, per theme, only that theme's
+lazily loaded assets/retro/<id>.css), switches through every registered theme,
+and measures every rendered text node, at rest and in the hovered state.
 
 Measurement:
 - Text color is composited over its real background: the element's own and
@@ -272,6 +273,9 @@ function runChecks() {
   const results = [];
   let pseudoSeen = new Set();
   for (const item of entries) {
+    for (const sheet of document.querySelectorAll('style[data-retro-css]')) {
+      sheet.media = sheet.getAttribute('data-retro-css') === item.id ? 'all' : 'not all';
+    }
     fixture.setTheme(item.id);
     pseudoCache = new Map();
     pseudoSeen = new Set();
@@ -388,15 +392,20 @@ def build_fixture(out_dir, timeout):
 
 
 def production_css():
+    """The shared bundle CSS and each retro theme's split stylesheet."""
     css_files = list((FRONTEND/'dist/assets').glob('index-*.css'))
     if len(css_files) != 1:
         raise RuntimeError('Run npm run build before checking browser themes')
-    css = css_files[0].read_text()
-    if 'windows-xp-luna' not in css:
+    base = css_files[0].read_text()
+    themes = {path.stem: path.read_text() for path in sorted((FRONTEND/'dist/assets/retro').glob('*.css'))}
+    if not themes:
         raise RuntimeError('dist/ was built with VITE_FEATURE_RETRO_THEMES=false; rebuild with the flag on')
+    if 'windows-xp-luna' in base:
+        raise RuntimeError('Retro theme CSS leaked into the main bundle; it must load per theme')
     # Use production CSS, including its hover rules. The additional selector
     # permits deterministic hovered-state checks in headless --dump-dom.
-    return css.replace(':hover', ':is(:hover, [data-contrast-hover])')
+    hover = lambda css: css.replace(':hover', ':is(:hover, [data-contrast-hover])')
+    return hover(base), {theme: hover(css) for theme, css in themes.items()}
 
 
 def summarize(rows):
@@ -426,13 +435,21 @@ def summarize(rows):
 def run(chrome, timeout, report=None, fixture_js=None):
     entries = expected_themes()
     assert len(entries) == 55
-    css = production_css()
+    css, theme_css = production_css()
+    retro_ids = sorted(item['id'] for item in entries if item['id'] not in ('dark', 'light'))
+    if sorted(theme_css) != retro_ids:
+        raise RuntimeError('dist/assets/retro/ does not match the registry: '
+                           +str(sorted(set(theme_css) ^ set(retro_ids))))
+    # Each theme is measured with only its own stylesheet enabled, as the
+    # lazy loader ships it: the shared bundle plus /assets/retro/<id>.css.
+    theme_styles = ''.join('<style data-retro-css="'+theme+'" media="not all">'+sheet.replace('</style', '<\\/style')
+                           +'</style>' for theme, sheet in sorted(theme_css.items()))
     script = (SCRIPT.replace('__ENTRIES__', json.dumps(entries, separators=(',', ':')))
               .replace('__TEXT_MIN__', str(TEXT_MIN)).replace('__FOCUS_MIN__', str(FOCUS_MIN)))
     with tempfile.TemporaryDirectory(prefix='atlas-retro-check-') as tmp:
         bundle = Path(fixture_js).read_text() if fixture_js else build_fixture(Path(tmp)/'fixture', timeout)
         page = ('<!doctype html><html data-theme="dark" data-atlas-theme="dark"><head>'
-                '<meta charset="utf-8"><style>'+css+'</style>'
+                '<meta charset="utf-8"><style>'+css+'</style>'+theme_styles+
                 # Theme switches happen synchronously between measurements, so
                 # color transitions would be read mid-flight; settle them.
                 '<style>*,*::before,*::after{transition:none!important;'

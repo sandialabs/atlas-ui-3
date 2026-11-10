@@ -2,7 +2,8 @@ import process from 'node:process'
 /**
  * Builds the browser contrast fixture (fixture.jsx) into one IIFE script for
  * frontend/scripts/check-retro-browser.py. No CSS is emitted: the checker
- * measures the production stylesheet from `npm run build`.
+ * measures the production stylesheets from `npm run build` (index-*.css plus
+ * the per-theme assets/retro/<id>.css).
  *
  * Backend-bound contexts and hooks resolve to inert stubs in ./stubs.
  */
@@ -51,6 +52,10 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify('fixture'),
     __GIT_HASH__: JSON.stringify('fixture'),
     __BUILD_TIME__: JSON.stringify('fixture'),
+    // No lazy retro CSS: the checker inlines each theme's split stylesheet
+    // and enables only the measured one, so the loader treats every theme
+    // as loaded and setTheme() applies synchronously.
+    'import.meta.env.VITE_RETRO_CSS_VERSION': JSON.stringify(''),
   },
   build: {
     outDir: process.env.ATLAS_FIXTURE_OUT_DIR || path.join(here, 'dist'),

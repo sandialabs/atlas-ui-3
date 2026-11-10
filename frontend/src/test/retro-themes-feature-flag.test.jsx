@@ -3,7 +3,7 @@
  * (FEATURE_RETRO_THEMES_ENABLED -> features.retro_themes) gates for the Retro
  * Design System gallery (issue #1119, maintainer request on PR #1175).
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { act, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,6 +17,7 @@ import { RETRO_THEME_MODES } from '../themes/retroThemeModes.generated'
 import * as disabledModule from '../themes/retro/retroThemes.disabled'
 import * as enabledModule from '../themes/retro/retroThemes.enabled'
 import { retroThemesBuildEnabled, retroThemesModulePath } from '../themes/retro/retroThemesBuildFlag'
+import { RETRO_CSS_SOURCES } from '../themes/retro/retroCssSplit'
 
 vi.mock('../contexts/ChatContext', () => ({ useChat: vi.fn() }))
 vi.mock('../hooks/useGlobusAuth', () => ({
@@ -89,15 +90,22 @@ describe('VITE_FEATURE_RETRO_THEMES build flag', () => {
     expect(enabledModule.RETRO_THEMES_BUILT).toBe(true)
   })
 
-  it('keeps every retro stylesheet behind the alias, never in the always-loaded entry', () => {
-    const enabled = readFileSync('src/themes/retro/retroThemes.enabled.js', 'utf8')
-    for (const sheet of ['tokens.css', 'retroCatalog.generated.css', 'retroChrome.generated.css', 'retroChrome.css']) {
-      expect(enabled).toContain(sheet)
-      for (const entry of ['src/main.jsx', 'src/App.jsx', 'src/index.css']) {
-        expect(readFileSync(entry, 'utf8'), `${entry} must not import ${sheet}`).not.toMatch(
-          new RegExp(`import\\s+['"][^'"]*${sheet.replace('.', '\\.')}['"]`))
+  it('bundles no retro stylesheet: they load per theme from /assets/retro/', () => {
+    // retroCssPlugin splits these three into /assets/retro/<id>.css, emitted
+    // only when VITE_FEATURE_RETRO_THEMES is on; no module may import them.
+    const sheets = ['tokens.css', 'retroCatalog.generated.css', 'retroChrome.generated.css']
+    expect(RETRO_CSS_SOURCES.map(path => path.split('/').pop())).toEqual(sheets)
+    const sources = readdirSync('src', { recursive: true })
+      .filter(file => /\.(jsx?|css)$/.test(file) && !file.startsWith('test'))
+    expect(sources).toContain('main.jsx')
+    for (const file of sources) {
+      const text = readFileSync(`src/${file}`, 'utf8')
+      for (const sheet of sheets) {
+        expect(text, `src/${file} must not import ${sheet}`).not.toMatch(
+          new RegExp(`(import|@import)\\s+(url\\()?['"][^'"]*${sheet.replace('.', '\\.')}['"]`))
       }
     }
+    expect(readFileSync('vite.config.js', 'utf8')).toContain('retroCssPlugin(retroThemesEnabled)')
     // Dark/Light content aliases stay in every build.
     expect(readFileSync('src/main.jsx', 'utf8')).toContain("import './themes/baseThemes.generated.css'")
   })

@@ -38,7 +38,8 @@ produces five deterministic assets:
   window, titlebar, button, input, background, and font stack rather than
   an invented motif.
 - `frontend/public/theme-bootstrap.js`: a synchronous, registry-derived theme
-  ID/base-mode map applied before first paint, with the same Dark fallback as React.
+  ID/base-mode map applied before first paint, with the same Dark fallback as
+  React; for a retro ID it also writes the `<link>` to that theme's stylesheet.
 - `baseThemes.generated.css`: the content aliases for Atlas Dark and Light
   only. It always ships; everything retro is in the files above.
 - `retroThemeModes.generated.js`: a frozen id-to-base-mode map that is all the
@@ -49,7 +50,7 @@ produces five deterministic assets:
 
 | Flag | Where | Default | Mechanism |
 |---|---|---|---|
-| `VITE_FEATURE_RETRO_THEMES` | build (Vite, Docker `ARG`) | `true` | `vite.config.js` aliases `@atlas/retro-themes` to `themes/retro/retroThemes.enabled.js` (imports the token, catalog and chrome CSS and exports the catalog) or `retroThemes.disabled.js` (empty catalog). Only the literal `false` disables it; see `themes/retro/retroThemesBuildFlag.js`. `index.html` passes the value to the bootstrap as `data-retro-themes`. |
+| `VITE_FEATURE_RETRO_THEMES` | build (Vite, Docker `ARG`) | `true` | `vite.config.js` aliases `@atlas/retro-themes` to `themes/retro/retroThemes.enabled.js` (exports the catalog) or `retroThemes.disabled.js` (empty catalog), and `retroCssPlugin` emits the per-theme stylesheets only when on (see *Per-theme CSS loading*). Only the literal `false` disables it; see `themes/retro/retroThemesBuildFlag.js`. `index.html` passes the value to the bootstrap as `data-retro-themes` and the CSS version as `data-retro-css` (empty when off). |
 | `FEATURE_RETRO_THEMES_ENABLED` | backend `AppSettings` | `false` | Published as `features.retro_themes` in `/api/config/shell` and `/api/config`. `RetroThemeFeatureBridge` in `App.jsx` forwards it to `ThemeContext.setRetroThemesEnabled`. |
 
 `ThemeContext` keeps the user's `selectedTheme` separately from the applied
@@ -64,6 +65,44 @@ the backend stamps on the bootstrap `<script>` tag every time it serves
 and a flag that was just flipped never flashes the old state, not even once. Vitest resolves the
 alias to the enabled module; `retro-themes-build-off.test.jsx` mocks it to the
 disabled one.
+
+### Per-theme CSS loading
+
+The three generated retro stylesheets are not bundled. Every top-level rule in
+them is scoped to exactly one `[data-atlas-theme="<id>"]`, so at build time
+`themes/retro/retroCssPlugin.js` splits them (`retroCssSplit.js`; tokens, then
+catalog adapters, then chrome) into one minified file per retro theme,
+`dist/assets/retro/<id>.css`, served by the existing `/assets` mount (and by a
+middleware on the Vite dev server). The split fails the build if a rule is
+unscoped, scoped to two themes, or an at-rule. The main bundle keeps only the
+shared CSS (`index.css`, `theme-presets.css`, `baseThemes.generated.css`).
+
+- **First paint.** When the bootstrap applies a retro ID (build and run-time
+  flags on) it `document.write`s `<link rel="stylesheet"
+  data-atlas-theme-css="<id>" href="/assets/retro/<id>.css?v=<version>">`,
+  a parser-inserted sheet that blocks rendering like a static one, so there is
+  no unstyled frame. `<version>` is a hash of the generated sources
+  (`VITE_RETRO_CSS_VERSION`, stamped on the tag as `data-retro-css`). The
+  plugin moves the bundle CSS `<link>` above the bootstrap so the retro sheet
+  stays last in the cascade, as it was when it was bundled.
+- **Switching.** `themes/retroThemeCss.js` appends the new theme's `<link>`,
+  caches one load per ID, and adopts the bootstrap's `<link>`. `ThemeContext`
+  keeps the previous theme applied until the new sheet has loaded, then
+  switches; a theme already loaded switches synchronously.
+- **Failure.** A sheet that errors (or never settles within 15 s) is removed and
+  the theme renders as its Light/Dark base, as when the flag is off; the
+  saved choice is kept, and choosing the theme again retries.
+- **Flags off.** A `VITE_FEATURE_RETRO_THEMES=false` build emits no retro CSS
+  and an empty version, and nothing is ever requested; with
+  `FEATURE_RETRO_THEMES_ENABLED` off the effective theme is Light/Dark, which
+  needs no extra CSS.
+- **Gallery.** Swatches use the catalog's `preview` colours (JS data), so
+  browsing the gallery loads no theme CSS; only applying a theme does.
+
+Initial CSS for the default build (`npm run build`): 131.2 kB (26.7 kB gzip)
+with Dark or Light, plus 3.1 to 7.4 kB (avg 4.9 kB, 1.5 kB gzip) for a retro
+theme; previously every page loaded 378.3 kB (59.8 kB gzip). All 53 retro
+files total 258.8 kB.
 
 ### Content tones and surfaces
 
@@ -118,11 +157,15 @@ preferences. All other IDs derive deterministically from their upstream
 manifest slugs. For example, `03-windows-xp-luna` becomes
 `windows-xp-luna`.
 
-The generated assets are static: **no network fetch, remotely installed CSS,
-arbitrary script, external font, logo, bitmap or historical art**.
+The generated assets are static: **no remote fetch, remotely installed CSS,
+arbitrary script, external font, logo, bitmap or historical art**. The only
+request is the same-origin `/assets/retro/<id>.css` for the applied theme.
 
 After `cd frontend && npm run build`, verify the rendered CSS against all
-55 modes using an installed Chrome/Chromium binary:
+55 modes using an installed Chrome/Chromium binary. The check measures each
+theme with only the shared bundle and that theme's `assets/retro/<id>.css`
+enabled, as the lazy loader ships it, and fails if retro CSS leaks into the
+bundle or a registered theme has no file:
 
 ```bash
 python3 frontend/scripts/check-retro-browser.py --chrome /path/to/chrome

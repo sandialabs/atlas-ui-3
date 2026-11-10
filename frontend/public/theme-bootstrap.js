@@ -7,6 +7,11 @@
 // wins; without it (Vite dev server) the cached server config is used.
 // Otherwise the saved ID falls back to its own light/dark base mode,
 // so there is no flash.
+// Retro CSS is split per theme (/assets/retro/<id>.css, see
+// src/themes/retro/retroCssPlugin.js). When a retro ID applies and the
+// build stamped a CSS version (data-retro-css), its stylesheet is written
+// into <head> here, parser-inserted so it blocks first paint like a static
+// <link>; src/themes/retroThemeCss.js adopts it after React starts.
 (function () {
   var modes = {"dark":"dark","light":"light","mac7":"light","win95":"light","windows-xp-luna":"light","aqua-osx":"light","amiga-workbench":"light","nextstep":"light","beos":"light","teletext":"dark","crt-phosphor":"dark","dos-cga":"dark","8bit-arcade":"dark","frutiger-aero":"light","winamp-skin":"dark","geocities-web10":"dark","cassette-futurism":"dark","vaporwave":"dark","memphis":"dark","ps1-tech":"light","os2-warp":"light","macos9-platinum":"dark","web20-glossy":"light","gameboy-dmg":"dark","braun-rams":"light","tron-vector":"dark","vhs-tracking":"dark","risograph":"light","ibm-3270":"dark","nethack-ascii":"dark","templeos":"dark","bbs-ansi":"dark","midnight-commander":"dark","matrix-rain":"dark","btop-meters":"dark","c64-basic":"dark","flat-2013":"light","glassmorphism":"light","neumorphism":"light","blueprint-cad":"dark","claymorphism":"light","brutalist-web":"light","swiss-intl":"light","bauhaus":"light","pop-art-lichtenstein":"light","op-art":"dark","hypnagogic":"light","monochrome-zen":"light","default-browser":"light","wireframe-sketch":"light","glitch-databend":"dark","y2k-chrome":"light","duotone-poster":"light","grid-paper":"light","maximalist-banners":"light"};
   var script = document.currentScript;
@@ -24,4 +29,19 @@
   if (!retro && id !== 'dark' && id !== 'light') id = modes[id];
   document.documentElement.setAttribute('data-theme', modes[id]);
   document.documentElement.setAttribute('data-atlas-theme', id);
+  var version = script && script.getAttribute('data-retro-css');
+  if (retro && version && version.charAt(0) !== '%' && id !== 'dark' && id !== 'light') {
+    var href = '/assets/retro/' + id + '.css?v=' + encodeURIComponent(version);
+    try {
+      if (document.readyState === 'loading') {
+        document.write('<link rel="stylesheet" data-atlas-theme-css="' + id + '" href="' + href + '">');
+      } else {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.setAttribute('data-atlas-theme-css', id);
+        document.head.appendChild(link);
+      }
+    } catch { /* React's loader (retroThemeCss.js) retries or falls back. */ }
+  }
 })();

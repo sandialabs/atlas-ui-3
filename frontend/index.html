@@ -6,8 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>%VITE_APP_NAME%</title>
     <!-- Blocking registry-derived bootstrap: both selectors exist before first paint.
-         data-retro-themes carries the VITE_FEATURE_RETRO_THEMES build flag. -->
-    <script src="/theme-bootstrap.js" data-retro-themes="%VITE_FEATURE_RETRO_THEMES%"></script>
+         data-retro-themes carries the VITE_FEATURE_RETRO_THEMES build flag;
+         data-retro-css the version of the per-theme /assets/retro/<id>.css
+         files (empty when the flag is off), so it can load the saved theme's
+         stylesheet before first paint. -->
+    <script src="/theme-bootstrap.js" data-retro-themes="%VITE_FEATURE_RETRO_THEMES%" data-retro-css="%VITE_RETRO_CSS_VERSION%"></script>
   </head>
   <body>
     <div id="root"></div>

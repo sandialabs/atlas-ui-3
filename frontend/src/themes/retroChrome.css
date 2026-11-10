@@ -1,7 +1,0 @@
-/*
- * Per-theme window/control chrome now comes from retroChrome.generated.css,
- * which maps the vendored NovusGFX demo CSS (commit 8988f50, MIT) onto
- * Atlas RetroWindow, RetroButton, RetroInput, Settings chrome, and chat
- * accents. This file is kept so existing imports stay valid; it no longer
- * hand-tunes individual designs.
- */
