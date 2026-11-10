@@ -1,5 +1,5 @@
 import { useReducer, useCallback } from 'react'
-import { currentTurnProgress, isOpenLegacyRow } from '../../utils/executionState'
+import { transcriptProgress, isOpenLegacyRow } from '../../utils/executionState'
 
 // The marker-only seed (issue #957) stands for "the run is still going"; it
 // has no text, so it belongs after every row of its turn. Rows that arrive
@@ -23,14 +23,14 @@ function reseatSeed(state) {
 // reconcile) without each of them having to say so. It is sticky: a row that
 // is later dropped (a stale approval card) does not bring the notice back.
 //
-// The measure can also fall before the seed has advanced: a snapshot drops a
-// stale approval card, or a user row lands and starts the count over. The
-// baseline follows it down, so the next row still counts as a step instead
-// of having to climb back past a mark the transcript no longer reaches.
+// The measure can also fall before the seed has advanced: the conversation
+// was rewound, or a reconcile dropped rows. The baseline follows it down, so
+// the next row still counts as a step instead of having to climb back past
+// a mark the transcript no longer reaches.
 function markSeedAdvanced(state) {
   const idx = state.findLastIndex(m => m._seed)
   if (idx < 0 || state[idx]._stepAdvanced) return state
-  const progress = currentTurnProgress(state)
+  const progress = transcriptProgress(state)
   const baseline = state[idx]._seedProgress ?? 0
   if (progress === baseline) return state
   const updated = [...state]
@@ -89,8 +89,8 @@ function reduceMessages(state, action) {
           _seed: !action.token,
         }
         if (replayed._seed) {
-          // Where the turn stood when this seed was made; see markSeedAdvanced.
-          replayed._seedProgress = currentTurnProgress(state)
+          // Where the transcript stood when this seed was made; see markSeedAdvanced.
+          replayed._seedProgress = transcriptProgress(state)
           replayed._stepAdvanced = false
         }
         // First target a placeholder (the seed or an earlier replay): the

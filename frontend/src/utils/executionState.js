@@ -84,21 +84,24 @@ export function currentTurnHasActiveRow(messages, settings) {
   return false
 }
 
-// How far the turn in progress has come, as one number that only grows while
-// the run advances: every settled row after the last user message counts, and
-// a tool row counts again once it reaches a terminal status. The marker-only
-// replay seed records this when it is created (useMessages.js); a later, larger
-// value means the view has been reconciled past the snapshot the seed stood
-// for -- a new tool row, a finished one, a narration row (issue #1193). Open
-// streaming bubbles are not steps, and an agent-loop answer (`_agentInput`)
-// belongs to the running turn, as in currentTurnHasActiveRow.
-export function currentTurnProgress(messages) {
+// How far the transcript has come, as one number that grows with every step a
+// run takes: each settled row counts, and a tool row counts again once it
+// reaches a terminal status. The marker-only replay seed records this when it
+// is created (useMessages.js); a later, larger value means the view has been
+// reconciled past the snapshot the seed stood for -- a new tool row, a
+// finished one, a narration row (issue #1193).
+//
+// The whole transcript is measured, not the turn in progress: a refresh can
+// deliver a user row and the tool rows after it in one batch, and a count
+// that restarted at that row would read the batch as no progress at all.
+// Open streaming bubbles are not steps. Neither is an approval card: the
+// snapshot reconcile drops a card in the same pass that adds the tool row it
+// was for, and the two must not cancel out.
+export function transcriptProgress(messages) {
   const list = Array.isArray(messages) ? messages : []
   let progress = 0
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    const message = list[i]
-    if (!message || message._streaming) continue
-    if (message.role === 'user' && !message._agentInput) break
+  for (const message of list) {
+    if (!message || message._streaming || message.type === 'tool_approval_request') continue
     progress += 1
     if (message.type === 'tool_call' && TERMINAL_TOOL_STATUS.has(message.status)) progress += 1
   }

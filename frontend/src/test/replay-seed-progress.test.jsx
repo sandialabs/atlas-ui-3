@@ -17,7 +17,7 @@ import Message from '../components/Message'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMessages } from '../hooks/chat/useMessages'
-import { currentTurnHasActiveRow, currentTurnProgress } from '../utils/executionState'
+import { currentTurnHasActiveRow, transcriptProgress } from '../utils/executionState'
 
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({
@@ -186,23 +186,36 @@ describe('replay seed - notice lifecycle follows the step, not the run (issue #1
     expect(seedOf(viaRefresh)._stepAdvanced).toBe(true)
   })
 
-  it('a row dropped before the seed advanced lowers the mark, so the next step still retires the notice', () => {
+  it('an approval card swapped for its tool row in one pass advances the seed', () => {
     const card = { role: 'system', type: 'tool_approval_request', tool_call_id: 'call_1', status: 'pending', content: 'Tool Approval Required' }
     const result = reopened([userRow, card])
-    // The snapshot says the run is no longer waiting on the card.
-    act(() => { result.current.mapMessages(prev => prev.filter(m => m.type !== 'tool_approval_request')) })
-    expect(seedOf(result)._stepAdvanced).toBe(false)
-    // The tool row that takes its place is a step, not a return to the mark.
-    act(() => { result.current.addMessage(toolRow(1, 'calling')) })
+    // The snapshot reconcile drops the answered card and adds the row together.
+    act(() => { result.current.mapMessages(prev => [...prev.filter(m => m.type !== 'tool_approval_request'), toolRow(1, 'calling')]) })
     expect(seedOf(result)._stepAdvanced).toBe(true)
   })
 
-  it('a user row that restarts the count does not strand the notice', () => {
+  it('a card that is only dropped is not a step', () => {
+    const card = { role: 'system', type: 'tool_approval_request', tool_call_id: 'call_1', status: 'pending', content: 'Tool Approval Required' }
+    const result = reopened([userRow, card])
+    act(() => { result.current.mapMessages(prev => prev.filter(m => m.type !== 'tool_approval_request')) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+  })
+
+  it('rows removed before the seed advanced lower the mark, so the next step still retires the notice', () => {
     const result = reopened([userRow, toolRow(1, 'completed'), toolRow(2, 'completed')])
-    act(() => { result.current.addMessage({ role: 'user', content: 'also check the archive' }) })
+    act(() => { result.current.mapMessages(prev => prev.filter(m => m.tool_call_id !== 'call_2')) })
     expect(seedOf(result)._stepAdvanced).toBe(false)
     act(() => { result.current.addMessage(toolRow(3, 'calling')) })
     expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('one refresh that delivers a user row together with later tool rows advances the seed', () => {
+    const result = reopened([userRow, toolRow(1, 'completed'), toolRow(2, 'completed')])
+    act(() => {
+      result.current.refreshAppend([{ role: 'user', content: 'also check the archive' }, toolRow(3, 'completed')], true)
+    })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+    expect(result.current.messages.filter(m => m._streaming)).toHaveLength(1)
   })
 
   it('a change that is not progress leaves the seed alone', () => {
@@ -278,17 +291,19 @@ describe('replay seed - notice lifecycle follows the step, not the run (issue #1
   })
 })
 
-describe('currentTurnProgress', () => {
-  it('counts settled rows of the current turn and a terminal tool row twice', () => {
-    expect(currentTurnProgress([userRow])).toBe(0)
-    expect(currentTurnProgress([userRow, sleepRow('calling')])).toBe(1)
-    expect(currentTurnProgress([userRow, sleepRow('completed')])).toBe(2)
-    expect(currentTurnProgress([userRow, sleepRow('failed'), seedRow])).toBe(2)
+describe('transcriptProgress', () => {
+  it('counts settled rows and a terminal tool row twice', () => {
+    expect(transcriptProgress([userRow])).toBe(1)
+    expect(transcriptProgress([userRow, sleepRow('calling')])).toBe(2)
+    expect(transcriptProgress([userRow, sleepRow('completed')])).toBe(3)
+    expect(transcriptProgress([userRow, sleepRow('failed'), seedRow])).toBe(3)
   })
 
-  it('stops at the last real user message but scans past an agent-loop answer', () => {
-    expect(currentTurnProgress([userRow, sleepRow('completed'), { role: 'user', content: 'next' }])).toBe(0)
-    expect(currentTurnProgress([userRow, sleepRow('completed'), { role: 'user', content: 'ok', _agentInput: true }])).toBe(3)
+  it('measures the whole transcript and leaves approval cards out', () => {
+    const card = { role: 'system', type: 'tool_approval_request', status: 'pending' }
+    expect(transcriptProgress([userRow, sleepRow('completed'), { role: 'user', content: 'next' }])).toBe(4)
+    expect(transcriptProgress([userRow, card])).toBe(1)
+    expect(transcriptProgress(null)).toBe(0)
   })
 })
 
