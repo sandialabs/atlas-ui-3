@@ -12,7 +12,10 @@ one into the library explicitly ("Save to library").
 No database-level foreign key constraints for DuckDB compatibility.
 Referential integrity is enforced in the repository layer. The unique
 constraint on (prompt_id, version_number) is what keeps two concurrent
-publications from producing the same version number.
+publications from producing the same version number, and the one on
+(prompt_id, grantee_type, grantee) keeps one grant per grantee. The
+draft_revision and sharing_revision counters back optimistic concurrency for
+draft edits/publication and sharing changes.
 """
 
 from alembic import op
@@ -32,6 +35,8 @@ def upgrade() -> None:
         sa.Column("title", sa.String(200), nullable=False),
         sa.Column("description", sa.String(1000), nullable=True),
         sa.Column("draft_content", sa.Text, nullable=False),
+        sa.Column("draft_revision", sa.Integer, nullable=False, server_default="1"),
+        sa.Column("sharing_revision", sa.Integer, nullable=False, server_default="0"),
         sa.Column("latest_version_id", sa.String(36), nullable=True),
         sa.Column("latest_version_number", sa.Integer, nullable=False, server_default="0"),
         sa.Column("forked_from_prompt_id", sa.String(36), nullable=True),
@@ -68,6 +73,7 @@ def upgrade() -> None:
         sa.Column("permission", sa.String(10), nullable=False),
         sa.Column("created_by", sa.String(255), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("prompt_id", "grantee_type", "grantee", name="uq_prompt_library_grant"),
     )
     op.create_index(
         "ix_prompt_library_grants_grantee",

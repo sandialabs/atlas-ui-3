@@ -164,6 +164,13 @@ class PromptLibraryPromptRecord(Base):
     title = Column(String(200), nullable=False)
     description = Column(String(1000), nullable=True)
     draft_content = Column(Text, nullable=False)
+    # Optimistic-concurrency counters. ``draft_revision`` advances on every
+    # draft change: saving and publishing name the revision the editor last
+    # saw, so nobody publishes text they did not review. ``sharing_revision``
+    # advances on every grant change, so a sharing update computed from a
+    # stale view cannot restore a grant someone else just revoked.
+    draft_revision = Column(Integer, nullable=False, default=1)
+    sharing_revision = Column(Integer, nullable=False, default=0)
     # Denormalized pointer to the newest published version; the versions table
     # stays authoritative (unique on prompt_id + version_number).
     latest_version_id = Column(String(36), nullable=True)
@@ -205,8 +212,8 @@ class PromptLibraryVersionRecord(Base):
 class PromptLibraryGrantRecord(Base):
     """A sharing grant on a prompt-library entry.
 
-    ``grantee_type`` is ``group`` (an Atlas group name, permission always
-    ``use``) or ``user`` (a normalized identity, permission ``use``, ``edit`` or
+    ``grantee_type`` is ``group`` (an Atlas group name exactly as configured
+    -- external authorizers may be case-sensitive -- permission always ``use``) or ``user`` (a normalized identity, permission ``use``, ``edit`` or
     ``manage``). The owner is never a grant.
     """
 
@@ -222,6 +229,9 @@ class PromptLibraryGrantRecord(Base):
 
     __table_args__ = (
         Index("ix_prompt_library_grants_grantee", "grantee_type", "grantee"),
+        # One grant per grantee: concurrent sharing updates cannot leave two
+        # rows (and two permissions) for the same group or user.
+        UniqueConstraint("prompt_id", "grantee_type", "grantee", name="uq_prompt_library_grant"),
     )
 
 

@@ -108,7 +108,9 @@ const PromptSelector = () => {
   // shown as unavailable (and the send path refuses it) rather than quietly
   // replaced -- see utils/libraryPromptSelection.js.
   const activeLibrary = parseLibraryPromptKey(activePromptKey)
-  const libraryReady = !!promptLibrary?.loaded && !promptLibrary?.error
+  // Only a complete list can say an entry is gone (an entry past the first
+  // page is not missing).
+  const libraryReady = !!promptLibrary?.loaded && !promptLibrary?.error && promptLibrary?.complete !== false
   const activeLibraryUnavailable = !!activeLibrary && libraryReady &&
     !libraryPrompts.some(p => p.id === activeLibrary.promptId && p.latest_version)
   const usableLibraryPrompts = libraryPrompts.filter(p => p.latest_version)

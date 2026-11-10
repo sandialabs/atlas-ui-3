@@ -18,8 +18,9 @@ import {
  * A selection the loaded library no longer lists (unshared, archived, access
  * revoked) is blocked rather than dropped: dropping it would silently run the
  * default prompt, which is exactly the stale-selection failure the issue
- * forbids. When the list has not loaded (or failed to), the reference goes out
- * and the server -- which re-checks access on every turn -- decides.
+ * forbids. When the list has not loaded, failed to, or is only a first page
+ * (`complete` false), the reference goes out and the server -- which
+ * re-checks access on every turn -- decides.
  */
 export function resolveLibrarySelection(activeKey, library) {
   if (isLibraryDraftKey(activeKey)) {
@@ -38,7 +39,7 @@ export function resolveLibrarySelection(activeKey, library) {
   if (!parsed) {
     return { kind: 'blocked', message: 'The selected team prompt is not valid. Choose another prompt.' }
   }
-  if (library?.loaded && !library.error) {
+  if (library?.loaded && !library.error && library.complete !== false) {
     const entry = (library.entries || []).find(e => e.id === parsed.promptId)
     if (!entry || !entry.latest_version) {
       return {

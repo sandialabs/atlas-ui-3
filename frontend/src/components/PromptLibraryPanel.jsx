@@ -28,6 +28,7 @@ const PromptLibraryPanel = () => {
   const [scope, setScope] = useState('all')
   const [query, setQuery] = useState('')
   const [items, setItems] = useState([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   // { type: 'create' } | { type: 'edit'|'share'|'versions', id }
@@ -39,13 +40,34 @@ const PromptLibraryPanel = () => {
     setLoading(true)
     setError(null)
     try {
-      setItems(await library.listPrompts(scope, query))
+      const page = await library.listPrompts(scope, query, 0)
+      setItems(page.prompts)
+      setTotal(page.total)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
   }, [library, scope, query])
+
+  // Next page, appended. The server orders newest first, so a page never
+  // repeats an entry unless the list changed meanwhile (dropped as a duplicate).
+  const loadMore = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const page = await library.listPrompts(scope, query, items.length)
+      setItems(prev => {
+        const seen = new Set(prev.map(p => p.id))
+        return [...prev, ...page.prompts.filter(p => !seen.has(p.id))]
+      })
+      setTotal(page.total)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Debounced so typing a search does not fire a request per keystroke.
   useEffect(() => {
@@ -104,9 +126,13 @@ const PromptLibraryPanel = () => {
         <PromptLibraryEditor
           prompt={detail}
           onCancel={close}
-          onSave={async fields => setDetail(await library.updatePrompt(prompt.id, fields))}
-          onPublish={async change => {
-            await library.publishPrompt(prompt.id, change)
+          onSave={async (fields, revision) => {
+            const saved = await library.updatePrompt(prompt.id, fields, revision)
+            setDetail(saved)
+            return saved
+          }}
+          onPublish={async (change, revision) => {
+            await library.publishPrompt(prompt.id, change, revision)
             setDetail(await library.getPrompt(prompt.id))
           }}
           onTest={({ title, content }) => {
@@ -245,6 +271,16 @@ const PromptLibraryPanel = () => {
           )
         })}
       </ul>
+
+      {items.length < total && (
+        <div className="flex items-center justify-center gap-3">
+          <span className="text-xs text-gray-400">Showing {items.length} of {total}</span>
+          <button type="button" onClick={loadMore} disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm disabled:opacity-50">
+            Load more
+          </button>
+        </div>
+      )}
     </section>
   )
 }

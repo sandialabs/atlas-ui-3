@@ -737,6 +737,33 @@ class ConversationRepository:
             session.commit()
             return True
 
+    def pop_metadata_keys(
+        self, conversation_id: str, user_email: str, keys: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Remove ``keys`` from one of the user's conversations' metadata.
+
+        Returns the removed ``{key: value}`` entries (empty when none were
+        present), or None when the user owns no such conversation. Used to
+        clear a conversation's pinned team-library prompt (issue #1169)
+        without rewriting its messages.
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            conv = session.query(ConversationRecord).filter(
+                ConversationRecord.id == conversation_id,
+                ConversationRecord.user_email == user_email,
+            ).first()
+            if not conv:
+                return None
+            current = _load_metadata(conv.metadata_json)
+            if not isinstance(current, dict):
+                return {}
+            removed = {k: current.pop(k) for k in keys if k in current}
+            if removed:
+                conv.metadata_json = json.dumps(current)
+                session.commit()
+            return removed
+
     def stamp_legacy_classification(
         self,
         level: Optional[str],

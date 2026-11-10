@@ -6,7 +6,7 @@
 # the mock LLM's own request log, which system prompt each chat turn sent:
 # privacy by default, group sharing (use only), ID probing, server-side
 # resolution, exact-version pinning across publications, crafted frames,
-# revocation, forks and audit. Then runs the targeted unit/integration tests
+# revocation and pin clearing, stale-revision refusals, forks and audit. Then runs the targeted unit/integration tests
 # (the PostgreSQL ones too when ATLAS_TEST_POSTGRES_URL is set), the frontend
 # library tests, and the backend suite.
 set -euo pipefail
@@ -101,10 +101,12 @@ python -m pytest -q -p no:warnings \
     atlas/tests/test_prompt_library_routes.py \
     atlas/tests/test_prompt_library_chat_turn.py \
     atlas/tests/test_prompt_library_migration.py \
+    atlas/tests/test_prompt_library_concurrency.py \
+    atlas/tests/test_prompt_library_storage.py \
     atlas/tests/test_user_prompts.py \
     atlas/tests/test_schema_migration.py
 if [ -z "${ATLAS_TEST_POSTGRES_URL:-}" ]; then
-    echo "NOTE: ATLAS_TEST_POSTGRES_URL not set; the PostgreSQL migration and cross-replica publish tests were skipped."
+    echo "NOTE: ATLAS_TEST_POSTGRES_URL not set; the PostgreSQL migration and concurrency tests were skipped."
 fi
 
 echo "=== Frontend library tests ==="

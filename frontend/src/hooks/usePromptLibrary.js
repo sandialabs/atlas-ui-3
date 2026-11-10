@@ -3,12 +3,21 @@ import { useState, useCallback, useEffect } from 'react'
 /**
  * Team-shared prompt library (issue #1169), backed by /api/prompts.
  *
- * `entries` is every entry the signed-in user may see (scope "all"); the chat
+ * `entries` is the first page (up to MAX_PAGE) of what the signed-in user may
+ * see (scope "all"); `complete` says whether that page is everything. The chat
  * prompt selector reads it, and the send path uses it to refuse a selection
- * that is no longer available instead of letting it silently fall back. The
- * server re-checks access on every request and chat turn -- this list is a
- * convenience for the UI, never the security boundary.
+ * that is no longer available instead of letting it silently fall back -- but
+ * only when the list is complete, since an entry past the first page is not
+ * missing. The server re-checks access on every request and chat turn -- this
+ * list is a convenience for the UI, never the security boundary.
+ *
+ * Draft saves and publishing name the draft revision being edited, and
+ * sharing changes name the sharing revision they were computed from; a 409
+ * means someone else changed it first (`error.status === 409`).
  */
+
+const MAX_PAGE = 200
+export const PAGE_SIZE = 50
 
 async function request(url, options = {}) {
   const res = await fetch(url, {
@@ -36,6 +45,7 @@ export function usePromptLibrary(enabled = true) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [complete, setComplete] = useState(false)
   const [error, setError] = useState(null)
   // A draft being tried in chat before publishing; memory only (see useSelections).
   const [testDraft, setTestDraft] = useState(null)
@@ -50,8 +60,10 @@ export function usePromptLibrary(enabled = true) {
     setLoading(true)
     setError(null)
     try {
-      const data = await request('/api/prompts?scope=all')
-      setEntries(Array.isArray(data?.prompts) ? data.prompts : [])
+      const data = await request(`/api/prompts?scope=all&limit=${MAX_PAGE}`)
+      const list = Array.isArray(data?.prompts) ? data.prompts : []
+      setEntries(list)
+      setComplete(typeof data?.total === 'number' ? data.total <= list.length : true)
       setLoaded(true)
     } catch (e) {
       setError(e.message)
@@ -64,11 +76,15 @@ export function usePromptLibrary(enabled = true) {
     refresh()
   }, [refresh])
 
-  const listPrompts = useCallback(async (scope = 'all', query = '') => {
-    const params = new URLSearchParams({ scope })
+  // One page: { prompts, total }.
+  const listPrompts = useCallback(async (scope = 'all', query = '', offset = 0) => {
+    const params = new URLSearchParams({ scope, limit: String(PAGE_SIZE), offset: String(offset) })
     if (query && query.trim()) params.set('q', query.trim())
     const data = await request(`/api/prompts?${params.toString()}`)
-    return Array.isArray(data?.prompts) ? data.prompts : []
+    return {
+      prompts: Array.isArray(data?.prompts) ? data.prompts : [],
+      total: typeof data?.total === 'number' ? data.total : 0,
+    }
   }, [])
 
   const getPrompt = useCallback(async id => (await request(`/api/prompts/${enc(id)}`)).prompt, [])
@@ -82,16 +98,22 @@ export function usePromptLibrary(enabled = true) {
     return data.prompt
   }, [refresh])
 
-  const updatePrompt = useCallback(async (id, fields) => {
-    const data = await request(`/api/prompts/${enc(id)}`, { method: 'PUT', body: JSON.stringify(fields) })
+  const updatePrompt = useCallback(async (id, fields, expectedDraftRevision) => {
+    const data = await request(`/api/prompts/${enc(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...fields, expected_draft_revision: expectedDraftRevision }),
+    })
     await refresh()
     return data.prompt
   }, [refresh])
 
-  const publishPrompt = useCallback(async (id, changeDescription) => {
+  const publishPrompt = useCallback(async (id, changeDescription, expectedDraftRevision) => {
     const data = await request(`/api/prompts/${enc(id)}/publish`, {
       method: 'POST',
-      body: JSON.stringify({ change_description: changeDescription || null }),
+      body: JSON.stringify({
+        change_description: changeDescription || null,
+        expected_draft_revision: expectedDraftRevision,
+      }),
     })
     await refresh()
     return data.version
@@ -101,6 +123,7 @@ export function usePromptLibrary(enabled = true) {
 
   const getSharing = useCallback(async id => (await request(`/api/prompts/${enc(id)}/sharing`)).sharing, [])
 
+  // `sharing` is { groups, users, expected_revision }.
   const setSharing = useCallback(async (id, sharing) => {
     const data = await request(`/api/prompts/${enc(id)}/sharing`, { method: 'PUT', body: JSON.stringify(sharing) })
     await refresh()
@@ -130,6 +153,7 @@ export function usePromptLibrary(enabled = true) {
     entries,
     loading,
     loaded,
+    complete,
     error,
     refresh,
     listPrompts,

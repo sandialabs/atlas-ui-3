@@ -63,6 +63,11 @@ describe('resolveLibrarySelection', () => {
     expect(resolveLibrarySelection(libraryPromptKey('p1'), loaded([draftOnly])).kind).toBe('blocked')
   })
 
+  it('defers to the server when the list is only a first page', () => {
+    const partial = { ...loaded(), complete: false }
+    expect(resolveLibrarySelection(libraryPromptKey('beyond-first-page'), partial).kind).toBe('library')
+  })
+
   it('defers to the server while the list is unavailable', () => {
     for (const library of [{ loaded: false, entries: [] }, { loaded: true, error: 'boom', entries: [] }, null]) {
       expect(resolveLibrarySelection(libraryPromptKey('p1'), library).kind).toBe('library')

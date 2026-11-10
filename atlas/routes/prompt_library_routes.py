@@ -7,12 +7,21 @@ body -- and delegates the access decision to ``PromptLibraryService``.
 
 Errors never reveal whether an entry the caller cannot see exists: missing and
 unauthorized both return 404 "Prompt not found". 403 is only returned to a
-caller who can already see the entry but lacks the level an action needs.
+caller who can already see the entry but lacks the level an action needs. 409
+means someone else changed the draft or sharing first (reload and retry); 503
+means the library's storage failed -- the cause stays in the server log (as an
+exception type only), never in the response.
+
+Draft edits and publishing name the ``expected_draft_revision`` the editor
+reviewed, and sharing changes the ``expected_revision`` of the grants they
+were computed from, so concurrent editors cannot overwrite each other or
+publish text nobody reviewed.
 
 Gated on the same flag as custom prompts (``custom_prompts_effective``: the
 custom-prompt feature plus chat history, which provides the database).
 """
 
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -20,18 +29,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from atlas.core.log_sanitizer import get_current_user
-from atlas.modules.prompts.prompt_library_service import (
+from atlas.modules.prompts.prompt_library_policy import (
+    DEFAULT_PAGE_SIZE,
     MAX_CHANGE_DESCRIPTION_LEN,
     MAX_CONTENT_LEN,
     MAX_DESCRIPTION_LEN,
     MAX_GRANTS,
+    MAX_PAGE_SIZE,
     MAX_TITLE_LEN,
+    PromptConflict,
     PromptForbidden,
     PromptLibraryError,
-    PromptLibraryService,
+    PromptLibraryUnavailable,
     PromptNotFound,
     PromptValidationError,
 )
+from atlas.modules.prompts.prompt_library_service import PromptLibraryService
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +58,14 @@ class CreateLibraryPromptRequest(BaseModel):
 
 
 class UpdateLibraryPromptRequest(BaseModel):
+    expected_draft_revision: int = Field(..., ge=0)
     title: Optional[str] = Field(default=None, max_length=MAX_TITLE_LEN)
     content: Optional[str] = Field(default=None, max_length=MAX_CONTENT_LEN)
     description: Optional[str] = Field(default=None, max_length=MAX_DESCRIPTION_LEN)
 
 
 class PublishRequest(BaseModel):
+    expected_draft_revision: int = Field(..., ge=0)
     change_description: Optional[str] = Field(default=None, max_length=MAX_CHANGE_DESCRIPTION_LEN)
 
 
@@ -60,6 +75,7 @@ class UserGrant(BaseModel):
 
 
 class SharingRequest(BaseModel):
+    expected_revision: int = Field(..., ge=0)
     groups: List[str] = Field(default_factory=list, max_length=MAX_GRANTS)
     users: List[UserGrant] = Field(default_factory=list, max_length=MAX_GRANTS)
 
@@ -99,6 +115,10 @@ def _http_error(e: PromptLibraryError) -> HTTPException:
         return HTTPException(status_code=403, detail=e.message)
     if isinstance(e, PromptValidationError):
         return HTTPException(status_code=400, detail=e.message)
+    if isinstance(e, PromptConflict):
+        return HTTPException(status_code=409, detail=e.message)
+    if isinstance(e, PromptLibraryUnavailable):
+        return HTTPException(status_code=503, detail=e.message)
     return HTTPException(status_code=400, detail=e.message)
 
 
@@ -106,12 +126,18 @@ def _http_error(e: PromptLibraryError) -> HTTPException:
 async def list_library_prompts(
     scope: str = Query(default="all"),
     q: Optional[str] = Query(default=None, max_length=200),
+    limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
     current_user: str = Depends(get_current_user),
 ):
-    """List entries the caller may see: scope all|mine|shared|team, optional search."""
+    """One page of the entries the caller may see (scope all|mine|shared|team, optional search).
+
+    Returns ``{prompts, total, limit, offset}``; ``q`` matches title or
+    description literally.
+    """
     service = _service()
     try:
-        return {"prompts": await service.list_prompts(current_user, scope=scope, query=q)}
+        return await service.list_prompts(current_user, scope=scope, query=q, limit=limit, offset=offset)
     except PromptLibraryError as e:
         raise _http_error(e)
 
@@ -120,7 +146,10 @@ async def list_library_prompts(
 async def list_shareable_groups(current_user: str = Depends(get_current_user)):
     """Configured groups the caller belongs to and may therefore share with."""
     service = _service()
-    return {"groups": await service.shareable_groups(current_user)}
+    try:
+        return {"groups": await service.shareable_groups(current_user)}
+    except PromptLibraryError as e:
+        raise _http_error(e)
 
 
 @router.post("")
@@ -158,7 +187,7 @@ async def update_library_prompt(
     service = _service()
     try:
         prompt = await service.update_prompt(
-            current_user, prompt_id,
+            current_user, prompt_id, body.expected_draft_revision,
             title=body.title, description=body.description, content=body.content,
         )
     except PromptLibraryError as e:
@@ -186,7 +215,9 @@ async def publish_library_prompt(
     """Snapshot the current draft as the next immutable version."""
     service = _service()
     try:
-        version = await service.publish(current_user, prompt_id, body.change_description)
+        version = await service.publish(
+            current_user, prompt_id, body.expected_draft_revision, body.change_description
+        )
     except PromptLibraryError as e:
         raise _http_error(e)
     return {"version": version}
@@ -231,7 +262,8 @@ async def set_library_prompt_sharing(
     service = _service()
     try:
         sharing = await service.set_sharing(
-            current_user, prompt_id, body.groups, [u.model_dump() for u in body.users]
+            current_user, prompt_id, body.groups, [u.model_dump() for u in body.users],
+            body.expected_revision,
         )
     except PromptLibraryError as e:
         raise _http_error(e)
@@ -281,11 +313,14 @@ async def resolve_library_prompt(
 
     Lets the client confirm a saved selection (a workspace, a reopened
     conversation) before sending. The chat path performs the same check
-    itself; this endpoint is advisory, never a substitute.
+    itself; this endpoint is advisory, never a substitute, and read-only: a
+    refusal here writes no audit event (only a refused chat turn does).
     """
     service = _service()
     try:
-        version = await service.resolve_for_execution(current_user, prompt_id, version_id)
+        version = await service.resolve_for_execution(current_user, prompt_id, version_id, record_denial=False)
+    except PromptLibraryUnavailable as e:
+        raise _http_error(e)
     except PromptLibraryError as e:
         # Same not-found answer as every other unauthorized lookup.
         raise HTTPException(status_code=404, detail=e.message)
@@ -295,3 +330,43 @@ async def resolve_library_prompt(
         "version_number": version["version_number"],
         "title": version["title"],
     }
+
+
+@router.delete("/pins/{conversation_id}")
+async def clear_conversation_pin(conversation_id: str, current_user: str = Depends(get_current_user)):
+    """Clear the team prompt pinned to one of the caller's conversations.
+
+    The explicit way out when a pinned prompt is no longer available to a
+    client that cannot choose another prompt per turn (the CLI, follow-up and
+    API runs, older browser bundles): the next turn runs the default prompt.
+    Only the conversation's owner can do this; another user's (or an unknown)
+    conversation answers 404. Recorded as an ``unpin`` audit event.
+
+    Deliberately not gated on the library feature flag: with the feature
+    turned off, a pinned conversation is refused on every turn, and this is
+    how its owner continues. It needs only the conversation store.
+    """
+    from atlas.application.chat.prompt_library_turn import PIN_METADATA_KEY
+    from atlas.infrastructure.app_factory import app_factory
+
+    conversations = getattr(app_factory, "conversation_repository", None)
+    if conversations is None:
+        raise HTTPException(status_code=503, detail=app_factory.chat_history_unavailable_reason())
+    try:
+        removed = await asyncio.to_thread(
+            conversations.pop_metadata_keys, conversation_id, current_user, [PIN_METADATA_KEY]
+        )
+    except Exception as e:
+        logger.error("Clearing a conversation pin failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=503, detail=PromptLibraryUnavailable().message)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    pin = removed.get(PIN_METADATA_KEY)
+    service = _get_service() if _library_enabled() else None
+    if service is not None and isinstance(pin, dict) and isinstance(pin.get("prompt_id"), str):
+        try:
+            await service.record_unpin(current_user, pin["prompt_id"], conversation_id)
+        except PromptLibraryError:
+            pass  # the pin is cleared; the audit write failure is already logged
+    # ``prompt_library_history`` is kept: it records what the conversation ran.
+    return {"cleared": bool(pin)}

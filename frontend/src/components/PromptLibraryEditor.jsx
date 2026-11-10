@@ -10,21 +10,33 @@ import { Check, X, Eye, Pencil, Upload, FlaskConical } from 'lucide-react'
  * is the editor's own, sent inline like a private custom prompt, so nobody
  * else's selection is affected.
  *
- * `prompt` is null when creating. `onSave(fields)` must resolve to the saved
- * entry (or throw); `onPublish(changeDescription)` and `onTest(fields)` are
- * only offered for an existing entry.
+ * `prompt` is null when creating. `onSave(fields, draftRevision)` must resolve
+ * to the saved entry (or throw); `onPublish(changeDescription, draftRevision)`
+ * and `onTest(fields)` are only offered for an existing entry.
+ *
+ * The editor keeps the draft revision it loaded. Saving names it, and
+ * publishing names the revision of the text on screen, so the server refuses
+ * (409) instead of overwriting someone else's save or publishing text this
+ * editor never showed.
  */
 const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCancel }) => {
   const [title, setTitle] = useState(prompt?.title || '')
   const [description, setDescription] = useState(prompt?.description || '')
   const [content, setContent] = useState(prompt?.draft_content || '')
+  const [revision, setRevision] = useState(prompt?.draft_revision ?? 1)
+  // What was last saved, so "dirty" compares against the server's copy.
+  const [saved, setSaved] = useState({
+    title: prompt?.title || '',
+    description: prompt?.description || '',
+    content: prompt?.draft_content || '',
+  })
   const [changeDescription, setChangeDescription] = useState('')
   const [preview, setPreview] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const dirty = !prompt || title !== prompt.title || (description || '') !== (prompt.description || '') ||
-    content !== prompt.draft_content
+  const dirty = !prompt || title !== saved.title || (description || '') !== saved.description ||
+    content !== saved.content
   const valid = title.trim().length > 0 && content.trim().length > 0
   const run = async fn => {
     setBusy(true)
@@ -38,10 +50,20 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
     }
   }
 
-  const save = () => run(() => onSave({ title: title.trim(), description, content }))
+  // Saves the draft and returns the revision now on the server.
+  const saveDraft = async () => {
+    const result = await onSave({ title: title.trim(), description, content }, revision)
+    if (result && typeof result.draft_revision === 'number') {
+      setRevision(result.draft_revision)
+      setSaved({ title: result.title, description: result.description || '', content: result.draft_content })
+      return result.draft_revision
+    }
+    return revision
+  }
+  const save = () => run(saveDraft)
   const publish = () => run(async () => {
-    if (dirty) await onSave({ title: title.trim(), description, content })
-    await onPublish(changeDescription)
+    const reviewed = dirty ? await saveDraft() : revision
+    await onPublish(changeDescription, reviewed)
     setChangeDescription('')
   })
 

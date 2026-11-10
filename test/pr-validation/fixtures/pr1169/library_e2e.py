@@ -64,6 +64,16 @@ def last_llm_request():
         return json.loads(r.read())
 
 
+def draft_revision(pid, user=None):
+    return api("GET", f"/api/prompts/{pid}", user or OWNER)[1]["prompt"]["draft_revision"]
+
+
+def share(pid, groups, users=(), user=None):
+    revision = api("GET", f"/api/prompts/{pid}/sharing", user or OWNER)[1]["sharing"]["revision"]
+    return api("PUT", f"/api/prompts/{pid}/sharing", user or OWNER,
+               {"groups": list(groups), "users": list(users), "expected_revision": revision})
+
+
 async def chat(user, conversation_id, library_prompt, extra=None):
     """One chat turn; returns ("ok", None) or ("error", frame)."""
     frame = {
@@ -90,20 +100,26 @@ async def main():
     pid = body["prompt"]["id"]
     s, _ = api("GET", f"/api/prompts/{pid}", MEMBER)
     check(s == 404, "new prompt is private (member gets 404)")
-    s, body = api("POST", f"/api/prompts/{pid}/publish", OWNER, {"change_description": "first"})
+    s, body = api("POST", f"/api/prompts/{pid}/publish", OWNER,
+                  {"change_description": "first", "expected_draft_revision": draft_revision(pid)})
     v1 = body["version"]
     check(s == 200 and v1["version_number"] == 1, "owner publishes v1")
-    s, body = api("PUT", f"/api/prompts/{pid}/sharing", OWNER, {"groups": ["hr"], "users": []})
+    s, body = share(pid, ["hr"])
     check(s == 403, "sharing into a group the owner is not in is refused")
-    s, body = api("PUT", f"/api/prompts/{pid}/sharing", OWNER, {"groups": ["eng"], "users": []})
+    s, body = share(pid, ["Users"])
+    check(s == 400, "sharing with the everyone group is refused")
+    s, body = share(pid, ["eng"])
     check(s == 200 and body["sharing"]["groups"] == ["eng"], "owner shares with group eng")
+    s, body = api("PUT", f"/api/prompts/{pid}/sharing", OWNER,
+                  {"groups": [], "users": [], "expected_revision": body["sharing"]["revision"] - 1})
+    check(s == 409, "a sharing change based on a stale revision is refused")
 
     s, body = api("GET", "/api/prompts?scope=team", MEMBER)
     team = {p["id"]: p for p in body.get("prompts", [])}
     check(s == 200 and pid in team, "member sees it under Team")
     check(team.get(pid, {}).get("permission") == "use" and "sharing" not in team.get(pid, {}),
           "member has use permission and no sharing details")
-    s, _ = api("PUT", f"/api/prompts/{pid}", MEMBER, {"content": "hijack"})
+    s, _ = api("PUT", f"/api/prompts/{pid}", MEMBER, {"content": "hijack", "expected_draft_revision": 1})
     check(s == 403, "group membership does not grant edit")
     s, body = api("GET", "/api/prompts?q=Security", OUTSIDER)
     check(s == 200 and body["prompts"] == [], "outsider search finds nothing")
@@ -120,8 +136,14 @@ async def main():
     pin = (stored.get("metadata") or {}).get("prompt_library") if s == 200 else None
     check(pin and pin["version_id"] == v1["id"], "conversation records the pinned version")
 
-    api("PUT", f"/api/prompts/{pid}", OWNER, {"content": V2})
-    s, body = api("POST", f"/api/prompts/{pid}/publish", OWNER, {"change_description": "second"})
+    reviewed = draft_revision(pid)
+    api("PUT", f"/api/prompts/{pid}", OWNER, {"content": V2, "expected_draft_revision": reviewed})
+    s, _ = api("PUT", f"/api/prompts/{pid}", OWNER, {"content": "stale editor", "expected_draft_revision": reviewed})
+    check(s == 409, "a stale draft save is refused")
+    s, _ = api("POST", f"/api/prompts/{pid}/publish", OWNER, {"expected_draft_revision": reviewed})
+    check(s == 409, "publishing a draft revision nobody reviewed is refused")
+    s, body = api("POST", f"/api/prompts/{pid}/publish", OWNER,
+                  {"change_description": "second", "expected_draft_revision": draft_revision(pid)})
     v2 = body["version"]
     check(s == 200 and v2["version_number"] == 2, "owner publishes v2")
     s, body = api("GET", f"/api/prompts/{pid}/versions/{v1['id']}", MEMBER)
@@ -147,19 +169,29 @@ async def main():
     check(last_llm_request().get("timestamp") == before, "no refused turn reached the model")
 
     # --- Revocation --------------------------------------------------------
-    api("PUT", f"/api/prompts/{pid}/sharing", OWNER, {"groups": [], "users": []})
+    share(pid, [])
     status, frame = await chat(MEMBER, conv, ...)
     check(status == "error" and frame.get("error_type") == "authorization",
           "after unsharing, continuing the pinned conversation is refused")
     s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
     check(s == 200 and stored["metadata"]["prompt_library"]["version_id"] == v1["id"],
           "history keeps its pinned reference after revocation")
-    status, _ = await chat(MEMBER, conv, None)
+    status, frame = await chat(MEMBER, conv, ...)
+    check(status == "error" and f"/api/prompts/pins/{conv}" in frame.get("message", ""),
+          "a client that cannot pick a prompt is told how to clear the pin")
+    s, _ = api("DELETE", f"/api/prompts/pins/{conv}", OUTSIDER)
+    check(s == 404, "only the conversation owner can clear its pin")
+    s, body = api("DELETE", f"/api/prompts/pins/{conv}", MEMBER)
+    check(s == 200 and body == {"cleared": True}, "the owner clears the unavailable pin")
+    status, _ = await chat(MEMBER, conv, ...)
     check(status == "ok" and not system_prompt_sent().startswith(V1),
-          "the member continues by explicitly choosing another prompt")
+          "after clearing, a legacy-style turn continues with the default prompt")
+    s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
+    history = (stored.get("metadata") or {}).get("prompt_library_history") or []
+    check(any(h.get("version_id") == v1["id"] for h in history), "the pin history still records v1")
 
     # --- Fork and audit ----------------------------------------------------
-    api("PUT", f"/api/prompts/{pid}/sharing", OWNER, {"groups": ["eng"], "users": []})
+    share(pid, ["eng"])
     s, body = api("POST", f"/api/prompts/{pid}/fork", MEMBER, {"version_id": v1["id"]})
     check(s == 200 and body["prompt"]["is_owner"] and body["prompt"]["draft_content"] == V1,
           "member forks v1 into a private copy")
@@ -167,8 +199,8 @@ async def main():
     check(s == 404, "the fork is private to the member")
     s, body = api("GET", f"/api/prompts/{pid}/audit", OWNER)
     kinds = {e["event_type"] for e in body["events"]}
-    check({"create", "publish", "share", "update_draft", "use", "use_denied", "fork"} <= kinds,
-          "audit trail records create/publish/share/update/use/denied/fork")
+    check({"create", "publish", "share", "update_draft", "use", "use_denied", "unpin", "fork"} <= kinds,
+          "audit trail records create/publish/share/update/use/denied/unpin/fork")
     check("SYSTEM-PROMPT" not in json.dumps(body), "audit trail holds no prompt text")
     s, _ = api("GET", f"/api/prompts/{pid}/audit", MEMBER)
     check(s == 403, "audit trail needs manage permission")

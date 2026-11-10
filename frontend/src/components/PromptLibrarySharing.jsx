@@ -18,6 +18,9 @@ const PERMISSIONS = [
 const PromptLibrarySharing = ({ prompt, library, onClose }) => {
   const [groups, setGroups] = useState([])
   const [users, setUsers] = useState([])
+  // The sharing revision these grants were loaded at; a save names it, so a
+  // change someone else made meanwhile is refused (409), never overwritten.
+  const [revision, setRevision] = useState(null)
   const [available, setAvailable] = useState([])
   const [newUser, setNewUser] = useState('')
   const [loading, setLoading] = useState(true)
@@ -31,6 +34,7 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
         if (cancelled) return
         setGroups(sharing.groups || [])
         setUsers(sharing.users || [])
+        setRevision(sharing.revision ?? 0)
         setAvailable(shareable)
       })
       .catch(e => !cancelled && setError(e.message))
@@ -53,7 +57,7 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
     setSaving(true)
     setError(null)
     try {
-      await library.setSharing(prompt.id, { groups, users })
+      await library.setSharing(prompt.id, { groups, users, expected_revision: revision })
       onClose()
     } catch (e) {
       setError(e.message)

@@ -24,6 +24,26 @@ USER = "member@example.com"
 OUTSIDER = "outsider@example.com"
 
 
+async def _publish(lib, user, prompt_id, change=None):
+    """Publish the draft the caller currently sees (its draft_revision)."""
+    detail = await lib.get_prompt(user, prompt_id)
+    return await lib.publish(user, prompt_id, detail.get("draft_revision", 1), change)
+
+
+async def _edit(lib, user, prompt_id, **fields):
+    detail = await lib.get_prompt(user, prompt_id)
+    return await lib.update_prompt(user, prompt_id, detail.get("draft_revision", 1), **fields)
+
+
+async def _share(lib, user, prompt_id, groups, users):
+    revision = (await lib.get_sharing(user, prompt_id))["revision"]
+    return await lib.set_sharing(user, prompt_id, groups, users, revision)
+
+
+async def _list(lib, user, **kwargs):
+    return (await lib.list_prompts(user, **kwargs))["prompts"]
+
+
 @pytest.fixture(autouse=True)
 def _clean_engine():
     reset_engine()
@@ -111,8 +131,8 @@ async def _turn(service, session_id, conversation_id, user=USER, **extra):
 
 async def _shared_prompt(lib, content="v1 body"):
     prompt = await lib.create_prompt(OWNER, "Team reviewer", content)
-    v1 = await lib.publish(OWNER, prompt["id"], "first")
-    await lib.set_sharing(OWNER, prompt["id"], ["eng"], [])
+    v1 = await _publish(lib, OWNER, prompt["id"], "first")
+    await _share(lib, OWNER, prompt["id"], ["eng"], [])
     return prompt, v1
 
 
@@ -142,7 +162,7 @@ async def test_library_prompt_is_resolved_server_side_and_pinned(env):
 async def test_crafted_frames_cannot_bypass_access(env, user):
     shared, _ = await _shared_prompt(env["library"])
     private = await env["library"].create_prompt(OWNER, "Private", "PRIVATE BODY")
-    private_v = await env["library"].publish(OWNER, private["id"])
+    private_v = await _publish(env["library"], OWNER, private["id"])
     service, calls, _ = _service(env)
     frames = [
         {"prompt_id": private["id"], "version_id": None},
@@ -182,8 +202,8 @@ async def test_exact_version_survives_new_publications(env):
     latest = {"prompt_id": prompt["id"], "version_id": None}
     await _turn(service, session_id, conv, library_prompt=latest)
 
-    await lib.update_prompt(OWNER, prompt["id"], content="v2 body")
-    v2 = await lib.publish(OWNER, prompt["id"], "second")
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"], "second")
 
     # "Latest" in this conversation keeps v1; an old client omitting the field too.
     await _turn(service, session_id, conv, library_prompt=latest)
@@ -230,8 +250,8 @@ async def test_restored_conversation_keeps_its_version(env):
     service, calls, _ = _service(env)
     conv = str(uuid4())
     await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
-    await lib.update_prompt(OWNER, prompt["id"], content="v2 body")
-    await lib.publish(OWNER, prompt["id"])
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    await _publish(lib, OWNER, prompt["id"])
 
     # A new replica/socket: fresh service and session, hydrated from the store.
     fresh, fresh_calls, _ = _service(env)
@@ -319,8 +339,8 @@ async def test_two_accounts_get_independent_pins(env):
     service, calls, _ = _service(env)
     conv_owner, conv_user = str(uuid4()), str(uuid4())
     await _turn(service, uuid4(), conv_owner, user=OWNER, library_prompt={"prompt_id": prompt["id"], "version_id": None})
-    await lib.update_prompt(OWNER, prompt["id"], content="v2 body")
-    v2 = await lib.publish(OWNER, prompt["id"])
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"])
     await _turn(service, uuid4(), conv_user, library_prompt={"prompt_id": prompt["id"], "version_id": None})
     assert _stored_meta(env, conv_owner, OWNER)["prompt_library"]["version_id"] == v1["id"]
     assert _stored_meta(env, conv_user)["prompt_library"]["version_id"] == v2["id"]
@@ -349,3 +369,116 @@ async def test_saved_workspace_selection_is_rechecked_after_revocation(env):
     env["members"].table["eng"].discard(USER)
     with pytest.raises(AuthorizationError):
         await _turn(service, uuid4(), str(uuid4()), library_prompt={"prompt_id": prompt_id, "version_id": version_id})
+
+
+def _pin_client(env, monkeypatch, members):
+    """The /api/prompts router wired to this test's conversation store and library."""
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+
+    from atlas.core.log_sanitizer import get_current_user
+    from atlas.infrastructure.app_factory import app_factory
+    from atlas.routes import prompt_library_routes
+
+    monkeypatch.setattr(prompt_library_routes, "_get_service", lambda: env["library"])
+    monkeypatch.setattr(prompt_library_routes, "_library_enabled", lambda: True)
+    monkeypatch.setattr(app_factory, "conversation_repository", env["conversations"], raising=False)
+    app = FastAPI()
+    app.include_router(prompt_library_routes.router)
+
+    async def identity(request: Request) -> str:
+        return request.headers["x-test-user"]
+
+    app.dependency_overrides[get_current_user] = identity
+    return TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_clients_that_omit_the_field_get_an_actionable_refusal(env):
+    """CLI, follow-up/API runs and older bundles never send library_prompt."""
+    prompt, _ = await _shared_prompt(env["library"])
+    browser, calls, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(browser, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    env["members"].table["eng"].discard(USER)
+    cli, cli_calls, _ = _service(env)  # a fresh process/run hydrating from the store
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(cli, uuid4(), conv)
+    assert f"DELETE /api/prompts/pins/{conv}" in exc.value.message
+    assert "v1 body" not in exc.value.message and cli_calls == []
+    # A browser naming the prompt still gets the generic refusal.
+    with pytest.raises(AuthorizationError) as browser_exc:
+        await _turn(browser, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    assert "DELETE" not in browser_exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_owner_can_clear_an_unavailable_pin_and_continue(env, monkeypatch):
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    browser, _, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(browser, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    env["members"].table["eng"].discard(USER)
+    client = _pin_client(env, monkeypatch, env["members"])
+
+    # Only the conversation's owner can clear it; others get the not-found answer.
+    other = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": OUTSIDER})
+    assert other.status_code == 404
+    unknown = client.delete(f"/api/prompts/pins/{uuid4()}", headers={"x-test-user": USER})
+    assert unknown.status_code == 404
+    assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
+
+    cleared = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert cleared.status_code == 200 and cleared.json() == {"cleared": True}
+    meta = _stored_meta(env, conv)
+    assert "prompt_library" not in meta
+    assert meta["prompt_library_history"][0]["version_id"] == v1["id"]  # what ran stays recorded
+    unpin = [e for e in lib.repository.list_audit_events(prompt["id"]) if e["event_type"] == "unpin"]
+    assert unpin and unpin[0]["actor_email"] == USER and unpin[0]["details"] == {"conversation_id": conv}
+
+    cli, cli_calls, _ = _service(env)
+    await _turn(cli, uuid4(), conv)
+    assert cli_calls[-1].get("custom_system_prompt") is None  # default prompt, explicitly chosen
+    again = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert again.json() == {"cleared": False}
+
+
+@pytest.mark.asyncio
+async def test_storage_outage_refuses_without_dropping_the_pin(env, monkeypatch):
+    from atlas.modules.prompts.prompt_library_policy import PromptLibraryUnavailable
+
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+
+    async def outage(*args, **kwargs):
+        raise PromptLibraryUnavailable()
+
+    monkeypatch.setattr(env["library"], "resolve_for_execution", outage)
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(service, session_id, conv)
+    assert "temporarily unavailable" in exc.value.message
+    assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY]["version_id"] == v1["id"]
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_pin_can_be_cleared_while_the_library_is_switched_off(env, monkeypatch):
+    from atlas.routes import prompt_library_routes
+
+    prompt, _ = await _shared_prompt(env["library"])
+    browser, _, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(browser, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    off, off_calls, _ = _service(env, library=None)  # feature disabled
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(off, uuid4(), conv)
+    assert "/api/prompts/pins/" in exc.value.message
+    client = _pin_client(env, monkeypatch, env["members"])
+    monkeypatch.setattr(prompt_library_routes, "_library_enabled", lambda: False)
+    cleared = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert cleared.status_code == 200 and cleared.json() == {"cleared": True}
+    await _turn(off, uuid4(), conv)
+    assert off_calls[-1].get("custom_system_prompt") is None

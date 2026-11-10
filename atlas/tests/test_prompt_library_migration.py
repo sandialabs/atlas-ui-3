@@ -1,14 +1,12 @@
-"""Migration 004 and concurrency for the prompt library (issue #1169).
+"""Migration 004 for the prompt library (issue #1169).
 
 Alembic has no DuckDB dialect, so the upgrade path is exercised on SQLite (as
 in test_schema_migration.py) and, when ``ATLAS_TEST_POSTGRES_URL`` points at a
-server, on real PostgreSQL. Concurrent publication runs on DuckDB (the dev
-backend) and on PostgreSQL with two independent engines standing in for two
-replicas.
+server, on real PostgreSQL. Concurrency is covered in
+test_prompt_library_concurrency.py.
 """
 
 import os
-import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -102,11 +100,16 @@ def _assert_upgrade_preserves_and_matches(db_url, monkeypatch):
             diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
         library_diffs = [d for d in diff if any(t in repr(d) for t in LIBRARY_TABLES)]
         assert library_diffs == []
+        unique = {c["name"] for c in inspect(engine).get_unique_constraints("prompt_library_grants")}
+        assert "uq_prompt_library_grant" in unique
+        columns = {c["name"] for c in inspect(engine).get_columns("prompt_library_prompts")}
+        assert {"draft_revision", "sharing_revision"} <= columns
 
         # The repository works against the migrated schema.
         repo = PromptLibraryRepository(sessionmaker(bind=engine, expire_on_commit=False))
         prompt = repo.create_prompt("alice@example.com", "T", None, "body")
-        assert repo.publish_version(prompt["id"], "alice@example.com", None)["version_number"] == 1
+        version = repo.publish_version(prompt["id"], "alice@example.com", None, 1)
+        assert version["version_number"] == 1
 
         # Downgrade removes only the library tables.
         _migrate(cfg, db_url, command.downgrade, "003")
@@ -120,46 +123,6 @@ def _assert_upgrade_preserves_and_matches(db_url, monkeypatch):
 
 def test_migration_is_additive_and_preserves_existing_data_sqlite(tmp_path, monkeypatch):
     _assert_upgrade_preserves_and_matches(f"sqlite:///{tmp_path / 'm.db'}", monkeypatch)
-
-
-def _concurrent_publish(repos, prompt_id, per_thread=5):
-    errors = []
-    barrier = threading.Barrier(len(repos))
-
-    def worker(repo):
-        try:
-            barrier.wait()
-            for _ in range(per_thread):
-                repo.publish_version(prompt_id, "editor@example.com", "race")
-        except Exception as e:  # pragma: no cover - surfaced below
-            errors.append(e)
-
-    threads = [threading.Thread(target=worker, args=(r,)) for r in repos]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    return errors
-
-
-def _assert_consistent(repo, prompt_id, expected):
-    versions = repo.list_versions(prompt_id)
-    numbers = sorted(v["version_number"] for v in versions)
-    assert numbers == list(range(1, expected + 1))
-    prompt = repo.get_prompt(prompt_id)
-    assert prompt["latest_version_number"] == expected
-    assert prompt["latest_version_id"] == versions[0]["id"]
-
-
-def test_concurrent_publication_duckdb(tmp_path):
-    from atlas.modules.chat_history import get_session_factory, init_database
-
-    init_database(f"duckdb:///{tmp_path / 'race.db'}")
-    repo = PromptLibraryRepository(get_session_factory())
-    prompt = repo.create_prompt("owner@example.com", "Race", None, "body")
-    errors = _concurrent_publish([repo] * 4, prompt["id"])
-    assert errors == []
-    _assert_consistent(repo, prompt["id"], 20)
 
 
 @pytest.fixture
@@ -181,22 +144,3 @@ def pg_database():
 
 def test_migration_on_postgresql(pg_database, monkeypatch):
     _assert_upgrade_preserves_and_matches(pg_database, monkeypatch)
-
-
-def test_concurrent_publication_across_replicas_postgresql(pg_database, monkeypatch):
-    _migrate(_alembic(pg_database, monkeypatch), pg_database, command.upgrade, "head")
-    engines = [create_engine(pg_database, pool_size=5) for _ in range(2)]
-    try:
-        repos = [PromptLibraryRepository(sessionmaker(bind=e, expire_on_commit=False)) for e in engines]
-        prompt = repos[0].create_prompt("owner@example.com", "Race", None, "body")
-        errors = _concurrent_publish(repos * 3, prompt["id"])
-        assert errors == []
-        _assert_consistent(repos[1], prompt["id"], 30)
-        # A grant change made through one replica is what the other reads next.
-        repos[0].replace_grants(prompt["id"], [{"grantee_type": "group", "grantee": "eng", "permission": "use"}], "o@e.com")
-        assert [g["grantee"] for g in repos[1].list_grants(prompt["id"])] == ["eng"]
-        repos[1].replace_grants(prompt["id"], [], "o@e.com")
-        assert repos[0].list_grants(prompt["id"]) == []
-    finally:
-        for e in engines:
-            e.dispose()

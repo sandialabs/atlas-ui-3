@@ -2,50 +2,65 @@
 
 This layer stores and loads rows; it makes **no** authorization decisions.
 Every caller goes through ``atlas.modules.prompts.prompt_library_service``,
-which decides who may see or change what before calling in here.
+which decides who may see or change what before calling in here. Methods are
+synchronous and open their own session; the service runs them in a worker
+thread so they never block the event loop.
 
 Invariants kept here:
 
-* Published versions are insert-only. Nothing in this module updates or
+* Published versions are insert-only. Nothing in this package updates or
   deletes a ``prompt_library_versions`` row, so a pinned version id always
   resolves to the text it was published with.
 * Version numbers are unique per prompt (database constraint). ``publish``
-  retries on the constraint violation a concurrent publisher causes, so two
-  replicas publishing at once get consecutive numbers rather than a duplicate.
-* Identities are normalized at the entry point, like the other chat-history
-  repositories, and referential integrity is enforced here rather than with
-  foreign keys (DuckDB compatibility).
+  retries only transient conflicts -- a concurrent publisher taking the same
+  number, a serialization failure or deadlock, a DuckDB write conflict -- and
+  raises ``PromptConflictError("publish")`` once retries run out. Any other
+  database failure surfaces at once as ``PromptStorageError``.
+* Drafts change only through a compare-and-set on ``draft_revision``, and
+  publishing names the revision it expects, so nobody publishes text they did
+  not review. Grants: see ``prompt_library_grants``.
+* Database exception text never reaches a log (see ``prompt_library_storage``).
 """
 
-import json
 import logging
 import random
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import desc, func, or_
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy import func, or_, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from atlas.core.user_identity import normalize_user_email
 
-from .models import (
-    PromptLibraryAuditRecord,
-    PromptLibraryGrantRecord,
-    PromptLibraryPromptRecord,
-    PromptLibraryVersionRecord,
+from .models import PromptLibraryPromptRecord, PromptLibraryVersionRecord
+from .prompt_library_grants import GRANTEE_GROUP, GRANTEE_USER, PromptLibraryGrantStore
+from .prompt_library_storage import (
+    VERSION_CONSTRAINT,
+    PromptConflictError,
+    PromptStorageError,
+    guarded,
+    is_transient_conflict,
+    storage_guard,
 )
+
+__all__ = [
+    "GRANTEE_GROUP",
+    "GRANTEE_USER",
+    "PromptConflictError",
+    "PromptLibraryRepository",
+    "PromptStorageError",
+    "clean_group_name",
+]
 
 logger = logging.getLogger(__name__)
 
-GRANTEE_GROUP = "group"
-GRANTEE_USER = "user"
-
-# Attempts a publish makes when concurrent publishers keep taking the number,
-# with a short jittered pause between them so racing writers spread out.
+# Attempts a publish makes while concurrent publishers keep winning, with a
+# short jittered pause between them (in the worker thread, not the loop).
 _PUBLISH_ATTEMPTS = 20
 _PUBLISH_BACKOFF_SECONDS = 0.005
+_LIKE_ESCAPE = "\\"
 
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
@@ -56,12 +71,25 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def normalize_group_name(group: str) -> str:
-    """Group names compare case- and whitespace-insensitively, as in auth."""
-    return (group or "").strip().lower()
+def clean_group_name(group: str) -> str:
+    """Group names keep their spelling: only surrounding whitespace is dropped.
+
+    An external authorizer receives the name exactly as configured and may
+    match case-sensitively, so lower-casing would ask it about another group.
+    """
+    return (group or "").strip()
 
 
-class PromptLibraryRepository:
+def escape_like(text: str) -> str:
+    """Make ``text`` match literally inside a LIKE pattern."""
+    return (
+        text.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+
+
+class PromptLibraryRepository(PromptLibraryGrantStore):
     """Row-level storage for prompts, versions, grants and audit events."""
 
     def __init__(self, session_factory: sessionmaker):
@@ -82,6 +110,8 @@ class PromptLibraryRepository:
             "title": record.title,
             "description": record.description,
             "draft_content": record.draft_content,
+            "draft_revision": record.draft_revision or 1,
+            "sharing_revision": record.sharing_revision or 0,
             "latest_version_id": record.latest_version_id,
             "latest_version_number": record.latest_version_number or 0,
             "forked_from_prompt_id": record.forked_from_prompt_id,
@@ -104,36 +134,11 @@ class PromptLibraryRepository:
             "created_at": _iso(record.created_at),
         }
 
-    @staticmethod
-    def grant_to_dict(record: PromptLibraryGrantRecord) -> Dict[str, Any]:
-        return {
-            "grantee_type": record.grantee_type,
-            "grantee": record.grantee,
-            "permission": record.permission,
-            "created_by": record.created_by,
-            "created_at": _iso(record.created_at),
-        }
-
-    @staticmethod
-    def audit_to_dict(record: PromptLibraryAuditRecord) -> Dict[str, Any]:
-        try:
-            details = json.loads(record.details_json) if record.details_json else {}
-        except (TypeError, ValueError):
-            details = {}
-        return {
-            "id": record.id,
-            "prompt_id": record.prompt_id,
-            "version_id": record.version_id,
-            "event_type": record.event_type,
-            "actor_email": record.actor_email,
-            "details": details,
-            "created_at": _iso(record.created_at),
-        }
-
     # ------------------------------------------------------------------
     # Prompts
     # ------------------------------------------------------------------
 
+    @guarded("read prompt")
     def get_prompt(self, prompt_id: str) -> Optional[Dict[str, Any]]:
         """Return a prompt row by id (archived included), or None."""
         if not prompt_id:
@@ -142,23 +147,7 @@ class PromptLibraryRepository:
             record = session.get(PromptLibraryPromptRecord, prompt_id)
             return self.prompt_to_dict(record) if record else None
 
-    def get_prompts(self, prompt_ids: Iterable[str]) -> List[Dict[str, Any]]:
-        """Return the non-archived prompts among ``prompt_ids``, newest first."""
-        ids = [p for p in set(prompt_ids) if p]
-        if not ids:
-            return []
-        with self._session() as session:
-            records = (
-                session.query(PromptLibraryPromptRecord)
-                .filter(
-                    PromptLibraryPromptRecord.id.in_(ids),
-                    PromptLibraryPromptRecord.archived_at.is_(None),
-                )
-                .order_by(desc(PromptLibraryPromptRecord.updated_at))
-                .all()
-            )
-            return [self.prompt_to_dict(r) for r in records]
-
+    @guarded("list prompts")
     def list_owned_prompt_ids(self, owner_email: str) -> List[str]:
         owner_email = normalize_user_email(owner_email)
         with self._session() as session:
@@ -172,31 +161,59 @@ class PromptLibraryRepository:
             )
             return [r[0] for r in rows]
 
-    def search_prompt_ids(self, prompt_ids: Sequence[str], query: str) -> List[str]:
-        """Narrow ``prompt_ids`` to those whose title or description match.
+    @guarded("list prompts")
+    def page_prompts(
+        self,
+        full_access_ids: Iterable[str],
+        published_only_ids: Iterable[str],
+        query: Optional[str],
+        limit: int,
+        offset: int,
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """One page of the caller's visible prompts, newest first, and the total.
 
-        Only ever narrows an already-authorized id set: the match runs in SQL
-        but cannot widen what the caller may see.
+        ``full_access_ids`` are visible whatever their state (owned, edit or
+        manage); ``published_only_ids`` only once something is published
+        (use-only callers). The search narrows that already-authorized set
+        and matches title or description literally (LIKE wildcards escaped),
+        so it can never widen what a caller sees.
         """
-        ids = [p for p in set(prompt_ids) if p]
+        full = {p for p in full_access_ids if p}
+        published_only = {p for p in published_only_ids if p} - full
+        if not full and not published_only:
+            return 0, []
+        conditions = [PromptLibraryPromptRecord.archived_at.is_(None)]
+        visibility = []
+        if full:
+            visibility.append(PromptLibraryPromptRecord.id.in_(full))
+        if published_only:
+            visibility.append(
+                PromptLibraryPromptRecord.id.in_(published_only)
+                & (PromptLibraryPromptRecord.latest_version_number > 0)
+            )
+        conditions.append(or_(*visibility))
         needle = (query or "").strip().lower()
-        if not ids or not needle:
-            return ids
-        pattern = f"%{needle}%"
+        if needle:
+            pattern = f"%{escape_like(needle)}%"
+            conditions.append(or_(
+                func.lower(PromptLibraryPromptRecord.title).like(pattern, escape=_LIKE_ESCAPE),
+                func.lower(func.coalesce(PromptLibraryPromptRecord.description, "")).like(
+                    pattern, escape=_LIKE_ESCAPE
+                ),
+            ))
         with self._session() as session:
-            rows = (
-                session.query(PromptLibraryPromptRecord.id)
-                .filter(
-                    PromptLibraryPromptRecord.id.in_(ids),
-                    or_(
-                        func.lower(PromptLibraryPromptRecord.title).like(pattern),
-                        func.lower(func.coalesce(PromptLibraryPromptRecord.description, "")).like(pattern),
-                    ),
-                )
+            total = session.query(func.count(PromptLibraryPromptRecord.id)).filter(*conditions).scalar() or 0
+            records = (
+                session.query(PromptLibraryPromptRecord)
+                .filter(*conditions)
+                .order_by(PromptLibraryPromptRecord.updated_at.desc(), PromptLibraryPromptRecord.id)
+                .limit(limit)
+                .offset(offset)
                 .all()
             )
-            return [r[0] for r in rows]
+            return total, [self.prompt_to_dict(r) for r in records]
 
+    @guarded("create prompt")
     def create_prompt(
         self,
         owner_email: str,
@@ -213,6 +230,8 @@ class PromptLibraryRepository:
                 title=title.strip(),
                 description=(description or "").strip() or None,
                 draft_content=draft_content,
+                draft_revision=1,
+                sharing_revision=0,
                 latest_version_number=0,
                 forked_from_prompt_id=forked_from_prompt_id,
                 forked_from_version_id=forked_from_version_id,
@@ -225,26 +244,53 @@ class PromptLibraryRepository:
     def update_prompt(
         self,
         prompt_id: str,
+        expected_draft_revision: int,
         title: Optional[str] = None,
         description: Optional[str] = None,
         draft_content: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Update draft fields. Published versions are never touched."""
-        with self._session() as session:
-            record = session.get(PromptLibraryPromptRecord, prompt_id)
-            if record is None or record.archived_at is not None:
-                return None
-            if title is not None:
-                record.title = title.strip()
-            if description is not None:
-                record.description = description.strip() or None
-            if draft_content is not None:
-                record.draft_content = draft_content
-            record.updated_at = _now()
-            session.commit()
-            session.refresh(record)
-            return self.prompt_to_dict(record)
+        """Compare-and-set the draft. Published versions are never touched.
 
+        Returns the updated prompt, None when it is missing or archived, or
+        raises ``PromptConflictError("draft")`` when the draft moved past
+        ``expected_draft_revision`` (someone else saved).
+        """
+        values: Dict[str, Any] = {
+            "draft_revision": PromptLibraryPromptRecord.draft_revision + 1,
+            "updated_at": _now(),
+        }
+        if title is not None:
+            values["title"] = title.strip()
+        if description is not None:
+            values["description"] = description.strip() or None
+        if draft_content is not None:
+            values["draft_content"] = draft_content
+        with storage_guard("update draft"):
+            try:
+                with self._session() as session:
+                    result = session.execute(
+                        update(PromptLibraryPromptRecord)
+                        .where(
+                            PromptLibraryPromptRecord.id == prompt_id,
+                            PromptLibraryPromptRecord.draft_revision == expected_draft_revision,
+                            PromptLibraryPromptRecord.archived_at.is_(None),
+                        )
+                        .values(**values)
+                        .execution_options(synchronize_session=False)
+                    )
+                    if result.rowcount != 1:
+                        record = session.get(PromptLibraryPromptRecord, prompt_id)
+                        if record is None or record.archived_at is not None:
+                            return None
+                        raise PromptConflictError("draft")
+                    session.commit()
+            except SQLAlchemyError as e:
+                if is_transient_conflict(e):
+                    raise PromptConflictError("draft") from None
+                raise
+        return self.get_prompt(prompt_id)
+
+    @guarded("archive prompt")
     def archive_prompt(self, prompt_id: str) -> bool:
         with self._session() as session:
             record = session.get(PromptLibraryPromptRecord, prompt_id)
@@ -264,80 +310,84 @@ class PromptLibraryRepository:
         prompt_id: str,
         author_email: str,
         change_description: Optional[str],
+        expected_draft_revision: int,
     ) -> Optional[Dict[str, Any]]:
-        """Snapshot the prompt's current draft as the next immutable version.
+        """Snapshot the draft at ``expected_draft_revision`` as the next version.
 
-        Returns None when the prompt is missing or archived. The number is
-        computed from the versions table (not the denormalized counter), and
-        the unique constraint arbitrates a concurrent publication: the loser
-        rolls back and tries again with a fresh read. DuckDB reports a write
-        conflict between its connections as a transaction error rather than
-        a constraint violation, so any driver error is retried the same way.
+        Returns None when the prompt is missing or archived; raises
+        ``PromptConflictError("draft")`` when the draft changed since the
+        caller reviewed it, ``PromptConflictError("publish")`` when concurrent
+        publishers kept winning, and ``PromptStorageError`` for anything else.
         """
         author_email = normalize_user_email(author_email)
-        last_error: Optional[Exception] = None
-        for attempt in range(_PUBLISH_ATTEMPTS):
-            if attempt:
-                time.sleep(random.uniform(0, _PUBLISH_BACKOFF_SECONDS * min(attempt, 8)))
-            with self._session() as session:
-                query = session.query(PromptLibraryPromptRecord).filter(
-                    PromptLibraryPromptRecord.id == prompt_id
-                )
-                if session.get_bind().dialect.name == "postgresql":
-                    # Serialize publishers of one prompt; the constraint below
-                    # is still the guarantee on every backend.
-                    query = query.with_for_update()
-                prompt = query.first()
-                if prompt is None or prompt.archived_at is not None:
-                    return None
-                current = (
-                    session.query(func.max(PromptLibraryVersionRecord.version_number))
-                    .filter(PromptLibraryVersionRecord.prompt_id == prompt_id)
-                    .scalar()
-                ) or 0
-                version = PromptLibraryVersionRecord(
-                    prompt_id=prompt_id,
-                    version_number=current + 1,
-                    title=prompt.title,
-                    content=prompt.draft_content,
-                    change_description=(change_description or "").strip() or None,
-                    author_email=author_email,
-                )
-                session.add(version)
+        last_conflict = "none"
+        with storage_guard("publish"):
+            for attempt in range(_PUBLISH_ATTEMPTS):
+                if attempt:
+                    time.sleep(random.uniform(0, _PUBLISH_BACKOFF_SECONDS * min(attempt, 8)))
                 try:
-                    session.flush()
-                except DBAPIError as e:
-                    session.rollback()
-                    last_error = e
-                    continue
-                # Only move the pointer forward: a slower publisher that lost
-                # the race to a higher number must not rewind it.
-                if (prompt.latest_version_number or 0) < version.version_number:
-                    prompt.latest_version_number = version.version_number
-                    prompt.latest_version_id = version.id
-                prompt.updated_at = _now()
-                try:
-                    session.commit()
-                except DBAPIError as e:
-                    session.rollback()
-                    last_error = e
-                    continue
-                session.refresh(version)
-                return self.version_to_dict(version)
-        logger.error("Publishing prompt %s failed after retries: %s", prompt_id, last_error)
-        raise RuntimeError("Could not allocate a version number; try again")
+                    return self._publish_once(prompt_id, author_email, change_description, expected_draft_revision)
+                except SQLAlchemyError as e:
+                    if not is_transient_conflict(e, VERSION_CONSTRAINT):
+                        raise
+                    last_conflict = type(e).__name__
+        logger.warning(
+            "Publishing gave up after %d conflicting attempts (%s)", _PUBLISH_ATTEMPTS, last_conflict
+        )
+        raise PromptConflictError("publish")
 
+    def _publish_once(
+        self, prompt_id: str, author_email: str, change_description: Optional[str], expected_draft_revision: int
+    ) -> Optional[Dict[str, Any]]:
+        with self._session() as session:
+            query = session.query(PromptLibraryPromptRecord).filter(PromptLibraryPromptRecord.id == prompt_id)
+            if session.get_bind().dialect.name == "postgresql":
+                # Serialize publishers (and draft saves) of one prompt; the
+                # unique constraint is still the guarantee on every backend.
+                query = query.with_for_update()
+            prompt = query.first()
+            if prompt is None or prompt.archived_at is not None:
+                return None
+            if (prompt.draft_revision or 1) != expected_draft_revision:
+                raise PromptConflictError("draft")
+            current = (
+                session.query(func.max(PromptLibraryVersionRecord.version_number))
+                .filter(PromptLibraryVersionRecord.prompt_id == prompt_id)
+                .scalar()
+            ) or 0
+            version = PromptLibraryVersionRecord(
+                prompt_id=prompt_id,
+                version_number=current + 1,
+                title=prompt.title,
+                content=prompt.draft_content,
+                change_description=(change_description or "").strip() or None,
+                author_email=author_email,
+            )
+            session.add(version)
+            session.flush()
+            # Only move the pointer forward: a slower publisher that lost the
+            # race to a higher number must not rewind it.
+            if (prompt.latest_version_number or 0) < version.version_number:
+                prompt.latest_version_number = version.version_number
+                prompt.latest_version_id = version.id
+            prompt.updated_at = _now()
+            session.commit()
+            session.refresh(version)
+            return self.version_to_dict(version)
+
+    @guarded("list versions")
     def list_versions(self, prompt_id: str) -> List[Dict[str, Any]]:
         """All published versions of a prompt, newest first."""
         with self._session() as session:
             records = (
                 session.query(PromptLibraryVersionRecord)
                 .filter(PromptLibraryVersionRecord.prompt_id == prompt_id)
-                .order_by(desc(PromptLibraryVersionRecord.version_number))
+                .order_by(PromptLibraryVersionRecord.version_number.desc())
                 .all()
             )
             return [self.version_to_dict(r) for r in records]
 
+    @guarded("read version")
     def get_version(self, prompt_id: str, version_id: str) -> Optional[Dict[str, Any]]:
         """A version, only if it belongs to ``prompt_id``."""
         if not prompt_id or not version_id:
@@ -348,149 +398,23 @@ class PromptLibraryRepository:
                 return None
             return self.version_to_dict(record)
 
+    @guarded("read version")
     def get_latest_version(self, prompt_id: str) -> Optional[Dict[str, Any]]:
         with self._session() as session:
             record = (
                 session.query(PromptLibraryVersionRecord)
                 .filter(PromptLibraryVersionRecord.prompt_id == prompt_id)
-                .order_by(desc(PromptLibraryVersionRecord.version_number))
+                .order_by(PromptLibraryVersionRecord.version_number.desc())
                 .first()
             )
             return self.version_to_dict(record) if record else None
 
-    # ------------------------------------------------------------------
-    # Grants
-    # ------------------------------------------------------------------
-
-    def list_grants(self, prompt_id: str) -> List[Dict[str, Any]]:
-        with self._session() as session:
-            records = (
-                session.query(PromptLibraryGrantRecord)
-                .filter(PromptLibraryGrantRecord.prompt_id == prompt_id)
-                .order_by(PromptLibraryGrantRecord.grantee_type, PromptLibraryGrantRecord.grantee)
-                .all()
-            )
-            return [self.grant_to_dict(r) for r in records]
-
-    def grants_for_prompts(self, prompt_ids: Iterable[str]) -> Dict[str, List[Dict[str, Any]]]:
-        ids = [p for p in set(prompt_ids) if p]
-        result: Dict[str, List[Dict[str, Any]]] = {p: [] for p in ids}
+    @guarded("read versions")
+    def versions_by_id(self, version_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+        """Several versions in one query (the list view's latest versions)."""
+        ids = [v for v in set(version_ids) if v]
         if not ids:
-            return result
-        with self._session() as session:
-            records = (
-                session.query(PromptLibraryGrantRecord)
-                .filter(PromptLibraryGrantRecord.prompt_id.in_(ids))
-                .all()
-            )
-            for r in records:
-                result.setdefault(r.prompt_id, []).append(self.grant_to_dict(r))
-        return result
-
-    def replace_grants(
-        self, prompt_id: str, grants: Sequence[Dict[str, str]], actor_email: str
-    ) -> List[Dict[str, Any]]:
-        """Atomically replace a prompt's grant set.
-
-        One transaction, so a reader never sees a half-applied change and two
-        concurrent updates resolve to one of the two complete sets.
-        """
-        actor_email = normalize_user_email(actor_email)
-        with self._session() as session:
-            session.query(PromptLibraryGrantRecord).filter(
-                PromptLibraryGrantRecord.prompt_id == prompt_id
-            ).delete(synchronize_session=False)
-            for g in grants:
-                session.add(
-                    PromptLibraryGrantRecord(
-                        prompt_id=prompt_id,
-                        grantee_type=g["grantee_type"],
-                        grantee=g["grantee"],
-                        permission=g["permission"],
-                        created_by=actor_email,
-                    )
-                )
-            prompt = session.get(PromptLibraryPromptRecord, prompt_id)
-            if prompt is not None:
-                prompt.updated_at = _now()
-            session.commit()
-        return self.list_grants(prompt_id)
-
-    def prompt_ids_granted_to_user(self, user_email: str) -> Dict[str, str]:
-        """``{prompt_id: permission}`` for direct user grants."""
-        user_email = normalize_user_email(user_email)
-        with self._session() as session:
-            rows = (
-                session.query(PromptLibraryGrantRecord.prompt_id, PromptLibraryGrantRecord.permission)
-                .filter(
-                    PromptLibraryGrantRecord.grantee_type == GRANTEE_USER,
-                    PromptLibraryGrantRecord.grantee == user_email,
-                )
-                .all()
-            )
-            return {r[0]: r[1] for r in rows}
-
-    def distinct_granted_groups(self) -> List[str]:
-        """Every group that appears in any grant (bounded by sharing use)."""
-        with self._session() as session:
-            rows = (
-                session.query(PromptLibraryGrantRecord.grantee)
-                .filter(PromptLibraryGrantRecord.grantee_type == GRANTEE_GROUP)
-                .distinct()
-                .all()
-            )
-            return sorted({r[0] for r in rows})
-
-    def prompt_ids_granted_to_groups(self, groups: Iterable[str]) -> Dict[str, List[str]]:
-        """``{prompt_id: [group, ...]}`` for group grants among ``groups``."""
-        names = [g for g in set(groups) if g]
-        if not names:
             return {}
         with self._session() as session:
-            rows = (
-                session.query(PromptLibraryGrantRecord.prompt_id, PromptLibraryGrantRecord.grantee)
-                .filter(
-                    PromptLibraryGrantRecord.grantee_type == GRANTEE_GROUP,
-                    PromptLibraryGrantRecord.grantee.in_(names),
-                )
-                .all()
-            )
-        result: Dict[str, List[str]] = {}
-        for prompt_id, group in rows:
-            result.setdefault(prompt_id, []).append(group)
-        return result
-
-    # ------------------------------------------------------------------
-    # Audit
-    # ------------------------------------------------------------------
-
-    def add_audit_event(
-        self,
-        prompt_id: str,
-        event_type: str,
-        actor_email: str,
-        version_id: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        with self._session() as session:
-            session.add(
-                PromptLibraryAuditRecord(
-                    prompt_id=prompt_id,
-                    version_id=version_id,
-                    event_type=event_type,
-                    actor_email=normalize_user_email(actor_email),
-                    details_json=json.dumps(details, sort_keys=True) if details else None,
-                )
-            )
-            session.commit()
-
-    def list_audit_events(self, prompt_id: str, limit: int = 200) -> List[Dict[str, Any]]:
-        with self._session() as session:
-            records = (
-                session.query(PromptLibraryAuditRecord)
-                .filter(PromptLibraryAuditRecord.prompt_id == prompt_id)
-                .order_by(desc(PromptLibraryAuditRecord.created_at))
-                .limit(max(1, min(limit, 1000)))
-                .all()
-            )
-            return [self.audit_to_dict(r) for r in records]
+            records = session.query(PromptLibraryVersionRecord).filter(PromptLibraryVersionRecord.id.in_(ids)).all()
+            return {r.id: self.version_to_dict(r) for r in records}

@@ -1,6 +1,6 @@
 # Team Prompt Library (issue #1169)
 
-Date: 2026-11-09
+Date: 2026-11-09 (review revisions 2026-11-10)
 
 How the team-shared, versioned prompt library was built, and why. User-facing
 behaviour is in the [user guide](../../user-guide/team-prompt-library/README.md).
@@ -9,9 +9,9 @@ behaviour is in the [user guide](../../user-guide/team-prompt-library/README.md)
 
 | Layer | Module | Responsibility |
 |-------|--------|----------------|
-| Storage | `atlas/modules/chat_history/prompt_library_repository.py` | Rows only; no authorization decisions |
+| Storage | `atlas/modules/chat_history/prompt_library_repository.py`, `prompt_library_grants.py`, `prompt_library_storage.py` | Rows only; no authorization decisions; typed storage errors |
 | Policy | `atlas/modules/prompts/prompt_library_policy.py` | Levels, errors, validation, per-level response views |
-| Service | `atlas/modules/prompts/prompt_library_service.py` | Every access decision; audit |
+| Service | `atlas/modules/prompts/prompt_library_service.py` (+ `prompt_library_listing.py`, `prompt_library_sharing.py`) | Every access decision; audit; all storage calls in worker threads |
 | REST | `atlas/routes/prompt_library_routes.py` | `/api/prompts`, identity from `get_current_user` |
 | Chat | `atlas/application/chat/prompt_library_turn.py` | Per-turn resolution and version pinning, called from `ChatService.handle_chat_message` |
 | UI | `usePromptLibrary`, `PromptLibraryPanel` (+ Editor/Sharing/Versions), `PromptSelector`, `utils/libraryPromptSelection.js` | Browse, manage, select; send a reference only |
@@ -39,6 +39,10 @@ model.
 - Callers with no access get the same `PromptNotFound` as a missing id; 403 is
   only for callers who can already see the entry.
 - Sharing into a group requires the sharer to be a member of it.
+- Group names are stored and passed to `is_user_in_group` exactly as
+  configured (only surrounding whitespace is dropped): an external authorizer
+  receives the raw name and may match case-sensitively. Only the reserved
+  everyone group is compared case-insensitively.
 - `users` (the group `is_user_in_group` grants every identity when no
   authorizer is configured) is reserved (`ORG_WIDE_GROUPS`): never offered,
   refused as a grant, and ignored in access evaluation if a row exists, so
@@ -78,13 +82,47 @@ and archiving is a soft delete, a pinned id always resolves to its original
 text; running it again still needs current access. That is the distinction
 between preserving history and permitting new use.
 
+## Recovering from an unavailable pin
+
+Clients that never send `library_prompt` -- the CLI, follow-up and Agent Runs
+API turns, older browser bundles -- keep running a pinned conversation's
+version. When that version is no longer available they are refused (never
+silently switched to another prompt) with a message naming the explicit way
+out: `DELETE /api/prompts/pins/{conversation_id}`, owner only, which removes
+`metadata.prompt_library` (the history is kept) and records an `unpin` audit
+event. The next run or connection hydrates the conversation without a pin and
+uses the default prompt. A storage outage during resolution is reported as
+such and keeps the pin. Browsers choose explicitly every turn
+(`library_prompt: null` unpins).
+
 ## Concurrency and scaling
 
 - Version numbers are unique per prompt (database constraint). Publishing
   computes `max+1` in a transaction (`SELECT ... FOR UPDATE` on the prompt row
-  on PostgreSQL) and retries with jittered backoff when a concurrent publisher
-  wins; DuckDB's optimistic write conflicts are retried the same way.
-- Grant changes replace the whole set in one transaction.
+  on PostgreSQL) and retries with jittered backoff only on transient
+  conflicts: a unique violation of that constraint, a PostgreSQL serialization
+  failure/deadlock/lock timeout, or a DuckDB write conflict. Any other
+  database error fails at once; exhausted retries end in a typed conflict
+  (HTTP 409), never an unhandled exception.
+- Drafts carry `draft_revision`; saving is a compare-and-set on it and
+  publishing names the revision the editor reviewed, so concurrent editors get
+  a 409 instead of overwriting each other or publishing unseen text.
+- Grants carry `sharing_revision`. A sharing change is an `UPDATE ... WHERE
+  sharing_revision = expected` (which takes the prompt's row lock on
+  PostgreSQL) followed by a diff of the grant rows, all in one transaction;
+  a stale or concurrent change is refused, so it cannot restore a grant that
+  was just revoked. `UNIQUE (prompt_id, grantee_type, grantee)` backs it up.
+  Writing a diff (never delete-then-reinsert of one key) keeps DuckDB's
+  constraint checking happy.
+- The service runs every repository call with `asyncio.to_thread`; each call
+  opens and closes its own session in that thread, so publish backoff or a
+  slow database never stalls the event loop.
+- Listing decides visibility from id-level grant data, then the database
+  filters, searches (LIKE wildcards escaped), counts and pages; a page is
+  rendered with one query each for grants and latest versions.
+- Database exception text (SQL, parameters, prompt text, identities) never
+  reaches a log or a response: storage errors are logged as operation,
+  exception type and SQLSTATE, and re-raised unchained as a typed error.
 - No process-local state: PostgreSQL is the source of truth for entries,
   versions, grants, audit and pins; membership comes from the authorizer on
   each request. Migration `004` runs under the existing advisory-locked
@@ -94,12 +132,15 @@ between preserving history and permitting new use.
 
 `prompt_library_audit_events` records `create`, `update_draft` (field names),
 `publish` (version number), `share` (groups/users added, removed, changed),
-`fork`, `archive`, `use` (once per pin, with conversation id) and `use_denied`.
+`fork`, `archive`, `use` (once per pin, with conversation id), `use_denied`
+(a refused chat turn; the advisory `/resolve` endpoint writes nothing) and
+`unpin`.
 Prompt text is never written to audit rows or logs.
 
 ## Tests
 
 `atlas/tests/test_prompt_library_access.py`, `..._routes.py`,
-`..._chat_turn.py`, `..._migration.py` (SQLite, DuckDB and, with
-`ATLAS_TEST_POSTGRES_URL`, PostgreSQL); frontend `src/test/prompt-library-*.test.*`;
+`..._chat_turn.py`, `..._migration.py`, `..._concurrency.py`,
+`..._storage.py` (SQLite, DuckDB and, with `ATLAS_TEST_POSTGRES_URL`,
+PostgreSQL); frontend `src/test/prompt-library-*.test.*`;
 end-to-end `test/pr-validation/test_pr1169_team_prompt_library.sh`.

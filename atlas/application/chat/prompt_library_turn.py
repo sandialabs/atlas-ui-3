@@ -23,9 +23,14 @@ from a client field. Rules, per turn:
   without a pin for that entry pins the current latest.
 * ``library_prompt`` is ``null``: the user chose a non-library prompt; the pin
   is cleared and the other prompt (inline/persona/default) applies.
-* ``library_prompt`` omitted (older clients, the CLI, follow-up runs): a pinned
-  conversation keeps running its pinned version, unless the turn explicitly
-  carries another prompt (inline custom prompt or persona), which unpins.
+* ``library_prompt`` omitted (older clients, the CLI, follow-up and API runs):
+  a pinned conversation keeps running its pinned version, unless the turn
+  explicitly carries another prompt (inline custom prompt or persona), which
+  unpins. If the pinned version is no longer available, the turn is refused
+  with a message naming the explicit way out -- ``DELETE
+  /api/prompts/pins/{conversation_id}`` (owner only, audited) -- because these
+  clients cannot pick another prompt per turn. After the pin is cleared, the
+  next run or connection continues with the default prompt.
 
 Whenever a library prompt applies, authorization is checked on that turn. A
 refusal fails the turn with one generic message -- it never falls back to a
@@ -39,7 +44,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.domain.errors import AuthorizationError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -51,14 +55,11 @@ PIN_HISTORY_METADATA_KEY = "prompt_library_history"
 MAX_PIN_HISTORY = 50
 _MAX_ID_LEN = 64
 
-# Sentinel for "the frame did not carry the field" (distinct from null).
-_OMITTED = object()
-
 
 def parse_library_request(raw: Any) -> Any:
     """Validate the frame's ``library_prompt`` field.
 
-    Returns ``_OMITTED``-compatible values: the caller's sentinel passes
+    Returns the caller's "omitted" sentinel unchanged when it was passed
     through untouched, ``None`` for an explicit clear, or a
     ``(prompt_id, version_id_or_None)`` tuple. Raises ``ValidationError`` for
     anything else, so a malformed reference fails the turn rather than being
@@ -149,6 +150,18 @@ def _unpin(context: Dict[str, Any], message_index: int) -> None:
     context[PIN_CONTEXT_KEY] = None
 
 
+def _refusal_message(context: Dict[str, Any], from_pin_only: bool, default: Optional[str]) -> str:
+    """The refusal a user sees. Never names the prompt or why it is gone."""
+    if from_pin_only:
+        conversation_id = context.get("conversation_id") or "<conversation id>"
+        return (
+            "This conversation is pinned to a team prompt that is no longer available "
+            "to you. Choose another prompt, or clear the conversation's team prompt "
+            f"(DELETE /api/prompts/pins/{conversation_id}) to continue with the default prompt."
+        )
+    return default or "The selected team prompt is not available. Choose another prompt to continue."
+
+
 async def resolve_library_prompt_for_turn(
     *,
     context: Dict[str, Any],
@@ -173,6 +186,7 @@ async def resolve_library_prompt_for_turn(
         _unpin(context, message_index)
         return None
 
+    from_pin_only = parsed is omitted
     if parsed is omitted:
         if current is None:
             return None
@@ -190,19 +204,20 @@ async def resolve_library_prompt_for_turn(
 
     if library is None or not user_email:
         logger.warning("Library prompt requested but the prompt library is unavailable")
-        raise AuthorizationError(
-            "The selected team prompt is not available. Choose another prompt to continue."
-        )
+        raise AuthorizationError(_refusal_message(context, from_pin_only, None))
 
-    from atlas.modules.prompts.prompt_library_service import PromptLibraryError
+    from atlas.modules.prompts.prompt_library_policy import PromptLibraryError, PromptLibraryUnavailable
 
     try:
         version = await library.resolve_for_execution(user_email, prompt_id, version_id)
-    except PromptLibraryError as e:
-        logger.warning(
-            "Refused library prompt for this turn (prompt %s)", sanitize_for_logging(prompt_id)
-        )
+    except PromptLibraryUnavailable as e:
+        # Storage outage: say so, and keep the pin -- the prompt may well
+        # still be the user's to run once the database is back.
         raise AuthorizationError(e.message)
+    except PromptLibraryError as e:
+        # Nothing client-supplied is logged: the prompt id came from the frame.
+        logger.warning("Refused a team-library prompt for this turn (%s)", type(e).__name__)
+        raise AuthorizationError(_refusal_message(context, from_pin_only, e.message))
 
     if current is None or current["version_id"] != version["id"]:
         _record_pin(context, version, message_index)

@@ -28,23 +28,33 @@ chat turn. A group check that errors counts as "not a member" (fail closed).
 Callers who lack any access get the same answer as for an id that does not
 exist (``PromptNotFound``), so ids cannot be probed. ``PromptForbidden`` is
 only raised to callers who can already see the entry.
+
+Group names are passed to the authorizer exactly as configured (it may match
+case-sensitively); only the reserved everyone group ``users`` is compared
+case-insensitively, and it never grants anything.
+
+Every repository call runs in a worker thread (``_db``): the repository is
+synchronous, publishing can back off between conflicting attempts, and a
+database round trip must never stall the event loop that serves every
+WebSocket on this replica. Each call opens and closes its own session inside
+that thread, so no session is shared across threads. Storage failures become
+``PromptLibraryUnavailable`` and concurrent-change refusals ``PromptConflict``.
 """
 
 import asyncio
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TypeVar
 
-from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.user_identity import normalize_user_email
 from atlas.modules.chat_history.prompt_library_repository import (
     GRANTEE_GROUP,
     GRANTEE_USER,
+    PromptConflictError,
     PromptLibraryRepository,
-    normalize_group_name,
+    PromptStorageError,
 )
-from atlas.modules.prompts.prompt_library_policy import (  # noqa: F401 - re-exported
-    _GROUP_CHECK_CONCURRENCY,
-    _GROUP_NAME_RE,
+from atlas.modules.prompts.prompt_library_listing import PromptLibraryListing
+from atlas.modules.prompts.prompt_library_policy import (
     LEVEL_EDIT,
     LEVEL_MANAGE,
     LEVEL_NAMES,
@@ -52,35 +62,39 @@ from atlas.modules.prompts.prompt_library_policy import (  # noqa: F401 - re-exp
     LEVEL_OWNER,
     LEVEL_USE,
     MAX_CHANGE_DESCRIPTION_LEN,
-    MAX_CONTENT_LEN,
-    MAX_DESCRIPTION_LEN,
-    MAX_GRANTS,
-    MAX_TITLE_LEN,
-    ORG_WIDE_GROUPS,
     PERMISSION_LEVELS,
-    SCOPES,
     Access,
     GroupCandidates,
     GroupCheck,
+    PromptConflict,
     PromptForbidden,
-    PromptLibraryError,
+    PromptLibraryUnavailable,
     PromptNotFound,
     PromptUnavailable,
     PromptValidationError,
     _default_group_candidates,
+    check_revision,
     clean_content,
     clean_description,
     clean_title,
-    parse_grants,
-    sharing_view,
+    is_org_wide_group,
     summary_view,
     version_view,
 )
+from atlas.modules.prompts.prompt_library_sharing import PromptLibrarySharing
 
 logger = logging.getLogger(__name__)
 
+# Concurrent group checks per request: an external authorizer is an HTTP call
+# per (user, group), so a large sharing footprint must not fan out unbounded.
+GROUP_CHECK_CONCURRENCY = 8
 
-class PromptLibraryService:
+T = TypeVar("T")
+
+
+
+
+class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
     """Authorization-checked operations on the prompt library."""
 
     def __init__(
@@ -96,6 +110,16 @@ class PromptLibraryService:
     @property
     def repository(self) -> PromptLibraryRepository:
         return self._repo
+
+    async def _db(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Run a repository call off the event loop, mapping storage errors."""
+        try:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except PromptConflictError as e:
+            raise PromptConflict(e.kind) from None
+        except PromptStorageError:
+            # Already logged (type and SQLSTATE only) by the storage guard.
+            raise PromptLibraryUnavailable() from None
 
     # ------------------------------------------------------------------
     # Membership and access
@@ -120,10 +144,11 @@ class PromptLibraryService:
             return False
 
     async def _member_groups(self, user_email: str, groups: Iterable[str]) -> Set[str]:
-        names = sorted({g for g in groups if g})
+        """The groups among ``groups`` the user is in, names as given (case kept)."""
+        names = sorted({g for g in groups if g and not is_org_wide_group(g)})
         if not names:
             return set()
-        semaphore = asyncio.Semaphore(_GROUP_CHECK_CONCURRENCY)
+        semaphore = asyncio.Semaphore(GROUP_CHECK_CONCURRENCY)
 
         async def check(group: str) -> Optional[str]:
             async with semaphore:
@@ -144,18 +169,18 @@ class PromptLibraryService:
         if prompt["owner_email"] == user_email:
             return Access(LEVEL_OWNER, ["owner"])
         if grants is None:
-            grants = self._repo.list_grants(prompt["id"])
+            grants = await self._db(self._repo.list_grants, prompt["id"])
         level = LEVEL_NONE
         via: List[str] = []
         for g in grants:
             if g["grantee_type"] == GRANTEE_USER and g["grantee"] == user_email:
                 level = max(level, PERMISSION_LEVELS.get(g["permission"], LEVEL_NONE))
                 via.append("user")
-        # An org-wide group never grants access, even if a row for one exists
+        # The everyone group never grants access, even if a row for one exists
         # (written outside this service): defense in depth for ORG_WIDE_GROUPS.
         group_names = [
             g["grantee"] for g in grants
-            if g["grantee_type"] == GRANTEE_GROUP and g["grantee"] not in ORG_WIDE_GROUPS
+            if g["grantee_type"] == GRANTEE_GROUP and not is_org_wide_group(g["grantee"])
         ]
         if group_names:
             if member_groups is None:
@@ -174,7 +199,7 @@ class PromptLibraryService:
         user_email = normalize_user_email(user_email)
         if not user_email:
             raise PromptNotFound()
-        prompt = self._repo.get_prompt(prompt_id)
+        prompt = await self._db(self._repo.get_prompt, prompt_id)
         if prompt is None:
             raise PromptNotFound()
         access = await self._access(user_email, prompt)
@@ -186,71 +211,23 @@ class PromptLibraryService:
             )
         return user_email, prompt, access
 
-    def _audit(self, prompt_id: str, event: str, actor: str, version_id: Optional[str] = None,
-               details: Optional[Dict[str, Any]] = None) -> None:
+    async def _audit(self, prompt_id: str, event: str, actor: str, version_id: Optional[str] = None,
+                     details: Optional[Dict[str, Any]] = None) -> None:
         try:
-            self._repo.add_audit_event(prompt_id, event, actor, version_id=version_id, details=details)
+            await asyncio.to_thread(self._repo.add_audit_event, prompt_id, event, actor, version_id, details)
         except Exception as e:  # an audit write failure is logged, never silent
-            logger.error(
-                "Failed to record prompt-library audit event %s for %s: %s",
-                event, sanitize_for_logging(prompt_id), type(e).__name__,
-            )
+            # Event type and exception type only: the prompt id is
+            # client-supplied, and the failure is the same for every prompt.
+            logger.error("Failed to record a prompt-library audit event (%s): %s", event, type(e).__name__)
 
     # ------------------------------------------------------------------
     # Listing and reading
     # ------------------------------------------------------------------
 
-    async def list_prompts(
-        self, user_email: str, scope: str = "all", query: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Entries this user may see, filtered by scope and an optional search.
-
-        scope: ``mine`` (owned), ``shared`` (direct user grant), ``team``
-        (through a group the user is in), ``all`` (union).
-        """
-        if scope not in SCOPES:
-            raise PromptValidationError(f"scope must be one of {', '.join(SCOPES)}")
-        user_email = normalize_user_email(user_email)
-        if not user_email:
-            return []
-
-        owned = set(self._repo.list_owned_prompt_ids(user_email)) if scope in ("all", "mine") else set()
-        direct = self._repo.prompt_ids_granted_to_user(user_email) if scope in ("all", "shared") else {}
-        team: Dict[str, List[str]] = {}
-        member_groups: Set[str] = set()
-        if scope in ("all", "team"):
-            member_groups = await self._member_groups(
-                user_email,
-                [g for g in self._repo.distinct_granted_groups() if g not in ORG_WIDE_GROUPS],
-            )
-            team = self._repo.prompt_ids_granted_to_groups(member_groups)
-
-        candidate_ids = owned | set(direct) | set(team)
-        if scope == "shared":
-            candidate_ids -= set(self._repo.list_owned_prompt_ids(user_email))
-        if scope == "team":
-            candidate_ids -= set(self._repo.list_owned_prompt_ids(user_email))
-        if query:
-            candidate_ids = set(self._repo.search_prompt_ids(list(candidate_ids), query))
-        prompts = self._repo.get_prompts(candidate_ids)
-        grants_by_prompt = self._repo.grants_for_prompts(p["id"] for p in prompts)
-
-        results = []
-        for prompt in prompts:
-            grants = grants_by_prompt.get(prompt["id"], [])
-            # Recompute the level from the full grant set (the scope queries
-            # only found *a* path in); the membership answers are reused.
-            access = await self._access(user_email, prompt, grants, member_groups if scope in ("all", "team") else None)
-            if access.level == LEVEL_NONE:
-                continue
-            latest = self._repo.get_latest_version(prompt["id"]) if prompt.get("latest_version_id") else None
-            results.append(summary_view(prompt, access, grants, latest))
-        return results
-
     async def get_prompt(self, user_email: str, prompt_id: str) -> Dict[str, Any]:
         user_email, prompt, access = await self._authorize(user_email, prompt_id, LEVEL_USE)
-        grants = self._repo.list_grants(prompt_id)
-        latest = self._repo.get_latest_version(prompt_id) if prompt.get("latest_version_id") else None
+        grants = await self._db(self._repo.list_grants, prompt_id)
+        latest = await self._db(self._repo.get_latest_version, prompt_id) if prompt.get("latest_version_id") else None
         data = summary_view(prompt, access, grants, latest)
         if access.level >= LEVEL_EDIT:
             data["draft_content"] = prompt["draft_content"]
@@ -260,11 +237,11 @@ class PromptLibraryService:
 
     async def list_versions(self, user_email: str, prompt_id: str) -> List[Dict[str, Any]]:
         await self._authorize(user_email, prompt_id, LEVEL_USE)
-        return [version_view(v) for v in self._repo.list_versions(prompt_id)]
+        return [version_view(v) for v in await self._db(self._repo.list_versions, prompt_id)]
 
     async def get_version(self, user_email: str, prompt_id: str, version_id: str) -> Dict[str, Any]:
         await self._authorize(user_email, prompt_id, LEVEL_USE)
-        version = self._repo.get_version(prompt_id, version_id)
+        version = await self._db(self._repo.get_version, prompt_id, version_id)
         if version is None:
             raise PromptNotFound()
         return version_view(version)
@@ -277,21 +254,20 @@ class PromptLibraryService:
         """
         detail = await self.get_prompt(user_email, prompt_id)
         detail.pop("latest_content", None)
-        detail["versions"] = [version_view(v) for v in self._repo.list_versions(prompt_id)]
+        detail["versions"] = [version_view(v) for v in await self._db(self._repo.list_versions, prompt_id)]
         detail["export_format"] = "atlas-prompt-library/1"
         return detail
 
     async def list_audit_events(self, user_email: str, prompt_id: str) -> List[Dict[str, Any]]:
         await self._authorize(user_email, prompt_id, LEVEL_MANAGE)
-        return self._repo.list_audit_events(prompt_id)
+        return await self._db(self._repo.list_audit_events, prompt_id)
 
     async def shareable_groups(self, user_email: str) -> List[str]:
         """Configured groups the caller belongs to (the only ones they may share with)."""
         user_email = normalize_user_email(user_email)
         if not user_email:
             return []
-        candidates = {normalize_group_name(g) for g in self._group_candidates()} - ORG_WIDE_GROUPS
-        return sorted(await self._member_groups(user_email, candidates))
+        return sorted(await self._member_groups(user_email, self._group_candidates()))
 
     # ------------------------------------------------------------------
     # Writing
@@ -307,18 +283,21 @@ class PromptLibraryService:
         title = clean_title(title, required=True)
         content = clean_content(content, required=True)
         description = clean_description(description)
-        prompt = self._repo.create_prompt(user_email, title, description, content)
-        self._audit(prompt["id"], "create", user_email)
+        prompt = await self._db(self._repo.create_prompt, user_email, title, description, content)
+        await self._audit(prompt["id"], "create", user_email)
         return await self.get_prompt(user_email, prompt["id"])
 
     async def update_prompt(
         self,
         user_email: str,
         prompt_id: str,
+        expected_draft_revision: Any,
         title: Optional[str] = None,
         description: Optional[str] = None,
         content: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Change the draft, if it is still at ``expected_draft_revision``."""
+        expected = check_revision(expected_draft_revision, "expected_draft_revision")
         user_email, prompt, _ = await self._authorize(user_email, prompt_id, LEVEL_EDIT)
         title = clean_title(title, required=False)
         content = clean_content(content, required=False)
@@ -331,88 +310,41 @@ class PromptLibraryService:
             )
             if value is not None and value != current
         ]
-        if changed:
-            if self._repo.update_prompt(prompt_id, title, description, content) is None:
-                raise PromptNotFound()
-            self._audit(prompt_id, "update_draft", user_email, details={"fields": changed})
+        if not changed:
+            if prompt["draft_revision"] != expected:
+                raise PromptConflict("draft")
+            return await self.get_prompt(user_email, prompt_id)
+        updated = await self._db(self._repo.update_prompt, prompt_id, expected, title, description, content)
+        if updated is None:
+            raise PromptNotFound()
+        await self._audit(
+            prompt_id, "update_draft", user_email,
+            details={"fields": changed, "draft_revision": updated["draft_revision"]},
+        )
         return await self.get_prompt(user_email, prompt_id)
 
     async def publish(
-        self, user_email: str, prompt_id: str, change_description: Optional[str] = None
+        self,
+        user_email: str,
+        prompt_id: str,
+        expected_draft_revision: Any,
+        change_description: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Publish the draft the caller reviewed (``expected_draft_revision``)."""
+        expected = check_revision(expected_draft_revision, "expected_draft_revision")
         user_email, _, _ = await self._authorize(user_email, prompt_id, LEVEL_EDIT)
         if change_description is not None and len(change_description) > MAX_CHANGE_DESCRIPTION_LEN:
             raise PromptValidationError(
                 f"Change description is longer than {MAX_CHANGE_DESCRIPTION_LEN} characters"
             )
-        version = self._repo.publish_version(prompt_id, user_email, change_description)
+        version = await self._db(self._repo.publish_version, prompt_id, user_email, change_description, expected)
         if version is None:
             raise PromptNotFound()
-        self._audit(
+        await self._audit(
             prompt_id, "publish", user_email, version_id=version["id"],
-            details={"version_number": version["version_number"]},
+            details={"version_number": version["version_number"], "draft_revision": expected},
         )
         return version_view(version)
-
-    async def get_sharing(self, user_email: str, prompt_id: str) -> Dict[str, Any]:
-        await self._authorize(user_email, prompt_id, LEVEL_MANAGE)
-        return sharing_view(self._repo.list_grants(prompt_id))
-
-    async def set_sharing(
-        self,
-        user_email: str,
-        prompt_id: str,
-        groups: Sequence[str],
-        users: Sequence[Dict[str, str]],
-    ) -> Dict[str, Any]:
-        """Replace the entry's grants.
-
-        Rules: groups get ``use`` only; a newly added group must be one the
-        caller belongs to (no sharing into groups you are not part of); user
-        grants may be ``use``/``edit``/``manage`` but only the owner may add,
-        change or remove ``manage``; the owner is never a grantee.
-        """
-        user_email, prompt, access = await self._authorize(user_email, prompt_id, LEVEL_MANAGE)
-        current = self._repo.list_grants(prompt_id)
-        current_groups = {g["grantee"] for g in current if g["grantee_type"] == GRANTEE_GROUP}
-        current_users = {g["grantee"]: g["permission"] for g in current if g["grantee_type"] == GRANTEE_USER}
-
-        new_groups, new_users = parse_grants(groups, users, prompt["owner_email"])
-
-        if access.level < LEVEL_OWNER:
-            before = {e for e, p in current_users.items() if p == "manage"}
-            after = {e for e, p in new_users.items() if p == "manage"}
-            if before != after:
-                raise PromptForbidden("Only the owner can grant or revoke manage permission")
-
-        added_groups = new_groups - current_groups
-        if added_groups:
-            member = await self._member_groups(user_email, added_groups)
-            not_member = added_groups - member
-            if not_member:
-                raise PromptForbidden(
-                    "You can only share with groups you belong to: " + ", ".join(sorted(not_member))
-                )
-
-        grants = [
-            {"grantee_type": GRANTEE_GROUP, "grantee": g, "permission": "use"} for g in sorted(new_groups)
-        ] + [
-            {"grantee_type": GRANTEE_USER, "grantee": e, "permission": p} for e, p in sorted(new_users.items())
-        ]
-        stored = self._repo.replace_grants(prompt_id, grants, user_email)
-
-        details = {
-            "groups_added": sorted(added_groups),
-            "groups_removed": sorted(current_groups - new_groups),
-            "users_added": sorted(set(new_users) - set(current_users)),
-            "users_removed": sorted(set(current_users) - set(new_users)),
-            "users_changed": sorted(
-                e for e in set(new_users) & set(current_users) if new_users[e] != current_users[e]
-            ),
-        }
-        if any(details.values()):
-            self._audit(prompt_id, "share", user_email, details=details)
-        return sharing_view(stored)
 
     async def fork(
         self,
@@ -428,25 +360,21 @@ class PromptLibraryService:
         """
         user_email, prompt, _ = await self._authorize(user_email, prompt_id, LEVEL_USE)
         if version_id:
-            source = self._repo.get_version(prompt_id, version_id)
+            source = await self._db(self._repo.get_version, prompt_id, version_id)
         else:
-            source = self._repo.get_latest_version(prompt_id)
+            source = await self._db(self._repo.get_latest_version, prompt_id)
         if source is None:
             raise PromptNotFound()
-        new_title = clean_title(title, required=False) or f"{source['title']} (copy)"[:MAX_TITLE_LEN]
-        new_prompt = self._repo.create_prompt(
-            user_email,
-            new_title,
-            prompt.get("description"),
-            source["content"],
-            forked_from_prompt_id=prompt_id,
-            forked_from_version_id=source["id"],
+        new_title = clean_title(title, required=False) or f"{source['title']} (copy)"[:200]
+        new_prompt = await self._db(
+            self._repo.create_prompt, user_email, new_title, prompt.get("description"), source["content"],
+            prompt_id, source["id"],
         )
-        self._audit(
+        await self._audit(
             prompt_id, "fork", user_email, version_id=source["id"],
             details={"new_prompt_id": new_prompt["id"], "version_number": source["version_number"]},
         )
-        self._audit(
+        await self._audit(
             new_prompt["id"], "create", user_email,
             details={"forked_from_prompt_id": prompt_id, "forked_from_version_id": source["id"]},
         )
@@ -455,16 +383,20 @@ class PromptLibraryService:
     async def archive(self, user_email: str, prompt_id: str) -> None:
         """Hide the entry and stop new use. Versions are kept for history."""
         user_email, _, _ = await self._authorize(user_email, prompt_id, LEVEL_OWNER)
-        if not self._repo.archive_prompt(prompt_id):
+        if not await self._db(self._repo.archive_prompt, prompt_id):
             raise PromptNotFound()
-        self._audit(prompt_id, "archive", user_email)
+        await self._audit(prompt_id, "archive", user_email)
 
     # ------------------------------------------------------------------
     # Chat execution
     # ------------------------------------------------------------------
 
     async def resolve_for_execution(
-        self, user_email: str, prompt_id: str, version_id: Optional[str] = None
+        self,
+        user_email: str,
+        prompt_id: str,
+        version_id: Optional[str] = None,
+        record_denial: bool = True,
     ) -> Dict[str, Any]:
         """The exact published version a chat turn may run, after a fresh check.
 
@@ -473,27 +405,27 @@ class PromptLibraryService:
         is missing, archived, not visible to this user (now), or the version
         does not belong to it. Never falls back to another version.
 
-        Runs on the chat path before the model call, so the database reads go
-        through ``asyncio.to_thread`` (as conversation hydration does) rather
-        than blocking every other socket on this replica.
+        ``record_denial`` is False for the advisory ``/resolve`` endpoint,
+        which must stay read-only; a chat turn records ``use_denied``.
         """
         user_email = normalize_user_email(user_email)
         if not user_email or not prompt_id:
             raise PromptUnavailable()
-        prompt = await asyncio.to_thread(self._repo.get_prompt, prompt_id)
+        prompt = await self._db(self._repo.get_prompt, prompt_id)
         if prompt is None:
             raise PromptUnavailable()
-        grants = await asyncio.to_thread(self._repo.list_grants, prompt_id)
+        grants = await self._db(self._repo.list_grants, prompt_id)
         access = await self._access(user_email, prompt, grants)
         if access.level == LEVEL_NONE:
             # Recorded for an entry that exists (archived or revoked); ids that
             # match nothing leave no row behind.
-            await asyncio.to_thread(self._audit, prompt_id, "use_denied", user_email, version_id)
+            if record_denial:
+                await self._audit(prompt_id, "use_denied", user_email, version_id)
             raise PromptUnavailable()
         if version_id:
-            version = await asyncio.to_thread(self._repo.get_version, prompt_id, version_id)
+            version = await self._db(self._repo.get_version, prompt_id, version_id)
         else:
-            version = await asyncio.to_thread(self._repo.get_latest_version, prompt_id)
+            version = await self._db(self._repo.get_latest_version, prompt_id)
         if version is None:
             raise PromptUnavailable()
         return version
@@ -502,7 +434,12 @@ class PromptLibraryService:
         self, user_email: str, version: Dict[str, Any], conversation_id: Optional[str]
     ) -> None:
         """Audit the moment a conversation is pinned to a version."""
-        await asyncio.to_thread(
-            self._audit, version["prompt_id"], "use", user_email, version["id"],
+        await self._audit(
+            version["prompt_id"], "use", user_email, version["id"],
             {"version_number": version["version_number"], "conversation_id": conversation_id},
         )
+
+    async def record_unpin(self, user_email: str, prompt_id: str, conversation_id: str) -> None:
+        """Audit an explicit clear of a conversation's pinned prompt."""
+        if await self._db(self._repo.get_prompt, prompt_id) is not None:
+            await self._audit(prompt_id, "unpin", user_email, details={"conversation_id": conversation_id})

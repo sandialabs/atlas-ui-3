@@ -15,7 +15,7 @@ from atlas.core.user_identity import normalize_user_email
 from atlas.modules.chat_history.prompt_library_repository import (
     GRANTEE_GROUP,
     GRANTEE_USER,
-    normalize_group_name,
+    clean_group_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,15 +44,27 @@ MAX_DESCRIPTION_LEN = 1000
 MAX_CONTENT_LEN = 50_000
 MAX_CHANGE_DESCRIPTION_LEN = 1000
 MAX_GRANTS = 100
-# Concurrent group checks per request: an external authorizer is an HTTP call
-# per (user, group), so a large sharing footprint must not fan out unbounded.
-_GROUP_CHECK_CONCURRENCY = 8
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
 # Groups that stand for "every user", which the MVP never accepts as a
 # sharing target: sharing with one would be an organization-wide catalog,
 # which issue #1169 leaves out of scope. ``users`` is the group
 # ``is_user_in_group`` grants to every identity when no external authorizer
 # is configured. Enforced here and in access evaluation, not only in the UI.
+# Compared case- and whitespace-insensitively (``is_org_wide_group``), while
+# every other group name keeps its configured spelling.
 ORG_WIDE_GROUPS = frozenset({"users"})
+
+
+def check_revision(value: Any, name: str) -> int:
+    """A client-supplied optimistic-concurrency revision (a non-negative int)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise PromptValidationError(f"{name} is required")
+    return value
+
+
+def is_org_wide_group(name: str) -> bool:
+    return (name or "").strip().casefold() in ORG_WIDE_GROUPS
 
 _GROUP_NAME_RE = re.compile(r"^[^\s\x00-\x1f]{1,255}$")
 
@@ -78,6 +90,27 @@ class PromptForbidden(PromptLibraryError):
 
 class PromptValidationError(PromptLibraryError):
     """The request is malformed."""
+
+
+class PromptConflict(PromptLibraryError):
+    """Someone else changed the entry first; reload and retry (HTTP 409)."""
+
+    _MESSAGES = {
+        "draft": "The draft was changed by someone else. Reload it, review the changes, and try again.",
+        "sharing": "Sharing was changed by someone else. Reload the sharing settings and try again.",
+        "publish": "Another version is being published right now. Try again in a moment.",
+    }
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(self._MESSAGES.get(kind, "The prompt was changed concurrently. Try again."))
+        self.kind = kind
+
+
+class PromptLibraryUnavailable(PromptLibraryError):
+    """The library's storage failed; nothing about the cause is exposed (HTTP 503)."""
+
+    def __init__(self) -> None:
+        super().__init__("The prompt library is temporarily unavailable. Try again shortly.")
 
 
 class PromptUnavailable(PromptLibraryError):
@@ -124,9 +157,7 @@ def _default_group_candidates() -> List[str]:
             names.update(getattr(model, "groups", None) or [])
     except Exception as e:  # pragma: no cover - config shape drift must not break sharing
         logger.warning("Could not collect configured group names: %s", type(e).__name__)
-    return sorted(
-        {normalize_group_name(n) for n in names if normalize_group_name(n)} - ORG_WIDE_GROUPS
-    )
+    return sorted({clean_group_name(n) for n in names if clean_group_name(n) and not is_org_wide_group(n)})
 
 
 
@@ -192,6 +223,8 @@ def summary_view(
         "can_manage": access.level >= LEVEL_MANAGE,
     }
     if access.level >= LEVEL_EDIT:
+        # The draft revision an edit or publish must name (optimistic concurrency).
+        data["draft_revision"] = prompt.get("draft_revision", 1)
         data["forked_from_prompt_id"] = prompt.get("forked_from_prompt_id")
         data["forked_from_version_id"] = prompt.get("forked_from_version_id")
         if latest is not None:
@@ -202,13 +235,16 @@ def summary_view(
             data["has_unpublished_changes"] = True
     if grants is not None:
         if access.level >= LEVEL_MANAGE:
-            data["sharing"] = sharing_view(grants)
+            data["sharing"] = sharing_view(grants, prompt.get("sharing_revision", 0))
         # Everyone may know whether an entry is shared at all.
         data["shared"] = bool(grants)
     return data
 
-def sharing_view(grants: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+def sharing_view(grants: List[Dict[str, Any]], revision: int) -> Dict[str, Any]:
+    """Grants as the API shows them, with the revision a change must name."""
     return {
+        "revision": revision,
         "groups": sorted(g["grantee"] for g in grants if g["grantee_type"] == GRANTEE_GROUP),
         "users": sorted(
             (
@@ -219,6 +255,7 @@ def sharing_view(grants: List[Dict[str, Any]]) -> Dict[str, Any]:
             key=lambda u: u["email"],
         ),
     }
+
 
 def version_view(version: Dict[str, Any], include_content: bool = True) -> Dict[str, Any]:
     data = {
@@ -240,17 +277,18 @@ def parse_grants(
 ) -> Tuple[Set[str], Dict[str, str]]:
     """Validate and normalize a requested grant set.
 
-    Groups become lower-cased names (always ``use``); users become
-    ``{normalized_email: permission}``. The owner can never be a grantee.
+    Groups keep their configured spelling, surrounding whitespace removed
+    (always ``use``); users become ``{normalized_email: permission}``. The
+    owner can never be a grantee, and the everyone group never is either.
     """
     new_groups: Set[str] = set()
     for raw in groups or []:
-        name = normalize_group_name(raw if isinstance(raw, str) else "")
+        name = clean_group_name(raw if isinstance(raw, str) else "")
         if not name or not _GROUP_NAME_RE.match(name):
             raise PromptValidationError("Invalid group name")
-        if name in ORG_WIDE_GROUPS:
+        if is_org_wide_group(name):
             raise PromptValidationError(
-                f"Sharing with '{name}' (everyone) is not supported; choose a narrower group"
+                "Sharing with the everyone group 'users' is not supported; choose a narrower group"
             )
         new_groups.add(name)
 

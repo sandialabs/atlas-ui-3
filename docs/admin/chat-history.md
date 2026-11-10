@@ -271,7 +271,7 @@ Four tables are created:
 The team prompt library (issue #1169, migration `004`) adds four more tables:
 `prompt_library_prompts` (entries and their drafts), `prompt_library_versions`
 (immutable published versions, unique on prompt and version number),
-`prompt_library_grants` (group and user sharing) and
+`prompt_library_grants` (group and user sharing, one row per grantee) and
 `prompt_library_audit_events` (governance events, no prompt text). The
 migration is additive; existing tables, including `user_prompts`, are not
 changed. See [Team Prompt Library](../user-guide/team-prompt-library/README.md).

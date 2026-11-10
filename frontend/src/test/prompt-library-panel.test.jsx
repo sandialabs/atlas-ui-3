@@ -33,15 +33,16 @@ function makeLibrary(items = [owned, teamUse]) {
     entries: items,
     loaded: true,
     error: null,
-    listPrompts: vi.fn(async () => items),
-    getPrompt: vi.fn(async id => ({ ...items.find(p => p.id === id), draft_content: 'draft body' })),
-    createPrompt: vi.fn(async fields => ({ ...owned, id: 'p-new', title: fields.title, latest_version: null, draft_content: fields.content })),
-    updatePrompt: vi.fn(async (id, fields) => ({ ...owned, ...fields, draft_content: fields.content })),
+    complete: true,
+    listPrompts: vi.fn(async () => ({ prompts: items, total: items.length })),
+    getPrompt: vi.fn(async id => ({ ...items.find(p => p.id === id), draft_content: 'draft body', draft_revision: 4 })),
+    createPrompt: vi.fn(async fields => ({ ...owned, id: 'p-new', title: fields.title, latest_version: null, draft_content: fields.content, draft_revision: 1 })),
+    updatePrompt: vi.fn(async (id, fields, rev) => ({ ...owned, ...fields, draft_content: fields.content, draft_revision: rev + 1 })),
     publishPrompt: vi.fn(async () => ({ id: 'v2', version_number: 2 })),
     listVersions: vi.fn(async () => [
       { id: 'v7', version_number: 7, content: 'seventh', change_description: 'tone', author_email: 'lead@x.com' },
     ]),
-    getSharing: vi.fn(async () => ({ groups: ['eng'], users: [] })),
+    getSharing: vi.fn(async () => ({ revision: 3, groups: ['eng'], users: [] })),
     setSharing: vi.fn(async () => ({ groups: ['eng', 'ops'], users: [] })),
     listShareableGroups: vi.fn(async () => ['eng', 'ops']),
     forkPrompt: vi.fn(async () => ({ ...owned, id: 'p-fork', title: 'Team helper (copy)', draft_content: 'seventh' })),
@@ -83,9 +84,9 @@ describe('PromptLibraryPanel', () => {
     render(<PromptLibraryPanel />)
     await row('My reviewer')
     fireEvent.click(screen.getByRole('button', { name: 'Shared with me' }))
-    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('shared', ''))
+    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('shared', '', 0))
     fireEvent.change(screen.getByPlaceholderText('Search title or description'), { target: { value: 'tone' } })
-    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('shared', 'tone'))
+    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('shared', 'tone', 0))
     expect(screen.getByRole('button', { name: 'Shared with me' })).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -109,7 +110,7 @@ describe('PromptLibraryPanel', () => {
     await waitFor(() => expect(library.createPrompt).toHaveBeenCalledWith({ title: 'Fresh', description: '', content: 'be brief' }))
     fireEvent.change(await screen.findByLabelText(/Change description/), { target: { value: 'first cut' } })
     fireEvent.click(screen.getByRole('button', { name: /Publish version/ }))
-    await waitFor(() => expect(library.publishPrompt).toHaveBeenCalledWith('p-new', 'first cut'))
+    await waitFor(() => expect(library.publishPrompt).toHaveBeenCalledWith('p-new', 'first cut', 1))
   })
 
   it('previews and tests a draft without publishing', async () => {
@@ -134,6 +135,7 @@ describe('PromptLibraryPanel', () => {
     await waitFor(() => expect(library.setSharing).toHaveBeenCalledWith('p-own', {
       groups: ['eng', 'ops'],
       users: [{ email: 'ed@x.com', permission: 'edit' }],
+      expected_revision: 3,
     }))
   })
 
@@ -141,7 +143,7 @@ describe('PromptLibraryPanel', () => {
     render(<PromptLibraryPanel />)
     fireEvent.click(within(await row('Team helper')).getByLabelText('Fork Team helper'))
     await waitFor(() => expect(library.forkPrompt).toHaveBeenCalledWith('p-team', null))
-    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('mine', ''))
+    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('mine', '', 0))
   })
 
   it('surfaces server errors', async () => {
@@ -149,6 +151,50 @@ describe('PromptLibraryPanel', () => {
     render(<PromptLibraryPanel />)
     fireEvent.click(within(await row('Team helper')).getByLabelText('Fork Team helper'))
     expect(await screen.findByRole('alert')).toHaveTextContent('Prompt not found')
+  })
+})
+
+describe('optimistic concurrency and pagination in the panel', () => {
+  it('saves with the loaded draft revision and publishes the revision it saved', async () => {
+    render(<PromptLibraryPanel />)
+    fireEvent.click(within(await row('My reviewer')).getByLabelText('Edit My reviewer'))
+    fireEvent.change(await screen.findByLabelText(/Draft system prompt/), { target: { value: 'edited body' } })
+    fireEvent.click(screen.getByRole('button', { name: /Publish version/ }))
+    await waitFor(() => expect(library.publishPrompt).toHaveBeenCalled())
+    expect(library.updatePrompt).toHaveBeenCalledWith('p-own', { title: 'My reviewer', description: 'mine', content: 'edited body' }, 4)
+    expect(library.publishPrompt).toHaveBeenCalledWith('p-own', '', 5)
+  })
+
+  it('publishes an unchanged draft at the revision it was loaded with', async () => {
+    render(<PromptLibraryPanel />)
+    fireEvent.click(within(await row('My reviewer')).getByLabelText('Edit My reviewer'))
+    fireEvent.click(await screen.findByRole('button', { name: /Publish version/ }))
+    await waitFor(() => expect(library.publishPrompt).toHaveBeenCalledWith('p-own', '', 4))
+    expect(library.updatePrompt).not.toHaveBeenCalled()
+  })
+
+  it('shows the conflict when someone else changed the draft', async () => {
+    library.updatePrompt.mockRejectedValueOnce(Object.assign(
+      new Error('The draft was changed by someone else. Reload it, review the changes, and try again.'), { status: 409 }))
+    render(<PromptLibraryPanel />)
+    fireEvent.click(within(await row('My reviewer')).getByLabelText('Edit My reviewer'))
+    fireEvent.change(await screen.findByLabelText(/Draft system prompt/), { target: { value: 'mine' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save draft/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/changed by someone else/)
+    expect(library.publishPrompt).not.toHaveBeenCalled()
+  })
+
+  it('loads further pages on request', async () => {
+    library.listPrompts
+      .mockResolvedValueOnce({ prompts: [owned], total: 2 })
+      .mockResolvedValueOnce({ prompts: [teamUse], total: 2 })
+    render(<PromptLibraryPanel />)
+    await row('My reviewer')
+    expect(screen.getByText('Showing 1 of 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await row('Team helper')
+    expect(library.listPrompts).toHaveBeenLastCalledWith('all', '', 1)
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
   })
 })
 
@@ -173,6 +219,14 @@ describe('PromptSelector team library section', () => {
     expect(screen.getByText('Unavailable team prompt')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle(/Select custom prompts/))
     expect(screen.getByRole('alert')).toHaveTextContent(/no longer available/)
+  })
+
+  it('does not call an entry missing when the list is only a first page', () => {
+    useChat.mockReturnValue({ ...base, activePromptKey: libraryPromptKey('far-away'), libraryPrompts: [owned],
+      promptLibrary: { ...library, complete: false } })
+    render(<PromptSelector />)
+    fireEvent.click(screen.getByTitle(/Select custom prompts/))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('names the pinned version', () => {
