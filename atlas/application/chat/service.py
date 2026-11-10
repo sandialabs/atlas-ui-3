@@ -698,6 +698,9 @@ class ChatService:
                 previous_conversation_id != conversation_id
                 or not session.history.messages
                 or (kwargs.get("compact_only") and not _has_save_floor(session))
+                # An earlier load failed and left the team-prompt pin unknown
+                # (issue #1169): retry until the store settles it.
+                or session.context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY)
             ):
                 # This session is not already carrying the conversation the turn
                 # names. Load it from the store before running the turn.
@@ -798,7 +801,10 @@ class ChatService:
             context=session.context,
             user_email=user_email,
             request=kwargs.pop("library_prompt", UNSET),
-            other_prompt_selected=bool(kwargs.get("custom_system_prompt")),
+            # A persona counts as another prompt for direct callers too (the
+            # WebSocket also rejects the combination on the raw frame).
+            other_prompt_selected=bool(kwargs.get("custom_system_prompt"))
+            or kwargs.get("persona_id") not in (None, ""),
             library=getattr(self, "prompt_library_service", None),
             message_index=len(session.history.messages),
             omitted=UNSET,

@@ -210,10 +210,15 @@ async def _refresh_pin_state(context: Dict[str, Any], load_metadata: MetadataLoa
         logger.warning("Could not read the conversation's prompt pin (%s)", type(e).__name__)
         raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
     if stored is None:
+        if context.get(PIN_UNKNOWN_CONTEXT_KEY):
+            # The full load of this conversation failed, so "no record" from
+            # the light read is not proof the conversation is new. Refuse
+            # rather than run the default prompt; the next turn retries the
+            # full load (ChatService), which settles it either way -- a
+            # genuinely new conversation then proceeds normally.
+            raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
         # The store has no record yet (a new conversation): nothing stored
         # can be lost, and the session's own state stands.
-        if context.get(PIN_UNKNOWN_CONTEXT_KEY):
-            load_pin_from_metadata(context, {})
         return
     stored_epoch = pin_epoch(stored)
     session_epoch = pin_epoch({PIN_EPOCH_METADATA_KEY: context.get(PIN_EPOCH_CONTEXT_KEY)})

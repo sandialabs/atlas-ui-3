@@ -716,3 +716,89 @@ async def test_a_failed_reload_of_the_same_conversation_rechecks_a_cleared_pin(e
     monkeypatch.setattr(env["conversations"], "get_conversation", _fail)
     await _turn(service, session_id, conv)
     assert calls[-1].get("custom_system_prompt") is None  # the clear is honoured
+
+
+# --- Review of 69036b8a: direct persona conflicts, unknown pin + no record --
+
+
+@pytest.mark.asyncio
+async def test_direct_service_calls_reject_a_library_prompt_with_a_persona(env, monkeypatch):
+    """ChatService callers other than the WebSocket get the same rejection."""
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    ref = {"prompt_id": prompt["id"], "version_id": None}
+    await _turn(service, session_id, conv, library_prompt=ref)
+    events_before = lib.repository.list_audit_events(prompt["id"])
+    meta_before = _stored_meta(env, conv)
+    lookups = []
+
+    async def spy(*args, **kwargs):
+        lookups.append(args)
+        raise AssertionError("no library lookup expected")
+
+    monkeypatch.setattr(lib, "resolve_for_execution", spy)
+    for frame in (ref, {"prompt_id": prompt["id"], "version_id": v1["id"]}):
+        with pytest.raises(ValidationError) as exc:
+            await _turn(service, session_id, conv, library_prompt=frame, persona_id="any-persona")
+        assert exc.value.message == library_turn.CONFLICTING_PROMPTS_MESSAGE
+    assert len(calls) == 1 and lookups == []  # only the first, pinning turn ran
+    assert lib.repository.list_audit_events(prompt["id"]) == events_before
+    assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY]["version_id"] == v1["id"]
+    assert _stored_meta(env, conv) == meta_before
+
+
+def _record_missing(*args, **kwargs):
+    return None
+
+
+@pytest.mark.asyncio
+async def test_unknown_pin_with_no_metadata_record_is_refused_not_defaulted(env, monkeypatch, no_compliance):
+    """A failed full load followed by "no record" is not proof of a new conversation."""
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions, session_id, conv_b = await _session_on_other_conversation(env, prompt)
+    store = env["conversations"]
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "get_conversation", _fail)
+        patched.setattr(store, "get_conversation_metadata", _record_missing)
+        with pytest.raises(AuthorizationError) as exc:
+            await _turn(service, session_id, conv_b)
+        assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+        with pytest.raises(AuthorizationError):  # stays refused while unsettled
+            await _turn(service, session_id, conv_b)
+    assert len(calls) == 1  # only the earlier turn on A reached the model
+    assert sessions[session_id].context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY) is True
+    assert _stored_meta(env, conv_b)["prompt_library"]["version_id"] == v1["id"]
+    # Once the full load works, the stored pin -- not the default -- runs.
+    await _turn(service, session_id, conv_b)
+    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert sessions[session_id].context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_new_conversation_after_a_failed_load_proceeds_once_the_store_answers(env, monkeypatch, no_compliance):
+    service, calls, sessions = _service(env)
+    session_id = uuid4()
+    await _turn(service, session_id, str(uuid4()))
+    new_conv = str(uuid4())
+    store = env["conversations"]
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "get_conversation", _fail)
+        patched.setattr(store, "get_conversation_metadata", _record_missing)
+        with pytest.raises(AuthorizationError):
+            await _turn(service, session_id, new_conv)
+    # The retried full load finds no record: a genuinely new conversation.
+    await _turn(service, session_id, new_conv)
+    assert calls[-1].get("custom_system_prompt") is None
+    assert sessions[session_id].context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_genuinely_new_conversations_are_unaffected(env):
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv)
+    await _turn(service, session_id, conv)
+    assert len(calls) == 2 and all(c.get("custom_system_prompt") is None for c in calls)
+    assert library_turn.PIN_UNKNOWN_CONTEXT_KEY not in sessions[session_id].context

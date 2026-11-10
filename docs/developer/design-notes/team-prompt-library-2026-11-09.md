@@ -78,7 +78,8 @@ A frame that names a library entry together with an inline custom prompt or a
 persona is ambiguous, so it is rejected with "Choose either a team library
 prompt or a custom prompt, not both." -- on the raw WebSocket frame before
 either side is resolved (`frame_has_conflicting_prompts`, error type
-`validation`), and again in the service for other callers. No library lookup
+`validation`), and again in the service for other callers (inline prompt or
+`persona_id`). No library lookup
 happens, so no `use` or `use_denied` is audited; the pin is untouched.
 
 Any refusal raises `AuthorizationError` before the turn runs or is saved, with
@@ -120,7 +121,11 @@ between preserving history and permitting new use.
   with compliance enforcement on or off, so a failed load never swaps a
   pinned prompt for the default. A session in that state saves
   `KEEP_STORED_PIN` instead of pin keys, which carries the stored pin,
-  history and epoch through untouched. A failed reload of the conversation
+  history and epoch through untouched. "No record" from the re-read does not
+  settle an unknown pin (the full load failed, so it is not proof the
+  conversation is new): the turn is refused, and every following turn
+  retries the full load until it answers -- a genuinely new conversation
+  then proceeds with no pin. A failed reload of the conversation
   the session already carries keeps its own pin, which the re-read then
   checks against the store.
 
