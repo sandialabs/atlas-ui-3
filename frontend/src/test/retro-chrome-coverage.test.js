@@ -48,6 +48,30 @@ describe('complete Retro Design System chrome coverage', () => {
     expect(generated).toMatch(/\[data-atlas-theme="bbs-ansi"\][^{]*\{[^}]*--atlas-user-bubble-bg: #ffff55/s)
   })
 
+  it('renders the real close control as the demo close light instead of a second X', () => {
+    // Aqua: the red jelly light is the close button; the decorative copy and
+    // Atlas's X glyph are hidden so only three lights show.
+    expect(generated).toMatch(/\[data-atlas-theme="aqua-osx"\] \.atlas-theme-titlebar > \.atlas-theme-close \{[^}]*order: -1;[^}]*background: var\(--jelly-red\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="aqua-osx"\] \.atlas-theme-titlebar \.atlas-retro-traffic-close,[^{]*\{\s*display: none;/s)
+    expect(generated).toMatch(/\[data-atlas-theme="aqua-osx"\] \.atlas-theme-close svg \{\s*display: none;/s)
+    // BeOS: the caption is the yellow .tab, sized like a tab, with the red dot as close.
+    expect(generated).toMatch(/\[data-atlas-theme="beos"\] \.atlas-theme-titlebar \{[^}]*background: var\(--yellow\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="beos"\] \.atlas-theme-titlebar \{[^}]*width: max-content/s)
+    expect(generated).toMatch(/\[data-atlas-theme="beos"\] \.atlas-theme-titlebar > \.atlas-theme-close \{[^}]*background: var\(--red-dot\)/s)
+    expect(generated).not.toMatch(/\[data-atlas-theme="beos"\] \.atlas-theme-titlebar \{[^}]*background: #404040/s)
+    // Decorative dots outside a caption (Memphis, Zen) must not become close controls.
+    expect(generated).not.toMatch(/\[data-atlas-theme="memphis"\] \.atlas-theme-titlebar > \.atlas-theme-close/)
+  })
+
+  it('maps text-drawn and nested-frame chrome for GeoCities, NetHack, and BBS', () => {
+    expect(generated).toMatch(/\[data-atlas-theme="geocities-web10"\] \.atlas-theme-chrome\[role="dialog"\] \{[^}]*border-image: repeating-linear-gradient\(45deg, var\(--yellow\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="geocities-web10"\] \.atlas-retro-window,[^{]*\{[^}]*ridge var\(--hotpink\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="nethack-ascii"\] \.atlas-retro-window,[^{]*\{[^}]*dashed var\(--wall\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="nethack-ascii"\] \.atlas-retro-window-title,[^{]*\{[^}]*var\(--monster-green\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="bbs-ansi"\] \.atlas-retro-window,[^{]*\{[^}]*double var\(--yellow-hi\)/s)
+    expect(generated).toMatch(/\[data-atlas-theme="bbs-ansi"\] \.atlas-retro-window-titlebar,[^{]*\{[^}]*solid var\(--red-hi\)/s)
+  })
+
   it('keeps the mapped chrome scoped and free of external assets and animation', () => {
     const uncommented = generated.replace(/\/\*[\s\S]*?\*\//g, '')
     expect(uncommented).not.toMatch(/@import|@font-face|@keyframes|url\s*\(/)

@@ -51,6 +51,68 @@ CLOSE_CLASSES = (
 )
 TITLE_TEXT_CLASSES = ('title',)
 
+# Some demos draw their chrome as page *text* (box-drawing / ASCII / ANSI
+# spans) rather than CSS classes, so class mapping alone yields a generic dark
+# window. For those, map the colour roles of the demo's own text frames onto
+# Atlas surfaces, using only the demo's original tokens. No demo text, art,
+# counters, or maps enter Atlas; this is palette + border chrome only.
+CONTENT_CHROME = {
+    # 14-geocities-web10: mostly class-mapped (marquee titlebar, construction
+    # hazard frame). Nested Atlas windows use the black, hot-pink ridged
+    # .webring box rather than a second hazard frame.
+    'geocities-web10': {
+        'retro_window': ('from', 'webring'),
+    },
+    # 28-nethack-ascii: rooms are framed by --wall '-'/'|' runs; the message
+    # topline and bottom status line are --ink on --bg with a --dim rule, and
+    # status labels (St:, HP:) are --monster-green. Items like '(' '[' are
+    # --item-cyan. body::before contributes the faint CRT scanline overlay.
+    'nethack-ascii': {
+        'fold_body_overlay': True,
+        'window': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                   ('color', 'var(--ink)'), ('border', '1px dashed var(--wall)')],
+        'titlebar': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                     ('color', 'var(--ink)'), ('padding', '6px 10px'),
+                     ('border', '0'), ('border-bottom', '1px solid var(--dim)')],
+        'title': [('color', 'var(--monster-green)'), ('font-family', 'var(--font)')],
+        'button': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                   ('color', 'var(--item-cyan)'), ('border', '1px solid var(--item-cyan)'),
+                   ('border-radius', '0'), ('font-family', 'var(--font)')],
+        'input': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                  ('color', 'var(--player)'), ('border', '1px solid var(--dim)'),
+                  ('border-radius', '0'), ('font-family', 'var(--font)')],
+        'footer': [('border-top', '1px solid var(--dim)'), ('background', 'var(--bg)'),
+                   ('color', 'var(--ink)')],
+        'close': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                  ('color', 'var(--ink)'), ('border', '1px solid var(--dim)'),
+                  ('border-radius', '0')],
+    },
+    # 30-bbs-ansi: the sysop info panel is a --yellow-hi double-line box
+    # (╔═╗), the MAIN MENU band is --red-hi shade blocks around spaced
+    # --yellow-hi caps on black, menu keys are --green-hi labels in --cyan-hi
+    # brackets, the Command: prompt is --yellow-hi, and rules are --magenta.
+    'bbs-ansi': {
+        'window': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                   ('color', 'var(--white-hi)'), ('border', '4px double var(--yellow-hi)')],
+        'titlebar': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                     ('color', 'var(--yellow-hi)'), ('padding', '4px 10px'),
+                     ('border', '4px solid var(--red-hi)'),
+                     ('letter-spacing', '0.25em'), ('text-transform', 'uppercase')],
+        'title': [('color', 'var(--yellow-hi)'), ('font-family', 'var(--font)')],
+        'button': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                   ('color', 'var(--green-hi)'), ('border', '1px solid var(--cyan-hi)'),
+                   ('border-radius', '0'), ('font-family', 'var(--font)')],
+        'input': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                  ('color', 'var(--yellow-hi)'), ('border', '1px solid var(--cyan)'),
+                  ('border-radius', '0'), ('font-family', 'var(--font)')],
+        'footer': [('border-top', '1px solid var(--magenta)'), ('background', 'var(--bg)'),
+                   ('color', 'var(--cyan-hi)')],
+        'close': [('background', 'var(--bg)'), ('background-color', '#000000'),
+                  ('color', 'var(--red-hi)'), ('border', '1px solid var(--red-hi)'),
+                  ('border-radius', '0')],
+    },
+}
+
 BODY_PROPS = (
     'background', 'background-color', 'background-image', 'background-size',
     'background-repeat', 'background-position', 'background-blend-mode',
@@ -478,6 +540,29 @@ def first_color_from_decls(decls, variables, props):
     return None
 
 
+def load_html(item):
+    return (DEMOS / f"{item['slug']}.html").read_text()
+
+
+def titlebar_child(html, rules):
+    """A .titlebar with no fill of its own (BeOS) draws its caption on its
+    first filled child element (the yellow .tab). Use that child instead."""
+    match = re.search(r'class="titlebar"[^>]*>\s*<\w+[^>]*class="([\w-]+)', html)
+    if not match:
+        return None
+    return first_class_rule(rules, (match.group(1),), require_fill=True)
+
+
+def body_overlay_layers(rules):
+    """Gradient layers from a body::before overlay (CRT scanlines)."""
+    for selector, decls in rules:
+        if any(part.strip() in ('body::before', 'body::after') for part in split_selectors(selector)):
+            for prop, value in decls:
+                if prop in ('background', 'background-image') and 'gradient(' in value and 'url(' not in value:
+                    return value
+    return None
+
+
 def load_demo(item):
     path = DEMOS / f"{item['slug']}.html"
     if not path.exists():
@@ -733,6 +818,43 @@ def demo_focus_color(rules, variables):
     return None
 
 
+def content_chrome_blocks(ident, spec, rules, variables):
+    """Emit CONTENT_CHROME roles; text colours are AA-checked like class maps."""
+    targets = {
+        'window': ['.atlas-retro-window', '.atlas-theme-chrome'],
+        'retro_window': ['.atlas-retro-window', '.atlas-theme-option'],
+        'close': ['.atlas-retro-window-close',
+                  '.atlas-theme-titlebar > .atlas-theme-close'],
+        'titlebar': ['.atlas-retro-window-titlebar', '.atlas-theme-titlebar'],
+        'title': ['.atlas-retro-window-title', '.atlas-theme-titlebar h2'],
+        'button': ['.atlas-retro-button', '.atlas-theme-chrome .atlas-retro-button'],
+        'input': ['.atlas-retro-input'],
+        'footer': ['.atlas-retro-window-footer'],
+    }
+    out = []
+    for role, decls in spec.items():
+        if role not in targets:
+            continue
+        note = f'{role} from the demo\'s text-drawn chrome'
+        if isinstance(decls, tuple) and decls[0] == 'from':
+            picked = first_class_rule(rules, (decls[1],))
+            if not picked:
+                continue
+            decls = [d for d in filter_decls(picked[2])
+                     if not d[0].startswith('padding') and d[0] != 'text-align']
+            note = f'{role} from .{decls and picked[0]}'
+        if role in ('window', 'retro_window', 'titlebar', 'button', 'input', 'close'):
+            decls, _bg = ensure_readable(decls, variables, variables.get('_surface_rgb'))
+        out.append(emit_mapped(ident, targets[role], decls, note))
+    if spec.get('fold_body_overlay'):
+        layer = body_overlay_layers(rules)
+        if layer:
+            out.append(emit_mapped(
+                ident, ['body', '.atlas-theme-desktop', '.atlas-theme-backdrop'],
+                [('background-image', layer)], 'body::before overlay folded into the fill'))
+    return out
+
+
 def generate_chrome(systems, variables_by_id):
     parts = [
         '/* Generated by build-retro-catalog.py; do not edit.',
@@ -753,6 +875,13 @@ def generate_chrome(systems, variables_by_id):
 
         window = pick_window(rules)
         titlebar = pick_titlebar(rules)
+        html = load_html(item)
+        titlebar_tab = False
+        if not titlebar:
+            child = titlebar_child(html, rules)
+            if child:
+                titlebar, titlebar_tab = child, True
+        content = CONTENT_CHROME.get(ident, {})
         button = pick_button(rules)
         primary = pick_primary_button(rules)
         field = pick_input(rules)
@@ -800,6 +929,22 @@ def generate_chrome(systems, variables_by_id):
             surface = variables.get('_surface_rgb') or (255, 255, 255)
             accent = variables.get('_accent_rgb')
             blocks.append(fallback_window(ident, variables, surface, accent))
+        if window and window[0].endswith('-inner'):
+            # GeoCities .construction is a padded hazard-stripe box around
+            # .construction-inner. Atlas has one element, so the outer
+            # gradient becomes a border-image as wide as the outer padding.
+            outer = first_class_rule(rules, (window[0][:-len('-inner')],))
+            if outer:
+                stripe = next((v for p_, v in outer[2]
+                               if p_ in ('background', 'background-image') and 'gradient(' in v), None)
+                pad = next((v for p_, v in outer[2] if p_ == 'padding'), None)
+                if stripe and pad and re.fullmatch(r'\d+px', pad):
+                    blocks.append(
+                        f'/* frame from .{outer[0]} around .{window[0]} */\n'
+                        f'[data-atlas-theme="{ident}"] .atlas-theme-chrome[role="dialog"] {{\n'
+                        f'  border: {pad} solid transparent;\n'
+                        f'  border-image: {stripe} {pad[:-2]};\n}}'
+                    )
 
         mapped, _ = map_component(
             ident,
@@ -812,6 +957,20 @@ def generate_chrome(systems, variables_by_id):
         )
         if mapped:
             blocks.append(mapped)
+            if titlebar_tab:
+                # The caption is a left tab sized to its contents, not a full
+                # bar; the window chrome shows through beside it (.filler).
+                blocks.append(
+                    f'/* .{titlebar[0]} is a tab inside .titlebar */\n'
+                    f'[data-atlas-theme="{ident}"] .atlas-retro-window-titlebar,\n'
+                    f'[data-atlas-theme="{ident}"] .atlas-theme-titlebar {{\n'
+                    f'  width: max-content;\n  max-width: 100%;\n'
+                    f'  justify-content: flex-start;\n}}\n'
+                    f'[data-atlas-theme="{ident}"] .atlas-retro-window-title,\n'
+                    f'[data-atlas-theme="{ident}"] .atlas-theme-titlebar h2 {{\n'
+                    f'  font-size: inherit;\n  font-weight: inherit;\n  color: inherit;\n'
+                    f'  line-height: inherit;\n}}'
+                )
         elif window:
             # Use the window's border/background color as a caption treatment
             # when the demo has no titlebar class, still from original decls.
@@ -911,20 +1070,21 @@ def generate_chrome(systems, variables_by_id):
         traffic = first_class_rule(rules, ('traffic',))
         dot = first_class_rule(rules, ('dot',))
         if traffic or dot:
+            t = f'[data-atlas-theme="{ident}"]'
             if traffic:
                 decls = filter_decls(traffic[2], extra=TITLE_LAYOUT_PROPS, allow_size=True)
                 decls = [('display', 'flex')] + [d for d in decls if d[0] != 'display']
                 blocks.append(emit_mapped(ident, ['.atlas-retro-traffic'], decls, 'from .traffic'))
             else:
                 blocks.append(
-                    f'[data-atlas-theme="{ident}"] .atlas-retro-traffic {{ display: flex; gap: 8px; }}'
+                    f'{t} .atlas-retro-traffic {{ display: flex; gap: 8px; }}'
                 )
+            dot_decls = filter_decls(dot[2], extra=TITLE_LAYOUT_PROPS, allow_size=True) if dot else []
             if dot:
                 blocks.append(emit_mapped(
-                    ident, ['.atlas-retro-traffic-dot'],
-                    filter_decls(dot[2], extra=TITLE_LAYOUT_PROPS, allow_size=True),
-                    'from .dot',
+                    ident, ['.atlas-retro-traffic-dot'], dot_decls, 'from .dot',
                 ))
+            colors = {}
             for color_name, atlas in (('red', 'close'), ('yellow', 'min'), ('green', 'max')):
                 colored = first_class_rule(rules, (color_name,))
                 # Prefer .dot.red if present
@@ -936,10 +1096,61 @@ def generate_chrome(systems, variables_by_id):
                 decls = specific or (colored[2] if colored else [])
                 filtered = filter_decls(decls, allow_size=True)
                 if filtered:
+                    colors[atlas] = filtered
                     blocks.append(emit_mapped(
                         ident, [f'.atlas-retro-traffic-{atlas}'],
                         filtered, f'from .dot.{color_name}',
                     ))
+            # Only treat the dot as the window's close control when the demo
+            # actually puts it in the caption (Aqua .traffic, BeOS .tab);
+            # decorative dots elsewhere (Memphis, Zen) keep the old mapping.
+            in_caption = re.search(r'class="(?:titlebar|traffic|tab)"[^>]*>(?:(?!</div>).)*class="dot',
+                                   html, re.S)
+            if in_caption and not colors:
+                # A single .dot (BeOS close box), not a three-light cluster.
+                blocks.append(
+                    f'{t} .atlas-retro-traffic-min,\n{t} .atlas-retro-traffic-max {{\n'
+                    f'  display: none;\n}}'
+                )
+            # The demo's close light IS the close control. Render Atlas's real
+            # close button as that light (first in the bar) and hide the
+            # decorative copy, instead of showing both it and an Atlas X.
+            close_look = dot_decls + colors.get('close', [])
+            if not in_caption:
+                close_look = None
+            close_sel = (f'{t} .atlas-retro-window-titlebar > .atlas-retro-window-close,\n'
+                         f'{t} .atlas-theme-titlebar > .atlas-theme-close')
+            if close_look is not None:
+                blocks.append(
+                    f'/* Atlas close rendered as the demo close light */\n'
+                    f'{t} .atlas-retro-window-titlebar,\n{t} .atlas-theme-titlebar {{\n'
+                    f'  justify-content: flex-start;\n}}\n'
+                    f'{t} .atlas-retro-window-symbol,\n{t} .atlas-retro-window-glyphs,\n'
+                    f'{t} .atlas-theme-titlebar h2 > [aria-hidden="true"],\n'
+                    f'{t} .atlas-theme-titlebar h2 svg,\n{t} .atlas-theme-close svg {{\n'
+                    f'  display: none;\n}}\n'
+                    f'{t} .atlas-theme-titlebar .atlas-retro-traffic-close,\n'
+                    f'{t} .atlas-retro-window-titlebar:has(> .atlas-retro-window-close) .atlas-retro-traffic-close {{\n'
+                    f'  display: none;\n}}\n'
+                    + (f'{t} .atlas-theme-titlebar .atlas-retro-traffic,\n'
+                       f'{t} .atlas-retro-window-titlebar:has(> .atlas-retro-window-close) .atlas-retro-traffic {{\n'
+                       f'  display: none;\n}}\n' if not colors else '')
+                    + f'{close_sel} {{\n'
+                    f'  order: -1;\n  flex-shrink: 0;\n  display: inline-block;\n'
+                    f'  min-width: 0;\n  min-height: 0;\n  padding: 0;\n  border: 0;\n'
+                    f'  font-size: 0;\n  line-height: 0;\n  color: transparent;\n'
+                    f'{format_decls(close_look)}\n}}\n'
+                    f'{t} .atlas-retro-window-titlebar > .atlas-retro-window-close:focus-visible,\n'
+                    f'{t} .atlas-theme-titlebar > .atlas-theme-close:focus-visible {{\n'
+                    f'  outline: 3px solid var(--atlas-focus-ring);\n  outline-offset: 2px;\n}}'
+                )
+            if close_look is not None and title_text and any(p_ == 'flex' for p_, _ in title_text[2]):
+                # .title { flex: 1; text-align: center } centres the caption
+                # in the space right of the lights.
+                blocks.append(
+                    f'{t} .atlas-retro-window-title,\n{t} .atlas-theme-titlebar h2 {{\n'
+                    f'  flex: 1;\n  justify-content: center;\n}}'
+                )
 
         # Conversation + header accents from original tokens / primary controls.
         surface = variables.get('_surface_rgb')
@@ -987,6 +1198,9 @@ def generate_chrome(systems, variables_by_id):
         elif titlebar and item['id'] in (1, 2, 3, 4, 5, 6, 7, 9, 19, 20):
             # OS themes: header is a chrome strip, not the desktop.
             pass
+
+        if content:
+            blocks.extend(content_chrome_blocks(ident, content, rules, variables))
 
         blocks = [b for b in blocks if b]
         surface = variables.get('_surface_rgb') or (255, 255, 255)

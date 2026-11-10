@@ -459,6 +459,50 @@
 [data-atlas-theme="aqua-osx"] .atlas-retro-traffic-max {
   background: var(--jelly-green);
 }
+/* Atlas close rendered as the demo close light */
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-titlebar,
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar {
+  justify-content: flex-start;
+}
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-symbol,
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-glyphs,
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar h2 > [aria-hidden="true"],
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar h2 svg,
+[data-atlas-theme="aqua-osx"] .atlas-theme-close svg {
+  display: none;
+}
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar .atlas-retro-traffic-close,
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-titlebar:has(> .atlas-retro-window-close) .atlas-retro-traffic-close {
+  display: none;
+}
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-titlebar > .atlas-retro-window-close,
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar > .atlas-theme-close {
+  order: -1;
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 1px rgba(0,0,0,0.3);
+  background: var(--jelly-red);
+}
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-titlebar > .atlas-retro-window-close:focus-visible,
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar > .atlas-theme-close:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 2px;
+}
+[data-atlas-theme="aqua-osx"] .atlas-retro-window-title,
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar h2 {
+  flex: 1;
+  justify-content: center;
+}
 [data-atlas-theme="aqua-osx"] {
   --atlas-user-bubble-bg: #4d90fe;
   --atlas-user-bubble-fg: #000000;
@@ -698,11 +742,35 @@
   color: #000000;
   background-color: #cfcfcf;
 }
+/* from .tab */
 [data-atlas-theme="beos"] .atlas-retro-window-titlebar,
 [data-atlas-theme="beos"] .atlas-theme-titlebar {
-  background: #404040;
-  color: #ffffff;
-  border-bottom-color: #404040;
+  background: var(--yellow);
+  border: 1px solid var(--chrome-darker);
+  border-bottom: none;
+  padding: 3px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: bold;
+  font-size: 11px;
+  box-shadow: inset 0 1px 0 #fff;
+  color: #000000;
+  background-color: #ffcc00;
+}
+/* .tab is a tab inside .titlebar */
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar,
+[data-atlas-theme="beos"] .atlas-theme-titlebar {
+  width: max-content;
+  max-width: 100%;
+  justify-content: flex-start;
+}
+[data-atlas-theme="beos"] .atlas-retro-window-title,
+[data-atlas-theme="beos"] .atlas-theme-titlebar h2 {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  line-height: inherit;
 }
 /* from .btn */
 [data-atlas-theme="beos"] .atlas-retro-button,
@@ -741,6 +809,54 @@
   background: var(--red-dot);
   border: 1px solid var(--chrome-darker);
   box-shadow: inset 1px 1px 0 rgba(255,255,255,0.6);
+}
+[data-atlas-theme="beos"] .atlas-retro-traffic-min,
+[data-atlas-theme="beos"] .atlas-retro-traffic-max {
+  display: none;
+}
+/* Atlas close rendered as the demo close light */
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar,
+[data-atlas-theme="beos"] .atlas-theme-titlebar {
+  justify-content: flex-start;
+}
+[data-atlas-theme="beos"] .atlas-retro-window-symbol,
+[data-atlas-theme="beos"] .atlas-retro-window-glyphs,
+[data-atlas-theme="beos"] .atlas-theme-titlebar h2 > [aria-hidden="true"],
+[data-atlas-theme="beos"] .atlas-theme-titlebar h2 svg,
+[data-atlas-theme="beos"] .atlas-theme-close svg {
+  display: none;
+}
+[data-atlas-theme="beos"] .atlas-theme-titlebar .atlas-retro-traffic-close,
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar:has(> .atlas-retro-window-close) .atlas-retro-traffic-close {
+  display: none;
+}
+[data-atlas-theme="beos"] .atlas-theme-titlebar .atlas-retro-traffic,
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar:has(> .atlas-retro-window-close) .atlas-retro-traffic {
+  display: none;
+}
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar > .atlas-retro-window-close,
+[data-atlas-theme="beos"] .atlas-theme-titlebar > .atlas-theme-close {
+  order: -1;
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red-dot);
+  border: 1px solid var(--chrome-darker);
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.6);
+}
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar > .atlas-retro-window-close:focus-visible,
+[data-atlas-theme="beos"] .atlas-theme-titlebar > .atlas-theme-close:focus-visible {
+  outline: 3px solid var(--atlas-focus-ring);
+  outline-offset: 2px;
 }
 [data-atlas-theme="beos"] {
   --atlas-user-bubble-bg: #ffcc00;
@@ -1285,6 +1401,11 @@
   font-size: 18px;
   background-color: #000000;
 }
+/* frame from .construction around .construction-inner */
+[data-atlas-theme="geocities-web10"] .atlas-theme-chrome[role="dialog"] {
+  border: 8px solid transparent;
+  border-image: repeating-linear-gradient(45deg, var(--yellow) 0 14px, var(--ink) 14px 28px) 8;
+}
 /* from .marquee */
 [data-atlas-theme="geocities-web10"] .atlas-retro-window-titlebar,
 [data-atlas-theme="geocities-web10"] .atlas-theme-titlebar {
@@ -1324,6 +1445,14 @@
 [data-atlas-theme="geocities-web10"] .atlas-theme-accent-fill {
   background: #ff3399;
   color: #000000;
+}
+/* retro_window from .webring */
+[data-atlas-theme="geocities-web10"] .atlas-retro-window,
+[data-atlas-theme="geocities-web10"] .atlas-theme-option {
+  background: #000;
+  border: 2px ridge var(--hotpink);
+  color: #ffffff;
+  background-color: #000000;
 }
 [data-atlas-theme="geocities-web10"] .atlas-retro-button {
   background-color: #929292;
@@ -2500,6 +2629,70 @@
   background: #ffff00;
   color: #000000;
 }
+/* window from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-window,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-chrome {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px dashed var(--wall);
+  background-color: #000000;
+}
+/* titlebar from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-window-titlebar,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-titlebar {
+  background: var(--bg);
+  color: var(--ink);
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--dim);
+  background-color: #000000;
+}
+/* title from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-window-title,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-titlebar h2 {
+  color: var(--monster-green);
+  font-family: var(--font);
+}
+/* button from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-button,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-chrome .atlas-retro-button {
+  background: var(--bg);
+  color: var(--item-cyan);
+  border: 1px solid var(--item-cyan);
+  border-radius: 0;
+  font-family: var(--font);
+  background-color: #000000;
+}
+/* input from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-input {
+  background: var(--bg);
+  color: var(--player);
+  border: 1px solid var(--dim);
+  border-radius: 0;
+  font-family: var(--font);
+  background-color: #000000;
+}
+/* footer from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-window-footer {
+  border-top: 1px solid var(--dim);
+  background: var(--bg);
+  color: var(--ink);
+}
+/* close from the demo's text-drawn chrome */
+[data-atlas-theme="nethack-ascii"] .atlas-retro-window-close,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-titlebar > .atlas-theme-close {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--dim);
+  border-radius: 0;
+  background-color: #000000;
+}
+/* body::before overlay folded into the fill */
+[data-atlas-theme="nethack-ascii"] body,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-desktop,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-backdrop {
+  background-image: repeating-linear-gradient(to bottom, transparent 0 2px, rgba(255,255,255,0.03) 2px 3px);
+}
 [data-atlas-theme="nethack-ascii"] {
   --atlas-focus-ring: #e4e4e4;
 }
@@ -2600,6 +2793,65 @@
 [data-atlas-theme="bbs-ansi"] .atlas-theme-accent-fill {
   background: #ffff55;
   color: #000000;
+}
+/* window from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-window,
+[data-atlas-theme="bbs-ansi"] .atlas-theme-chrome {
+  background: var(--bg);
+  color: var(--white-hi);
+  border: 4px double var(--yellow-hi);
+  background-color: #000000;
+}
+/* titlebar from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-window-titlebar,
+[data-atlas-theme="bbs-ansi"] .atlas-theme-titlebar {
+  background: var(--bg);
+  color: var(--yellow-hi);
+  padding: 4px 10px;
+  border: 4px solid var(--red-hi);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  background-color: #000000;
+}
+/* title from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-window-title,
+[data-atlas-theme="bbs-ansi"] .atlas-theme-titlebar h2 {
+  color: var(--yellow-hi);
+  font-family: var(--font);
+}
+/* button from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-button,
+[data-atlas-theme="bbs-ansi"] .atlas-theme-chrome .atlas-retro-button {
+  background: var(--bg);
+  color: var(--green-hi);
+  border: 1px solid var(--cyan-hi);
+  border-radius: 0;
+  font-family: var(--font);
+  background-color: #000000;
+}
+/* input from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-input {
+  background: var(--bg);
+  color: var(--yellow-hi);
+  border: 1px solid var(--cyan);
+  border-radius: 0;
+  font-family: var(--font);
+  background-color: #000000;
+}
+/* footer from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-window-footer {
+  border-top: 1px solid var(--magenta);
+  background: var(--bg);
+  color: var(--cyan-hi);
+}
+/* close from the demo's text-drawn chrome */
+[data-atlas-theme="bbs-ansi"] .atlas-retro-window-close,
+[data-atlas-theme="bbs-ansi"] .atlas-theme-titlebar > .atlas-theme-close {
+  background: var(--bg);
+  color: var(--red-hi);
+  border: 1px solid var(--red-hi);
+  border-radius: 0;
+  background-color: #000000;
 }
 [data-atlas-theme="bbs-ansi"] {
   --atlas-focus-ring: #ffff55;
