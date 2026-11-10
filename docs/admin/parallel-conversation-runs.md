@@ -1,6 +1,6 @@
 # Parallel conversation runs
 
-Last updated: 2026-11-08
+Last updated: 2026-11-10
 
 Issue #884.
 
@@ -298,6 +298,27 @@ progress indicator and the seed is not drawn at all; otherwise it shows only
 the marker line, kept below any tool rows that arrive after it. The next
 segment's text replaces the seed at the end of the transcript, below those
 rows.
+
+The marker describes one answer segment, not the run (issue #1193). A partial
+bubble keeps it for as long as its segment is open, because that text really
+is incomplete. The empty seed keeps it only for the snapshot the view was
+opened on: as soon as the transcript moves past that snapshot -- a tool row
+arrives or settles, a narration row is appended, or an open segment closes --
+the seed is marked as advanced and the "answer in progress" notice is retired,
+however many more steps the run goes on to take. The seed row itself stays
+until the run ends (the mid-run poll below is gated on it and fills it with
+the next segment's text), but it is drawn differently:
+
+- In an agent run the "Agent is running" status above the composer and the
+  busy row in the transcript already show the run, so an advanced seed is not
+  drawn at all.
+- A run with neither indicator keeps one neutral line, "Still working -- new
+  steps appear here as they finish", which says the run is alive without
+  calling a transcript stale that is visibly keeping up.
+
+A reload, a reconnect resync or opening the conversation in another tab seeds
+a new placeholder measured against the transcript it loaded, so each of those
+views starts with the notice and retires it at the next step in the same way.
 
 ### Reconnecting resynchronizes the open conversation
 

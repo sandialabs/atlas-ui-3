@@ -150,6 +150,11 @@ const ChatArea = () => {
   // turn already shows the run is alive, drawing it as well would stack a
   // second status indicator under that row, so it is not rendered.
   const hideReplaySeed = useMemo(() => currentTurnHasActiveRow(messages, settings), [messages, settings])
+  // A seed the run has moved past (issue #1193) no longer marks an unfinished
+  // answer, only a run that is still going. The agent-run status and the busy
+  // row already say that for an agent run, so the seed is not drawn a third
+  // time; a run with neither indicator keeps it as its one sign of life.
+  const hideAdvancedSeed = isAgentRunning
 
   // Fine-tune capture "correct this turn" (issue #622). Only fetch consent and
   // wire the affordance when the feature flag is on; the per-message control is
@@ -1075,7 +1080,7 @@ const ChatArea = () => {
             agent-loop answers that never enter ConversationHistory). The same
             implementation drives the truncation path so the two cannot drift.
             See utils/userMessageOrdinal and issue #142. */}
-        {messagesWithOrdinals.map(({ message, userIndex }, index) => (message._seed && hideReplaySeed) ? null : (
+        {messagesWithOrdinals.map(({ message, userIndex }, index) => (message._seed && (hideReplaySeed || (message._stepAdvanced && hideAdvancedSeed))) ? null : (
           <Message
             key={`${index}-${message.role}-${message.content?.substring(0, 20)}`}
             message={message}
