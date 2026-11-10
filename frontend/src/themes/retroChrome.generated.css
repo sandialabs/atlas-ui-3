@@ -284,6 +284,14 @@
   justify-content: space-between;
   background-color: #0a246a;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="windows-xp-luna"] .atlas-theme-titlebar h2,
+[data-atlas-theme="windows-xp-luna"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="windows-xp-luna"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #0a246a;
+}
 /* from .btn */
 [data-atlas-theme="windows-xp-luna"] .atlas-retro-button,
 [data-atlas-theme="windows-xp-luna"] .atlas-theme-chrome .atlas-retro-button {
@@ -396,6 +404,14 @@
   border-bottom: 1px solid #666;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
   color: #000000;
+  background-color: #e6e6e6;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar h2,
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="aqua-osx"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #e6e6e6;
 }
 /* from .title */
@@ -573,6 +589,31 @@
   color: #ffffff;
   background-color: #000000;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar h2,
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #000000;
+}
+/* caption plate from .titlebar-inner */
+[data-atlas-theme="amiga-workbench"] .atlas-retro-window-titlebar,
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar {
+  justify-content: flex-start;
+}
+[data-atlas-theme="amiga-workbench"] .atlas-retro-window-title,
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar h2 {
+  background: var(--wb-white);
+  padding: 2px 12px;
+  font-weight: bold;
+  color: var(--wb-black);
+  background-color: #ffffff;
+  flex: none;
+}
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #ffffff;
+}
 /* from .btn */
 [data-atlas-theme="amiga-workbench"] .atlas-retro-button,
 [data-atlas-theme="amiga-workbench"] .atlas-theme-chrome .atlas-retro-button {
@@ -602,6 +643,37 @@
   padding: 3px 6px;
   color: #000000;
   background-color: #ffffff;
+}
+/* from .gadget */
+[data-atlas-theme="amiga-workbench"] .atlas-retro-window-close,
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar > button[aria-label="Close tools and settings"],
+[data-atlas-theme="amiga-workbench"] .atlas-theme-close {
+  background: var(--wb-white);
+  border: 2px solid var(--wb-black);
+  width: 22px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+[data-atlas-theme="amiga-workbench"] .atlas-retro-window-titlebar > .atlas-retro-window-close,
+[data-atlas-theme="amiga-workbench"] .atlas-theme-titlebar > .atlas-theme-close {
+  order: -1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  color: #000000;
+}
+[data-atlas-theme="amiga-workbench"] .atlas-retro-window-close svg,
+[data-atlas-theme="amiga-workbench"] .atlas-theme-close svg {
+  width: 12px;
+  height: 12px;
 }
 [data-atlas-theme="amiga-workbench"] {
   --atlas-user-bubble-bg: #ff8800;
@@ -651,6 +723,14 @@
   align-items: center;
   box-shadow: inset 0 1px 0 var(--chrome-lighter), inset 0 -1px 0 var(--chrome-dark);
   color: #000000;
+  background-color: #a8a8b0;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="nextstep"] .atlas-theme-titlebar h2,
+[data-atlas-theme="nextstep"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="nextstep"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #a8a8b0;
 }
 /* from .title */
@@ -758,6 +838,14 @@
   color: #000000;
   background-color: #ffcc00;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="beos"] .atlas-theme-titlebar h2,
+[data-atlas-theme="beos"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="beos"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #ffcc00;
+}
 /* .tab is a tab inside .titlebar */
 [data-atlas-theme="beos"] .atlas-retro-window-titlebar,
 [data-atlas-theme="beos"] .atlas-theme-titlebar {
@@ -771,6 +859,16 @@
   font-weight: inherit;
   color: inherit;
   line-height: inherit;
+}
+/* .tab::after skewX(30deg) wedge, as a 13px strip */
+[data-atlas-theme="beos"] .atlas-retro-window-titlebar,
+[data-atlas-theme="beos"] .atlas-theme-titlebar {
+  padding-right: calc(20px + 13px);
+  border-right: 0;
+  background-image: linear-gradient(to top right, transparent 0 calc(50% - 0.75px), var(--chrome-darker) calc(50% - 0.75px) calc(50% + 0.75px), var(--chrome) calc(50% + 0.75px));
+  background-size: 13px 100%;
+  background-position: right top;
+  background-repeat: no-repeat;
 }
 /* from .btn */
 [data-atlas-theme="beos"] .atlas-retro-button,
@@ -914,6 +1012,14 @@
   color: #ffffff;
   border-bottom-color: #222222;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="teletext"] .atlas-theme-titlebar h2,
+[data-atlas-theme="teletext"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="teletext"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #222222;
+}
 [data-atlas-theme="teletext"] .atlas-retro-button,
 [data-atlas-theme="teletext"] .atlas-theme-chrome .atlas-retro-button {
   background: #1f1f1f;
@@ -1053,6 +1159,14 @@
   border-bottom: 1px solid var(--c-dgray);
   background-color: #aaaaaa;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="dos-cga"] .atlas-theme-titlebar h2,
+[data-atlas-theme="dos-cga"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="dos-cga"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #aaaaaa;
+}
 /* from .btn */
 [data-atlas-theme="dos-cga"] .atlas-retro-button,
 [data-atlas-theme="dos-cga"] .atlas-theme-chrome .atlas-retro-button {
@@ -1124,6 +1238,14 @@
   background: #ffffff;
   color: #000000;
   border-bottom-color: #ffffff;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="8bit-arcade"] .atlas-theme-titlebar h2,
+[data-atlas-theme="8bit-arcade"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="8bit-arcade"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #ffffff;
 }
 /* from .btn */
 [data-atlas-theme="8bit-arcade"] .atlas-retro-button,
@@ -1309,6 +1431,14 @@
   text-shadow: 0 1px 0 rgba(255,255,255,0.4);
   background-color: #a0a0a0;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="winamp-skin"] .atlas-theme-titlebar h2,
+[data-atlas-theme="winamp-skin"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="winamp-skin"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #a0a0a0;
+}
 /* from .btn-chrome */
 [data-atlas-theme="winamp-skin"] .atlas-retro-button,
 [data-atlas-theme="winamp-skin"] .atlas-theme-chrome .atlas-retro-button {
@@ -1410,14 +1540,22 @@
 [data-atlas-theme="geocities-web10"] .atlas-retro-window-titlebar,
 [data-atlas-theme="geocities-web10"] .atlas-theme-titlebar {
   background: var(--red);
+  color: var(--yellow);
   padding: 4px 0;
   font-weight: bold;
   font-size: 18px;
   white-space: nowrap;
   border-top: 3px ridge #fff;
   border-bottom: 3px ridge #fff;
-  color: #141400;
-  background-color: #ff0000;
+  background-color: #e30000;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="geocities-web10"] .atlas-theme-titlebar h2,
+[data-atlas-theme="geocities-web10"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="geocities-web10"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #e30000;
 }
 /* from .beveled-btn */
 [data-atlas-theme="geocities-web10"] .atlas-retro-button,
@@ -1498,6 +1636,14 @@
   border-radius: 4px;
   box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
   color: #ffffff;
+  background-color: #0a0704;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="cassette-futurism"] .atlas-theme-titlebar h2,
+[data-atlas-theme="cassette-futurism"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="cassette-futurism"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #0a0704;
 }
 /* from .btn */
@@ -1582,6 +1728,14 @@
   background: #ff71ce;
   color: #000000;
   border-bottom-color: #ff71ce;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="vaporwave"] .atlas-theme-titlebar h2,
+[data-atlas-theme="vaporwave"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="vaporwave"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #ff71ce;
 }
 /* from .btn */
 [data-atlas-theme="vaporwave"] .atlas-retro-button,
@@ -1676,6 +1830,14 @@
   background: #000000;
   color: #ffffff;
   border-bottom-color: #000000;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="memphis"] .atlas-theme-titlebar h2,
+[data-atlas-theme="memphis"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="memphis"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #000000;
 }
 /* from .btn */
 [data-atlas-theme="memphis"] .atlas-retro-button,
@@ -1778,6 +1940,14 @@
   color: #ffffff;
   border-bottom-color: #606068;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="ps1-tech"] .atlas-theme-titlebar h2,
+[data-atlas-theme="ps1-tech"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="ps1-tech"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #606068;
+}
 /* from .btn */
 [data-atlas-theme="ps1-tech"] .atlas-retro-button,
 [data-atlas-theme="ps1-tech"] .atlas-theme-chrome .atlas-retro-button {
@@ -1863,6 +2033,14 @@
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
+  background-color: #00007f;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="os2-warp"] .atlas-theme-titlebar h2,
+[data-atlas-theme="os2-warp"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="os2-warp"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #00007f;
 }
 /* from .btn */
@@ -1953,6 +2131,14 @@
   padding: 0 6px;
   border-radius: 3px 3px 0 0;
   color: #000000;
+  background-color: #f5f5f5;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="macos9-platinum"] .atlas-theme-titlebar h2,
+[data-atlas-theme="macos9-platinum"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="macos9-platinum"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #f5f5f5;
 }
 /* from .title */
@@ -2085,6 +2271,14 @@
   color: #000000;
   border-bottom-color: #c5d3e0;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="web20-glossy"] .atlas-theme-titlebar h2,
+[data-atlas-theme="web20-glossy"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="web20-glossy"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #c5d3e0;
+}
 /* from .btn */
 [data-atlas-theme="web20-glossy"] .atlas-retro-button,
 [data-atlas-theme="web20-glossy"] .atlas-theme-chrome .atlas-retro-button {
@@ -2171,6 +2365,14 @@
   background: #0f380f;
   color: #ffffff;
   border-bottom-color: #0f380f;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="gameboy-dmg"] .atlas-theme-titlebar h2,
+[data-atlas-theme="gameboy-dmg"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="gameboy-dmg"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #0f380f;
 }
 [data-atlas-theme="gameboy-dmg"] .atlas-retro-button,
 [data-atlas-theme="gameboy-dmg"] .atlas-theme-chrome .atlas-retro-button {
@@ -2304,6 +2506,14 @@
   color: #000000;
   border-bottom-color: #00e4ff;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="tron-vector"] .atlas-theme-titlebar h2,
+[data-atlas-theme="tron-vector"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="tron-vector"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #00e4ff;
+}
 /* from .btn */
 [data-atlas-theme="tron-vector"] .atlas-retro-button,
 [data-atlas-theme="tron-vector"] .atlas-theme-chrome .atlas-retro-button {
@@ -2387,6 +2597,14 @@
   background: #141014;
   color: #ffffff;
   border-bottom-color: #141014;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="vhs-tracking"] .atlas-theme-titlebar h2,
+[data-atlas-theme="vhs-tracking"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="vhs-tracking"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #141014;
 }
 /* from .btn */
 [data-atlas-theme="vhs-tracking"] .atlas-retro-button,
@@ -2552,6 +2770,14 @@
   color: #ffffff;
   border-bottom-color: #222222;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="ibm-3270"] .atlas-theme-titlebar h2,
+[data-atlas-theme="ibm-3270"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="ibm-3270"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #222222;
+}
 [data-atlas-theme="ibm-3270"] .atlas-retro-button,
 [data-atlas-theme="ibm-3270"] .atlas-theme-chrome .atlas-retro-button {
   background: #1f1f1f;
@@ -2606,6 +2832,14 @@
   border-top: 1px solid var(--dim);
   color: var(--ink);
   font-size: 17px;
+  background-color: #1f1f1f;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="nethack-ascii"] .atlas-theme-titlebar h2,
+[data-atlas-theme="nethack-ascii"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="nethack-ascii"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #1f1f1f;
 }
 [data-atlas-theme="nethack-ascii"] .atlas-retro-button,
@@ -2725,6 +2959,14 @@
   background: #ffffff;
   color: #000000;
   border-bottom-color: #ffffff;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="templeos"] .atlas-theme-titlebar h2,
+[data-atlas-theme="templeos"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="templeos"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #ffffff;
 }
 [data-atlas-theme="templeos"] .atlas-retro-button,
 [data-atlas-theme="templeos"] .atlas-theme-chrome .atlas-retro-button {
@@ -2889,6 +3131,14 @@
   font-weight: bold;
   background-color: #aaaaaa;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="midnight-commander"] .atlas-theme-titlebar h2,
+[data-atlas-theme="midnight-commander"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="midnight-commander"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #aaaaaa;
+}
 [data-atlas-theme="midnight-commander"] .atlas-retro-button,
 [data-atlas-theme="midnight-commander"] .atlas-theme-chrome .atlas-retro-button {
   background: #1f1fb4;
@@ -2951,6 +3201,14 @@
   background: #00a830;
   color: #000000;
   border-bottom-color: #00a830;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="matrix-rain"] .atlas-theme-titlebar h2,
+[data-atlas-theme="matrix-rain"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="matrix-rain"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #00a830;
 }
 /* from .btn */
 [data-atlas-theme="matrix-rain"] .atlas-retro-button,
@@ -3041,6 +3299,14 @@
   color: #ffffff;
   background-color: #1a1c30;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="btop-meters"] .atlas-theme-titlebar h2,
+[data-atlas-theme="btop-meters"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="btop-meters"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #1a1c30;
+}
 [data-atlas-theme="btop-meters"] .atlas-retro-button,
 [data-atlas-theme="btop-meters"] .atlas-theme-chrome .atlas-retro-button {
   background: #1a1c30;
@@ -3091,6 +3357,14 @@
   background: #443ec4;
   color: #ffffff;
   border-bottom-color: #443ec4;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="c64-basic"] .atlas-theme-titlebar h2,
+[data-atlas-theme="c64-basic"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="c64-basic"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #443ec4;
 }
 [data-atlas-theme="c64-basic"] .atlas-retro-button,
 [data-atlas-theme="c64-basic"] .atlas-theme-chrome .atlas-retro-button {
@@ -3307,6 +3581,14 @@
   color: #000000;
   border-bottom-color: #e0e5ec;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="neumorphism"] .atlas-theme-titlebar h2,
+[data-atlas-theme="neumorphism"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="neumorphism"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #e0e5ec;
+}
 /* from .btn */
 [data-atlas-theme="neumorphism"] .atlas-retro-button,
 [data-atlas-theme="neumorphism"] .atlas-theme-chrome .atlas-retro-button {
@@ -3389,6 +3671,14 @@
   color: #000000;
   border-bottom-color: #c0daf4;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="blueprint-cad"] .atlas-theme-titlebar h2,
+[data-atlas-theme="blueprint-cad"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="blueprint-cad"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #c0daf4;
+}
 /* from .btn */
 [data-atlas-theme="blueprint-cad"] .atlas-retro-button,
 [data-atlas-theme="blueprint-cad"] .atlas-theme-chrome .atlas-retro-button {
@@ -3467,6 +3757,14 @@
   background: #ffffff;
   color: #000000;
   border-bottom-color: #ffffff;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="claymorphism"] .atlas-theme-titlebar h2,
+[data-atlas-theme="claymorphism"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="claymorphism"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #ffffff;
 }
 /* from .btn */
 [data-atlas-theme="claymorphism"] .atlas-retro-button,
@@ -3623,6 +3921,14 @@
   color: #000000;
   background-color: #e63946;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="swiss-intl"] .atlas-theme-titlebar h2,
+[data-atlas-theme="swiss-intl"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="swiss-intl"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #e63946;
+}
 /* from .btn */
 [data-atlas-theme="swiss-intl"] .atlas-retro-button,
 [data-atlas-theme="swiss-intl"] .atlas-theme-chrome .atlas-retro-button {
@@ -3695,6 +4001,14 @@
 [data-atlas-theme="bauhaus"] .atlas-theme-titlebar {
   background: var(--ink);
   color: #ffffff;
+  background-color: #0a0a0a;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="bauhaus"] .atlas-theme-titlebar h2,
+[data-atlas-theme="bauhaus"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="bauhaus"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #0a0a0a;
 }
 /* from .btn */
@@ -3772,6 +4086,14 @@
   background: #fffef8;
   color: #000000;
   border-bottom-color: #fffef8;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="pop-art-lichtenstein"] .atlas-theme-titlebar h2,
+[data-atlas-theme="pop-art-lichtenstein"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="pop-art-lichtenstein"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #fffef8;
 }
 /* from .btn */
 [data-atlas-theme="pop-art-lichtenstein"] .atlas-retro-button,
@@ -3866,6 +4188,14 @@
   color: #ffffff;
   border-bottom-color: #0a0a0a;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="op-art"] .atlas-theme-titlebar h2,
+[data-atlas-theme="op-art"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="op-art"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #0a0a0a;
+}
 /* from .btn */
 [data-atlas-theme="op-art"] .atlas-retro-button,
 [data-atlas-theme="op-art"] .atlas-theme-chrome .atlas-retro-button {
@@ -3942,6 +4272,14 @@
   background: #8a7a54;
   color: #000000;
   border-bottom-color: #8a7a54;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="hypnagogic"] .atlas-theme-titlebar h2,
+[data-atlas-theme="hypnagogic"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="hypnagogic"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #8a7a54;
 }
 /* from .btn */
 [data-atlas-theme="hypnagogic"] .atlas-retro-button,
@@ -4144,6 +4482,14 @@
   color: #000000;
   background-color: #d4d1c4;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="wireframe-sketch"] .atlas-theme-titlebar h2,
+[data-atlas-theme="wireframe-sketch"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="wireframe-sketch"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #d4d1c4;
+}
 /* from .btn-sketch */
 [data-atlas-theme="wireframe-sketch"] .atlas-retro-button,
 [data-atlas-theme="wireframe-sketch"] .atlas-theme-chrome .atlas-retro-button {
@@ -4217,6 +4563,14 @@
   background: #f0f0f0;
   color: #000000;
   border-bottom-color: #f0f0f0;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="glitch-databend"] .atlas-theme-titlebar h2,
+[data-atlas-theme="glitch-databend"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="glitch-databend"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #f0f0f0;
 }
 /* from .btn */
 [data-atlas-theme="glitch-databend"] .atlas-retro-button,
@@ -4460,6 +4814,14 @@
   color: #ffffff;
   border-bottom-color: #1a2847;
 }
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="grid-paper"] .atlas-theme-titlebar h2,
+[data-atlas-theme="grid-paper"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="grid-paper"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
+  background-color: #1a2847;
+}
 /* from .btn */
 [data-atlas-theme="grid-paper"] .atlas-retro-button,
 [data-atlas-theme="grid-paper"] .atlas-theme-chrome .atlas-retro-button {
@@ -4537,6 +4899,14 @@
   font-size: 16px;
   letter-spacing: 2px;
   white-space: nowrap;
+  background-color: #000000;
+}
+/* Settings caption text and icon use the caption colour */
+[data-atlas-theme="maximalist-banners"] .atlas-theme-titlebar h2,
+[data-atlas-theme="maximalist-banners"] .atlas-theme-titlebar h2 > [aria-hidden="true"] {
+  color: inherit;
+}
+[data-atlas-theme="maximalist-banners"] .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {
   background-color: #000000;
 }
 /* from .btn */

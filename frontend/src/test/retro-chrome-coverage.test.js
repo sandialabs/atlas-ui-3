@@ -63,6 +63,22 @@ describe('complete Retro Design System chrome coverage', () => {
     expect(generated).not.toMatch(/\[data-atlas-theme="memphis"\] \.atlas-theme-titlebar > \.atlas-theme-close/)
   })
 
+  it('redraws leftover caption details from the demos without blocked CSS', () => {
+    // BeOS .tab::after skewX(30deg) wedge becomes a background strip: no
+    // transform, clip-path, or pseudo-element content enters Atlas.
+    expect(generated).toMatch(/\[data-atlas-theme="beos"\] \.atlas-theme-titlebar \{[^}]*padding-right: calc\(20px \+ 13px\);[^}]*border-right: 0;[^}]*linear-gradient\(to top right, transparent[^}]*var\(--chrome-darker\)[^}]*var\(--chrome\) calc\(50% \+ 0\.75px\)\);[^}]*background-size: 13px 100%/s)
+    // GeoCities keeps the upstream yellow marquee text; only the red deepens to pass AA.
+    expect(generated).toMatch(/\[data-atlas-theme="geocities-web10"\] \.atlas-theme-titlebar \{[^}]*color: var\(--yellow\);[^}]*background-color: #e30000;/s)
+    // Amiga: the caption sits on the .titlebar-inner plate; the close is a .gadget at the left.
+    expect(generated).toMatch(/\[data-atlas-theme="amiga-workbench"\] \.atlas-theme-titlebar h2 \{[^}]*background: var\(--wb-white\);[^}]*color: var\(--wb-black\);[^}]*flex: none;/s)
+    expect(generated).toMatch(/\[data-atlas-theme="amiga-workbench"\] \.atlas-theme-titlebar > \.atlas-theme-close \{[^}]*order: -1;[^}]*color: #000000;/s)
+    // The Settings caption follows the mapped caption colour instead of Tailwind gray.
+    expect(generated).toMatch(/\[data-atlas-theme="windows-xp-luna"\] \.atlas-theme-titlebar h2,\s*\[data-atlas-theme="windows-xp-luna"\] \.atlas-theme-titlebar h2 > \[aria-hidden="true"\] \{\s*color: inherit;/s)
+    for (const legacy of ['mac7', 'win95', 'crt-phosphor']) {
+      expect(generated).not.toContain(`[data-atlas-theme="${legacy}"] .atlas-theme-titlebar h2 > [aria-hidden="true"]`)
+    }
+  })
+
   it('maps text-drawn and nested-frame chrome for GeoCities, NetHack, and BBS', () => {
     expect(generated).toMatch(/\[data-atlas-theme="geocities-web10"\] \.atlas-theme-chrome\[role="dialog"\] \{[^}]*border-image: repeating-linear-gradient\(45deg, var\(--yellow\)/s)
     expect(generated).toMatch(/\[data-atlas-theme="geocities-web10"\] \.atlas-retro-window,[^{]*\{[^}]*ridge var\(--hotpink\)/s)

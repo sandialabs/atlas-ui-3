@@ -47,7 +47,7 @@ INPUT_CLASSES = (
     'input', 'input-chrome', 'input-sketch', 'prompt',
 )
 CLOSE_CLASSES = (
-    'closebox', 'close-box', 'tbtn',
+    'closebox', 'close-box', 'tbtn', 'gadget',
 )
 TITLE_TEXT_CLASSES = ('title',)
 
@@ -553,6 +553,47 @@ def titlebar_child(html, rules):
     return first_class_rule(rules, (match.group(1),), require_fill=True)
 
 
+def tab_wedge(rules, tab, window):
+    """BeOS .tab::after is a yellow wedge skewed off the tab's right edge.
+    Pseudo-elements and transforms never enter Atlas, so redraw the same
+    silhouette as a background strip on the tab itself: the demo fill below
+    the slant, the wedge's border colour on it, and the chrome (.filler, or
+    the window) above it. Strip width = tan(skew) x demo .titlebar height."""
+    tabname = tab[0]
+    pad = next((v.split() for p_, v in tab[2] if p_ == 'padding'), ['0'])
+    pad_right = pad[1] if len(pad) > 1 else pad[0]
+    after = next((d for sel, d in rules
+                  if any(part.strip() == f'.{tabname}::after' for part in split_selectors(sel))), None)
+    if not after:
+        return None
+    skew = next((re.search(r'skewX\(\s*(-?[\d.]+)deg\s*\)', v) for p_, v in after
+                 if p_ == 'transform'), None)
+    bar = first_class_rule(rules, ('titlebar',))
+    height = next((v for p_, v in (bar[2] if bar else []) if p_ == 'height'), None)
+    line = next((v.split()[-1] for p_, v in after if p_ == 'border-right'), None)
+    filler = first_class_rule(rules, ('filler',))
+    chrome = next((v for p_, v in (filler or window or ('', '', []))[2]
+                   if p_ in ('background', 'background-color')), None)
+    if not (skew and height and re.fullmatch(r'\d+px', height) and line and chrome):
+        return None
+    import math
+    width = round(math.tan(math.radians(abs(float(skew.group(1))))) * int(height[:-2]))
+    def emit(ident):
+        t = f'[data-atlas-theme="{ident}"]'
+        return (
+            f'/* .{tabname}::after skewX({skew.group(1)}deg) wedge, as a {width}px strip */\n'
+            f'{t} .atlas-retro-window-titlebar,\n{t} .atlas-theme-titlebar {{\n'
+            f'  padding-right: calc({pad_right} + {width}px);\n'
+            f'  border-right: 0;\n'
+            f'  background-image: linear-gradient(to top right, transparent 0 calc(50% - 0.75px),'
+            f' {line} calc(50% - 0.75px) calc(50% + 0.75px), {chrome} calc(50% + 0.75px));\n'
+            f'  background-size: {width}px 100%;\n'
+            f'  background-position: right top;\n'
+            f'  background-repeat: no-repeat;\n}}'
+        )
+    return emit
+
+
 def body_overlay_layers(rules):
     """Gradient layers from a body::before overlay (CRT scanlines)."""
     for selector, decls in rules:
@@ -594,17 +635,38 @@ def finalize_background(decls):
     return out
 
 
-def ensure_readable(decls, variables, fallback_bg=None):
+def deepen_for_text(fg, bg, limit=.15):
+    """Smallest shift of a coloured fill away from fg so fg itself meets AA.
+    Captions like GeoCities yellow-on-red keep their signature text colour."""
+    if not (is_colorful(fg) and is_colorful(bg)):
+        return None
+    endpoint = (0, 0, 0) if luminance(fg) > luminance(bg) else (255, 255, 255)
+    for step in range(1, round(limit * 100) + 1):
+        candidate = blend(bg, endpoint, step / 100)
+        if contrast(fg, candidate) >= 4.55:
+            return candidate
+    return None
+
+
+def ensure_readable(decls, variables, fallback_bg=None, keep_fg=False):
     """Keep original fills, but guarantee AA text and a solid background-color
-    so contrast checks (which read background-color, not images) stay honest."""
+    so contrast checks (which read background-color, not images) stay honest.
+    keep_fg (captions): first try a slightly deeper fill under the original
+    text colour before recolouring the text."""
     decls = list(decls)
     bg = first_color_from_decls(decls, variables, ('background-color', 'background')) or fallback_bg
+    fg = first_color_from_decls(decls, variables, ('color',))
+    if keep_fg and bg and fg and contrast(fg, bg) < 4.55:
+        deeper = deepen_for_text(fg, bg)
+        if deeper:
+            decls = [(p, v) for p, v in decls if p != 'background-color']
+            decls.append(('background-color', hexcolor(deeper)))
+            bg = deeper
     if bg and not any(prop == 'background-color' for prop, _ in decls):
         decls.insert(0, ('background-color', hexcolor(bg)))
     elif not bg and fallback_bg:
         decls.insert(0, ('background-color', hexcolor(fallback_bg)))
         bg = fallback_bg
-    fg = first_color_from_decls(decls, variables, ('color',))
     if bg and (fg is None or contrast(fg, bg) < 4.55):
         decls = [(prop, value) for prop, value in decls if prop != 'color']
         decls.append(('color', hexcolor(content_foreground(fg or high_contrast(bg), [bg]))))
@@ -761,13 +823,13 @@ def emit_mapped(ident, atlas_selectors, decls, extra_comment=''):
     return f'{comment}{targets} {{\n{format_decls(decls)}\n}}'
 
 
-def map_component(ident, atlas_selectors, picked, *, extra=(), allow_size=False, comment='', variables=None, readable=False, fallback_bg=None):
+def map_component(ident, atlas_selectors, picked, *, extra=(), allow_size=False, comment='', variables=None, readable=False, fallback_bg=None, keep_fg=False):
     if not picked:
         return '', None
     name, _selector, decls = picked
     filtered = filter_decls(decls, extra=extra, allow_size=allow_size)
     if readable and variables is not None:
-        filtered, _bg = ensure_readable(filtered, variables, fallback_bg)
+        filtered, _bg = ensure_readable(filtered, variables, fallback_bg, keep_fg)
     if not filtered:
         return '', name
     return emit_mapped(ident, atlas_selectors, filtered, comment or f'from .{name}' if name and not name.startswith(('button', 'input', 'textarea')) else f'from {name}'), name
@@ -954,9 +1016,24 @@ def generate_chrome(systems, variables_by_id):
             variables=variables,
             readable=True,
             fallback_bg=variables.get('_surface_rgb'),
+            keep_fg=True,
         )
+        def caption_inherits(caption_bg):
+            # Settings caption text and its gear icon take the demo caption
+            # colour, like .atlas-retro-window-title, instead of Tailwind
+            # gray/blue utilities; the wrench badge notch matches the caption.
+            if item['id'] in LEGACY_IDS:
+                return ''
+            t = f'[data-atlas-theme="{ident}"] .atlas-theme-titlebar h2'
+            notch = (f'\n{t} > [aria-hidden="true"] > span {{\n'
+                     f'  background-color: {hexcolor(caption_bg)};\n}}' if caption_bg else '')
+            return (f'/* Settings caption text and icon use the caption colour */\n'
+                    f'{t},\n{t} > [aria-hidden="true"] {{\n  color: inherit;\n}}' + notch)
         if mapped:
             blocks.append(mapped)
+            blocks.append(caption_inherits(first_color_from_decls(
+                parse_decls(mapped.split('{', 1)[1].rsplit('}', 1)[0]), variables,
+                ('background-color',))))
             if titlebar_tab:
                 # The caption is a left tab sized to its contents, not a full
                 # bar; the window chrome shows through beside it (.filler).
@@ -971,6 +1048,9 @@ def generate_chrome(systems, variables_by_id):
                     f'  font-size: inherit;\n  font-weight: inherit;\n  color: inherit;\n'
                     f'  line-height: inherit;\n}}'
                 )
+                wedge = tab_wedge(rules, titlebar, window)
+                if wedge:
+                    blocks.append(wedge(ident))
         elif window:
             # Use the window's border/background color as a caption treatment
             # when the demo has no titlebar class, still from original decls.
@@ -985,6 +1065,24 @@ def generate_chrome(systems, variables_by_id):
                     f'  color: {hexcolor(fg)};\n'
                     f'  border-bottom-color: {hexcolor(fill)};\n}}'
                 )
+                blocks.append(caption_inherits(fill))
+
+        plate = (first_class_rule(rules, (titlebar[0] + '-inner',), require_fill=True)
+                 if titlebar and not titlebar_tab else None)
+        if plate:
+            # Amiga .titlebar-inner: the caption sits on a solid plate over the
+            # striped bar, sized to its text, so the title stays readable.
+            decls, _bg = ensure_readable(filter_decls(plate[2]), variables)
+            t = f'[data-atlas-theme="{ident}"]'
+            blocks.append(
+                f'/* caption plate from .{plate[0]} */\n'
+                f'{t} .atlas-retro-window-titlebar,\n{t} .atlas-theme-titlebar {{\n'
+                f'  justify-content: flex-start;\n}}\n'
+                f'{t} .atlas-retro-window-title,\n{t} .atlas-theme-titlebar h2 {{\n'
+                f'{format_decls(decls)}\n  flex: none;\n}}\n'
+                f'{t} .atlas-theme-titlebar h2 > [aria-hidden="true"] > span {{\n'
+                f'  background-color: {hexcolor(_bg)};\n}}'
+            )
 
         if title_text:
             mapped, _ = map_component(
@@ -1050,6 +1148,21 @@ def generate_chrome(systems, variables_by_id):
             )
             if mapped:
                 blocks.append(mapped)
+            if close_name == 'gadget':
+                # Amiga close gadget: a boxed glyph at the left of the bar.
+                gadget, _bg = ensure_readable(filter_decls(close[2], allow_size=True), variables)
+                fg = next(v for p_, v in gadget if p_ == 'color')
+                t = f'[data-atlas-theme="{ident}"]'
+                blocks.append(
+                    f'{t} .atlas-retro-window-titlebar > .atlas-retro-window-close,\n'
+                    f'{t} .atlas-theme-titlebar > .atlas-theme-close {{\n'
+                    f'  order: -1;\n  flex-shrink: 0;\n  display: flex;\n'
+                    f'  align-items: center;\n  justify-content: center;\n'
+                    f'  min-width: 0;\n  min-height: 0;\n  padding: 0;\n'
+                    f'  border-radius: 0;\n  color: {fg};\n}}\n'
+                    f'{t} .atlas-retro-window-close svg,\n{t} .atlas-theme-close svg {{\n'
+                    f'  width: 12px;\n  height: 12px;\n}}'
+                )
             if close_name in ('closebox', 'close-box'):
                 blocks.append(
                     f'[data-atlas-theme="{ident}"] .atlas-retro-window-titlebar,\n'
