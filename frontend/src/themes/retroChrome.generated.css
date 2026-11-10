@@ -3432,6 +3432,7 @@
 }
 [data-atlas-theme="flat-2013"] .atlas-retro-button:hover {
   background: #16a085;
+  color: #272727;
 }
 /* from input */
 [data-atlas-theme="flat-2013"] .atlas-retro-input {
@@ -3949,6 +3950,7 @@
 }
 [data-atlas-theme="swiss-intl"] .atlas-retro-button:hover {
   background: var(--red);
+  color: #0f0f0e;
 }
 /* from input */
 [data-atlas-theme="swiss-intl"] .atlas-retro-input {
@@ -4737,6 +4739,7 @@
 }
 [data-atlas-theme="duotone-poster"] .atlas-retro-button:hover {
   background: var(--spot-2);
+  color: #878684;
 }
 /* from input */
 [data-atlas-theme="duotone-poster"] .atlas-retro-input {

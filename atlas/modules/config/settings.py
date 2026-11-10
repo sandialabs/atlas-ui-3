@@ -1176,6 +1176,15 @@ class AppSettings(BaseSettings):
         description="Enable AI-generated follow-up question suggestions after each chat response",
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
+    # Retro Design System theme gallery (issue #1119). Run-time switch; the
+    # catalog must also be in the frontend bundle (VITE_FEATURE_RETRO_THEMES,
+    # build-time, default on). Off hides the gallery and a saved retro theme
+    # falls back to its own Light/Dark base mode.
+    feature_retro_themes_enabled: bool = Field(
+        False,
+        description="Show the 53 Retro Design System themes in Settings (Light/Dark are always available)",
+        validation_alias=AliasChoices("FEATURE_RETRO_THEMES_ENABLED"),
+    )
 
     # Origin validation for the main chat WebSocket at /ws. A WS upgrade skips
     # the CORS preflight, so without this check any page the user visits can

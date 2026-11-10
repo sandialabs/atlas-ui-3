@@ -587,7 +587,7 @@ const Sidebar = ({ mobileOpen, onMobileClose }) => {
         <div className="flex-1 p-4 text-center text-gray-500 text-sm">
           Chat history is disabled.
           <br />
-          <span className="text-xs text-gray-600 mt-1 block">
+          <span className="text-xs atlas-text-gray-600 mt-1 block">
             Set FEATURE_CHAT_HISTORY_ENABLED=true to enable.
           </span>
         </div>

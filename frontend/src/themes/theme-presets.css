@@ -39,9 +39,10 @@
   --gray-50: 0 0 0;
   --gray-100: 15 15 15;
   --gray-200: 34 34 34;
-  --gray-300: 55 55 55;
-  --gray-400: 78 78 78;
-  --gray-500: 95 95 95;
+  /* 300-500 are text steps; kept dark enough for AA on the gray-700 tint. */
+  --gray-300: 45 45 45;
+  --gray-400: 52 52 52;
+  --gray-500: 60 60 60;
   --gray-600: 138 138 138;
   --gray-700: 175 175 175;
   --gray-800: 223 223 223;
@@ -58,10 +59,11 @@
   --gray-50: 0 0 0;
   --gray-100: 17 17 17;
   --gray-200: 34 34 34;
-  --gray-300: 55 55 55;
-  --gray-400: 75 75 75;
-  --gray-500: 95 95 95;
-  --gray-600: 135 135 135;
+  /* 300-500 are text steps; kept dark enough for AA on the gray-700 tint. */
+  --gray-300: 40 40 40;
+  --gray-400: 48 48 48;
+  --gray-500: 58 58 58;
+  --gray-600: 142 142 142;
   --gray-700: 168 168 168;
   --gray-800: 221 221 221;
   --gray-900: 245 245 245;
@@ -357,7 +359,9 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   border-top: 1px solid var(--atlas-retro-control-border);
   padding: 0.4rem 0.75rem;
   font-size: 0.8rem;
-  color: var(--atlas-retro-control-fg);
+  /* The footer sits on the window fill, not on a control, so it keeps the
+     window's (AA-checked) text colour. */
+  color: inherit;
 }
 .atlas-retro-workbench-help { font-size: 0.825rem; margin-bottom: 0.8rem; }
 .atlas-retro-form { display: flex; align-items: end; flex-wrap: wrap; gap: 0.75rem; }
@@ -391,6 +395,26 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   outline-offset: 3px;
 }
 .atlas-retro-button:disabled { cursor: not-allowed; opacity: 0.65; }
+/* Primary action (Settings "Save Changes"): the theme's AA accent fill, with
+ * enough specificity to win over per-theme demo button chrome. */
+:root[data-atlas-theme] .atlas-retro-button.atlas-retro-button-primary:not(:disabled) {
+  background: var(--atlas-accent-fill-bg, #2563eb);
+  color: var(--atlas-accent-fill-fg, #ffffff);
+  border-color: var(--atlas-accent-fill-fg, #ffffff);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--atlas-accent-fill-bg, #2563eb);
+}
+/* Disabled reads as unavailable by shape, not only by fading: no fill, a
+ * dashed outline and the AA dim-text gray, at full opacity. */
+:root[data-atlas-theme] .atlas-retro-button:disabled {
+  opacity: 1;
+  background: transparent;
+  background-image: none;
+  color: rgb(var(--gray-400));
+  border: 2px dashed rgb(var(--gray-400));
+  box-shadow: none;
+  text-shadow: none;
+}
 
 /* Windows 95: classic raised buttons, inset fields, squared title bars. */
 [data-atlas-theme="win95"] .atlas-retro-window-titlebar {
@@ -593,4 +617,55 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+/* Transcript and composer plates (issue #1119). Several retro desktops paint
+   wallpaper (XP bliss blue, Win95 teal, Amiga blue) behind the chat column.
+   Bubbles already carry their own surface, but compact rows (tool calls,
+   approvals, logs, system notices, agent status) and the composer toolbar
+   would otherwise sit on that wallpaper, where no text colour can reach
+   4.5:1 across a gradient. Back them with the theme's transcript surface. The
+   base Dark/Light themes paint the same gray-900 already, so they are left
+   untouched. */
+:root[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .atlas-transcript-row {
+  background-color: rgb(var(--gray-800));
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+}
+:root[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .atlas-composer-plate {
+  background-color: rgb(var(--gray-800));
+}
+
+/* Dark-key retro themes: Tailwind's prose-invert ships fixed light grays
+   (#d1d5db body, #fff headings) that assume Atlas Dark panels. Route them
+   through the theme ramp, as Light already does, so mid-gray panels (Mac OS 9
+   Platinum, C64) keep AA. Atlas Dark itself is untouched. */
+:root[data-theme="dark"][data-atlas-theme]:not([data-atlas-theme="dark"]) .prose-invert {
+  --tw-prose-invert-body: rgb(var(--gray-300));
+  --tw-prose-invert-headings: rgb(var(--gray-50));
+  --tw-prose-invert-bold: rgb(var(--gray-50));
+  --tw-prose-invert-counters: rgb(var(--gray-400));
+  --tw-prose-invert-quotes: rgb(var(--gray-100));
+  --tw-prose-invert-code: rgb(var(--gray-50));
+  --tw-prose-invert-pre-code: rgb(var(--gray-200));
+  --tw-prose-invert-captions: rgb(var(--gray-400));
+}
+
+/* "Not saved" warning text takes the theme's AA danger tone (issue #1119);
+   the fixed red-200/red-300 utilities assume the Atlas Dark header. */
+:root[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .conversation-not-saved-label,
+:root[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .conversation-not-saved-accent {
+  color: var(--atlas-fg-danger);
+}
+/* The "Not saved" save-mode control tints itself red-950 at 30-50%, which on a
+   light demo menubar (DOS CGA, Midnight Commander) leaves no text colour that
+   passes at rest and on hover. Retro themes outline it in the danger tone
+   instead and use the header's own hover tint. */
+:root[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .conversation-save-not-saved {
+  background-color: transparent;
+  border-color: var(--atlas-fg-danger);
+  color: inherit;
+}
+:root[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .conversation-save-not-saved:hover {
+  background-color: rgb(var(--gray-700));
 }

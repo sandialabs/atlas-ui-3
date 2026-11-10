@@ -42,7 +42,9 @@
   --gray-100: 243 244 246;
   --gray-200: 229 231 235;
   --gray-300: 209 213 219;
-  --gray-400: 156 163 175;
+  /* gray-400 is the secondary-text step; nudged from Tailwind 156 163 175 so it
+     reaches AA on gray-700 controls and hover rows too (issue #1119). */
+  --gray-400: 170 176 187;
   --gray-500: 107 114 128;
   --gray-600: 75 85 99;
   --gray-700: 55 65 81;
@@ -56,7 +58,9 @@
   --gray-100: 31 41 55;
   --gray-200: 55 65 81;
   --gray-300: 75 85 99;
-  --gray-400: 107 114 128;
+  /* Nudged from Tailwind 107 114 128 (4.39:1 on gray-800) so secondary text
+     reaches AA on gray-800 panels and gray-700 rows (issue #1119). */
+  --gray-400: 97 103 117;
   --gray-500: 156 163 175;
   --gray-600: 209 213 219;
   --gray-700: 229 231 235;
@@ -725,6 +729,22 @@
 .atlas-status-neutral { background-color: #4b5563; color: #ffffff; }
 .atlas-status-orange { background-color: #9a3412; color: #ffffff; }
 .atlas-status-blue { background-color: #1d4ed8; color: #ffffff; }
+
+/* Semantic transcript foregrounds (logs, system notices, tool/approval/agent
+ * headings). Generated per theme in baseThemes.generated.css and
+ * retroCatalog.generated.css so each reaches 4.5:1 on the panels the text sits
+ * on; the fallbacks are the original dark-mode Tailwind shades. */
+.atlas-fg-danger { color: var(--atlas-fg-danger, #fca5a5); }
+.atlas-fg-warning { color: var(--atlas-fg-warning, #fde047); }
+.atlas-fg-alert { color: var(--atlas-fg-alert, #fdba74); }
+.atlas-fg-info { color: var(--atlas-fg-info, #93c5fd); }
+.atlas-fg-success { color: var(--atlas-fg-success, #86efac); }
+.atlas-fg-agent { color: var(--atlas-fg-agent, #d8b4fe); }
+/* Text-safe forms of the gray-600/700 steps. The ramps use those steps as
+ * surface tints, so dim metadata text (sidebar timestamps, message counts)
+ * uses these instead of text-gray-600/700. */
+.atlas-text-gray-600 { color: rgb(var(--atlas-text-gray-600, var(--gray-500))); }
+.atlas-text-gray-700 { color: rgb(var(--atlas-text-gray-700, var(--gray-500))); }
 
 /* Each alias is generated against the surface of its actual content state. */
 .atlas-header-accent { color: var(--atlas-header-accent); }

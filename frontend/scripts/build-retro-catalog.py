@@ -197,6 +197,18 @@ def focus_color(accent, surface, control):
     return min(eligible, key=lambda c: sum((x - y) ** 2 for x, y in zip(c, accent)))
 
 
+def try_focus_color(accent, surface, control):
+    """focus_color(), or None when no blend of the accent reaches 3.1:1.
+
+    Callers then keep their fallback ring (the adapter default, or pure
+    black/white in legal_ring), so a missing blend is never silently dropped.
+    """
+    try:
+        return focus_color(accent, surface, control)
+    except ValueError:
+        return None
+
+
 def content_foreground(accent, surfaces):
     """Closest accent shade meeting AA on every actual state of this surface."""
     choices = [blend(accent, endpoint, step / 100)
@@ -218,6 +230,16 @@ def text_shade(surface, minimum):
     return target
 
 
+def ramp_text_shade(surface, surfaces, minimum):
+    """Like text_shade(), but the shade must reach minimum on every surface."""
+    target = high_contrast(surface)
+    for n in range(101):
+        value = blend(surface, target, n/100)
+        if all(contrast(value, bg) >= minimum for bg in surfaces):
+            return value
+    return target
+
+
 def utility_surface(surface, amount, foregrounds):
     for step in range(round(amount * 100), -1, -1):
         candidate = blend(surface, high_contrast(surface), step / 100)
@@ -234,14 +256,97 @@ def entry_id(item):
     return LEGACY_IDS.get(item['id'], item['slug'][3:])
 
 
+# Semantic foreground tones for transcript content (logs, system notices,
+# tool/approval/agent headings). Seeds are the Tailwind -300 shade the
+# components used before (dark panels) and the matching -700 shade (light
+# panels); content_foreground() keeps the closest shade that reaches AA on
+# every surface the text can sit on, so the hue survives on every theme.
+TONE_SEEDS = {
+    'danger': ('#fca5a5', '#b91c1c'), 'warning': ('#fde047', '#a16207'),
+    'alert': ('#fdba74', '#c2410c'), 'info': ('#93c5fd', '#1d4ed8'),
+    'success': ('#86efac', '#15803d'), 'agent': ('#d8b4fe', '#7e22ce'),
+}
+# Text-safe forms of the gray-600/700 steps. The generated ramps use those
+# steps as surface tints (hover rows, panels), so text that wants "dimmer than
+# gray-500" uses these aliases instead (sidebar timestamps, message counts).
+TEXT_GRAY_STEPS = (600, 700)
+
+
+# Window/dialog fill and text colour per theme, recorded by generate_chrome().
+CHROME_SURFACES = {}
+CHROME_TEXT_STEPS = (50, 100, 200, 300, 400, 500)
+
+
+def chrome_ramp(bg, fg):
+    """Gray ramp for content inside a retro window (.atlas-theme-chrome).
+
+    Many demos paint windows in a different key from the desktop (Memphis and
+    Op Art use white windows on a dark palette, Game Boy a green LCD panel).
+    Tailwind gray utilities inside those windows would otherwise resolve
+    against the desktop ramp and land light-on-light. Inside the window the
+    surfaces become small tints of its own fill and every text step a dimmer
+    form of its own text colour that still reaches AA on all of them.
+    """
+    ink = high_contrast(bg)
+    ramp = {800: bg, 900: blend(bg, ink, .04), 700: blend(bg, ink, .08),
+            600: blend(bg, ink, .2)}
+    surfaces = [ramp[900], ramp[800], ramp[700]]
+    for index, step in enumerate(CHROME_TEXT_STEPS):
+        ramp[step] = content_foreground(blend(fg, bg, index * .07), surfaces)
+    return ramp, surfaces
+
+
+# Header strip fill and text colour per theme (demo menubar), same purpose.
+HEADER_SURFACES = {}
+
+
+def chrome_island_rule(ident, grays):
+    """CSS that re-keys the gray ramp inside this theme's windows, or ''."""
+    if ident not in CHROME_SURFACES:
+        return ''
+    bg, fg = CHROME_SURFACES[ident]
+    return island_rule(ident, grays, bg, fg, ('.atlas-theme-chrome', '.atlas-retro-window'), 'Window')
+
+
+def header_island_rule(ident, grays):
+    """The same re-keying for a demo menubar used as the Atlas header strip."""
+    if ident not in HEADER_SURFACES:
+        return ''
+    bg, fg = HEADER_SURFACES[ident]
+    return island_rule(ident, grays, bg, fg, ('.atlas-theme-header',), 'Header')
+
+
+def island_rule(ident, grays, bg, fg, selectors, label, tone_surfaces=()):
+    if all(contrast(grays[step], bg) >= 4.55 for step in CHROME_TEXT_STEPS):
+        return ''
+    ramp, surfaces = chrome_ramp(bg, fg)
+    light_panel = luminance(bg) >= .18
+    tone_targets = surfaces + list(tone_surfaces)
+    lines = [f'  --gray-{step}: {css_rgb(ramp[step])};' for step in sorted(ramp)]
+    lines += [f'  --atlas-text-gray-{step}: {css_rgb(ramp[step - 200])};'
+              for step in TEXT_GRAY_STEPS]
+    lines += [f'  --atlas-fg-{tone}: '
+              f'{hexcolor(content_foreground(rgb(light if light_panel else dark), tone_targets))};'
+              for tone, (dark, light) in TONE_SEEDS.items()]
+    selector = ',\n'.join(f'[data-atlas-theme="{ident}"] {sel}' for sel in selectors)
+    return (f'/* {label} content ramp: {ident} {label.lower()}s are {hexcolor(bg)}. */\n'
+            f'{selector} {{\n'+'\n'.join(lines)+'\n}')
+
+
 def content_adapters(catalog, generated_css, link_accents=None):
+    """Return (base_css, retro_css) AA content aliases.
+
+    base_css covers the Atlas Dark/Light themes and always ships; retro_css
+    covers the 53 catalog themes and ships only with VITE_FEATURE_RETRO_THEMES.
+    """
     # Resolve the same gray cascade as the browser, including the handcrafted
     # legacy adapters. Never change the original MIT source tokens.
     sources = [(ROOT.parent/'index.css').read_text(),
                (ROOT/'theme-presets.css').read_text(), generated_css]
     entries = [{'id': 'dark', 'mode': 'dark'}, {'id': 'light', 'mode': 'light'}] + catalog
     link_accents = link_accents or {}
-    rules = ['/* AA content aliases against real conversation and header surfaces. */']
+    header = '/* AA content aliases against real conversation and header surfaces. */'
+    base_rules, retro_rules = [header], [header]
     for entry in entries:
         grays = {}
         for source in sources:
@@ -250,6 +355,15 @@ def content_adapters(catalog, generated_css, link_accents=None):
                         f'[data-atlas-theme="{entry["id"]}"]' in selector):
                     grays.update({int(k): tuple(map(int, v.split())) for k, v in
                                   re.findall(r'--gray-(\d+):\s*([\d ]+);', declarations)})
+        # Transcript text sits on the conversation panels (gray-800), hover and
+        # control tints (gray-700) and, usually, the gray-900 desktop. A few
+        # themes paint a light gray-900 under a dark demo wallpaper (Game Boy
+        # DMG); there no single shade fits both sides, so gray-900 is dropped
+        # and the browser check measures the real composited desktop instead.
+        transcript = [grays[900], grays[800], grays[700]]
+        if not any(all(contrast(c, bg) >= 4.55 for bg in transcript)
+                   for c in ((0, 0, 0), (255, 255, 255))):
+            transcript = [grays[800], grays[700]]
         surfaces = {'link': [grays[800]], 'syntax-keyword': [grays[900]],
                     'syntax-string': [grays[900]], 'syntax-number': [grays[900]],
                     'syntax-comment': [grays[900]],
@@ -260,27 +374,64 @@ def content_adapters(catalog, generated_css, link_accents=None):
                    'syntax-string': '#16a34a', 'syntax-number': '#ca8a04',
                    'syntax-comment': '#6b7280', 'header-menu-accent': '#60a5fa',
                    'header-accent': '#60a5fa', 'header-hover-accent': '#60a5fa'}
+        light_panel = luminance(grays[800]) >= .18
+        for tone, (dark_seed, light_seed) in TONE_SEEDS.items():
+            surfaces[f'fg-{tone}'] = transcript
+            accents[f'fg-{tone}'] = light_seed if light_panel else dark_seed
         declarations = [f'  --atlas-{key}: {hexcolor(content_foreground(rgb(accents[key]), bgs))};'
                         for key, bgs in surfaces.items()]
-        rules.append(f'[data-atlas-theme="{entry["id"]}"] {{\n'+
-                     '\n'.join(declarations)+'\n}')
-    return '\n\n'.join(rules)
+        declarations += [f'  --atlas-text-gray-{step}: '
+                         f'{css_rgb(content_foreground(grays[step], transcript))};'
+                         for step in TEXT_GRAY_STEPS]
+        rule = (f'[data-atlas-theme="{entry["id"]}"] {{\n'+
+                '\n'.join(declarations)+'\n}')
+        (base_rules if entry['id'] in ('dark', 'light') else retro_rules).append(rule)
+        if entry['id'] not in ('dark', 'light'):
+            for island in (chrome_island_rule(entry['id'], grays),
+                           header_island_rule(entry['id'], grays)):
+                if island:
+                    retro_rules.append(island)
+    return '\n\n'.join(base_rules), '\n\n'.join(retro_rules)
+
+
+def theme_modes(catalog):
+    return {'dark': 'dark', 'light': 'light', **{t['id']: t['mode'] for t in catalog}}
 
 
 def theme_bootstrap(catalog):
-    modes = {'dark': 'dark', 'light': 'light', **{t['id']: t['mode'] for t in catalog}}
+    modes = theme_modes(catalog)
     return ("// Generated by build-retro-catalog.py; do not edit.\n"
             "// Synchronous first-paint counterpart of ThemeContext / resolveThemeId.\n"
+            "// A retro ID is only applied when the build ships the catalog\n"
+            "// (data-retro-themes=\"true\" on this script tag, from\n"
+            "// VITE_FEATURE_RETRO_THEMES) and the cached server config has not\n"
+            "// turned FEATURE_RETRO_THEMES_ENABLED off. Otherwise the saved ID\n"
+            "// falls back to its own light/dark base mode, so there is no flash.\n"
             "(function () {\n"
             "  var modes = "+json.dumps(modes, separators=(',', ':'))+";\n"
+            "  var script = document.currentScript;\n"
+            "  var retro = !!script && script.getAttribute('data-retro-themes') === 'true';\n"
             "  var id = 'dark';\n"
             "  try {\n"
             "    var saved = localStorage.getItem('atlas-theme');\n"
             "    if (Object.prototype.hasOwnProperty.call(modes, saved)) id = saved;\n"
+            "    var cached = JSON.parse(localStorage.getItem('chatui-config-cache') || 'null');\n"
+            "    if (cached && cached.features && cached.features.retro_themes === false) retro = false;\n"
             "  } catch { /* Storage can be unavailable in privacy modes. */ }\n"
+            "  if (!retro && id !== 'dark' && id !== 'light') id = modes[id];\n"
             "  document.documentElement.setAttribute('data-theme', modes[id]);\n"
             "  document.documentElement.setAttribute('data-atlas-theme', id);\n"
             "})();\n")
+
+
+def theme_modes_module(catalog):
+    modes = {t['id']: t['mode'] for t in catalog}
+    return ("// Generated by frontend/scripts/build-retro-catalog.py; do not edit.\n"
+            "// Base light/dark mode of every retro theme ID. Always bundled (about\n"
+            "// 1 kB) so a saved retro ID falls back to its own base mode when the\n"
+            "// catalog is compiled out or turned off at run time.\n"
+            "export const RETRO_THEME_MODES = Object.freeze("
+            + json.dumps(modes, indent=2) + ")\n")
 
 
 def source_colors(info, vars):
@@ -835,13 +986,21 @@ def map_component(ident, atlas_selectors, picked, *, extra=(), allow_size=False,
     return emit_mapped(ident, atlas_selectors, filtered, comment or f'from .{name}' if name and not name.startswith(('button', 'input', 'textarea')) else f'from {name}'), name
 
 
-def map_states(ident, atlas_selector, rules, classname, states=('hover', 'active', 'disabled')):
+def map_states(ident, atlas_selector, rules, classname, states=('hover', 'active', 'disabled'),
+               variables=None, base_fg=None):
     parts = []
     if not classname:
         return parts
     for state in states:
         for _selector, decls in state_rules(rules, classname, state):
             filtered = filter_decls(decls)
+            state_bg = first_color_from_decls(filtered, variables or {}, ('background-color', 'background'))
+            has_fg = any(prop == 'color' for prop, _ in filtered)
+            if (state != 'disabled' and state_bg and base_fg and not has_fg
+                    and contrast(base_fg, state_bg) < 4.55):
+                # The demo recolours the fill on hover/press but leaves the
+                # label alone; keep the label hue, deepened just enough for AA.
+                filtered = filtered + [('color', hexcolor(content_foreground(base_fg, [state_bg])))]
             if filtered:
                 parts.append(
                     f'[data-atlas-theme="{ident}"] {atlas_selector}:{state} {{\n'
@@ -983,6 +1142,9 @@ def generate_chrome(systems, variables_by_id):
             name, _selector, decls = window
             filtered = [d for d in filter_decls(decls) if not d[0].startswith('padding') and d[0] != 'text-align']
             filtered, _bg = ensure_readable(filtered, variables, variables.get('_surface_rgb'))
+            window_fg = next((rgb(v) for p_, v in filtered if p_ == 'color' and rgb(v)), None)
+            if _bg:
+                CHROME_SURFACES[ident] = (tuple(_bg), window_fg or high_contrast(_bg))
             mapped_window = emit_mapped(ident, ['.atlas-retro-window', '.atlas-theme-chrome'], filtered,
                                  f'from .{name}' if name and not name[0].isupper() else f'from {name}')
             if mapped_window:
@@ -990,6 +1152,7 @@ def generate_chrome(systems, variables_by_id):
         if not mapped_window:
             surface = variables.get('_surface_rgb') or (255, 255, 255)
             accent = variables.get('_accent_rgb')
+            CHROME_SURFACES[ident] = (tuple(surface), high_contrast(surface))
             blocks.append(fallback_window(ident, variables, surface, accent))
         if window and window[0].endswith('-inner'):
             # GeoCities .construction is a padded hazard-stripe box around
@@ -1112,18 +1275,25 @@ def generate_chrome(systems, variables_by_id):
         demo_focus = demo_focus_color(rules, variables)
         if demo_focus:
             ring_src = demo_focus
-        try:
-            ring = focus_color(ring_src, surface or (255, 255, 255), button_bg or surface or (255, 255, 255))
-            if title_bg:
-                ring = focus_color(ring, title_bg, button_bg or title_bg)
+        ring = try_focus_color(ring_src, surface or (255, 255, 255), button_bg or surface or (255, 255, 255))
+        if ring is not None and title_bg:
+            ring = try_focus_color(ring, title_bg, button_bg or title_bg)
+        if ring is not None:
             blocks.append(
                 f'[data-atlas-theme="{ident}"] {{\n'
                 f'  --atlas-focus-ring: {hexcolor(ring)};\n}}'
             )
-        except ValueError:
-            pass
+        # Otherwise the adapter's --atlas-focus-ring stays in effect; the
+        # legal_ring() pass below still guarantees a 3:1 ring on window/button.
         if button_name and not button_name.startswith(('button', 'input')):
-            blocks.extend(map_states(ident, '.atlas-retro-button', rules, button_name))
+            # The label colour actually emitted (ensure_readable may have
+            # replaced the demo's), which is what a hover fill sits under.
+            emitted = re.findall(r'^\s*color:\s*(#[0-9a-fA-F]{6})\s*;', mapped or '', re.M)
+            button_fg = rgb(emitted[-1]) if emitted else (
+                first_color_from_decls(button[2], variables, ('color',)) if button else None)
+            blocks.extend(map_states(ident, '.atlas-retro-button', rules, button_name,
+                                     variables=variables,
+                                     base_fg=button_fg or (high_contrast(button_bg) if button_bg else None)))
 
         mapped, _ = map_component(
             ident,
@@ -1308,6 +1478,10 @@ def generate_chrome(systems, variables_by_id):
                                       extra=TITLE_LAYOUT_PROPS)
             if mapped:
                 blocks.append(mapped)
+                header_bg = first_color_from_decls(menubar[2], variables, ('background-color', 'background'))
+                header_fg = first_color_from_decls(menubar[2], variables, ('color',))
+                if header_bg:
+                    HEADER_SURFACES[ident] = (header_bg, header_fg or high_contrast(header_bg))
         elif titlebar and item['id'] in (1, 2, 3, 4, 5, 6, 7, 9, 19, 20):
             # OS themes: header is a chrome strip, not the desktop.
             pass
@@ -1333,11 +1507,9 @@ def generate_chrome(systems, variables_by_id):
 
         def legal_ring(win, btn, preference=None):
             candidates = []
-            if preference:
-                try:
-                    candidates.append(focus_color(preference, win, btn))
-                except ValueError:
-                    pass
+            preferred = try_focus_color(preference, win, btn) if preference else None
+            if preferred is not None:
+                candidates.append(preferred)
             candidates.extend(((0, 0, 0), (255, 255, 255)))
             usable = [c for c in candidates
                       if contrast(c, win) >= 3.1 and contrast(c, btn) >= 3.1]
@@ -1469,24 +1641,6 @@ def build():
                 else ('"Times New Roman", Times, serif'))
         if item['id'] == 40:
             font = '"Times New Roman", Times, serif'
-        lines = [
-            f'[data-atlas-theme="{ident}"] {{',
-            f'  color-scheme: {"dark" if dark else "light"};',
-            f'  --atlas-font-ui: {font};',
-            f'  --atlas-body-fg: {hexcolor(high_contrast(bg) if contrast(high_contrast(bg), bg) >= 4.55 else high_contrast(surface))};',
-            f'  --atlas-retro-window-fg: {hexcolor(high_contrast(surface))};',
-            f'  --atlas-radius: {radii};',
-            f'  --atlas-accent: {hexcolor(accent)};',
-            f'  --atlas-focus-ring: {hexcolor(focus_color(demo_focus, surface, control))};',
-            f'  --atlas-retro-window-bg: {hexcolor(surface)};',
-            f'  --atlas-retro-header-bg: {hexcolor(header if contrast(header, high_contrast(header)) >= 3 else surface)};',
-            f'  --atlas-retro-header-fg: {hexcolor(header_foreground)};',
-            f'  --atlas-retro-control-bg: {hexcolor(control)};',
-            f'  --atlas-retro-control-fg: {hexcolor(high_contrast(control))};',
-            f'  --atlas-retro-input-bg: {hexcolor(bg if contrast(high_contrast(bg), bg) >= 4.55 else surface)};',
-            f'  --atlas-retro-input-fg: {hexcolor(high_contrast(bg) if contrast(high_contrast(bg), bg) >= 4.55 else high_contrast(surface))};',
-            f'  --atlas-retro-control-border: {hexcolor(border)};',
-        ]
         # Input/window surfaces should follow the window chrome, not the desktop.
         input_bg = surface if contrast(high_contrast(surface), surface) >= 4.55 else bg
         lines = [
@@ -1510,13 +1664,31 @@ def build():
         grays = {900: bg if dark else surface,
                  800: surface,
                  700: utility_surface(surface, .07, [text_shade(surface, 7.4), high_contrast(surface)]),
-                 600: utility_surface(surface, .22, [high_contrast(surface)]),
-                 500: text_shade(surface, 4.6), 400: text_shade(surface, 5.2),
-                 300: text_shade(surface, 6.4), 200: text_shade(surface, 7.4),
-                 100: text_shade(surface, 9.1), 50: high_contrast(surface)}
+                 600: None}
+        if dark and high_contrast(surface) == (255, 255, 255) and contrast((255, 255, 255), bg) < 7.4:
+            # The demo desktop is in the opposite key from its panels (Game Boy
+            # DMG: beige console around a dark LCD). gray-900 is also the code
+            # and input well under light text, so it becomes a deeper panel
+            # tint; the desktop itself is still painted by the chrome CSS.
+            grays[900] = blend(surface, (0, 0, 0), .25)
         if not dark:
             # Light themes: gray-900 is the deepest *surface* (window), desktop stays --bg.
             grays[900] = blend(surface, (0, 0, 0), .08) if luminance(surface) > luminance(bg) else surface
+        # Text steps must hold on every surface step they meet (panels, hover
+        # tints and, where it is in the same key, the gray-900 desktop), not
+        # just the gray-800 panel they were first tuned against.
+        text_surfaces = [grays[800], grays[700]]
+        if contrast(high_contrast(surface), grays[900]) >= 9.1:
+            text_surfaces.append(grays[900])
+        grays.update({500: ramp_text_shade(surface, text_surfaces, 4.6),
+                      400: ramp_text_shade(surface, text_surfaces, 5.2),
+                      300: ramp_text_shade(surface, text_surfaces, 6.4),
+                      200: ramp_text_shade(surface, text_surfaces, 7.4),
+                      100: ramp_text_shade(surface, text_surfaces, 9.1),
+                      50: high_contrast(surface)})
+        # gray-600 is the hover fill of gray-700 controls, so body text
+        # (gray-200) on a hovered control must still reach AA.
+        grays[600] = utility_surface(surface, .22, [grays[200], high_contrast(surface)])
         lines.extend(f'  --gray-{key}: {css_rgb(value)};' for key, value in sorted(grays.items(), reverse=True))
         lines.append('}')
         adapters.append('\n'.join(lines))
@@ -1534,8 +1706,15 @@ def build():
         '  }))\n'
         ')\n'
     )
-    adapter_css = '\n\n'.join(adapters).rstrip()+'\n\n'+content_adapters(catalog, '\n\n'.join(adapters), link_accents)+'\n'
+    base_content, retro_content = content_adapters(catalog, '\n\n'.join(adapters), link_accents)
+    adapter_css = '\n\n'.join(adapters).rstrip()+'\n\n'+retro_content+'\n'
+    base_css = ('/* Generated by frontend/scripts/build-retro-catalog.py; do not edit.\n'
+                ' * AA content aliases for the Atlas Dark/Light themes. Always bundled,\n'
+                ' * including builds with VITE_FEATURE_RETRO_THEMES=false.\n'
+                ' */\n'+base_content+'\n')
     return {
+        ROOT/'baseThemes.generated.css': base_css,
+        ROOT/'retroThemeModes.generated.js': theme_modes_module(catalog),
         catalog_file: catalog_js,
         VENDOR/'tokens.css': '\n\n'.join(scopes).rstrip()+'\n',
         ROOT/'retroCatalog.generated.css': adapter_css,

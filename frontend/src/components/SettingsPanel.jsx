@@ -55,7 +55,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // config fetch), but unmounting it on a tab switch throws away the save-result
   // notifications its cards raise.
   const [adminTabVisited, setAdminTabVisited] = useState(false)
-  const { toggleTheme, themeDefinition } = useTheme()
+  const { toggleTheme, themeDefinition, retroThemesAvailable } = useTheme()
   const darkBaseTheme = themeDefinition.mode === 'dark'
   // Default settings
   const defaultSettings = {
@@ -577,7 +577,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
             )}
           </RetroWindow>
 
-          <ThemePicker />
+          {/* The retro gallery is gated twice (issue #1119): the
+              VITE_FEATURE_RETRO_THEMES build flag and the run-time
+              FEATURE_RETRO_THEMES_ENABLED setting. Light/Dark stay above. */}
+          {retroThemesAvailable && <ThemePicker />}
 
           {/* LLM Temperature Setting */}
           <div className="space-y-3">
@@ -934,8 +937,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               Cancel
             </RetroButton>
             <RetroButton
+              variant="primary"
               onClick={handleSave}
               disabled={!hasChanges}
+              title={hasChanges ? undefined : 'No unsaved changes'}
             >
               Save Changes
             </RetroButton>

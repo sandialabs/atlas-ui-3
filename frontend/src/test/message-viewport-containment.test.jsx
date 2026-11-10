@@ -292,7 +292,14 @@ describe('mobile full-width responsive layout', () => {
     // w-full, so they don't overflow the row beside the avatar at sm+.
     // Match the full className of each div without embedding the asserted
     // classes in the pattern, so the assertions are real checks.
-    const agentBubble = chatArea.match(/className="([^"]*border-purple-700[^"]*)"/)
+    // The agent-pending bubble lives in AgentQuestionPrompt (ChatArea mounts it)
+    // so the browser contrast check can render the shipped markup.
+    expect(chatArea).toContain('<AgentQuestionPrompt')
+    const agentPrompt = readFileSync(
+      resolve(process.cwd(), 'src/components/AgentQuestionPrompt.jsx'),
+      'utf8'
+    )
+    const agentBubble = agentPrompt.match(/className="([^"]*border-purple-700[^"]*)"/)
     // Match the bubble inside the isThinking block by finding the second
     // occurrence of "rounded-lg p-3 sm:p-4" after "isThinking".
     const thinkingStart = chatArea.indexOf('isThinking && (')

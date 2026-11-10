@@ -217,7 +217,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         <div className="text-gray-200">
           <div className="flex items-center gap-2 mb-2">
             <span className={`px-2 py-1 rounded text-xs font-medium ${
-              isRejected ? 'bg-red-600' : 'bg-green-600'
+              isRejected ? 'bg-red-600 text-white' : 'bg-green-700 text-white'
             }`}>
               {settledLabel}
             </span>
@@ -233,7 +233,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     return (
       <div className="text-gray-200">
         <div className="flex items-center gap-2 mb-3">
-          <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-600">
+          <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-600 text-black">
             APPROVAL REQUIRED
           </span>
           <span className="font-medium">{message.tool_name}</span>
@@ -246,7 +246,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
             <button
               type="button"
               onClick={toggleCollapsed}
-              className={`w-full text-left text-sm font-semibold text-yellow-400 mb-2 flex items-center gap-2 hover:text-yellow-300 transition-colors rounded ${FOCUS_RING}`}
+              className={`w-full text-left text-sm font-semibold atlas-fg-warning mb-2 flex items-center gap-2 hover:underline rounded ${FOCUS_RING}`}
               aria-expanded={isExpanded}
             >
               <span aria-hidden="true" className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
@@ -321,7 +321,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
     return (
       <div className="text-gray-200 flex items-center gap-2 flex-wrap">
         <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-          isRejected ? 'bg-red-600' : 'bg-green-600'
+          isRejected ? 'bg-red-600 text-white' : 'bg-green-700 text-white'
         }`}>
           {settledLabel}
         </span>
@@ -342,18 +342,18 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
         <button
           type="button"
           onClick={toggleCollapsed}
-          className={`flex items-center gap-2 text-left hover:text-white transition-colors cursor-pointer rounded ${FOCUS_RING}`}
+          className={`flex items-center gap-2 text-left hover:text-gray-50 transition-colors cursor-pointer rounded ${FOCUS_RING}`}
           aria-expanded={isExpanded}
         >
-          <span aria-hidden="true" className={`text-gray-500 text-xs transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
+          <span aria-hidden="true" className={`text-gray-400 text-xs transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
             ▶
           </span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-600">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-600 text-black">
             APPROVAL REQUIRED
           </span>
           <span className="font-medium text-sm">{message.tool_name}</span>
           {!isExpanded && argCount > 0 && (
-            <span className="text-gray-500 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
+            <span className="text-gray-400 text-xs">· {argCount} param{argCount !== 1 ? 's' : ''}</span>
           )}
         </button>
       </div>
@@ -367,7 +367,7 @@ const ToolApprovalMessage = ({ message, compact = true }) => {
       {isExpanded && (
         <div className="mt-2 ml-5 border-l-2 border-yellow-500 pl-3">
           <div className="flex items-center justify-between mb-1">
-            <div className="text-xs font-semibold text-yellow-400">Input Arguments</div>
+            <div className="text-xs font-semibold atlas-fg-warning">Input Arguments</div>
             {/* Hide the edit affordance when the server disallows edits — any
                 edits would be ignored server-side, so showing it is misleading. */}
             {message.allow_edit !== false && (

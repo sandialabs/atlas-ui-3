@@ -39,6 +39,49 @@ produces five deterministic assets:
   an invented motif.
 - `frontend/public/theme-bootstrap.js`: a synchronous, registry-derived theme
   ID/base-mode map applied before first paint, with the same Dark fallback as React.
+- `baseThemes.generated.css`: the content aliases for Atlas Dark and Light
+  only. It always ships; everything retro is in the files above.
+- `retroThemeModes.generated.js`: a frozen id-to-base-mode map that is all the
+  app keeps of the catalog when it is compiled out, so a saved retro ID still
+  resolves to its Light or Dark base.
+
+### Feature flags
+
+| Flag | Where | Default | Mechanism |
+|---|---|---|---|
+| `VITE_FEATURE_RETRO_THEMES` | build (Vite, Docker `ARG`) | `true` | `vite.config.js` aliases `@atlas/retro-themes` to `themes/retro/retroThemes.enabled.js` (imports the token, catalog and chrome CSS and exports the catalog) or `retroThemes.disabled.js` (empty catalog). Only the literal `false` disables it; see `themes/retro/retroThemesBuildFlag.js`. `index.html` passes the value to the bootstrap as `data-retro-themes`. |
+| `FEATURE_RETRO_THEMES_ENABLED` | backend `AppSettings` | `false` | Published as `features.retro_themes` in `/api/config/shell` and `/api/config`. `RetroThemeFeatureBridge` in `App.jsx` forwards it to `ThemeContext.setRetroThemesEnabled`. |
+
+`ThemeContext` keeps the user's `selectedTheme` separately from the applied
+`theme`: `theme = effectiveThemeId(selectedTheme, retroThemesAvailable)`, so a
+retro choice falls back to its base mode while the gallery is unavailable and
+comes back unchanged when it is re-enabled. The bootstrap applies the same rule
+before React mounts, reading the cached `chatui-config-cache` for the run-time
+flag, so a disabled deployment never flashes a retro theme. Vitest resolves the
+alias to the enabled module; `retro-themes-build-off.test.jsx` mocks it to the
+disabled one.
+
+### Content tones and surfaces
+
+Transcript text that used fixed Tailwind palette utilities now uses semantic
+classes defined in `index.css` and fed per theme by the generator:
+`atlas-fg-danger|warning|alert|info|success|agent` (log levels, system
+notices, tool/approval/agent headings) and `atlas-text-gray-600|700` (dimmer
+metadata such as sidebar timestamps and message counts, since the gray-600/700
+steps are surface tints in the retro ramps). Each value is the closest shade of
+the original hue that reaches 4.55:1 on every transcript surface.
+
+Two structural rules keep that true on real pages:
+
+- Compact transcript rows (tool calls, approvals, logs, system notices, agent
+  status) and the composer get a gray-800 plate (`.atlas-transcript-row`,
+  `.atlas-composer-plate`) in retro themes, so they never sit directly on desktop
+  wallpaper such as the XP Bliss gradient or the Windows 95 teal.
+- Where a theme's windows or header strip are painted in a different key from
+  its palette (Memphis and Op Art white windows, Game Boy LCD green, DOS CGA
+  gray menubar), the generator emits a window/header "content ramp" that
+  re-keys the gray steps and tones inside `.atlas-theme-chrome`,
+  `.atlas-retro-window` and `.atlas-theme-header`.
 
 The three previously shipped theme IDs (`mac7`, `win95`,
 `crt-phosphor`) and their explicit adapters remain compatible with saved
@@ -56,14 +99,25 @@ After `cd frontend && npm run build`, verify the rendered CSS against all
 python3 frontend/scripts/check-retro-browser.py --chrome /path/to/chrome
 ```
 
-The headless browser checks computed body, window, title, button and input
-text contrast, assistant links, highlighted syntax, fixed classification/log
-badges, header controls (including hover), user bubbles, and hovered/disabled
-labels (at least 4.5:1). Transparent surfaces are composited through their
-ancestors, and badge colors must remain identical across the catalog. It also
-checks the keyboard-focus outline against both
-its button and surrounding window (at least 3:1), focus visibility, and
-matching dark/light color-scheme. The Build Artifacts GitHub workflow runs
+The check builds `frontend/scripts/contrast-fixture/` (Vite library build)
+and renders the **real** React components in every theme: `Header`,
+`ConversationTreeRow` rows, `Message` (user and assistant bubbles, tool calls
+in every state, tool logs at every level, system notices, agent status),
+`ToolApprovalMessage` in compact and classic layouts, `AgentQuestionPrompt`,
+`RetroWindow`/`RetroButton`/`RetroWorkbench`, and `SettingsPanel` with the
+theme gallery. Only the context providers that need a backend (chat,
+WebSocket, marketplace, Globus) are replaced by static stubs. Every visible
+text node is measured at rest and again with its hover styles forced, against
+its composited background: alpha and `opacity` are blended through the
+ancestors, and gradient backgrounds are sampled at every colour stop. Text
+below 4.5:1 fails. Text whose result depends on the gradient position (some
+stops pass, some fail) or that sits on a `url()` image is listed as
+**UNMEASURABLE** with its ratio range; nothing is skipped silently. Use
+`--report out.json` for the full per-theme list. It also checks the
+keyboard-focus outline against both its button and surrounding window (at
+least 3:1 on the solid fills, with gradient stops below 3:1 reported as
+unmeasurable), a 3px width, that classification badges are identical across
+themes, and matching dark/light color-scheme. The Build Artifacts GitHub workflow runs
 this check on the built frontend using the runner's installed Chrome. This
 is a targeted theme contrast test, not a blanket accessibility certification.
 The source token parser rejects additional selectors, non-token CSS, and external

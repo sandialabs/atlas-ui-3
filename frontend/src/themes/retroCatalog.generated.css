@@ -28,11 +28,11 @@
   --gray-800: 236 233 216;
   --gray-700: 219 217 201;
   --gray-600: 184 182 168;
-  --gray-500: 104 103 95;
-  --gray-400: 94 93 86;
-  --gray-300: 83 82 76;
-  --gray-200: 73 72 67;
-  --gray-100: 59 58 54;
+  --gray-500: 92 91 84;
+  --gray-400: 85 84 78;
+  --gray-300: 71 70 65;
+  --gray-200: 61 61 56;
+  --gray-100: 47 47 43;
   --gray-50: 0 0 0;
 }
 
@@ -56,11 +56,11 @@
   --gray-800: 171 187 208;
   --gray-700: 159 174 193;
   --gray-600: 133 146 162;
-  --gray-500: 67 73 81;
-  --gray-400: 60 65 73;
-  --gray-300: 48 52 58;
-  --gray-200: 38 41 46;
-  --gray-100: 22 24 27;
+  --gray-500: 58 64 71;
+  --gray-400: 51 56 62;
+  --gray-300: 38 41 46;
+  --gray-200: 27 30 33;
+  --gray-100: 2 2 2;
   --gray-50: 0 0 0;
 }
 
@@ -84,11 +84,11 @@
   --gray-800: 255 255 255;
   --gray-700: 237 237 237;
   --gray-600: 199 199 199;
-  --gray-500: 117 117 117;
-  --gray-400: 107 107 107;
-  --gray-300: 94 94 94;
-  --gray-200: 84 84 84;
-  --gray-100: 71 71 71;
+  --gray-500: 105 105 105;
+  --gray-400: 94 94 94;
+  --gray-300: 82 82 82;
+  --gray-200: 74 74 74;
+  --gray-100: 61 61 61;
   --gray-50: 0 0 0;
 }
 
@@ -112,10 +112,10 @@
   --gray-800: 168 168 176;
   --gray-700: 156 156 164;
   --gray-600: 131 131 137;
-  --gray-500: 60 60 63;
-  --gray-400: 52 52 55;
-  --gray-300: 37 37 39;
-  --gray-200: 25 25 26;
+  --gray-500: 50 50 53;
+  --gray-400: 42 42 44;
+  --gray-300: 25 25 26;
+  --gray-200: 5 5 5;
   --gray-100: 0 0 0;
   --gray-50: 0 0 0;
 }
@@ -140,11 +140,11 @@
   --gray-800: 207 207 207;
   --gray-700: 193 193 193;
   --gray-600: 161 161 161;
-  --gray-500: 87 87 87;
-  --gray-400: 79 79 79;
-  --gray-300: 66 66 66;
-  --gray-200: 56 56 56;
-  --gray-100: 41 41 41;
+  --gray-500: 75 75 75;
+  --gray-400: 68 68 68;
+  --gray-300: 54 54 54;
+  --gray-200: 43 43 43;
+  --gray-100: 27 27 27;
   --gray-50: 0 0 0;
 }
 
@@ -168,11 +168,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -196,11 +196,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -223,12 +223,12 @@
   --gray-900: 11 11 30;
   --gray-800: 40 40 57;
   --gray-700: 55 55 71;
-  --gray-600: 87 87 101;
-  --gray-500: 145 145 154;
-  --gray-400: 156 156 164;
-  --gray-300: 173 173 180;
-  --gray-200: 186 186 192;
-  --gray-100: 206 206 209;
+  --gray-600: 85 85 99;
+  --gray-500: 163 163 170;
+  --gray-400: 173 173 180;
+  --gray-300: 193 193 198;
+  --gray-200: 206 206 209;
+  --gray-100: 227 227 229;
   --gray-50: 255 255 255;
 }
 
@@ -252,11 +252,11 @@
   --gray-800: 118 193 237;
   --gray-700: 110 179 220;
   --gray-600: 92 151 185;
-  --gray-500: 46 75 92;
-  --gray-400: 40 66 81;
-  --gray-300: 32 52 64;
-  --gray-200: 26 42 52;
-  --gray-100: 14 23 28;
+  --gray-500: 39 64 78;
+  --gray-400: 34 56 69;
+  --gray-300: 26 42 52;
+  --gray-200: 18 29 36;
+  --gray-100: 0 0 0;
   --gray-50: 0 0 0;
 }
 
@@ -280,11 +280,11 @@
   --gray-800: 60 60 60;
   --gray-700: 74 74 74;
   --gray-600: 103 103 103;
-  --gray-500: 169 169 169;
-  --gray-400: 179 179 179;
-  --gray-300: 198 198 198;
-  --gray-200: 212 212 212;
-  --gray-100: 234 234 234;
+  --gray-500: 187 187 187;
+  --gray-400: 200 200 200;
+  --gray-300: 220 220 220;
+  --gray-200: 236 236 236;
+  --gray-100: 255 255 255;
   --gray-50: 255 255 255;
 }
 
@@ -308,11 +308,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -335,12 +335,12 @@
   --gray-900: 10 7 4;
   --gray-800: 39 37 34;
   --gray-700: 54 52 49;
-  --gray-600: 87 85 83;
-  --gray-500: 143 142 140;
-  --gray-400: 153 153 151;
-  --gray-300: 169 168 167;
-  --gray-200: 182 181 180;
-  --gray-100: 201 200 200;
+  --gray-600: 84 83 80;
+  --gray-500: 160 159 158;
+  --gray-400: 169 168 167;
+  --gray-300: 188 187 186;
+  --gray-200: 201 200 200;
+  --gray-100: 223 222 222;
   --gray-50: 255 255 255;
 }
 
@@ -364,11 +364,11 @@
   --gray-800: 53 40 71;
   --gray-700: 67 55 84;
   --gray-600: 97 87 111;
-  --gray-500: 154 148 163;
-  --gray-400: 164 158 172;
-  --gray-300: 182 178 189;
-  --gray-200: 194 190 200;
-  --gray-100: 215 212 218;
+  --gray-500: 172 167 180;
+  --gray-400: 182 178 189;
+  --gray-300: 200 197 205;
+  --gray-200: 215 212 218;
+  --gray-100: 235 234 237;
   --gray-50: 255 255 255;
 }
 
@@ -392,11 +392,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -420,11 +420,11 @@
   --gray-800: 192 192 192;
   --gray-700: 179 179 179;
   --gray-600: 150 150 150;
-  --gray-500: 77 77 77;
-  --gray-400: 69 69 69;
-  --gray-300: 56 56 56;
-  --gray-200: 46 46 46;
-  --gray-100: 29 29 29;
+  --gray-500: 67 67 67;
+  --gray-400: 58 58 58;
+  --gray-300: 44 44 44;
+  --gray-200: 33 33 33;
+  --gray-100: 12 12 12;
   --gray-50: 0 0 0;
 }
 
@@ -448,11 +448,11 @@
   --gray-800: 192 192 192;
   --gray-700: 179 179 179;
   --gray-600: 150 150 150;
-  --gray-500: 77 77 77;
-  --gray-400: 69 69 69;
-  --gray-300: 56 56 56;
-  --gray-200: 46 46 46;
-  --gray-100: 29 29 29;
+  --gray-500: 67 67 67;
+  --gray-400: 58 58 58;
+  --gray-300: 44 44 44;
+  --gray-200: 33 33 33;
+  --gray-100: 12 12 12;
   --gray-50: 0 0 0;
 }
 
@@ -476,7 +476,7 @@
   --gray-800: 119 119 119;
   --gray-700: 117 117 117;
   --gray-600: 117 117 117;
-  --gray-500: 2 2 2;
+  --gray-500: 0 0 0;
   --gray-400: 0 0 0;
   --gray-300: 0 0 0;
   --gray-200: 0 0 0;
@@ -504,11 +504,11 @@
   --gray-800: 216 223 230;
   --gray-700: 201 207 214;
   --gray-600: 168 174 179;
-  --gray-500: 93 96 99;
-  --gray-400: 86 89 92;
-  --gray-300: 73 76 78;
-  --gray-200: 63 65 67;
-  --gray-100: 50 51 53;
+  --gray-500: 84 87 90;
+  --gray-400: 76 78 80;
+  --gray-300: 63 65 67;
+  --gray-200: 54 56 58;
+  --gray-100: 41 42 44;
   --gray-50: 0 0 0;
 }
 
@@ -528,15 +528,15 @@
   --atlas-retro-input-bg: #0f380f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #7b927b;
-  --gray-900: 184 176 164;
+  --gray-900: 11 42 11;
   --gray-800: 15 56 15;
   --gray-700: 32 70 32;
   --gray-600: 68 100 68;
-  --gray-500: 140 159 140;
-  --gray-400: 152 169 152;
-  --gray-300: 171 185 171;
-  --gray-200: 188 199 188;
-  --gray-100: 209 217 209;
+  --gray-500: 159 175 159;
+  --gray-400: 171 185 171;
+  --gray-300: 193 203 193;
+  --gray-200: 209 217 209;
+  --gray-100: 236 239 236;
   --gray-50: 255 255 255;
 }
 
@@ -560,11 +560,11 @@
   --gray-800: 244 243 240;
   --gray-700: 227 226 223;
   --gray-600: 190 190 187;
-  --gray-500: 110 109 108;
-  --gray-400: 100 100 98;
-  --gray-300: 88 87 86;
-  --gray-200: 78 78 77;
-  --gray-100: 63 63 62;
+  --gray-500: 98 97 96;
+  --gray-400: 90 90 89;
+  --gray-300: 78 78 77;
+  --gray-200: 68 68 67;
+  --gray-100: 54 53 53;
   --gray-50: 0 0 0;
 }
 
@@ -587,12 +587,12 @@
   --gray-900: 0 0 8;
   --gray-800: 31 31 38;
   --gray-700: 47 47 53;
-  --gray-600: 80 80 86;
-  --gray-500: 136 136 140;
-  --gray-400: 145 145 149;
-  --gray-300: 163 163 166;
-  --gray-200: 174 174 177;
-  --gray-100: 195 195 196;
+  --gray-600: 78 78 84;
+  --gray-500: 152 152 155;
+  --gray-400: 163 163 166;
+  --gray-300: 181 181 183;
+  --gray-200: 195 195 196;
+  --gray-100: 215 215 216;
   --gray-50: 255 255 255;
 }
 
@@ -615,12 +615,12 @@
   --gray-900: 10 10 10;
   --gray-800: 39 39 39;
   --gray-700: 54 54 54;
-  --gray-600: 87 87 87;
-  --gray-500: 143 143 143;
-  --gray-400: 153 153 153;
-  --gray-300: 171 171 171;
-  --gray-200: 184 184 184;
-  --gray-100: 203 203 203;
+  --gray-600: 84 84 84;
+  --gray-500: 160 160 160;
+  --gray-400: 171 171 171;
+  --gray-300: 190 190 190;
+  --gray-200: 203 203 203;
+  --gray-100: 225 225 225;
   --gray-50: 255 255 255;
 }
 
@@ -644,11 +644,11 @@
   --gray-800: 243 239 228;
   --gray-700: 226 222 212;
   --gray-600: 190 186 178;
-  --gray-500: 107 105 100;
-  --gray-400: 100 98 93;
-  --gray-300: 85 84 80;
-  --gray-200: 78 76 73;
-  --gray-100: 63 62 59;
+  --gray-500: 97 96 91;
+  --gray-400: 90 88 84;
+  --gray-300: 75 74 71;
+  --gray-200: 66 65 62;
+  --gray-100: 53 53 50;
   --gray-50: 0 0 0;
 }
 
@@ -672,11 +672,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -700,11 +700,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -728,11 +728,11 @@
   --gray-800: 31 31 180;
   --gray-700: 47 47 185;
   --gray-600: 80 80 196;
-  --gray-500: 163 163 224;
-  --gray-400: 174 174 228;
-  --gray-300: 195 195 235;
-  --gray-200: 210 210 240;
-  --gray-100: 233 233 248;
+  --gray-500: 177 177 229;
+  --gray-400: 190 190 233;
+  --gray-300: 212 212 241;
+  --gray-200: 228 228 246;
+  --gray-100: 251 251 254;
   --gray-50: 255 255 255;
 }
 
@@ -756,11 +756,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -784,11 +784,11 @@
   --gray-800: 31 31 180;
   --gray-700: 47 47 185;
   --gray-600: 80 80 196;
-  --gray-500: 163 163 224;
-  --gray-400: 174 174 228;
-  --gray-300: 195 195 235;
-  --gray-200: 210 210 240;
-  --gray-100: 233 233 248;
+  --gray-500: 177 177 229;
+  --gray-400: 190 190 233;
+  --gray-300: 212 212 241;
+  --gray-200: 228 228 246;
+  --gray-100: 251 251 254;
   --gray-50: 255 255 255;
 }
 
@@ -812,11 +812,11 @@
   --gray-800: 31 31 31;
   --gray-700: 47 47 47;
   --gray-600: 80 80 80;
-  --gray-500: 136 136 136;
-  --gray-400: 145 145 145;
-  --gray-300: 163 163 163;
-  --gray-200: 174 174 174;
-  --gray-100: 195 195 195;
+  --gray-500: 152 152 152;
+  --gray-400: 163 163 163;
+  --gray-300: 181 181 181;
+  --gray-200: 195 195 195;
+  --gray-100: 215 215 215;
   --gray-50: 255 255 255;
 }
 
@@ -839,12 +839,12 @@
   --gray-900: 19 20 36;
   --gray-800: 26 28 48;
   --gray-700: 42 44 62;
-  --gray-600: 76 78 94;
-  --gray-500: 134 135 145;
-  --gray-400: 143 144 154;
-  --gray-300: 159 160 168;
-  --gray-200: 173 173 180;
-  --gray-100: 191 191 197;
+  --gray-600: 74 76 91;
+  --gray-500: 150 151 160;
+  --gray-400: 159 160 168;
+  --gray-300: 177 178 185;
+  --gray-200: 191 191 197;
+  --gray-100: 211 212 216;
   --gray-50: 255 255 255;
 }
 
@@ -868,8 +868,8 @@
   --gray-800: 90 85 203;
   --gray-700: 102 97 207;
   --gray-600: 110 105 209;
-  --gray-500: 229 228 247;
-  --gray-400: 242 241 251;
+  --gray-500: 245 245 252;
+  --gray-400: 255 255 255;
   --gray-300: 255 255 255;
   --gray-200: 255 255 255;
   --gray-100: 255 255 255;
@@ -896,11 +896,11 @@
   --gray-800: 219 223 224;
   --gray-700: 204 207 208;
   --gray-600: 171 174 175;
-  --gray-500: 94 96 96;
-  --gray-400: 88 89 90;
-  --gray-300: 74 76 76;
-  --gray-200: 64 65 65;
-  --gray-100: 50 51 52;
+  --gray-500: 85 87 87;
+  --gray-400: 77 78 78;
+  --gray-300: 64 65 65;
+  --gray-200: 55 56 56;
+  --gray-100: 42 42 43;
   --gray-50: 0 0 0;
 }
 
@@ -924,11 +924,11 @@
   --gray-800: 237 237 237;
   --gray-700: 220 220 220;
   --gray-600: 185 185 185;
-  --gray-500: 104 104 104;
-  --gray-400: 97 97 97;
-  --gray-300: 83 83 83;
-  --gray-200: 73 73 73;
-  --gray-100: 62 62 62;
+  --gray-500: 95 95 95;
+  --gray-400: 85 85 85;
+  --gray-300: 73 73 73;
+  --gray-200: 64 64 64;
+  --gray-100: 50 50 50;
   --gray-50: 0 0 0;
 }
 
@@ -952,11 +952,11 @@
   --gray-800: 208 213 219;
   --gray-700: 193 198 204;
   --gray-600: 162 166 171;
-  --gray-500: 87 89 92;
-  --gray-400: 81 83 85;
-  --gray-300: 67 68 70;
-  --gray-200: 58 60 61;
-  --gray-100: 44 45 46;
+  --gray-500: 79 81 83;
+  --gray-400: 71 72 74;
+  --gray-300: 58 60 61;
+  --gray-200: 48 49 50;
+  --gray-100: 33 34 35;
   --gray-50: 0 0 0;
 }
 
@@ -980,10 +980,10 @@
   --gray-800: 42 82 125;
   --gray-700: 57 94 134;
   --gray-600: 89 120 154;
-  --gray-500: 185 198 212;
-  --gray-400: 200 210 221;
-  --gray-300: 225 231 237;
-  --gray-200: 244 246 248;
+  --gray-500: 206 215 225;
+  --gray-400: 221 227 234;
+  --gray-300: 249 250 251;
+  --gray-200: 255 255 255;
   --gray-100: 255 255 255;
   --gray-50: 255 255 255;
 }
@@ -1008,11 +1008,11 @@
   --gray-800: 223 217 237;
   --gray-700: 207 202 220;
   --gray-600: 174 169 185;
-  --gray-500: 96 93 102;
-  --gray-400: 87 85 92;
-  --gray-300: 74 72 78;
-  --gray-200: 65 63 69;
-  --gray-100: 51 50 55;
+  --gray-500: 85 82 90;
+  --gray-400: 78 76 83;
+  --gray-300: 65 63 69;
+  --gray-200: 56 54 59;
+  --gray-100: 40 39 43;
   --gray-50: 0 0 0;
 }
 
@@ -1036,11 +1036,11 @@
   --gray-800: 237 237 237;
   --gray-700: 220 220 220;
   --gray-600: 185 185 185;
-  --gray-500: 104 104 104;
-  --gray-400: 97 97 97;
-  --gray-300: 83 83 83;
-  --gray-200: 73 73 73;
-  --gray-100: 62 62 62;
+  --gray-500: 95 95 95;
+  --gray-400: 85 85 85;
+  --gray-300: 73 73 73;
+  --gray-200: 64 64 64;
+  --gray-100: 50 50 50;
   --gray-50: 0 0 0;
 }
 
@@ -1064,11 +1064,11 @@
   --gray-800: 244 243 238;
   --gray-700: 227 226 221;
   --gray-600: 190 190 186;
-  --gray-500: 110 109 107;
-  --gray-400: 100 100 98;
-  --gray-300: 88 87 86;
-  --gray-200: 78 78 76;
-  --gray-100: 63 63 62;
+  --gray-500: 98 97 95;
+  --gray-400: 90 90 88;
+  --gray-300: 78 78 76;
+  --gray-200: 68 68 67;
+  --gray-100: 54 53 52;
   --gray-50: 0 0 0;
 }
 
@@ -1092,11 +1092,11 @@
   --gray-800: 240 235 224;
   --gray-700: 223 219 208;
   --gray-600: 187 183 175;
-  --gray-500: 106 103 99;
-  --gray-400: 98 96 92;
-  --gray-300: 84 82 78;
-  --gray-200: 74 73 69;
-  --gray-100: 62 61 58;
+  --gray-500: 96 94 90;
+  --gray-400: 89 87 83;
+  --gray-300: 74 73 69;
+  --gray-200: 65 63 60;
+  --gray-100: 50 49 47;
   --gray-50: 0 0 0;
 }
 
@@ -1120,11 +1120,11 @@
   --gray-800: 255 254 248;
   --gray-700: 237 236 231;
   --gray-600: 199 198 193;
-  --gray-500: 115 114 112;
-  --gray-400: 107 107 104;
-  --gray-300: 94 94 92;
-  --gray-200: 84 84 82;
-  --gray-100: 71 71 69;
+  --gray-500: 105 104 102;
+  --gray-400: 97 97 94;
+  --gray-300: 84 84 82;
+  --gray-200: 74 74 72;
+  --gray-100: 61 61 60;
   --gray-50: 0 0 0;
 }
 
@@ -1147,12 +1147,12 @@
   --gray-900: 10 10 10;
   --gray-800: 39 39 39;
   --gray-700: 54 54 54;
-  --gray-600: 87 87 87;
-  --gray-500: 143 143 143;
-  --gray-400: 153 153 153;
-  --gray-300: 171 171 171;
-  --gray-200: 184 184 184;
-  --gray-100: 203 203 203;
+  --gray-600: 84 84 84;
+  --gray-500: 160 160 160;
+  --gray-400: 171 171 171;
+  --gray-300: 190 190 190;
+  --gray-200: 203 203 203;
+  --gray-100: 225 225 225;
   --gray-50: 255 255 255;
 }
 
@@ -1176,11 +1176,11 @@
   --gray-800: 205 186 143;
   --gray-700: 191 173 133;
   --gray-600: 160 145 112;
-  --gray-500: 80 73 56;
-  --gray-400: 72 65 50;
-  --gray-300: 57 52 40;
-  --gray-200: 47 43 33;
-  --gray-100: 29 26 20;
+  --gray-500: 70 63 49;
+  --gray-400: 62 56 43;
+  --gray-300: 47 43 33;
+  --gray-200: 33 30 23;
+  --gray-100: 8 7 6;
   --gray-50: 0 0 0;
 }
 
@@ -1204,11 +1204,11 @@
   --gray-800: 250 250 247;
   --gray-700: 232 232 230;
   --gray-600: 195 195 193;
-  --gray-500: 112 112 111;
-  --gray-400: 105 105 104;
-  --gray-300: 92 92 91;
-  --gray-200: 82 82 82;
-  --gray-100: 68 68 67;
+  --gray-500: 103 103 101;
+  --gray-400: 95 95 94;
+  --gray-300: 80 80 79;
+  --gray-200: 70 70 69;
+  --gray-100: 57 57 57;
   --gray-50: 0 0 0;
 }
 
@@ -1232,11 +1232,11 @@
   --gray-800: 237 237 237;
   --gray-700: 220 220 220;
   --gray-600: 185 185 185;
-  --gray-500: 104 104 104;
-  --gray-400: 97 97 97;
-  --gray-300: 83 83 83;
-  --gray-200: 73 73 73;
-  --gray-100: 62 62 62;
+  --gray-500: 95 95 95;
+  --gray-400: 85 85 85;
+  --gray-300: 73 73 73;
+  --gray-200: 64 64 64;
+  --gray-100: 50 50 50;
   --gray-50: 0 0 0;
 }
 
@@ -1260,11 +1260,11 @@
   --gray-800: 251 250 244;
   --gray-700: 233 232 227;
   --gray-600: 196 195 190;
-  --gray-500: 113 112 110;
-  --gray-400: 105 105 102;
-  --gray-300: 90 90 88;
-  --gray-200: 83 82 81;
-  --gray-100: 68 68 66;
+  --gray-500: 103 103 100;
+  --gray-400: 95 95 93;
+  --gray-300: 80 80 78;
+  --gray-200: 70 70 68;
+  --gray-100: 58 57 56;
   --gray-50: 0 0 0;
 }
 
@@ -1287,12 +1287,12 @@
   --gray-900: 10 10 10;
   --gray-800: 39 39 39;
   --gray-700: 54 54 54;
-  --gray-600: 87 87 87;
-  --gray-500: 143 143 143;
-  --gray-400: 153 153 153;
-  --gray-300: 171 171 171;
-  --gray-200: 184 184 184;
-  --gray-100: 203 203 203;
+  --gray-600: 84 84 84;
+  --gray-500: 160 160 160;
+  --gray-400: 171 171 171;
+  --gray-300: 190 190 190;
+  --gray-200: 203 203 203;
+  --gray-100: 225 225 225;
   --gray-50: 255 255 255;
 }
 
@@ -1316,11 +1316,11 @@
   --gray-800: 200 223 237;
   --gray-700: 186 207 220;
   --gray-600: 156 174 185;
-  --gray-500: 86 96 102;
-  --gray-400: 78 87 92;
-  --gray-300: 66 74 78;
-  --gray-200: 58 65 69;
-  --gray-100: 46 51 55;
+  --gray-500: 76 85 90;
+  --gray-400: 70 78 83;
+  --gray-300: 58 65 69;
+  --gray-200: 48 54 57;
+  --gray-100: 36 40 43;
   --gray-50: 0 0 0;
 }
 
@@ -1344,11 +1344,11 @@
   --gray-800: 244 234 211;
   --gray-700: 227 218 196;
   --gray-600: 190 183 165;
-  --gray-500: 107 103 93;
-  --gray-400: 100 96 87;
-  --gray-300: 85 82 74;
-  --gray-200: 76 73 65;
-  --gray-100: 61 58 53;
+  --gray-500: 98 94 84;
+  --gray-400: 88 84 76;
+  --gray-300: 76 73 65;
+  --gray-200: 66 63 57;
+  --gray-100: 51 49 44;
   --gray-50: 0 0 0;
 }
 
@@ -1372,11 +1372,11 @@
   --gray-800: 250 250 240;
   --gray-700: 232 232 223;
   --gray-600: 195 195 187;
-  --gray-500: 112 112 108;
-  --gray-400: 105 105 101;
-  --gray-300: 90 90 86;
-  --gray-200: 82 82 79;
-  --gray-100: 68 68 65;
+  --gray-500: 103 103 98;
+  --gray-400: 95 95 91;
+  --gray-300: 80 80 77;
+  --gray-200: 70 70 67;
+  --gray-100: 57 57 55;
   --gray-50: 0 0 0;
 }
 
@@ -1400,8 +1400,8 @@
   --gray-800: 237 0 237;
   --gray-700: 220 0 220;
   --gray-600: 209 0 209;
-  --gray-500: 59 0 59;
-  --gray-400: 38 0 38;
+  --gray-500: 36 0 36;
+  --gray-400: 0 0 0;
   --gray-300: 0 0 0;
   --gray-200: 0 0 0;
   --gray-100: 0 0 0;
@@ -1409,28 +1409,6 @@
 }
 
 /* AA content aliases against real conversation and header surfaces. */
-
-[data-atlas-theme="dark"] {
-  --atlas-link: #608df0;
-  --atlas-syntax-keyword: #487cee;
-  --atlas-syntax-string: #16a34a;
-  --atlas-syntax-number: #ca8a04;
-  --atlas-syntax-comment: #7b828e;
-  --atlas-header-menu-accent: #60a5fa;
-  --atlas-header-accent: #73b0fb;
-  --atlas-header-hover-accent: #a6cdfc;
-}
-
-[data-atlas-theme="light"] {
-  --atlas-link: #2563eb;
-  --atlas-syntax-keyword: #2563eb;
-  --atlas-syntax-string: #12873d;
-  --atlas-syntax-number: #9e6c03;
-  --atlas-syntax-comment: #6b7280;
-  --atlas-header-menu-accent: #4170aa;
-  --atlas-header-accent: #3c689e;
-  --atlas-header-hover-accent: #365c8c;
-}
 
 [data-atlas-theme="mac7"] {
   --atlas-link: #2158d1;
@@ -1440,7 +1418,15 @@
   --atlas-syntax-comment: #69707d;
   --atlas-header-menu-accent: #396194;
   --atlas-header-accent: #243d5c;
-  --atlas-header-hover-accent: #121f2f;
+  --atlas-header-hover-accent: #17283c;
+  --atlas-fg-danger: #7a1212;
+  --atlas-fg-warning: #573504;
+  --atlas-fg-alert: #6d2407;
+  --atlas-fg-info: #133491;
+  --atlas-fg-success: #0c4622;
+  --atlas-fg-agent: #57178e;
+  --atlas-text-gray-600: 61 61 61;
+  --atlas-text-gray-700: 60 60 60;
 }
 
 [data-atlas-theme="win95"] {
@@ -1452,6 +1438,14 @@
   --atlas-header-menu-accent: #3a6396;
   --atlas-header-accent: #264264;
   --atlas-header-hover-accent: #142334;
+  --atlas-fg-danger: #831414;
+  --atlas-fg-warning: #5f3a04;
+  --atlas-fg-alert: #762807;
+  --atlas-fg-info: #15389c;
+  --atlas-fg-success: #0c4c24;
+  --atlas-fg-agent: #5e1a9a;
+  --atlas-text-gray-600: 66 66 66;
+  --atlas-text-gray-700: 66 66 66;
 }
 
 [data-atlas-theme="windows-xp-luna"] {
@@ -1463,6 +1457,14 @@
   --atlas-header-menu-accent: #3d6aa0;
   --atlas-header-accent: #375e8f;
   --atlas-header-hover-accent: #29476c;
+  --atlas-fg-danger: #b51b1b;
+  --atlas-fg-warning: #845006;
+  --atlas-fg-alert: #a5370a;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #116a33;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 92 91 84;
+  --atlas-text-gray-700: 92 91 84;
 }
 
 [data-atlas-theme="aqua-osx"] {
@@ -1474,6 +1476,14 @@
   --atlas-header-menu-accent: #2b4a70;
   --atlas-header-accent: #254062;
   --atlas-header-hover-accent: #18293e;
+  --atlas-fg-danger: #801313;
+  --atlas-fg-warning: #5c3804;
+  --atlas-fg-alert: #742707;
+  --atlas-fg-info: #153799;
+  --atlas-fg-success: #0c4a23;
+  --atlas-fg-agent: #5c1996;
+  --atlas-text-gray-600: 59 64 71;
+  --atlas-text-gray-700: 59 64 71;
 }
 
 [data-atlas-theme="amiga-workbench"] {
@@ -1485,6 +1495,14 @@
   --atlas-header-menu-accent: #4577b4;
   --atlas-header-accent: #3f6da5;
   --atlas-header-hover-accent: #315480;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #975c07;
+  --atlas-fg-alert: #bc3f0c;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #147839;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 105 105 105;
+  --atlas-text-gray-700: 104 104 104;
 }
 
 [data-atlas-theme="nextstep"] {
@@ -1496,6 +1514,14 @@
   --atlas-header-menu-accent: #243f5f;
   --atlas-header-accent: #1f3550;
   --atlas-header-hover-accent: #101c2b;
+  --atlas-fg-danger: #681010;
+  --atlas-fg-warning: #4a2d03;
+  --atlas-fg-alert: #5d1f06;
+  --atlas-fg-info: #112c7b;
+  --atlas-fg-success: #0a3b1c;
+  --atlas-fg-agent: #491477;
+  --atlas-text-gray-600: 51 51 53;
+  --atlas-text-gray-700: 51 51 54;
 }
 
 [data-atlas-theme="beos"] {
@@ -1507,6 +1533,14 @@
   --atlas-header-menu-accent: #345987;
   --atlas-header-accent: #2e4f78;
   --atlas-header-hover-accent: #213855;
+  --atlas-fg-danger: #981717;
+  --atlas-fg-warning: #6d4305;
+  --atlas-fg-alert: #8a2e09;
+  --atlas-fg-info: #1841b3;
+  --atlas-fg-success: #0e582a;
+  --atlas-fg-agent: #6c1db1;
+  --atlas-text-gray-600: 76 76 76;
+  --atlas-text-gray-700: 75 75 75;
 }
 
 [data-atlas-theme="teletext"] {
@@ -1518,6 +1552,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
 }
 
 [data-atlas-theme="crt-phosphor"] {
@@ -1529,6 +1571,37 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #66a9fa;
   --atlas-header-hover-accent: #a0c9fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 138 175 138;
+  --atlas-text-gray-700: 143 174 143;
+}
+
+/* Window content ramp: crt-phosphor windows are #1f351f. */
+[data-atlas-theme="crt-phosphor"] .atlas-theme-chrome,
+[data-atlas-theme="crt-phosphor"] .atlas-retro-window {
+  --gray-50: 255 255 255;
+  --gray-100: 239 241 239;
+  --gray-200: 224 227 224;
+  --gray-300: 208 213 208;
+  --gray-400: 192 198 192;
+  --gray-500: 177 184 177;
+  --gray-600: 76 93 76;
+  --gray-700: 49 69 49;
+  --gray-800: 31 53 31;
+  --gray-900: 40 61 40;
+  --atlas-text-gray-600: 192 198 192;
+  --atlas-text-gray-700: 177 184 177;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
 }
 
 [data-atlas-theme="dos-cga"] {
@@ -1540,6 +1613,36 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
+}
+
+/* Header content ramp: dos-cga headers are #aaaaaa. */
+[data-atlas-theme="dos-cga"] .atlas-theme-header {
+  --gray-50: 0 0 0;
+  --gray-100: 12 12 12;
+  --gray-200: 24 24 24;
+  --gray-300: 36 36 36;
+  --gray-400: 48 48 48;
+  --gray-500: 51 51 51;
+  --gray-600: 136 136 136;
+  --gray-700: 156 156 156;
+  --gray-800: 170 170 170;
+  --gray-900: 163 163 163;
+  --atlas-text-gray-600: 48 48 48;
+  --atlas-text-gray-700: 51 51 51;
+  --atlas-fg-danger: #681010;
+  --atlas-fg-warning: #4a2d03;
+  --atlas-fg-alert: #5d1f06;
+  --atlas-fg-info: #112c7b;
+  --atlas-fg-success: #0a3c1d;
+  --atlas-fg-agent: #4a147a;
 }
 
 [data-atlas-theme="8bit-arcade"] {
@@ -1550,7 +1653,15 @@
   --atlas-syntax-comment: #757c89;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #b0d2fc;
+  --atlas-header-hover-accent: #abcffc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 162 162 169;
+  --atlas-text-gray-700: 163 163 170;
 }
 
 [data-atlas-theme="frutiger-aero"] {
@@ -1562,6 +1673,14 @@
   --atlas-header-menu-accent: #2b4a70;
   --atlas-header-accent: #254062;
   --atlas-header-hover-accent: #18293e;
+  --atlas-fg-danger: #7e1313;
+  --atlas-fg-warning: #5a3704;
+  --atlas-fg-alert: #722607;
+  --atlas-fg-info: #143695;
+  --atlas-fg-success: #0c4923;
+  --atlas-fg-agent: #5b1894;
+  --atlas-text-gray-600: 40 66 81;
+  --atlas-text-gray-700: 41 66 81;
 }
 
 [data-atlas-theme="winamp-skin"] {
@@ -1573,6 +1692,37 @@
   --atlas-header-menu-accent: #68aafa;
   --atlas-header-accent: #8dbefb;
   --atlas-header-hover-accent: #d9e9fe;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 187 187 187;
+  --atlas-text-gray-700: 186 186 186;
+}
+
+/* Window content ramp: winamp-skin windows are #656565. */
+[data-atlas-theme="winamp-skin"] .atlas-theme-chrome,
+[data-atlas-theme="winamp-skin"] .atlas-retro-window {
+  --gray-50: 247 247 247;
+  --gray-100: 247 247 247;
+  --gray-200: 247 247 247;
+  --gray-300: 247 247 247;
+  --gray-400: 247 247 247;
+  --gray-500: 247 247 247;
+  --gray-600: 132 132 132;
+  --gray-700: 113 113 113;
+  --gray-800: 101 101 101;
+  --gray-900: 107 107 107;
+  --atlas-text-gray-600: 247 247 247;
+  --atlas-text-gray-700: 247 247 247;
+  --atlas-fg-danger: #fff5f5;
+  --atlas-fg-warning: #fff8d3;
+  --atlas-fg-alert: #fff6ed;
+  --atlas-fg-info: #f2f8ff;
+  --atlas-fg-success: #e8fcef;
+  --atlas-fg-agent: #faf6ff;
 }
 
 [data-atlas-theme="geocities-web10"] {
@@ -1584,6 +1734,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
 }
 
 [data-atlas-theme="cassette-futurism"] {
@@ -1594,7 +1752,15 @@
   --atlas-syntax-comment: #727986;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #a8cefc;
+  --atlas-header-hover-accent: #a3cbfc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 158 157 155;
+  --atlas-text-gray-700: 159 158 156;
 }
 
 [data-atlas-theme="vaporwave"] {
@@ -1606,6 +1772,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #68aafa;
   --atlas-header-hover-accent: #b9d7fd;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 171 166 179;
+  --atlas-text-gray-700: 170 165 178;
 }
 
 [data-atlas-theme="memphis"] {
@@ -1617,6 +1791,37 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
+}
+
+/* Window content ramp: memphis windows are #ffffff. */
+[data-atlas-theme="memphis"] .atlas-theme-chrome,
+[data-atlas-theme="memphis"] .atlas-retro-window {
+  --gray-50: 0 0 0;
+  --gray-100: 18 18 18;
+  --gray-200: 36 36 36;
+  --gray-300: 54 54 54;
+  --gray-400: 71 71 71;
+  --gray-500: 89 89 89;
+  --gray-600: 204 204 204;
+  --gray-700: 235 235 235;
+  --gray-800: 255 255 255;
+  --gray-900: 245 245 245;
+  --atlas-text-gray-600: 71 71 71;
+  --atlas-text-gray-700: 89 89 89;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #975c07;
+  --atlas-fg-alert: #bc3f0c;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #147839;
+  --atlas-fg-agent: #7e22ce;
 }
 
 [data-atlas-theme="ps1-tech"] {
@@ -1628,6 +1833,14 @@
   --atlas-header-menu-accent: #2e4f78;
   --atlas-header-accent: #284569;
   --atlas-header-hover-accent: #1b2e46;
+  --atlas-fg-danger: #871414;
+  --atlas-fg-warning: #613b04;
+  --atlas-fg-alert: #7a2908;
+  --atlas-fg-info: #153aa0;
+  --atlas-fg-success: #0d4e25;
+  --atlas-fg-agent: #601a9d;
+  --atlas-text-gray-600: 66 66 66;
+  --atlas-text-gray-700: 66 66 66;
 }
 
 [data-atlas-theme="os2-warp"] {
@@ -1639,6 +1852,14 @@
   --atlas-header-menu-accent: #2e4f78;
   --atlas-header-accent: #284569;
   --atlas-header-hover-accent: #1b2e46;
+  --atlas-fg-danger: #871414;
+  --atlas-fg-warning: #613b04;
+  --atlas-fg-alert: #7a2908;
+  --atlas-fg-info: #153aa0;
+  --atlas-fg-success: #0d4e25;
+  --atlas-fg-agent: #601a9d;
+  --atlas-text-gray-600: 66 66 66;
+  --atlas-text-gray-700: 66 66 66;
 }
 
 [data-atlas-theme="macos9-platinum"] {
@@ -1650,6 +1871,14 @@
   --atlas-header-menu-accent: #030508;
   --atlas-header-accent: #fdfeff;
   --atlas-header-hover-accent: #fdfeff;
+  --atlas-fg-danger: #000000;
+  --atlas-fg-warning: #000000;
+  --atlas-fg-alert: #000000;
+  --atlas-fg-info: #000000;
+  --atlas-fg-success: #000000;
+  --atlas-fg-agent: #000000;
+  --atlas-text-gray-600: 0 0 0;
+  --atlas-text-gray-700: 0 0 0;
 }
 
 [data-atlas-theme="web20-glossy"] {
@@ -1661,17 +1890,56 @@
   --atlas-header-menu-accent: #3a6396;
   --atlas-header-accent: #345987;
   --atlas-header-hover-accent: #264264;
+  --atlas-fg-danger: #ac1a1a;
+  --atlas-fg-warning: #7e4c05;
+  --atlas-fg-alert: #9b340a;
+  --atlas-fg-info: #1c4acd;
+  --atlas-fg-success: #116530;
+  --atlas-fg-agent: #7b21ca;
+  --atlas-text-gray-600: 84 87 90;
+  --atlas-text-gray-700: 84 87 90;
 }
 
 [data-atlas-theme="gameboy-dmg"] {
   --atlas-link: #6d96f2;
-  --atlas-syntax-keyword: #173d92;
-  --atlas-syntax-string: #0b4e24;
-  --atlas-syntax-number: #5b3e02;
-  --atlas-syntax-comment: #3f434c;
+  --atlas-syntax-keyword: #5988f0;
+  --atlas-syntax-string: #16a34a;
+  --atlas-syntax-number: #ca8a04;
+  --atlas-syntax-comment: #868b97;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #6dacfa;
   --atlas-header-hover-accent: #bbd8fd;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 158 174 158;
+  --atlas-text-gray-700: 157 174 157;
+}
+
+/* Window content ramp: gameboy-dmg windows are #9bbc0f. */
+[data-atlas-theme="gameboy-dmg"] .atlas-theme-chrome,
+[data-atlas-theme="gameboy-dmg"] .atlas-retro-window {
+  --gray-50: 0 0 0;
+  --gray-100: 11 13 1;
+  --gray-200: 22 26 2;
+  --gray-300: 33 39 3;
+  --gray-400: 43 53 4;
+  --gray-500: 49 60 5;
+  --gray-600: 124 150 12;
+  --gray-700: 143 173 14;
+  --gray-800: 155 188 15;
+  --gray-900: 149 180 14;
+  --atlas-text-gray-600: 43 53 4;
+  --atlas-text-gray-700: 49 60 5;
+  --atlas-fg-danger: #711111;
+  --atlas-fg-warning: #503104;
+  --atlas-fg-alert: #652206;
+  --atlas-fg-info: #123084;
+  --atlas-fg-success: #0b411f;
+  --atlas-fg-agent: #4f1582;
 }
 
 [data-atlas-theme="braun-rams"] {
@@ -1683,6 +1951,14 @@
   --atlas-header-menu-accent: #4170aa;
   --atlas-header-accent: #3b6598;
   --atlas-header-hover-accent: #2d4e76;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8f5706;
+  --atlas-fg-alert: #b23c0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #137337;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 99 99 97;
+  --atlas-text-gray-700: 100 99 98;
 }
 
 [data-atlas-theme="tron-vector"] {
@@ -1693,7 +1969,15 @@
   --atlas-syntax-comment: #6f7684;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #9cc7fc;
+  --atlas-header-hover-accent: #96c4fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 151 151 154;
+  --atlas-text-gray-700: 151 151 154;
 }
 
 [data-atlas-theme="vhs-tracking"] {
@@ -1704,7 +1988,15 @@
   --atlas-syntax-comment: #747a88;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #aed1fc;
+  --atlas-header-hover-accent: #a4ccfc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 159 159 159;
+  --atlas-text-gray-700: 159 159 159;
 }
 
 [data-atlas-theme="risograph"] {
@@ -1716,6 +2008,14 @@
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #3a6396;
   --atlas-header-hover-accent: #2b4a70;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8c5506;
+  --atlas-fg-alert: #af3a0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #126f35;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 99 97 93;
+  --atlas-text-gray-700: 99 98 93;
 }
 
 [data-atlas-theme="ibm-3270"] {
@@ -1727,6 +2027,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
 }
 
 [data-atlas-theme="nethack-ascii"] {
@@ -1738,6 +2046,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
 }
 
 [data-atlas-theme="templeos"] {
@@ -1749,6 +2065,14 @@
   --atlas-header-menu-accent: #68aafa;
   --atlas-header-accent: #81b8fb;
   --atlas-header-hover-accent: #c3ddfd;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 176 176 228;
+  --atlas-text-gray-700: 176 176 228;
 }
 
 [data-atlas-theme="bbs-ansi"] {
@@ -1760,6 +2084,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
 }
 
 [data-atlas-theme="midnight-commander"] {
@@ -1771,6 +2103,36 @@
   --atlas-header-menu-accent: #68aafa;
   --atlas-header-accent: #81b8fb;
   --atlas-header-hover-accent: #c3ddfd;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 176 176 228;
+  --atlas-text-gray-700: 176 176 228;
+}
+
+/* Header content ramp: midnight-commander headers are #aaaaaa. */
+[data-atlas-theme="midnight-commander"] .atlas-theme-header {
+  --gray-50: 0 0 0;
+  --gray-100: 12 12 12;
+  --gray-200: 24 24 24;
+  --gray-300: 36 36 36;
+  --gray-400: 48 48 48;
+  --gray-500: 51 51 51;
+  --gray-600: 136 136 136;
+  --gray-700: 156 156 156;
+  --gray-800: 170 170 170;
+  --gray-900: 163 163 163;
+  --atlas-text-gray-600: 48 48 48;
+  --atlas-text-gray-700: 51 51 51;
+  --atlas-fg-danger: #681010;
+  --atlas-fg-warning: #4a2d03;
+  --atlas-fg-alert: #5d1f06;
+  --atlas-fg-info: #112c7b;
+  --atlas-fg-success: #0a3c1d;
+  --atlas-fg-agent: #4a147a;
 }
 
 [data-atlas-theme="matrix-rain"] {
@@ -1782,6 +2144,14 @@
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
   --atlas-header-hover-accent: #9bc6fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 152 152 152;
+  --atlas-text-gray-700: 151 151 151;
 }
 
 [data-atlas-theme="btop-meters"] {
@@ -1792,7 +2162,15 @@
   --atlas-syntax-comment: #7a808d;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #99c5fc;
+  --atlas-header-hover-accent: #93c2fc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 148 149 158;
+  --atlas-text-gray-700: 148 150 158;
 }
 
 [data-atlas-theme="c64-basic"] {
@@ -1804,6 +2182,14 @@
   --atlas-header-menu-accent: #d2e6fe;
   --atlas-header-accent: #eef5fe;
   --atlas-header-hover-accent: #ffffff;
+  --atlas-fg-danger: #fff1f1;
+  --atlas-fg-warning: #fef5c2;
+  --atlas-fg-alert: #fff2e5;
+  --atlas-fg-info: #ecf5ff;
+  --atlas-fg-success: #ddfbe8;
+  --atlas-fg-agent: #f8f1ff;
+  --atlas-text-gray-600: 243 243 251;
+  --atlas-text-gray-700: 244 244 252;
 }
 
 [data-atlas-theme="flat-2013"] {
@@ -1815,6 +2201,14 @@
   --atlas-header-menu-accent: #3a6396;
   --atlas-header-accent: #345987;
   --atlas-header-hover-accent: #264264;
+  --atlas-fg-danger: #ac1a1a;
+  --atlas-fg-warning: #7e4c05;
+  --atlas-fg-alert: #9b340a;
+  --atlas-fg-info: #1c4acd;
+  --atlas-fg-success: #116530;
+  --atlas-fg-agent: #7b21ca;
+  --atlas-text-gray-600: 86 87 88;
+  --atlas-text-gray-700: 86 87 87;
 }
 
 [data-atlas-theme="glassmorphism"] {
@@ -1826,6 +2220,14 @@
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2b4a70;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8a5406;
+  --atlas-fg-alert: #ab390b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #126f35;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 96 96 96;
+  --atlas-text-gray-700: 95 95 95;
 }
 
 [data-atlas-theme="neumorphism"] {
@@ -1837,6 +2239,14 @@
   --atlas-header-menu-accent: #365c8c;
   --atlas-header-accent: #30527d;
   --atlas-header-hover-accent: #233b5a;
+  --atlas-fg-danger: #a11818;
+  --atlas-fg-warning: #744705;
+  --atlas-fg-alert: #933109;
+  --atlas-fg-info: #1a45c0;
+  --atlas-fg-success: #0f5d2d;
+  --atlas-fg-agent: #741fbe;
+  --atlas-text-gray-600: 79 81 84;
+  --atlas-text-gray-700: 79 81 84;
 }
 
 [data-atlas-theme="blueprint-cad"] {
@@ -1848,6 +2258,14 @@
   --atlas-header-menu-accent: #9bc6fc;
   --atlas-header-accent: #b9d7fd;
   --atlas-header-hover-accent: #ffffff;
+  --atlas-fg-danger: #fdc8c8;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fecb97;
+  --atlas-fg-info: #b6d8fe;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #e4cbfe;
+  --atlas-text-gray-600: 205 214 225;
+  --atlas-text-gray-700: 206 215 225;
 }
 
 [data-atlas-theme="claymorphism"] {
@@ -1859,6 +2277,14 @@
   --atlas-header-menu-accent: #396194;
   --atlas-header-accent: #335784;
   --atlas-header-hover-accent: #254062;
+  --atlas-fg-danger: #aa1a1a;
+  --atlas-fg-warning: #7c4b05;
+  --atlas-fg-alert: #993309;
+  --atlas-fg-info: #1b49cb;
+  --atlas-fg-success: #10632f;
+  --atlas-fg-agent: #7a21c8;
+  --atlas-text-gray-600: 87 84 92;
+  --atlas-text-gray-700: 87 85 92;
 }
 
 [data-atlas-theme="brutalist-web"] {
@@ -1870,6 +2296,14 @@
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2b4a70;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8a5406;
+  --atlas-fg-alert: #ab390b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #126f35;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 96 96 96;
+  --atlas-text-gray-700: 95 95 95;
 }
 
 [data-atlas-theme="swiss-intl"] {
@@ -1881,6 +2315,14 @@
   --atlas-header-menu-accent: #4170aa;
   --atlas-header-accent: #3b6598;
   --atlas-header-hover-accent: #2d4e76;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8f5706;
+  --atlas-fg-alert: #b23c0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #137337;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 99 99 97;
+  --atlas-text-gray-700: 100 99 97;
 }
 
 [data-atlas-theme="bauhaus"] {
@@ -1892,6 +2334,14 @@
   --atlas-header-menu-accent: #3e6ba2;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2a496e;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #895306;
+  --atlas-fg-alert: #ab390b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #126e34;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 97 95 91;
+  --atlas-text-gray-700: 96 94 89;
 }
 
 [data-atlas-theme="pop-art-lichtenstein"] {
@@ -1903,6 +2353,14 @@
   --atlas-header-menu-accent: #4577b4;
   --atlas-header-accent: #3e6ba2;
   --atlas-header-hover-accent: #30527d;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #975c07;
+  --atlas-fg-alert: #bc3f0c;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #147a3a;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 105 105 102;
+  --atlas-text-gray-700: 107 106 104;
 }
 
 [data-atlas-theme="op-art"] {
@@ -1913,7 +2371,38 @@
   --atlas-syntax-comment: #747a88;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #aed1fc;
+  --atlas-header-hover-accent: #a4ccfc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 159 159 159;
+  --atlas-text-gray-700: 159 159 159;
+}
+
+/* Window content ramp: op-art windows are #f5f5f5. */
+[data-atlas-theme="op-art"] .atlas-theme-chrome,
+[data-atlas-theme="op-art"] .atlas-retro-window {
+  --gray-50: 0 0 0;
+  --gray-100: 17 17 17;
+  --gray-200: 34 34 34;
+  --gray-300: 51 51 51;
+  --gray-400: 69 69 69;
+  --gray-500: 86 86 86;
+  --gray-600: 196 196 196;
+  --gray-700: 225 225 225;
+  --gray-800: 245 245 245;
+  --gray-900: 235 235 235;
+  --atlas-text-gray-600: 69 69 69;
+  --atlas-text-gray-700: 86 86 86;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8e5606;
+  --atlas-fg-alert: #b13b0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #137236;
+  --atlas-fg-agent: #7e22ce;
 }
 
 [data-atlas-theme="hypnagogic"] {
@@ -1925,6 +2414,14 @@
   --atlas-header-menu-accent: #2c4c73;
   --atlas-header-accent: #264264;
   --atlas-header-hover-accent: #192b41;
+  --atlas-fg-danger: #831414;
+  --atlas-fg-warning: #5f3a04;
+  --atlas-fg-alert: #762807;
+  --atlas-fg-info: #15389c;
+  --atlas-fg-success: #0c4c24;
+  --atlas-fg-agent: #5e1a9a;
+  --atlas-text-gray-600: 72 65 50;
+  --atlas-text-gray-700: 71 64 49;
 }
 
 [data-atlas-theme="monochrome-zen"] {
@@ -1936,6 +2433,14 @@
   --atlas-header-menu-accent: #4373af;
   --atlas-header-accent: #3c689e;
   --atlas-header-hover-accent: #2f517a;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #945a06;
+  --atlas-fg-alert: #b83e0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #147739;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 103 103 102;
+  --atlas-text-gray-700: 102 102 101;
 }
 
 [data-atlas-theme="default-browser"] {
@@ -1947,6 +2452,14 @@
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2b4a70;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #8a5406;
+  --atlas-fg-alert: #ab390b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #126f35;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 96 96 96;
+  --atlas-text-gray-700: 95 95 95;
 }
 
 [data-atlas-theme="wireframe-sketch"] {
@@ -1958,6 +2471,14 @@
   --atlas-header-menu-accent: #4373af;
   --atlas-header-accent: #3c689e;
   --atlas-header-hover-accent: #2f517a;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #945a06;
+  --atlas-fg-alert: #b83e0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #147739;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 104 103 101;
+  --atlas-text-gray-700: 103 102 100;
 }
 
 [data-atlas-theme="glitch-databend"] {
@@ -1968,7 +2489,15 @@
   --atlas-syntax-comment: #747a88;
   --atlas-header-menu-accent: #60a5fa;
   --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #aed1fc;
+  --atlas-header-hover-accent: #a4ccfc;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
+  --atlas-text-gray-600: 159 159 159;
+  --atlas-text-gray-700: 159 159 159;
 }
 
 [data-atlas-theme="y2k-chrome"] {
@@ -1980,6 +2509,14 @@
   --atlas-header-menu-accent: #396194;
   --atlas-header-accent: #335784;
   --atlas-header-hover-accent: #254062;
+  --atlas-fg-danger: #a81919;
+  --atlas-fg-warning: #7c4b05;
+  --atlas-fg-alert: #993309;
+  --atlas-fg-info: #1b49cb;
+  --atlas-fg-success: #10632f;
+  --atlas-fg-agent: #7921c6;
+  --atlas-text-gray-600: 78 87 92;
+  --atlas-text-gray-700: 78 87 92;
 }
 
 [data-atlas-theme="duotone-poster"] {
@@ -1991,6 +2528,14 @@
   --atlas-header-menu-accent: #3e6ba2;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2a496e;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #895306;
+  --atlas-fg-alert: #a9390a;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #126e34;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 99 95 86;
+  --atlas-text-gray-700: 98 94 84;
 }
 
 [data-atlas-theme="grid-paper"] {
@@ -2002,6 +2547,14 @@
   --atlas-header-menu-accent: #4373af;
   --atlas-header-accent: #3c689e;
   --atlas-header-hover-accent: #2f517a;
+  --atlas-fg-danger: #b91c1c;
+  --atlas-fg-warning: #945a06;
+  --atlas-fg-alert: #b83e0b;
+  --atlas-fg-info: #1d4ed8;
+  --atlas-fg-success: #147739;
+  --atlas-fg-agent: #7e22ce;
+  --atlas-text-gray-600: 103 103 99;
+  --atlas-text-gray-700: 102 102 98;
 }
 
 [data-atlas-theme="maximalist-banners"] {
@@ -2013,4 +2566,35 @@
   --atlas-header-menu-accent: #121f2f;
   --atlas-header-accent: #0a1019;
   --atlas-header-hover-accent: #020305;
+  --atlas-fg-danger: #270606;
+  --atlas-fg-warning: #180f01;
+  --atlas-fg-alert: #210b02;
+  --atlas-fg-info: #060f29;
+  --atlas-fg-success: #03140a;
+  --atlas-fg-agent: #1a072b;
+  --atlas-text-gray-600: 38 0 38;
+  --atlas-text-gray-700: 37 0 37;
+}
+
+/* Window content ramp: maximalist-banners windows are #000000. */
+[data-atlas-theme="maximalist-banners"] .atlas-theme-chrome,
+[data-atlas-theme="maximalist-banners"] .atlas-retro-window {
+  --gray-50: 255 255 255;
+  --gray-100: 237 237 237;
+  --gray-200: 219 219 219;
+  --gray-300: 201 201 201;
+  --gray-400: 184 184 184;
+  --gray-500: 166 166 166;
+  --gray-600: 51 51 51;
+  --gray-700: 20 20 20;
+  --gray-800: 0 0 0;
+  --gray-900: 10 10 10;
+  --atlas-text-gray-600: 184 184 184;
+  --atlas-text-gray-700: 166 166 166;
+  --atlas-fg-danger: #fca5a5;
+  --atlas-fg-warning: #fde047;
+  --atlas-fg-alert: #fdba74;
+  --atlas-fg-info: #93c5fd;
+  --atlas-fg-success: #86efac;
+  --atlas-fg-agent: #d8b4fe;
 }

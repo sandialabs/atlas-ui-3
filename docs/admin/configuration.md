@@ -41,6 +41,30 @@ Key settings in the `.env` file include:
 *   **Security Headers**: Configure Content Security Policy (CSP) and other security headers. See the Security Configuration section below for details.
 *   **RAG**: Enable RAG using `FEATURE_RAG_ENABLED=true` and configure sources in `rag-sources.json`. When disabled, the backend does not initialize RAG services and does not load `rag-sources.json`. RAG discovery is best-effort: a single failing source will not block others. See [RAG Configuration](external-rag-api.md) for details.
 
+### Retro Themes
+
+The Retro Design System theme gallery (issue #1119) has a build-time and a
+run-time flag, so an administrator can remove it from a build or hide it from a
+running deployment:
+
+| Variable | When it applies | Default | Effect |
+|---|---|---|---|
+| `VITE_FEATURE_RETRO_THEMES` | `npm run build` / Docker build (`ARG`) | `true` | Only the literal `false` compiles the 53 retro themes, their window chrome CSS, and the gallery out. The bundle then ships just Light and Dark (about 139 kB of CSS instead of about 345 kB). |
+| `FEATURE_RETRO_THEMES_ENABLED` | backend start-up | `false` | Exposed as `features.retro_themes` by `/api/config/shell` and `/api/config`. When false the gallery is hidden even in a build that contains it. |
+
+```
+# Ship the catalog in the image (default) but keep it hidden:
+VITE_FEATURE_RETRO_THEMES=true
+FEATURE_RETRO_THEMES_ENABLED=false
+```
+
+When either flag is off, a user whose saved theme is a retro theme sees its base
+Light or Dark mode. The inline bootstrap script applies that fallback before
+React mounts (it reads the build flag from its `data-retro-themes` attribute and
+the run-time flag from the cached config), so there is no flash of the retro
+theme. The saved choice is kept and returns if the themes are turned back on.
+Classic Light and Dark are always available.
+
 ### MCP Auto-Reconnect Settings
 
 Atlas UI can automatically retry failed MCP server connections using exponential backoff. This is controlled by environment variables in `.env`.

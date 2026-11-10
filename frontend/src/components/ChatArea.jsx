@@ -25,6 +25,7 @@ import AgentBusyIndicator from './AgentBusyIndicator'
 import ContextUsageMeter from './ContextUsageMeter'
 import { parseCompactCommand } from '../hooks/chat/useContextCompaction'
 import AgentRunStatus from './AgentRunStatus'
+import AgentQuestionPrompt from './AgentQuestionPrompt'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 import { useToast } from './ui/toastContext'
 import { followAfterScroll, NEAR_BOTTOM_PX } from '../utils/scrollDecision'
@@ -996,7 +997,6 @@ const ChatArea = () => {
   }
 
   const canSend = inputValue.trim().length > 0 && currentModel && isConnected
-  const [agentAnswer, setAgentAnswer] = useState('')
 
   const showPoweredByAtlas =
     import.meta.env.VITE_FEATURE_POWERED_BY_ATLAS === 'true'
@@ -1085,29 +1085,10 @@ const ChatArea = () => {
           />
         ))}
         {showAgentQuestion && (
-          <div className="flex items-start gap-0 sm:gap-3 w-full">
-            <div className="w-8 h-8 rounded-full bg-purple-600 items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex">
-              A
-            </div>
-            <div className="flex-1 min-w-0 bg-gray-800 rounded-lg p-3 sm:p-4 border border-purple-700">
-              <div className="text-sm font-medium text-purple-300 mb-2">Agent needs your input</div>
-              <div className="text-gray-200 mb-3">{agentPendingQuestion}</div>
-              <div className="flex gap-2">
-                <input
-                  value={agentAnswer}
-                  onChange={(e) => setAgentAnswer(e.target.value)}
-                  placeholder="Type your answer..."
-                  className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-200"
-                />
-                <button
-                  onClick={() => { if (agentAnswer.trim()) { answerAgentQuestion(agentAnswer.trim()); setAgentAnswer(''); setAgentPendingQuestion(null) } }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
-          </div>
+          <AgentQuestionPrompt
+            question={agentPendingQuestion}
+            onAnswer={(text) => { answerAgentQuestion(text); setAgentPendingQuestion(null) }}
+          />
         )}
         {isThinking && (
           <div className="flex items-start gap-0 sm:gap-3 w-full">
@@ -1180,7 +1161,7 @@ const ChatArea = () => {
   <footer
         ref={composerRef}
         data-testid="composer-footer"
-        className="p-4 border-t border-gray-700 flex-shrink-0"
+        className="atlas-composer-plate p-4 border-t border-gray-700 flex-shrink-0"
       >
         <div className="max-w-4xl mx-auto w-full composer-stack">
           <div className="composer-aux">
@@ -1392,8 +1373,8 @@ const ChatArea = () => {
                 {fileExtraction?.enabled && (() => {
                   const GlobalIcon = extractModeIcon(globalExtractMode)
                   const modeColors = {
-                    full: 'bg-green-600/20 text-green-400 hover:bg-green-600/30',
-                    preview: 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30',
+                    full: 'bg-green-600/20 atlas-fg-success hover:bg-green-600/30',
+                    preview: 'bg-blue-600/20 atlas-fg-info hover:bg-blue-600/30',
                     none: 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                   }
                   return (
@@ -1465,8 +1446,8 @@ const ChatArea = () => {
                     none: 'bg-gray-700'
                   }
                   const iconColors = {
-                    full: 'text-green-400 hover:text-green-300',
-                    preview: 'text-blue-400 hover:text-blue-300',
+                    full: 'atlas-fg-success hover:opacity-80',
+                    preview: 'atlas-fg-info hover:opacity-80',
                     none: 'text-gray-500 hover:text-gray-400'
                   }
                   const ModeIcon = extractModeIcon(mode)

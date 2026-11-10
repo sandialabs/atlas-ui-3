@@ -36,9 +36,15 @@ export function RetroWindow({ title, children, footer, onClose, className = '' }
   )
 }
 
-export function RetroButton({ type = 'button', className = '', children, ...props }) {
+/**
+ * variant="primary" marks the main action of a form or dialog (Settings
+ * "Save Changes"): it takes the theme's accent fill, while every disabled
+ * RetroButton gets a dashed, unfilled look instead of only lowered opacity.
+ */
+export function RetroButton({ type = 'button', variant, className = '', children, ...props }) {
+  const variantClass = variant === 'primary' ? ' atlas-retro-button-primary' : ''
   return (
-    <button type={type} className={`atlas-retro-button ${className}`} {...props}>
+    <button type={type} className={`atlas-retro-button${variantClass} ${className}`} {...props}>
       {children}
     </button>
   )
