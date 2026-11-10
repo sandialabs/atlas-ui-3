@@ -10,6 +10,11 @@ export function RetroWindow({ title, children, footer, onClose, className = '' }
   return (
     <section className={`atlas-retro-window ${className}`} aria-label={title}>
       <div className="atlas-retro-window-titlebar">
+        <span className="atlas-retro-traffic" aria-hidden="true">
+          <span className="atlas-retro-traffic-dot atlas-retro-traffic-close" />
+          <span className="atlas-retro-traffic-dot atlas-retro-traffic-min" />
+          <span className="atlas-retro-traffic-dot atlas-retro-traffic-max" />
+        </span>
         <span className="atlas-retro-window-symbol" aria-hidden="true">▣</span>
         <h3 className="atlas-retro-window-title">{title}</h3>
         {onClose ? (

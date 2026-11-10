@@ -171,7 +171,7 @@ function ChatInterface() {
 
   return (
     <div
-      className="relative flex flex-col w-full h-full min-h-0 bg-gray-900 text-gray-200 overflow-hidden"
+      className="atlas-theme-desktop relative flex flex-col w-full h-full min-h-0 bg-gray-900 text-gray-200 overflow-hidden"
     >
       {/* Banner Panel - full width across the top */}
       <BannerPanel />
@@ -291,7 +291,7 @@ function AppRoutes() {
 
   return (
     <div
-      className="flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
+      className="atlas-theme-desktop flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
       style={{ height: 'var(--app-viewport-height, 100vh)' }}
     >
       {/* Compliance classification banner: shared shell, above every route, so

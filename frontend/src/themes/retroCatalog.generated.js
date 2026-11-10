@@ -36,8 +36,8 @@ export const RETRO_CATALOG = Object.freeze(
         "classic"
       ],
       "preview": {
-        "background": "#c0c0c0",
-        "surface": "#dfdfdf",
+        "background": "#008080",
+        "surface": "#c0c0c0",
         "foreground": "#000000",
         "accent": "#000080"
       }
@@ -57,9 +57,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#5a7edb",
-        "surface": "#5475cc",
+        "surface": "#ece9d8",
         "foreground": "#000000",
-        "accent": "#0a246a"
+        "accent": "#2a5fd7"
       }
     },
     {
@@ -79,7 +79,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#b8c9e0",
         "surface": "#abbbd0",
         "foreground": "#000000",
-        "accent": "#b21808"
+        "accent": "#1a1a1a"
       }
     },
     {
@@ -87,7 +87,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "Amiga Workbench",
       "era": "Desktop OS · 1985",
       "description": "amiga, retro, orange, blue",
-      "mode": "dark",
+      "mode": "light",
       "reference": "05-amiga-workbench",
       "tags": [
         "amiga",
@@ -97,9 +97,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#0055aa",
-        "surface": "#1f69b4",
-        "foreground": "#ffffff",
-        "accent": "#ffffff"
+        "surface": "#ffffff",
+        "foreground": "#000000",
+        "accent": "#000000"
       }
     },
     {
@@ -107,7 +107,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "NeXTSTEP",
       "era": "Desktop OS · 1989",
       "description": "next, greyscale, unix, chiseled",
-      "mode": "dark",
+      "mode": "light",
       "reference": "06-nextstep",
       "tags": [
         "next",
@@ -117,9 +117,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#555561",
-        "surface": "#696974",
-        "foreground": "#ffffff",
-        "accent": "#f0f0f4"
+        "surface": "#a8a8b0",
+        "foreground": "#000000",
+        "accent": "#000000"
       }
     },
     {
@@ -127,7 +127,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "BeOS",
       "era": "Desktop OS · 1996",
       "description": "beos, yellow, tab, media",
-      "mode": "dark",
+      "mode": "light",
       "reference": "07-beos",
       "tags": [
         "beos",
@@ -137,9 +137,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#2a5556",
-        "surface": "#44696a",
-        "foreground": "#ffffff",
-        "accent": "#ffcc00"
+        "surface": "#cfcfcf",
+        "foreground": "#000000",
+        "accent": "#000000"
       }
     },
     {
@@ -219,7 +219,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#0b0b1e",
         "surface": "#282839",
         "foreground": "#ffffff",
-        "accent": "#ffd300"
+        "accent": "#e9e9ff"
       }
     },
     {
@@ -257,9 +257,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#3c3c3c",
-        "surface": "#535353",
+        "surface": "#3c3c3c",
         "foreground": "#ffffff",
-        "accent": "#00ff33"
+        "accent": "#ffb400"
       }
     },
     {
@@ -299,7 +299,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#0a0704",
         "surface": "#272522",
         "foreground": "#ffffff",
-        "accent": "#ffb000"
+        "accent": "#d9a85e"
       }
     },
     {
@@ -319,7 +319,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#1a0b2e",
         "surface": "#352847",
         "foreground": "#ffffff",
-        "accent": "#ff00e5"
+        "accent": "#f8f8ff"
       }
     },
     {
@@ -347,7 +347,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "PS1 Tech",
       "era": "Gaming · 1994",
       "description": "playstation, low-poly, tech, gradient",
-      "mode": "dark",
+      "mode": "light",
       "reference": "18-ps1-tech",
       "tags": [
         "playstation",
@@ -357,9 +357,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#0a0a10",
-        "surface": "#27272d",
-        "foreground": "#ffffff",
-        "accent": "#00ffff"
+        "surface": "#c0c0c0",
+        "foreground": "#000000",
+        "accent": "#2a2a32"
       }
     },
     {
@@ -367,7 +367,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "OS/2 Warp",
       "era": "Desktop OS · 1994",
       "description": "os2, ibm, bevel, blue",
-      "mode": "dark",
+      "mode": "light",
       "reference": "19-os2-warp",
       "tags": [
         "os2",
@@ -377,9 +377,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#2d7a7a",
-        "surface": "#468a8a",
+        "surface": "#c0c0c0",
         "foreground": "#000000",
-        "accent": "#00007f"
+        "accent": "#000000"
       }
     },
     {
@@ -387,7 +387,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "Mac OS 9 Platinum",
       "era": "Desktop OS · 1999",
       "description": "mac, platinum, pinstripe, grey",
-      "mode": "light",
+      "mode": "dark",
       "reference": "20-macos9-platinum",
       "tags": [
         "mac",
@@ -399,7 +399,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#808080",
         "surface": "#777777",
         "foreground": "#000000",
-        "accent": "#f5f5f5"
+        "accent": "#000000"
       }
     },
     {
@@ -419,7 +419,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#e8f0f7",
         "surface": "#d8dfe6",
         "foreground": "#000000",
-        "accent": "#2a7ac9"
+        "accent": "#2a2a2a"
       }
     },
     {
@@ -427,7 +427,7 @@ export const RETRO_CATALOG = Object.freeze(
       "name": "Game Boy DMG",
       "era": "Gaming · 1989",
       "description": "gameboy, green, lcd, 4-shade",
-      "mode": "light",
+      "mode": "dark",
       "reference": "22-gameboy-dmg",
       "tags": [
         "gameboy",
@@ -437,9 +437,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#b8b0a4",
-        "surface": "#aba499",
-        "foreground": "#000000",
-        "accent": "#0f380f"
+        "surface": "#0f380f",
+        "foreground": "#ffffff",
+        "accent": "#9bbc0f"
       }
     },
     {
@@ -457,9 +457,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#f4f3f0",
-        "surface": "#e3e2df",
+        "surface": "#f4f3f0",
         "foreground": "#000000",
-        "accent": "#6a6965"
+        "accent": "#1a1a1a"
       }
     },
     {
@@ -517,9 +517,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#f3efe4",
-        "surface": "#e2ded4",
+        "surface": "#f3efe4",
         "foreground": "#000000",
-        "accent": "#0078b4"
+        "accent": "#1a1a1a"
       }
     },
     {
@@ -559,7 +559,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#000000",
         "surface": "#1f1f1f",
         "foreground": "#ffffff",
-        "accent": "#ffff00"
+        "accent": "#e4e4e4"
       }
     },
     {
@@ -639,7 +639,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#000000",
         "surface": "#1f1f1f",
         "foreground": "#ffffff",
-        "accent": "#ff3860"
+        "accent": "#00a830"
       }
     },
     {
@@ -657,9 +657,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#131424",
-        "surface": "#2f303e",
+        "surface": "#1a1c30",
         "foreground": "#ffffff",
-        "accent": "#00e4ff"
+        "accent": "#e8ecff"
       }
     },
     {
@@ -759,7 +759,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#0d3a6b",
         "surface": "#2a527d",
         "foreground": "#ffffff",
-        "accent": "#ffe066"
+        "accent": "#eaf2fb"
       }
     },
     {
@@ -779,7 +779,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#f0e9ff",
         "surface": "#dfd9ed",
         "foreground": "#000000",
-        "accent": "#7c6ba8"
+        "accent": "#3a2e5c"
       }
     },
     {
@@ -817,9 +817,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#f4f3ee",
-        "surface": "#e3e2dd",
+        "surface": "#f4f3ee",
         "foreground": "#000000",
-        "accent": "#e63946"
+        "accent": "#0a0a0a"
       }
     },
     {
@@ -837,9 +837,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#f0ebe0",
-        "surface": "#dfdbd0",
+        "surface": "#f0ebe0",
         "foreground": "#000000",
-        "accent": "#d32027"
+        "accent": "#0a0a0a"
       }
     },
     {
@@ -857,9 +857,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#fffef8",
-        "surface": "#edece7",
+        "surface": "#fffef8",
         "foreground": "#000000",
-        "accent": "#ed1c24"
+        "accent": "#0a0a0a"
       }
     },
     {
@@ -899,7 +899,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#dcc89a",
         "surface": "#cdba8f",
         "foreground": "#000000",
-        "accent": "#3d5a80"
+        "accent": "#2a2418"
       }
     },
     {
@@ -917,7 +917,7 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#fafaf7",
-        "surface": "#e8e8e6",
+        "surface": "#fafaf7",
         "foreground": "#000000",
         "accent": "#0a0a0a"
       }
@@ -957,7 +957,7 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#fbfaf4",
-        "surface": "#e9e8e3",
+        "surface": "#fbfaf4",
         "foreground": "#000000",
         "accent": "#2a2a2a"
       }
@@ -979,7 +979,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#0a0a0a",
         "surface": "#272727",
         "foreground": "#ffffff",
-        "accent": "#ffe600"
+        "accent": "#f0f0f0"
       }
     },
     {
@@ -999,7 +999,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#d7f0ff",
         "surface": "#c8dfed",
         "foreground": "#000000",
-        "accent": "#5a6478"
+        "accent": "#202030"
       }
     },
     {
@@ -1017,7 +1017,7 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#f4ead3",
-        "surface": "#e3dac4",
+        "surface": "#f4ead3",
         "foreground": "#000000",
         "accent": "#1a1a3a"
       }
@@ -1037,9 +1037,9 @@ export const RETRO_CATALOG = Object.freeze(
       ],
       "preview": {
         "background": "#fafaf0",
-        "surface": "#e8e8df",
+        "surface": "#fafaf0",
         "foreground": "#000000",
-        "accent": "#c83030"
+        "accent": "#1a2847"
       }
     },
     {
@@ -1059,7 +1059,7 @@ export const RETRO_CATALOG = Object.freeze(
         "background": "#ff00ff",
         "surface": "#ed00ed",
         "foreground": "#000000",
-        "accent": "#ffff00"
+        "accent": "#000000"
       }
     }
   ].map(entry => Object.freeze({

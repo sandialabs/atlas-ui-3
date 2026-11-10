@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>23 Braun / Dieter Rams</title>
+<style>
+  :root {
+    --paper: #f4f3f0;
+    --white: #ffffff;
+    --ink: #1a1a1a;
+    --gray-1: #e4e3e0;
+    --gray-2: #b8b7b3;
+    --gray-3: #6a6965;
+    --gray-4: #2a2a28;
+    --orange: #f2642a;
+    --green: #3a7a5a;
+    --font: "Akzidenz-Grotesk", "Helvetica Neue", Helvetica, "Arial", sans-serif;
+    --font-mono: "IBM Plex Mono", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 60px;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .page { max-width: 780px; }
+  .hd {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-top: 2px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 6px 0;
+    margin-bottom: 30px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  h1 {
+    font-size: 44px;
+    font-weight: 400;
+    letter-spacing: -1px;
+    margin-bottom: 6px;
+    line-height: 1;
+  }
+  h1 strong { font-weight: 700; }
+  .subtitle {
+    font-size: 16px;
+    color: var(--gray-3);
+    margin-bottom: 30px;
+    max-width: 520px;
+  }
+  h2 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin: 36px 0 12px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--ink);
+    display: flex;
+    justify-content: space-between;
+  }
+  h2 .num { color: var(--gray-2); font-weight: 400; }
+  p { margin-bottom: 10px; max-width: 560px; }
+  .product {
+    background: var(--white);
+    border: 1px solid var(--gray-2);
+    padding: 30px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-bottom: 20px;
+  }
+  .radio {
+    aspect-ratio: 4 / 3;
+    background: var(--gray-1);
+    position: relative;
+    padding: 20px;
+    border: 1px solid var(--gray-2);
+  }
+  .speaker-grille {
+    position: absolute;
+    top: 20px; left: 20px; bottom: 20px;
+    width: 48%;
+    background-image: radial-gradient(circle, var(--gray-3) 1.5px, transparent 2px);
+    background-size: 8px 8px;
+    background-color: var(--gray-1);
+    border: 1px solid var(--gray-2);
+  }
+  .dials {
+    position: absolute;
+    top: 20px; right: 20px; bottom: 20px;
+    width: 42%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .dial {
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 40%, var(--white), var(--gray-2));
+    border: 1px solid var(--gray-3);
+    position: relative;
+    box-shadow: inset 0 -2px 4px rgba(0,0,0,0.1);
+  }
+  .dial::after {
+    content: "";
+    position: absolute;
+    top: 6px; left: 50%;
+    transform: translateX(-50%);
+    width: 2px; height: 10px;
+    background: var(--ink);
+  }
+  .dial-row { display: flex; gap: 10px; align-items: center; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+  .led-strip {
+    margin-top: auto;
+    display: flex;
+    gap: 3px;
+    align-items: flex-end;
+  }
+  .led-strip div {
+    width: 4px;
+    background: var(--gray-3);
+  }
+  .led-strip div.on { background: var(--orange); }
+  .btn {
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: var(--white);
+    color: var(--ink);
+    border: 1px solid var(--ink);
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 0;
+  }
+  .btn:hover { background: var(--ink); color: var(--white); }
+  .btn-orange { background: var(--orange); color: var(--white); border-color: var(--orange); }
+  .btn-orange:hover { background: #d44e18; border-color: #d44e18; }
+  .btn-outline { background: transparent; }
+  .input {
+    font-family: var(--font);
+    font-size: 14px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--ink);
+    padding: 6px 0;
+    width: 320px;
+    color: var(--ink);
+    letter-spacing: 0.5px;
+  }
+  .input:focus { outline: none; border-bottom-color: var(--orange); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--ink); margin: 12px 0; }
+  .grid-3 > div {
+    padding: 16px;
+    border-right: 1px solid var(--ink);
+    font-size: 12px;
+  }
+  .grid-3 > div:last-child { border-right: none; }
+  .grid-3 .num { font-size: 28px; font-weight: 300; display: block; margin-bottom: 4px; }
+  .swatch { width: 60px; height: 60px; border: 1px solid var(--ink); display: inline-block; }
+  .principles { columns: 2; column-gap: 40px; font-size: 13px; }
+  .principles p { margin-bottom: 6px; max-width: none; break-inside: avoid; }
+  .principles strong { display: inline-block; min-width: 20px; }
+  .footer-dot { width: 8px; height: 8px; background: var(--orange); display: inline-block; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hd">
+    <span>Braun AG — Kronberg</span>
+    <span>Weniger, aber besser</span>
+    <span>Frankfurt · 1960 —</span>
+  </div>
+
+  <h1>Less, but <strong>better.</strong></h1>
+  <p class="subtitle">Ten principles of good design. Honest, unobtrusive, long-lasting. Accent in a single saturated orange. Everything else: paper, ink, gray.</p>
+
+  <h2><span>Produkt T3</span><span class="num">01</span></h2>
+  <div class="product">
+    <div class="radio">
+      <div class="speaker-grille"></div>
+      <div class="dials">
+        <div class="dial-row"><div class="dial"></div><span>Volume</span></div>
+        <div class="dial-row"><div class="dial"></div><span>Tuning</span></div>
+        <div class="led-strip">
+          <div style="height:14px"></div><div style="height:20px"></div><div style="height:28px" class="on"></div><div style="height:24px" class="on"></div><div style="height:16px"></div><div style="height:10px"></div><div style="height:8px"></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--gray-3);letter-spacing:1px;margin-bottom:8px;">MODEL · T3 · 1958</div>
+      <h3 style="font-size:18px;font-weight:500;margin-bottom:8px;">Taschenempfänger</h3>
+      <p style="font-size:13px;">Pocket radio. Dieter Rams, with Ulm school rigor. Later inspired the first iPod — the same aperture grille, the same tuning wheel.</p>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn btn-orange">Order</button>
+        <button class="btn btn-outline">Specifications</button>
+      </div>
+    </div>
+  </div>
+
+  <h2><span>Eingabe</span><span class="num">02</span></h2>
+  <div class="row"><input class="input" value="Modellnummer eingeben"></div>
+
+  <h2><span>Datenraster</span><span class="num">03</span></h2>
+  <div class="grid-3">
+    <div><span class="num">10</span>Principles</div>
+    <div><span class="num">1960</span>Studio established</div>
+    <div><span class="num">T3</span>Model number</div>
+  </div>
+
+  <h2><span>Prinzipien</span><span class="num">04</span></h2>
+  <div class="principles">
+    <p><strong>01</strong> is innovative</p>
+    <p><strong>02</strong> makes a product useful</p>
+    <p><strong>03</strong> is aesthetic</p>
+    <p><strong>04</strong> makes a product understandable</p>
+    <p><strong>05</strong> is unobtrusive</p>
+    <p><strong>06</strong> is honest</p>
+    <p><strong>07</strong> is long-lasting</p>
+    <p><strong>08</strong> is thorough down to the last detail</p>
+    <p><strong>09</strong> is environmentally friendly</p>
+    <p><strong>10</strong> is as little design as possible</p>
+  </div>
+
+  <h2><span>Palette</span><span class="num">05</span></h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--paper)"></span>
+    <span class="swatch" style="background:var(--gray-1)"></span>
+    <span class="swatch" style="background:var(--gray-2)"></span>
+    <span class="swatch" style="background:var(--gray-3)"></span>
+    <span class="swatch" style="background:var(--ink)"></span>
+    <span class="swatch" style="background:var(--orange)"></span>
+  </div>
+
+  <div style="margin-top:40px;display:flex;justify-content:space-between;align-items:center;font-size:10px;letter-spacing:2px;text-transform:uppercase;border-top:1px solid var(--ink);padding-top:10px;">
+    <span>Kronberg · DE</span>
+    <span class="footer-dot"></span>
+    <span>Form follows function</span>
+  </div>
+</div>
+</body>
+</html>

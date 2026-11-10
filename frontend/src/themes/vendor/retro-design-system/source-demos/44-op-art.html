@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>44 Op Art / Vasarely</title>
+<style>
+  :root {
+    --black: #0a0a0a;
+    --white: #f5f5f5;
+    --red: #ec1e23;
+    --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--white);
+    background-image: repeating-linear-gradient(45deg, var(--black) 0 2px, transparent 2px 14px);
+    color: var(--black);
+    font-family: var(--font);
+    font-weight: 700;
+    font-size: 14px;
+    padding: 30px;
+    min-height: 100vh;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  .card { background: var(--white); border: 3px solid var(--black); padding: 24px; margin-bottom: 24px; box-shadow: 10px 10px 0 var(--black); }
+  h1 {
+    font-size: 72px;
+    letter-spacing: 8px;
+    text-transform: uppercase;
+    line-height: 0.9;
+    margin-bottom: 8px;
+    background: linear-gradient(to bottom, var(--black) 0%, var(--black) 50%, var(--white) 50%, var(--white) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 2px var(--black);
+  }
+  .sub { font-size: 12px; letter-spacing: 6px; text-transform: uppercase; margin-bottom: 20px; }
+  h2 { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; margin: 20px 0 10px; border-bottom: 3px solid var(--black); padding-bottom: 4px; }
+  .p-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border: 3px solid var(--black);
+  }
+  .p-grid > div { aspect-ratio: 1; border-right: 3px solid var(--black); border-bottom: 3px solid var(--black); position: relative; overflow: hidden; }
+  .p-grid > div:nth-child(3n) { border-right: none; }
+  .p-grid > div:nth-last-child(-n+3) { border-bottom: none; }
+  .moire-1 { background-image: repeating-linear-gradient(0deg, var(--black) 0 3px, var(--white) 3px 6px); }
+  .moire-2 { background-image: repeating-linear-gradient(90deg, var(--black) 0 3px, var(--white) 3px 6px); }
+  .moire-3 { background:
+    radial-gradient(circle, var(--black) 0 15px, transparent 16px 20px, var(--black) 21px 30px, transparent 31px 35px, var(--black) 36px 45px, transparent 46px 60px, var(--black) 61px 75px, transparent 76px 90px, var(--black) 91px 120px, transparent 121px 180px);
+  }
+  .moire-4 { background: conic-gradient(from 0deg, var(--black) 0deg 15deg, var(--white) 15deg 30deg, var(--black) 30deg 45deg, var(--white) 45deg 60deg, var(--black) 60deg 75deg, var(--white) 75deg 90deg, var(--black) 90deg 105deg, var(--white) 105deg 120deg, var(--black) 120deg 135deg, var(--white) 135deg 150deg, var(--black) 150deg 165deg, var(--white) 165deg 180deg, var(--black) 180deg 195deg, var(--white) 195deg 210deg, var(--black) 210deg 225deg, var(--white) 225deg 240deg, var(--black) 240deg 255deg, var(--white) 255deg 270deg, var(--black) 270deg 285deg, var(--white) 285deg 300deg, var(--black) 300deg 315deg, var(--white) 315deg 330deg, var(--black) 330deg 345deg, var(--white) 345deg 360deg); }
+  .moire-5 { background-image: repeating-linear-gradient(45deg, var(--black) 0 4px, var(--white) 4px 8px); }
+  .moire-6 {
+    background: var(--white);
+    background-image:
+      radial-gradient(circle at 50% 50%, var(--black) 0 10%, transparent 11% 20%, var(--black) 21% 30%, transparent 31% 40%, var(--black) 41% 50%, transparent 51% 60%);
+  }
+  .moire-7 { background-image: repeating-linear-gradient(-45deg, var(--black) 0 4px, var(--white) 4px 8px); }
+  .moire-8 {
+    background: var(--white);
+    background-image:
+      linear-gradient(45deg, var(--black) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--black) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--black) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--black) 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  }
+  .moire-9 { background: radial-gradient(circle, var(--red) 0 25%, var(--white) 26% 50%, var(--red) 51% 75%, var(--white) 76% 100%); }
+  .bulge {
+    height: 280px;
+    border: 3px solid var(--black);
+    margin: 10px 0;
+    background:
+      repeating-radial-gradient(circle at 50% 50%, var(--black) 0 6px, var(--white) 6px 12px);
+    position: relative;
+    overflow: hidden;
+  }
+  .btn { font-family: var(--font); font-weight: 700; font-size: 13px; letter-spacing: 3px; text-transform: uppercase; background: var(--black); color: var(--white); border: 3px solid var(--black); padding: 10px 24px; cursor: pointer; box-shadow: 5px 5px 0 var(--black); }
+  .btn-inv { background: var(--white); color: var(--black); }
+  .btn-red { background: var(--red); color: var(--white); border-color: var(--black); }
+  .input { font-family: var(--font); font-weight: 700; font-size: 15px; background: var(--white); border: 3px solid var(--black); padding: 10px 14px; width: 320px; letter-spacing: 2px; text-transform: uppercase; box-shadow: 5px 5px 0 var(--black); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 70px; height: 70px; border: 3px solid var(--black); box-shadow: 4px 4px 0 var(--black); display: inline-block; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <h1>OP ART</h1>
+    <div class="sub">◼︎ ◻︎ ◼︎ &nbsp; VASARELY · RILEY · 1964 &nbsp; ◻︎ ◼︎ ◻︎</div>
+
+    <h2>Moiré Grid</h2>
+    <div class="p-grid">
+      <div class="moire-1"></div>
+      <div class="moire-2"></div>
+      <div class="moire-3"></div>
+      <div class="moire-5"></div>
+      <div class="moire-4"></div>
+      <div class="moire-7"></div>
+      <div class="moire-6"></div>
+      <div class="moire-8"></div>
+      <div class="moire-9"></div>
+    </div>
+
+    <h2>Bulge Illusion</h2>
+    <div class="bulge"></div>
+
+    <h2>Input</h2>
+    <div class="row"><input class="input" value="BRIDGET RILEY"></div>
+
+    <h2>Buttons</h2>
+    <div class="row">
+      <button class="btn">Black</button>
+      <button class="btn btn-inv">White</button>
+      <button class="btn btn-red">Accent</button>
+    </div>
+
+    <h2>Palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--black)"></span>
+      <span class="swatch" style="background:var(--white)"></span>
+      <span class="swatch" style="background:var(--red)"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

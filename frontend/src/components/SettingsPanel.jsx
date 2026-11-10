@@ -395,7 +395,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      className="atlas-theme-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
       onClick={requestClose}
     >
       <div
@@ -408,13 +408,18 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0 atlas-theme-titlebar">
+          <span className="atlas-retro-traffic" aria-hidden="true">
+            <span className="atlas-retro-traffic-dot atlas-retro-traffic-close" />
+            <span className="atlas-retro-traffic-dot atlas-retro-traffic-min" />
+            <span className="atlas-retro-traffic-dot atlas-retro-traffic-max" />
+          </span>
           <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
             <ToolsSettingsIcon className="text-blue-400" />
             Tools and Settings
           </h2>
           <button
             onClick={requestClose}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            className="atlas-theme-close p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
             aria-label="Close tools and settings"
           >
             <X className="w-6 h-6" />
@@ -915,33 +920,25 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
         {/* Footer Actions (General settings only) */}
         {activeTab === 'general' && (
-        <div className="flex items-center justify-between p-6 border-t border-gray-700 flex-shrink-0">
-          <button
+        <div className="atlas-theme-footer flex items-center justify-between p-6 border-t border-gray-700 flex-shrink-0">
+          <RetroButton
             onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+            className="flex items-center gap-2"
           >
             <RotateCcw className="w-4 h-4" />
             Reset to Defaults
-          </button>
+          </RetroButton>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleCancel}
-              className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
-            >
+            <RetroButton onClick={handleCancel}>
               Cancel
-            </button>
-            <button
+            </RetroButton>
+            <RetroButton
               onClick={handleSave}
               disabled={!hasChanges}
-              className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                hasChanges
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                  : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-              }`}
             >
               Save Changes
-            </button>
+            </RetroButton>
           </div>
         </div>
         )}

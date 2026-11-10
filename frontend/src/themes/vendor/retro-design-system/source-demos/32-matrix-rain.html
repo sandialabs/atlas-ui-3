@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>32 Matrix Rain</title>
+<style>
+  :root {
+    --bg: #000000;
+    --mx-dim: #003b00;
+    --mx: #00a830;
+    --mx-hi: #62ff9d;
+    --mx-white: #ccffcc;
+    --warn: #ff3860;
+    --font: "Matrix Code NFI", "MS Mincho", "MS Gothic", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--mx);
+    font-family: var(--font);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+  #rain {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+  .col {
+    position: absolute;
+    top: -100px;
+    font-family: var(--font);
+    font-size: 18px;
+    line-height: 1.1;
+    color: var(--mx);
+    text-shadow: 0 0 6px var(--mx);
+    white-space: pre;
+    animation-name: fall;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  @keyframes fall {
+    from { transform: translateY(-100%); }
+    to   { transform: translateY(110vh); }
+  }
+  .col .head {
+    color: var(--mx-white);
+    text-shadow: 0 0 10px var(--mx-hi), 0 0 20px var(--mx-hi);
+  }
+  .col .bright { color: var(--mx-hi); text-shadow: 0 0 4px var(--mx-hi); }
+  .col .dim { color: var(--mx-dim); }
+
+  .content {
+    position: relative;
+    z-index: 1;
+    padding: 60px 40px;
+    max-width: 820px;
+    margin: 0 auto;
+    text-align: center;
+  }
+  h1 {
+    font-family: var(--font);
+    font-size: 64px;
+    color: var(--mx-hi);
+    text-shadow:
+      0 0 10px var(--mx),
+      0 0 20px var(--mx),
+      0 0 40px var(--mx);
+    letter-spacing: 12px;
+    margin-bottom: 8px;
+  }
+  .sub {
+    font-family: var(--font);
+    font-size: 20px;
+    color: var(--mx);
+    text-shadow: 0 0 6px var(--mx);
+    letter-spacing: 6px;
+    margin-bottom: 30px;
+  }
+  .panel {
+    background: rgba(0, 20, 0, 0.75);
+    border: 1px solid var(--mx);
+    padding: 24px;
+    margin: 20px 0;
+    text-align: left;
+    box-shadow: 0 0 20px rgba(0, 168, 48, 0.4);
+    backdrop-filter: blur(2px);
+  }
+  h2 {
+    font-family: var(--font);
+    font-size: 18px;
+    color: var(--mx-hi);
+    text-shadow: 0 0 4px var(--mx);
+    letter-spacing: 4px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--mx-dim);
+    padding-bottom: 4px;
+  }
+  p {
+    font-family: var(--font);
+    font-size: 16px;
+    color: var(--mx-hi);
+    text-shadow: 0 0 4px var(--mx);
+    line-height: 1.6;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .btn {
+    font-family: var(--font);
+    font-size: 16px;
+    background: transparent;
+    color: var(--mx-hi);
+    border: 1px solid var(--mx);
+    padding: 10px 24px;
+    cursor: pointer;
+    letter-spacing: 4px;
+    text-shadow: 0 0 4px var(--mx);
+    box-shadow: 0 0 12px rgba(0, 168, 48, 0.4), inset 0 0 8px rgba(0, 168, 48, 0.2);
+  }
+  .btn:hover {
+    background: var(--mx);
+    color: var(--bg);
+    text-shadow: none;
+    box-shadow: 0 0 20px var(--mx);
+  }
+  .btn-red {
+    color: var(--warn);
+    border-color: var(--warn);
+    text-shadow: 0 0 4px var(--warn);
+    box-shadow: 0 0 12px rgba(255, 56, 96, 0.4);
+  }
+  .input {
+    font-family: var(--font);
+    font-size: 16px;
+    background: rgba(0, 10, 0, 0.8);
+    color: var(--mx-hi);
+    border: 1px solid var(--mx);
+    padding: 8px 12px;
+    width: 360px;
+    letter-spacing: 3px;
+    text-shadow: 0 0 4px var(--mx);
+  }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; justify-content: center; margin: 10px 0; }
+  pre.code {
+    font-family: var(--font);
+    font-size: 15px;
+    color: var(--mx);
+    text-shadow: 0 0 4px var(--mx);
+    line-height: 1.4;
+    white-space: pre;
+  }
+  pre.code .k { color: var(--mx-hi); }
+  pre.code .s { color: var(--mx-white); }
+  pre.code .c { color: var(--mx-dim); }
+  .status {
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--mx-dim);
+    text-shadow: 0 0 4px var(--mx-dim);
+    letter-spacing: 3px;
+    margin-top: 30px;
+  }
+  .blink { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.2; } }
+</style>
+</head>
+<body>
+<div id="rain"></div>
+<div class="content">
+  <h1>WAKE UP</h1>
+  <div class="sub">◂ FOLLOW THE WHITE RABBIT ▸</div>
+
+  <div class="panel">
+    <h2>&gt; SYSTEM BREACH DETECTED</h2>
+    <p>The Matrix has you. Half-width katakana and reversed digits cascade down glass. Head glyph bright white. Trail fades to black.</p>
+    <p class="blink">&gt; Knock knock, Neo._</p>
+  </div>
+
+  <div class="panel">
+    <h2>&gt; SHELL</h2>
+<pre class="code"><span class="c">// trace route to source</span>
+<span class="k">root@zion</span>:~# <span class="s">./jack_in.sh</span>
+<span class="c">[</span><span class="k">OK</span><span class="c">] Neural link established</span>
+<span class="c">[</span><span class="k">OK</span><span class="c">] Construct loaded: </span><span class="s">dojo.lua</span>
+<span class="c">[..] Searching for Agent Smith... </span><span class="blink">_</span></pre>
+  </div>
+
+  <div class="panel">
+    <h2>&gt; CHOOSE</h2>
+    <div class="row">
+      <input class="input" value="&gt; enter the matrix_">
+    </div>
+    <div class="row">
+      <button class="btn btn-red">● RED PILL</button>
+      <button class="btn">○ BLUE PILL</button>
+    </div>
+  </div>
+
+  <div class="status">◂◂ CONNECTION 192.168.1.1 · ENCRYPTED · OPERATOR STANDING BY ▸▸</div>
+</div>
+
+<script>
+  const rain = document.getElementById('rain');
+  const glyphs = 'ｦｱｳｴｵｶｷｹｻｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ0123456789:.=*+-<>¦｜';
+  const cols = Math.floor(window.innerWidth / 20);
+  for (let i = 0; i < cols; i++) {
+    const c = document.createElement('div');
+    c.className = 'col';
+    c.style.left = (i * 20) + 'px';
+    const len = 8 + Math.floor(Math.random() * 22);
+    const dur = 6 + Math.random() * 10;
+    const delay = -Math.random() * dur;
+    c.style.animationDuration = dur + 's';
+    c.style.animationDelay = delay + 's';
+    let html = '';
+    for (let j = 0; j < len; j++) {
+      const g = glyphs[Math.floor(Math.random() * glyphs.length)];
+      let cls = '';
+      if (j === 0) cls = 'head';
+      else if (j < 3) cls = 'bright';
+      else if (j > len - 4) cls = 'dim';
+      html += cls ? `<span class="${cls}">${g}</span>\n` : `${g}\n`;
+    }
+    c.innerHTML = html;
+    rain.appendChild(c);
+  }
+</script>
+</body>
+</html>

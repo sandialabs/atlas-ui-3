@@ -702,19 +702,20 @@
   border-left-color: rgba(79, 70, 229, 0.45);
 }
 
-/* User message bubble: blue in dark mode, lighter blue in light mode */
+/* User message bubble: theme accent when a retro theme sets the variables,
+ * otherwise the classic Atlas blue (dark) / light-blue (light) defaults. */
 .user-message-bubble {
-  background-color: #2563eb;
-  color: #ffffff;
+  background-color: var(--atlas-user-bubble-bg, #2563eb);
+  color: var(--atlas-user-bubble-fg, #ffffff);
 }
-.user-message-bubble .text-gray-300 { color: #ffffff; }
+.user-message-bubble .text-gray-300 { color: var(--atlas-user-bubble-fg, #ffffff); }
 .user-message-bubble .text-gray-200 { color: inherit; }
 [data-theme="light"] .user-message-bubble {
-  background-color: #dbeafe;
-  color: #1e3a5f;
+  background-color: var(--atlas-user-bubble-bg, #dbeafe);
+  color: var(--atlas-user-bubble-fg, #1e3a5f);
 }
 [data-theme="light"] .user-message-bubble .text-gray-300 {
-  color: #374151;
+  color: var(--atlas-user-bubble-fg, #374151);
 }
 
 /* Fixed status pairs intentionally bypass ALL theme gray/accent bridges. */

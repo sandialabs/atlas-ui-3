@@ -111,4 +111,15 @@ describe('Retro Design System attribution and CSS isolation', () => {
     expect(adapter).not.toMatch(/@import|@font-face|url\s*\(/)
     expect(catalogAdapter).not.toMatch(/@import|@font-face|url\s*\(/)
   })
+
+  it('themes chat accents and Settings footer from mapped demo chrome, not invariant blue', () => {
+    const index = readFileSync('src/index.css', 'utf8')
+    const settings = readFileSync('src/components/SettingsPanel.jsx', 'utf8')
+    const chat = readFileSync('src/components/ChatArea.jsx', 'utf8')
+    expect(index).toContain('var(--atlas-user-bubble-bg')
+    expect(settings).toContain('atlas-theme-backdrop')
+    expect(settings).toMatch(/<RetroButton[\s\S]*Cancel[\s\S]*<RetroButton[\s\S]*Save Changes/)
+    expect(chat).toContain('atlas-theme-accent-fill')
+    expect(index).toContain('.atlas-status-red')
+  })
 })

@@ -564,3 +564,33 @@ body { font-family: var(--atlas-font-ui); color: var(--atlas-body-fg, rgb(var(--
   outline: 3px solid var(--atlas-focus-ring);
   outline-offset: 3px;
 }
+
+/* Shared hooks for generator-mapped demo CSS. These are structural, not
+ * per-theme invented chrome: traffic lights stay hidden until a theme maps
+ * .traffic / .dot, the desktop/backdrop pick up the demo body fill, and
+ * Settings keeps the Appearance titlebar visible at 1280x800. */
+.atlas-retro-traffic {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.atlas-retro-traffic-dot {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+}
+.atlas-theme-accent-fill {
+  background: var(--atlas-accent-fill-bg, #2563eb);
+  color: var(--atlas-accent-fill-fg, #ffffff);
+}
+[data-atlas-theme]:not([data-atlas-theme="dark"]):not([data-atlas-theme="light"]) .atlas-theme-header [class*="bg-blue-600"] {
+  background-color: var(--atlas-accent-fill-bg);
+  color: var(--atlas-accent-fill-fg);
+}
+.atlas-theme-chrome .atlas-retro-window-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}

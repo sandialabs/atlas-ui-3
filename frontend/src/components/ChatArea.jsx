@@ -1644,7 +1644,7 @@ const ChatArea = () => {
                 data-testid="send-button"
                 className={`w-12 h-12 sm:w-auto sm:h-auto sm:px-5 sm:py-3 min-w-[48px] sm:min-w-[56px] min-h-[48px] rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
                   canSend
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    ? 'atlas-theme-accent-fill bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-gray-700 text-gray-400 cursor-not-allowed'
                 }`}
               >

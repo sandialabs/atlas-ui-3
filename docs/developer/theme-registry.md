@@ -10,9 +10,10 @@ MIT license, pinned at commit
 
 ## Source, regeneration, and attribution
 
-All 53 original upstream token files, the complete `manifest.json`, and the
-MIT license are vendored under
-`frontend/src/themes/vendor/retro-design-system/`. The offline generator:
+All 53 original upstream token files, the complete `manifest.json`, the
+MIT license, and a copy of each standalone `styles/*/index.html` demo are
+vendored under `frontend/src/themes/vendor/retro-design-system/`. The
+offline generator:
 
 ```bash
 python3 frontend/scripts/build-retro-catalog.py
@@ -26,12 +27,16 @@ produces five deterministic assets:
 - `retroCatalog.generated.js`: names, eras, years, tags, palette previews,
   source identifiers, and base light/dark modes from the upstream manifest.
 - `retroCatalog.generated.css`: safe semantic Atlas color/control adapters
-  for designs not already covered by the initial three hand-reviewed adapters,
-  plus surface-validated link, syntax, and header foregrounds for all 55 themes.
-- `retroChrome.generated.css`: scoped, motif-specific window, titlebar,
-  button and input styling for 45 additional themes. The other eight themes
-  have handcrafted styles in `theme-presets.css` and `retroChrome.css`.
-  Every design therefore has distinct component chrome, not merely tokens.
+  for designs not already covered by the initial three hand-reviewed gray
+  ramps, plus surface-validated link, syntax, and header foregrounds for
+  all 55 themes.
+- `retroChrome.generated.css`: each design's original demo CSS, scoped to
+  `[data-atlas-theme]` and mapped onto Atlas surfaces (`RetroWindow`,
+  `RetroButton`, `RetroInput`, Settings chrome, chat accents, header, and
+  the desktop/backdrop). Global resets, scripts, webfonts, remote assets,
+  and animations are stripped. Every design therefore uses its upstream
+  window, titlebar, button, input, background, and font stack rather than
+  an invented motif.
 - `frontend/public/theme-bootstrap.js`: a synchronous, registry-derived theme
   ID/base-mode map applied before first paint, with the same Dark fallback as React.
 
@@ -62,8 +67,10 @@ matching dark/light color-scheme. The Build Artifacts GitHub workflow runs
 this check on the built frontend using the runner's installed Chrome. This
 is a targeted theme contrast test, not a blanket accessibility certification.
 The source token parser rejects additional selectors, non-token CSS, and external
-resource imports. The original token files and license remain inspectable
-and attributed. CI verifies the generated output is up to date.
+resource imports. The demo CSS importer likewise rejects remote resources
+and does not emit animation or webfonts. The original token files, demos,
+and license remain inspectable and attributed. CI verifies the generated
+output is up to date.
 
 Two upstream designs, **Brutalist Web (#40)** and **Default Browser (#47)**,
 intentionally have *empty token sets*: they derive their appearance from
@@ -77,16 +84,14 @@ All 53 design identities are selectable and have scoped source tokens, a
 catalog entry, preview colors, semantic surface/text colors, a source-driven
 font stack, and real interactive window/button/input styling. The 53 original
 standalone HTML demo pages **are not embedded or run inside Atlas**.
-They have global `body`/form/reset rules and document-specific layouts that
-cannot safely be loaded over a production chat interface. The adapters are
-conservative, **not pixel-perfect reproduction** of each standalone page.
-Eight hand-reviewed designs (Mac System 7, Windows 95, CRT Phosphor,
-Windows XP Luna, Mac OS X Aqua, Amiga Workbench, NeXTSTEP, and BeOS)
-retain distinctive window chrome. The other 45 use source-derived
-visual motifs (terminal borders, glossy highlights, pixel edges, print
-rules, geometric details, and more). These are real, accessible React
-components with theme-aware CSS; they are not literal re-creations of
-53 entire desktop environments.
+The generator copies their CSS only: global `*` / `body` resets, scripts,
+`@font-face`, remote assets, and animations are dropped, and the remaining
+rules are scoped to `[data-atlas-theme]` then aliased onto Atlas
+components. This is still not a pixel-perfect standalone-page reproduction
+inside a production chat interface, but the chrome, type, and backgrounds
+come from the original design code rather than invented motif adapters.
+These are real, accessible React components with theme-aware CSS; they
+are not literal re-creations of 53 entire desktop environments.
 
 The catalog includes #30, **BBS ANSI Art**, because that is one of the 53
 upstream designs. Here it is **only CSS color tokens and semantic styling**:

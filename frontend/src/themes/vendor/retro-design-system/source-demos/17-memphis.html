@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>17 Memphis Pop</title>
+<style>
+  :root {
+    --black: #000;
+    --white: #fff;
+    --pink: #ff4fa3;
+    --teal: #12c3ce;
+    --yellow: #ffe034;
+    --red: #ff2e2e;
+    --blue: #2e4bff;
+    --font: "Helvetica Neue", Helvetica, Impact, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--white);
+    background-image:
+      radial-gradient(circle at 12% 18%, var(--teal) 0 14px, transparent 15px),
+      radial-gradient(circle at 88% 22%, var(--pink) 0 18px, transparent 19px),
+      radial-gradient(circle at 75% 88%, var(--yellow) 0 12px, transparent 13px),
+      radial-gradient(circle at 20% 82%, var(--red) 0 10px, transparent 11px);
+    color: var(--black);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      repeating-linear-gradient(45deg, transparent 0 60px, var(--black) 60px 62px, transparent 62px 120px);
+    opacity: 0.04;
+    pointer-events: none;
+  }
+  .squiggle {
+    position: absolute;
+    font-size: 60px;
+    color: var(--black);
+    user-select: none;
+  }
+  h1 {
+    font-family: var(--font);
+    font-weight: 900;
+    font-size: 72px;
+    letter-spacing: -2px;
+    color: var(--black);
+    text-transform: uppercase;
+    line-height: 0.9;
+    margin-bottom: 12px;
+  }
+  h1 span:nth-child(1) { color: var(--pink); }
+  h1 span:nth-child(2) { color: var(--teal); }
+  h1 span:nth-child(3) { color: var(--yellow); background: var(--black); padding: 0 8px; }
+  h2 {
+    font-size: 24px;
+    font-weight: 900;
+    text-transform: uppercase;
+    margin: 24px 0 12px;
+    background: var(--yellow);
+    display: inline-block;
+    padding: 4px 12px;
+    border: 3px solid var(--black);
+    box-shadow: 5px 5px 0 var(--black);
+    transform: rotate(-2deg);
+  }
+  p { line-height: 1.6; margin-bottom: 10px; max-width: 640px; font-weight: 500; }
+  .card {
+    background: var(--white);
+    border: 3px solid var(--black);
+    box-shadow: 8px 8px 0 var(--black);
+    padding: 22px;
+    max-width: 720px;
+    margin-bottom: 30px;
+    position: relative;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    top: -30px; right: -30px;
+    width: 80px; height: 80px;
+    background: var(--pink);
+    border: 3px solid var(--black);
+    border-radius: 50%;
+    z-index: -1;
+  }
+  .card::after {
+    content: "";
+    position: absolute;
+    bottom: -30px; left: -30px;
+    width: 60px; height: 60px;
+    background: var(--teal);
+    border: 3px solid var(--black);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+  .btn {
+    font-family: var(--font);
+    font-size: 16px;
+    font-weight: 900;
+    text-transform: uppercase;
+    background: var(--pink);
+    color: var(--black);
+    border: 3px solid var(--black);
+    padding: 12px 24px;
+    cursor: pointer;
+    box-shadow: 5px 5px 0 var(--black);
+    letter-spacing: 1px;
+  }
+  .btn:hover { transform: translate(-2px,-2px); box-shadow: 7px 7px 0 var(--black); }
+  .btn-teal { background: var(--teal); }
+  .btn-yellow { background: var(--yellow); }
+  .btn-black { background: var(--black); color: var(--white); }
+  .input {
+    font-family: var(--font);
+    font-size: 15px;
+    background: var(--white);
+    border: 3px solid var(--black);
+    padding: 10px 14px;
+    width: 320px;
+    box-shadow: 5px 5px 0 var(--black);
+    font-weight: 700;
+  }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+  .swatch { width: 72px; height: 72px; border: 3px solid var(--black); box-shadow: 4px 4px 0 var(--black); display: inline-block; }
+  .shape-grid { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; }
+  .blob { width: 80px; height: 80px; border: 3px solid var(--black); box-shadow: 4px 4px 0 var(--black); }
+  .blob.circle { border-radius: 50%; background: var(--red); }
+  .blob.squig { background: var(--teal); background-image: repeating-linear-gradient(45deg, var(--white) 0 6px, transparent 6px 12px); }
+  .blob.tri { background: var(--yellow); clip-path: polygon(50% 0, 100% 100%, 0 100%); border: none; filter: drop-shadow(4px 4px 0 var(--black)); }
+  .blob.zigzag { background: var(--pink); background-image: repeating-linear-gradient(-45deg, var(--black) 0 4px, transparent 4px 14px); }
+  .blob.dot { background: var(--yellow); background-image: radial-gradient(circle, var(--black) 3px, transparent 4px); background-size: 18px 18px; }
+</style>
+</head>
+<body>
+<span class="squiggle" style="top:60px; right:40px;">〰️</span>
+<h1><span>MEM</span><span>PHIS</span> <span>!</span></h1>
+<p>Ettore Sottsass rides again. Squiggles. Dots. Confetti. Terrazzo. Every shape clashes with every other shape. And that is correct.</p>
+
+<div class="card">
+  <h2>Shapes</h2>
+  <div class="shape-grid">
+    <div class="blob circle"></div>
+    <div class="blob squig"></div>
+    <div class="blob tri"></div>
+    <div class="blob zigzag"></div>
+    <div class="blob dot"></div>
+  </div>
+
+  <h2>Palette</h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--pink)"></span>
+    <span class="swatch" style="background:var(--teal)"></span>
+    <span class="swatch" style="background:var(--yellow)"></span>
+    <span class="swatch" style="background:var(--red)"></span>
+    <span class="swatch" style="background:var(--blue)"></span>
+    <span class="swatch" style="background:var(--black)"></span>
+  </div>
+
+  <h2>Input</h2>
+  <div class="row"><input class="input" value="MILAN 1981"></div>
+
+  <h2>Buttons</h2>
+  <div class="row">
+    <button class="btn">Go!</button>
+    <button class="btn btn-teal">Maybe</button>
+    <button class="btn btn-yellow">Nope</button>
+    <button class="btn btn-black">Wow</button>
+  </div>
+</div>
+</body>
+</html>

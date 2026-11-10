@@ -1,8 +1,10 @@
 /* Generated semantic Atlas adapters from the complete RDS manifest.
 
- * Upstream 8988f50a514e7f845dbe5ad190faa2afd926f0b4 (MIT). No demo CSS, images or fonts imported.
+ * Upstream 8988f50a514e7f845dbe5ad190faa2afd926f0b4 (MIT). Tokens drive gray ramps and AA contrast.
 
- * Explicit legacy adapters (Win95, Mac7, CRT) live in theme-presets.css.
+ * Demo CSS is mapped separately in retroChrome.generated.css.
+
+ * Explicit legacy gray ramps (Win95, Mac7, CRT) live in theme-presets.css.
 
  */
 
@@ -12,25 +14,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #0a246a;
-  --atlas-focus-ring: #091f5c;
-  --atlas-retro-window-bg: #5475cc;
-  --atlas-retro-header-bg: #0a246a;
+  --atlas-accent: #2a5fd7;
+  --atlas-focus-ring: #2a5fd7;
+  --atlas-retro-window-bg: #ece9d8;
+  --atlas-retro-header-bg: #2a5fd7;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #4e6dbe;
-  --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #5a7edb;
+  --atlas-retro-control-bg: #dbd9c9;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ece9d8;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #2e4070;
-  --gray-900: 90 126 219;
-  --gray-800: 84 117 204;
-  --gray-700: 82 115 200;
-  --gray-600: 82 115 200;
-  --gray-500: 4 6 10;
-  --gray-400: 0 0 0;
-  --gray-300: 0 0 0;
-  --gray-200: 0 0 0;
-  --gray-100: 0 0 0;
+  --atlas-retro-control-border: #828077;
+  --gray-900: 217 214 199;
+  --gray-800: 236 233 216;
+  --gray-700: 219 217 201;
+  --gray-600: 184 182 168;
+  --gray-500: 104 103 95;
+  --gray-400: 94 93 86;
+  --gray-300: 83 82 76;
+  --gray-200: 73 72 67;
+  --gray-100: 59 58 54;
   --gray-50: 0 0 0;
 }
 
@@ -40,17 +42,17 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #b21808;
-  --atlas-focus-ring: #b01808;
+  --atlas-accent: #1a1a1a;
+  --atlas-focus-ring: #2f589b;
   --atlas-retro-window-bg: #abbbd0;
-  --atlas-retro-header-bg: #b21808;
+  --atlas-retro-header-bg: #1a1a1a;
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #9faec1;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #b8c9e0;
+  --atlas-retro-input-bg: #abbbd0;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #5e6772;
-  --gray-900: 184 201 224;
+  --gray-900: 171 187 208;
   --gray-800: 171 187 208;
   --gray-700: 159 174 193;
   --gray-600: 133 146 162;
@@ -63,87 +65,87 @@
 }
 
 [data-atlas-theme="amiga-workbench"] {
-  color-scheme: dark;
+  color-scheme: light;
   --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
-  --atlas-body-fg: #ffffff;
-  --atlas-retro-window-fg: #ffffff;
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #ffffff;
-  --atlas-focus-ring: #ffffff;
-  --atlas-retro-window-bg: #1f69b4;
-  --atlas-retro-header-bg: #ffffff;
-  --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #2f74b9;
-  --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0055aa;
-  --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #84acd6;
-  --gray-900: 0 85 170;
-  --gray-800: 31 105 180;
-  --gray-700: 47 116 185;
-  --gray-600: 53 120 188;
-  --gray-500: 224 234 244;
-  --gray-400: 244 248 251;
-  --gray-300: 255 255 255;
-  --gray-200: 255 255 255;
-  --gray-100: 255 255 255;
-  --gray-50: 255 255 255;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
+  --atlas-retro-window-bg: #ffffff;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #ededed;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #8c8c8c;
+  --gray-900: 235 235 235;
+  --gray-800: 255 255 255;
+  --gray-700: 237 237 237;
+  --gray-600: 199 199 199;
+  --gray-500: 117 117 117;
+  --gray-400: 107 107 107;
+  --gray-300: 94 94 94;
+  --gray-200: 84 84 84;
+  --gray-100: 71 71 71;
+  --gray-50: 0 0 0;
 }
 
 [data-atlas-theme="nextstep"] {
-  color-scheme: dark;
+  color-scheme: light;
   --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
-  --atlas-body-fg: #ffffff;
-  --atlas-retro-window-fg: #ffffff;
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #f0f0f4;
-  --atlas-focus-ring: #f0f0f4;
-  --atlas-retro-window-bg: #696974;
-  --atlas-retro-header-bg: #f0f0f4;
-  --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #74747e;
-  --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #555561;
-  --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #acacb3;
-  --gray-900: 85 85 97;
-  --gray-800: 105 105 116;
-  --gray-700: 116 116 126;
-  --gray-600: 117 117 127;
-  --gray-500: 237 237 238;
-  --gray-400: 252 252 252;
-  --gray-300: 255 255 255;
-  --gray-200: 255 255 255;
-  --gray-100: 255 255 255;
-  --gray-50: 255 255 255;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
+  --atlas-retro-window-bg: #a8a8b0;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #9c9ca4;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #a8a8b0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #5c5c61;
+  --gray-900: 155 155 162;
+  --gray-800: 168 168 176;
+  --gray-700: 156 156 164;
+  --gray-600: 131 131 137;
+  --gray-500: 60 60 63;
+  --gray-400: 52 52 55;
+  --gray-300: 37 37 39;
+  --gray-200: 25 25 26;
+  --gray-100: 0 0 0;
+  --gray-50: 0 0 0;
 }
 
 [data-atlas-theme="beos"] {
-  color-scheme: dark;
+  color-scheme: light;
   --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
-  --atlas-body-fg: #ffffff;
-  --atlas-retro-window-fg: #ffffff;
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #ffcc00;
-  --atlas-focus-ring: #ffcc00;
-  --atlas-retro-window-bg: #44696a;
-  --atlas-retro-header-bg: #ffcc00;
-  --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #517474;
-  --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #2a5556;
-  --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #98acad;
-  --gray-900: 42 85 86;
-  --gray-800: 68 105 106;
-  --gray-700: 81 116 116;
-  --gray-600: 90 123 124;
-  --gray-500: 219 226 227;
-  --gray-400: 234 239 239;
-  --gray-300: 255 255 255;
-  --gray-200: 255 255 255;
-  --gray-100: 255 255 255;
-  --gray-50: 255 255 255;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
+  --atlas-retro-window-bg: #cfcfcf;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #c1c1c1;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #cfcfcf;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #727272;
+  --gray-900: 190 190 190;
+  --gray-800: 207 207 207;
+  --gray-700: 193 193 193;
+  --gray-600: 161 161 161;
+  --gray-500: 87 87 87;
+  --gray-400: 79 79 79;
+  --gray-300: 66 66 66;
+  --gray-200: 56 56 56;
+  --gray-100: 41 41 41;
+  --gray-50: 0 0 0;
 }
 
 [data-atlas-theme="teletext"] {
@@ -159,7 +161,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -187,7 +189,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -208,14 +210,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #ffd300;
+  --atlas-accent: #e9e9ff;
   --atlas-focus-ring: #ffd300;
   --atlas-retro-window-bg: #282839;
-  --atlas-retro-header-bg: #ffd300;
+  --atlas-retro-header-bg: #e9e9ff;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #373747;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0b0b1e;
+  --atlas-retro-input-bg: #282839;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #898992;
   --gray-900: 11 11 30;
@@ -243,10 +245,10 @@
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #6eb3dc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #7fcfff;
+  --atlas-retro-input-bg: #76c1ed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #416a82;
-  --gray-900: 127 207 255;
+  --gray-900: 118 193 237;
   --gray-800: 118 193 237;
   --gray-700: 110 179 220;
   --gray-600: 92 151 185;
@@ -264,25 +266,25 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #00ff33;
-  --atlas-focus-ring: #00ff33;
-  --atlas-retro-window-bg: #535353;
-  --atlas-retro-header-bg: #00ff33;
+  --atlas-accent: #ffb400;
+  --atlas-focus-ring: #ffb400;
+  --atlas-retro-window-bg: #3c3c3c;
+  --atlas-retro-header-bg: #ffb400;
   --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #5f5f5f;
+  --atlas-retro-control-bg: #4a4a4a;
   --atlas-retro-control-fg: #ffffff;
   --atlas-retro-input-bg: #3c3c3c;
   --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #a0a0a0;
+  --atlas-retro-control-border: #949494;
   --gray-900: 60 60 60;
-  --gray-800: 83 83 83;
-  --gray-700: 95 95 95;
-  --gray-600: 117 117 117;
-  --gray-500: 202 202 202;
-  --gray-400: 214 214 214;
-  --gray-300: 236 236 236;
-  --gray-200: 252 252 252;
-  --gray-100: 255 255 255;
+  --gray-800: 60 60 60;
+  --gray-700: 74 74 74;
+  --gray-600: 103 103 103;
+  --gray-500: 169 169 169;
+  --gray-400: 179 179 179;
+  --gray-300: 198 198 198;
+  --gray-200: 212 212 212;
+  --gray-100: 234 234 234;
   --gray-50: 255 255 255;
 }
 
@@ -293,13 +295,13 @@
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
   --atlas-accent: #ffff00;
-  --atlas-focus-ring: #ffff00;
+  --atlas-focus-ring: #7a7a7a;
   --atlas-retro-window-bg: #1f1f1f;
   --atlas-retro-header-bg: #ffff00;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -320,14 +322,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #ffb000;
+  --atlas-accent: #d9a85e;
   --atlas-focus-ring: #ffb000;
   --atlas-retro-window-bg: #272522;
-  --atlas-retro-header-bg: #ffb000;
+  --atlas-retro-header-bg: #d9a85e;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #363431;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0a0704;
+  --atlas-retro-input-bg: #272522;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #888785;
   --gray-900: 10 7 4;
@@ -348,14 +350,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #ff00e5;
-  --atlas-focus-ring: #ff00e5;
+  --atlas-accent: #f8f8ff;
+  --atlas-focus-ring: #fffb96;
   --atlas-retro-window-bg: #352847;
-  --atlas-retro-header-bg: #ff00e5;
+  --atlas-retro-header-bg: #f8f8ff;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #433754;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #1a0b2e;
+  --atlas-retro-input-bg: #352847;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #90899a;
   --gray-900: 26 11 46;
@@ -383,7 +385,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -399,75 +401,75 @@
 }
 
 [data-atlas-theme="ps1-tech"] {
-  color-scheme: dark;
+  color-scheme: light;
   --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
-  --atlas-body-fg: #ffffff;
-  --atlas-retro-window-fg: #ffffff;
-  --atlas-radius: .35rem;
-  --atlas-accent: #00ffff;
-  --atlas-focus-ring: #00ffff;
-  --atlas-retro-window-bg: #27272d;
-  --atlas-retro-header-bg: #00ffff;
-  --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #36363c;
-  --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0a0a10;
-  --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #88888c;
-  --gray-900: 10 10 16;
-  --gray-800: 39 39 45;
-  --gray-700: 54 54 60;
-  --gray-600: 87 87 91;
-  --gray-500: 143 143 146;
-  --gray-400: 153 153 156;
-  --gray-300: 171 171 173;
-  --gray-200: 184 184 186;
-  --gray-100: 203 203 205;
-  --gray-50: 255 255 255;
-}
-
-[data-atlas-theme="os2-warp"] {
-  color-scheme: dark;
-  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
-  --atlas-body-fg: #ffffff;
+  --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
-  --atlas-radius: 0;
-  --atlas-accent: #00007f;
-  --atlas-focus-ring: #00007f;
-  --atlas-retro-window-bg: #468a8a;
-  --atlas-retro-header-bg: #00007f;
+  --atlas-radius: .35rem;
+  --atlas-accent: #2a2a32;
+  --atlas-focus-ring: #7e3eb1;
+  --atlas-retro-window-bg: #c0c0c0;
+  --atlas-retro-header-bg: #2a2a32;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #418080;
+  --atlas-retro-control-bg: #b3b3b3;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #2d7a7a;
-  --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #264c4c;
-  --gray-900: 45 122 122;
-  --gray-800: 70 138 138;
-  --gray-700: 65 128 128;
-  --gray-600: 64 127 127;
-  --gray-500: 11 22 22;
-  --gray-400: 1 1 1;
-  --gray-300: 0 0 0;
-  --gray-200: 0 0 0;
-  --gray-100: 0 0 0;
+  --atlas-retro-input-bg: #c0c0c0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #6a6a6a;
+  --gray-900: 177 177 177;
+  --gray-800: 192 192 192;
+  --gray-700: 179 179 179;
+  --gray-600: 150 150 150;
+  --gray-500: 77 77 77;
+  --gray-400: 69 69 69;
+  --gray-300: 56 56 56;
+  --gray-200: 46 46 46;
+  --gray-100: 29 29 29;
   --gray-50: 0 0 0;
 }
 
-[data-atlas-theme="macos9-platinum"] {
+[data-atlas-theme="os2-warp"] {
   color-scheme: light;
   --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #f5f5f5;
-  --atlas-focus-ring: #f5f5f5;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
+  --atlas-retro-window-bg: #c0c0c0;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #b3b3b3;
+  --atlas-retro-control-fg: #000000;
+  --atlas-retro-input-bg: #c0c0c0;
+  --atlas-retro-input-fg: #000000;
+  --atlas-retro-control-border: #6a6a6a;
+  --gray-900: 177 177 177;
+  --gray-800: 192 192 192;
+  --gray-700: 179 179 179;
+  --gray-600: 150 150 150;
+  --gray-500: 77 77 77;
+  --gray-400: 69 69 69;
+  --gray-300: 56 56 56;
+  --gray-200: 46 46 46;
+  --gray-100: 29 29 29;
+  --gray-50: 0 0 0;
+}
+
+[data-atlas-theme="macos9-platinum"] {
+  color-scheme: dark;
+  --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
+  --atlas-body-fg: #000000;
+  --atlas-retro-window-fg: #000000;
+  --atlas-radius: 0;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
   --atlas-retro-window-bg: #777777;
-  --atlas-retro-header-bg: #f5f5f5;
-  --atlas-retro-header-fg: #000000;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #6f6f6f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #808080;
+  --atlas-retro-input-bg: #777777;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #414141;
   --gray-900: 128 128 128;
@@ -488,17 +490,17 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #2a7ac9;
+  --atlas-accent: #2a2a2a;
   --atlas-focus-ring: #2773bd;
   --atlas-retro-window-bg: #d8dfe6;
-  --atlas-retro-header-bg: #2a7ac9;
-  --atlas-retro-header-fg: #000000;
+  --atlas-retro-header-bg: #2a2a2a;
+  --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #c9cfd6;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #e8f0f7;
+  --atlas-retro-input-bg: #d8dfe6;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #777b7f;
-  --gray-900: 232 240 247;
+  --gray-900: 216 223 230;
   --gray-800: 216 223 230;
   --gray-700: 201 207 214;
   --gray-600: 168 174 179;
@@ -511,31 +513,31 @@
 }
 
 [data-atlas-theme="gameboy-dmg"] {
-  color-scheme: light;
+  color-scheme: dark;
   --atlas-font-ui: var(--font-sys, var(--font, Georgia, serif));
-  --atlas-body-fg: #000000;
-  --atlas-retro-window-fg: #000000;
+  --atlas-body-fg: #ffffff;
+  --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #0f380f;
-  --atlas-focus-ring: #0f380f;
-  --atlas-retro-window-bg: #aba499;
-  --atlas-retro-header-bg: #0f380f;
-  --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #9f998e;
-  --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #b8b0a4;
-  --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #5e5a54;
+  --atlas-accent: #9bbc0f;
+  --atlas-focus-ring: #9bbc0f;
+  --atlas-retro-window-bg: #0f380f;
+  --atlas-retro-header-bg: #9bbc0f;
+  --atlas-retro-header-fg: #000000;
+  --atlas-retro-control-bg: #204620;
+  --atlas-retro-control-fg: #ffffff;
+  --atlas-retro-input-bg: #0f380f;
+  --atlas-retro-input-fg: #ffffff;
+  --atlas-retro-control-border: #7b927b;
   --gray-900: 184 176 164;
-  --gray-800: 171 164 153;
-  --gray-700: 159 153 142;
-  --gray-600: 133 128 119;
-  --gray-500: 60 57 54;
-  --gray-400: 51 49 46;
-  --gray-300: 36 34 32;
-  --gray-200: 21 20 18;
-  --gray-100: 0 0 0;
-  --gray-50: 0 0 0;
+  --gray-800: 15 56 15;
+  --gray-700: 32 70 32;
+  --gray-600: 68 100 68;
+  --gray-500: 140 159 140;
+  --gray-400: 152 169 152;
+  --gray-300: 171 185 171;
+  --gray-200: 188 199 188;
+  --gray-100: 209 217 209;
+  --gray-50: 255 255 255;
 }
 
 [data-atlas-theme="braun-rams"] {
@@ -544,25 +546,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #6a6965;
-  --atlas-focus-ring: #6a6965;
-  --atlas-retro-window-bg: #e3e2df;
-  --atlas-retro-header-bg: #6a6965;
+  --atlas-accent: #1a1a1a;
+  --atlas-focus-ring: #1a1a1a;
+  --atlas-retro-window-bg: #f4f3f0;
+  --atlas-retro-header-bg: #1a1a1a;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #d3d2cf;
+  --atlas-retro-control-bg: #e3e2df;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #f4f3f0;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #7d7c7b;
+  --atlas-retro-control-border: #868684;
   --gray-900: 244 243 240;
-  --gray-800: 227 226 223;
-  --gray-700: 211 210 207;
-  --gray-600: 177 176 174;
-  --gray-500: 100 99 98;
-  --gray-400: 91 90 89;
-  --gray-300: 77 77 76;
-  --gray-200: 68 68 67;
-  --gray-100: 54 54 54;
+  --gray-800: 244 243 240;
+  --gray-700: 227 226 223;
+  --gray-600: 190 190 187;
+  --gray-500: 110 109 108;
+  --gray-400: 100 100 98;
+  --gray-300: 88 87 86;
+  --gray-200: 78 78 77;
+  --gray-100: 63 63 62;
   --gray-50: 0 0 0;
 }
 
@@ -579,7 +581,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f35;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000008;
+  --atlas-retro-input-bg: #1f1f26;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848488;
   --gray-900: 0 0 8;
@@ -607,7 +609,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #363636;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0a0a0a;
+  --atlas-retro-input-bg: #272727;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #888888;
   --gray-900: 10 10 10;
@@ -628,25 +630,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #0078b4;
-  --atlas-focus-ring: #0077b2;
-  --atlas-retro-window-bg: #e2ded4;
-  --atlas-retro-header-bg: #0078b4;
+  --atlas-accent: #1a1a1a;
+  --atlas-focus-ring: #0078b4;
+  --atlas-retro-window-bg: #f3efe4;
+  --atlas-retro-header-bg: #1a1a1a;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #d2cec5;
+  --atlas-retro-control-bg: #e2ded4;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #f3efe4;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #7c7a75;
+  --atlas-retro-control-border: #86837d;
   --gray-900: 243 239 228;
-  --gray-800: 226 222 212;
-  --gray-700: 210 206 197;
-  --gray-600: 176 173 165;
-  --gray-500: 97 95 91;
-  --gray-400: 90 89 85;
-  --gray-300: 77 75 72;
-  --gray-200: 66 64 61;
-  --gray-100: 54 53 51;
+  --gray-800: 243 239 228;
+  --gray-700: 226 222 212;
+  --gray-600: 190 186 178;
+  --gray-500: 107 105 100;
+  --gray-400: 100 98 93;
+  --gray-300: 85 84 80;
+  --gray-200: 78 76 73;
+  --gray-100: 63 62 59;
   --gray-50: 0 0 0;
 }
 
@@ -663,7 +665,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -684,14 +686,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
-  --atlas-accent: #ffff00;
-  --atlas-focus-ring: #ffff00;
+  --atlas-accent: #e4e4e4;
+  --atlas-focus-ring: #e4e4e4;
   --atlas-retro-window-bg: #1f1f1f;
-  --atlas-retro-header-bg: #ffff00;
+  --atlas-retro-header-bg: #e4e4e4;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -719,7 +721,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2fb9;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0000aa;
+  --atlas-retro-input-bg: #1f1fb4;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #8484d6;
   --gray-900: 0 0 170;
@@ -747,7 +749,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -775,7 +777,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2fb9;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0000aa;
+  --atlas-retro-input-bg: #1f1fb4;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #8484d6;
   --gray-900: 0 0 170;
@@ -796,14 +798,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #ff3860;
-  --atlas-focus-ring: #ff3860;
+  --atlas-accent: #00a830;
+  --atlas-focus-ring: #62ff9d;
   --atlas-retro-window-bg: #1f1f1f;
-  --atlas-retro-header-bg: #ff3860;
+  --atlas-retro-header-bg: #00a830;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #2f2f2f;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #000000;
+  --atlas-retro-input-bg: #1f1f1f;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #848484;
   --gray-900: 0 0 0;
@@ -824,25 +826,25 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
-  --atlas-accent: #00e4ff;
-  --atlas-focus-ring: #00e4ff;
-  --atlas-retro-window-bg: #2f303e;
-  --atlas-retro-header-bg: #00e4ff;
+  --atlas-accent: #e8ecff;
+  --atlas-focus-ring: #e8ecff;
+  --atlas-retro-window-bg: #1a1c30;
+  --atlas-retro-header-bg: #e8ecff;
   --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #3e3e4c;
+  --atlas-retro-control-bg: #2a2c3e;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #131424;
+  --atlas-retro-input-bg: #1a1c30;
   --atlas-retro-input-fg: #ffffff;
-  --atlas-retro-control-border: #8d8d95;
+  --atlas-retro-control-border: #81828d;
   --gray-900: 19 20 36;
-  --gray-800: 47 48 62;
-  --gray-700: 62 62 76;
-  --gray-600: 93 94 104;
-  --gray-500: 153 154 160;
-  --gray-400: 163 164 170;
-  --gray-300: 182 183 187;
-  --gray-200: 195 195 199;
-  --gray-100: 215 216 218;
+  --gray-800: 26 28 48;
+  --gray-700: 42 44 62;
+  --gray-600: 76 78 94;
+  --gray-500: 134 135 145;
+  --gray-400: 143 144 154;
+  --gray-300: 159 160 168;
+  --gray-200: 173 173 180;
+  --gray-100: 191 191 197;
   --gray-50: 255 255 255;
 }
 
@@ -859,7 +861,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #6661cf;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #443ec4;
+  --atlas-retro-input-bg: #5a55cb;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #a4a2e2;
   --gray-900: 68 62 196;
@@ -881,16 +883,16 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #9b59b6;
-  --atlas-focus-ring: #9656b1;
+  --atlas-focus-ring: #12806a;
   --atlas-retro-window-bg: #dbdfe0;
   --atlas-retro-header-bg: #9b59b6;
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #cccfd0;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #ecf0f1;
+  --atlas-retro-input-bg: #dbdfe0;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #787b7b;
-  --gray-900: 236 240 241;
+  --gray-900: 219 223 224;
   --gray-800: 219 223 224;
   --gray-700: 204 207 208;
   --gray-600: 171 174 175;
@@ -909,16 +911,16 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .7rem;
   --atlas-accent: #7873f5;
-  --atlas-focus-ring: #706be4;
+  --atlas-focus-ring: #bf5293;
   --atlas-retro-window-bg: #ededed;
   --atlas-retro-header-bg: #7873f5;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #dcdcdc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-bg: #ededed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #828282;
-  --gray-900: 255 255 255;
+  --gray-900: 237 237 237;
   --gray-800: 237 237 237;
   --gray-700: 220 220 220;
   --gray-600: 185 185 185;
@@ -943,10 +945,10 @@
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #c1c6cc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #e0e5ec;
+  --atlas-retro-input-bg: #d0d5db;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #727578;
-  --gray-900: 224 229 236;
+  --gray-900: 208 213 219;
   --gray-800: 208 213 219;
   --gray-700: 193 198 204;
   --gray-600: 162 166 171;
@@ -964,14 +966,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: 0;
-  --atlas-accent: #ffe066;
-  --atlas-focus-ring: #ffe066;
+  --atlas-accent: #eaf2fb;
+  --atlas-focus-ring: #eaf2fb;
   --atlas-retro-window-bg: #2a527d;
-  --atlas-retro-header-bg: #ffe066;
+  --atlas-retro-header-bg: #eaf2fb;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #395e86;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0d3a6b;
+  --atlas-retro-input-bg: #2a527d;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #8aa0b8;
   --gray-900: 13 58 107;
@@ -992,17 +994,17 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .7rem;
-  --atlas-accent: #7c6ba8;
-  --atlas-focus-ring: #7666a0;
+  --atlas-accent: #3a2e5c;
+  --atlas-focus-ring: #7b669c;
   --atlas-retro-window-bg: #dfd9ed;
-  --atlas-retro-header-bg: #7c6ba8;
+  --atlas-retro-header-bg: #3a2e5c;
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #cfcadc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #f0e9ff;
+  --atlas-retro-input-bg: #dfd9ed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #7b7782;
-  --gray-900: 240 233 255;
+  --gray-900: 223 217 237;
   --gray-800: 223 217 237;
   --gray-700: 207 202 220;
   --gray-600: 174 169 185;
@@ -1027,10 +1029,10 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #dcdcdc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-bg: #ededed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #828282;
-  --gray-900: 255 255 255;
+  --gray-900: 237 237 237;
   --gray-800: 237 237 237;
   --gray-700: 220 220 220;
   --gray-600: 185 185 185;
@@ -1048,25 +1050,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #e63946;
-  --atlas-focus-ring: #d63541;
-  --atlas-retro-window-bg: #e3e2dd;
-  --atlas-retro-header-bg: #e63946;
-  --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #d3d2ce;
+  --atlas-accent: #0a0a0a;
+  --atlas-focus-ring: #0a0a0a;
+  --atlas-retro-window-bg: #f4f3ee;
+  --atlas-retro-header-bg: #0a0a0a;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #e3e2dd;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #f4f3ee;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #7d7c7a;
+  --atlas-retro-control-border: #868683;
   --gray-900: 244 243 238;
-  --gray-800: 227 226 221;
-  --gray-700: 211 210 206;
-  --gray-600: 177 176 172;
-  --gray-500: 100 99 97;
-  --gray-400: 91 90 88;
-  --gray-300: 77 77 75;
-  --gray-200: 68 68 66;
-  --gray-100: 54 54 53;
+  --gray-800: 244 243 238;
+  --gray-700: 227 226 221;
+  --gray-600: 190 190 186;
+  --gray-500: 110 109 107;
+  --gray-400: 100 100 98;
+  --gray-300: 88 87 86;
+  --gray-200: 78 78 76;
+  --gray-100: 63 63 62;
   --gray-50: 0 0 0;
 }
 
@@ -1076,25 +1078,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #d32027;
-  --atlas-focus-ring: #d32027;
-  --atlas-retro-window-bg: #dfdbd0;
-  --atlas-retro-header-bg: #d32027;
+  --atlas-accent: #0a0a0a;
+  --atlas-focus-ring: #0a0a0a;
+  --atlas-retro-window-bg: #f0ebe0;
+  --atlas-retro-header-bg: #0a0a0a;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #cfccc1;
+  --atlas-retro-control-bg: #dfdbd0;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #f0ebe0;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #7b7872;
+  --atlas-retro-control-border: #84817b;
   --gray-900: 240 235 224;
-  --gray-800: 223 219 208;
-  --gray-700: 207 204 193;
-  --gray-600: 174 171 162;
-  --gray-500: 96 94 89;
-  --gray-400: 87 85 81;
-  --gray-300: 74 72 69;
-  --gray-200: 65 64 60;
-  --gray-100: 51 50 48;
+  --gray-800: 240 235 224;
+  --gray-700: 223 219 208;
+  --gray-600: 187 183 175;
+  --gray-500: 106 103 99;
+  --gray-400: 98 96 92;
+  --gray-300: 84 82 78;
+  --gray-200: 74 73 69;
+  --gray-100: 62 61 58;
   --gray-50: 0 0 0;
 }
 
@@ -1104,25 +1106,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #ed1c24;
-  --atlas-focus-ring: #ed1c24;
-  --atlas-retro-window-bg: #edece7;
-  --atlas-retro-header-bg: #ed1c24;
-  --atlas-retro-header-fg: #000000;
-  --atlas-retro-control-bg: #dcdbd7;
+  --atlas-accent: #0a0a0a;
+  --atlas-focus-ring: #0a0a0a;
+  --atlas-retro-window-bg: #fffef8;
+  --atlas-retro-header-bg: #0a0a0a;
+  --atlas-retro-header-fg: #ffffff;
+  --atlas-retro-control-bg: #edece7;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #fffef8;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #82827f;
+  --atlas-retro-control-border: #8c8c88;
   --gray-900: 255 254 248;
-  --gray-800: 237 236 231;
-  --gray-700: 220 219 215;
-  --gray-600: 185 184 180;
-  --gray-500: 104 104 102;
-  --gray-400: 97 97 95;
-  --gray-300: 83 83 81;
-  --gray-200: 73 73 72;
-  --gray-100: 62 61 60;
+  --gray-800: 255 254 248;
+  --gray-700: 237 236 231;
+  --gray-600: 199 198 193;
+  --gray-500: 115 114 112;
+  --gray-400: 107 107 104;
+  --gray-300: 94 94 92;
+  --gray-200: 84 84 82;
+  --gray-100: 71 71 69;
   --gray-50: 0 0 0;
 }
 
@@ -1139,7 +1141,7 @@
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #363636;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0a0a0a;
+  --atlas-retro-input-bg: #272727;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #888888;
   --gray-900: 10 10 10;
@@ -1160,17 +1162,17 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #3d5a80;
-  --atlas-focus-ring: #3d5a80;
+  --atlas-accent: #2a2418;
+  --atlas-focus-ring: #2a2418;
   --atlas-retro-window-bg: #cdba8f;
-  --atlas-retro-header-bg: #3d5a80;
+  --atlas-retro-header-bg: #2a2418;
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #bfad85;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #dcc89a;
+  --atlas-retro-input-bg: #cdba8f;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #71664f;
-  --gray-900: 220 200 154;
+  --gray-900: 205 186 143;
   --gray-800: 205 186 143;
   --gray-700: 191 173 133;
   --gray-600: 160 145 112;
@@ -1190,23 +1192,23 @@
   --atlas-radius: .35rem;
   --atlas-accent: #0a0a0a;
   --atlas-focus-ring: #0a0a0a;
-  --atlas-retro-window-bg: #e8e8e6;
+  --atlas-retro-window-bg: #fafaf7;
   --atlas-retro-header-bg: #0a0a0a;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #d8d8d6;
+  --atlas-retro-control-bg: #e8e8e6;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #fafaf7;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #80807f;
+  --atlas-retro-control-border: #8a8a88;
   --gray-900: 250 250 247;
-  --gray-800: 232 232 230;
-  --gray-700: 216 216 214;
-  --gray-600: 181 181 179;
-  --gray-500: 102 102 101;
-  --gray-400: 95 95 94;
-  --gray-300: 81 81 80;
-  --gray-200: 72 72 71;
-  --gray-100: 58 58 58;
+  --gray-800: 250 250 247;
+  --gray-700: 232 232 230;
+  --gray-600: 195 195 193;
+  --gray-500: 112 112 111;
+  --gray-400: 105 105 104;
+  --gray-300: 92 92 91;
+  --gray-200: 82 82 82;
+  --gray-100: 68 68 67;
   --gray-50: 0 0 0;
 }
 
@@ -1223,10 +1225,10 @@
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #dcdcdc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #ffffff;
+  --atlas-retro-input-bg: #ededed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #828282;
-  --gray-900: 255 255 255;
+  --gray-900: 237 237 237;
   --gray-800: 237 237 237;
   --gray-700: 220 220 220;
   --gray-600: 185 185 185;
@@ -1246,23 +1248,23 @@
   --atlas-radius: 0;
   --atlas-accent: #2a2a2a;
   --atlas-focus-ring: #2a2a2a;
-  --atlas-retro-window-bg: #e9e8e3;
+  --atlas-retro-window-bg: #fbfaf4;
   --atlas-retro-header-bg: #2a2a2a;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #d9d8d3;
+  --atlas-retro-control-bg: #e9e8e3;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #fbfaf4;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #80807d;
+  --atlas-retro-control-border: #8a8a86;
   --gray-900: 251 250 244;
-  --gray-800: 233 232 227;
-  --gray-700: 217 216 211;
-  --gray-600: 182 181 177;
-  --gray-500: 103 102 100;
-  --gray-400: 93 93 91;
-  --gray-300: 82 81 79;
-  --gray-200: 72 72 70;
-  --gray-100: 58 58 57;
+  --gray-800: 251 250 244;
+  --gray-700: 233 232 227;
+  --gray-600: 196 195 190;
+  --gray-500: 113 112 110;
+  --gray-400: 105 105 102;
+  --gray-300: 90 90 88;
+  --gray-200: 83 82 81;
+  --gray-100: 68 68 66;
   --gray-50: 0 0 0;
 }
 
@@ -1272,14 +1274,14 @@
   --atlas-body-fg: #ffffff;
   --atlas-retro-window-fg: #ffffff;
   --atlas-radius: .35rem;
-  --atlas-accent: #ffe600;
-  --atlas-focus-ring: #ffe600;
+  --atlas-accent: #f0f0f0;
+  --atlas-focus-ring: #ff0551;
   --atlas-retro-window-bg: #272727;
-  --atlas-retro-header-bg: #ffe600;
+  --atlas-retro-header-bg: #f0f0f0;
   --atlas-retro-header-fg: #000000;
   --atlas-retro-control-bg: #363636;
   --atlas-retro-control-fg: #ffffff;
-  --atlas-retro-input-bg: #0a0a0a;
+  --atlas-retro-input-bg: #272727;
   --atlas-retro-input-fg: #ffffff;
   --atlas-retro-control-border: #888888;
   --gray-900: 10 10 10;
@@ -1300,17 +1302,17 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #5a6478;
-  --atlas-focus-ring: #5a6478;
+  --atlas-accent: #202030;
+  --atlas-focus-ring: #b24a81;
   --atlas-retro-window-bg: #c8dfed;
-  --atlas-retro-header-bg: #5a6478;
+  --atlas-retro-header-bg: #202030;
   --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #bacfdc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #d7f0ff;
+  --atlas-retro-input-bg: #c8dfed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #6e7b82;
-  --gray-900: 215 240 255;
+  --gray-900: 200 223 237;
   --gray-800: 200 223 237;
   --gray-700: 186 207 220;
   --gray-600: 156 174 185;
@@ -1329,24 +1331,24 @@
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
   --atlas-accent: #1a1a3a;
-  --atlas-focus-ring: #1a1a3a;
-  --atlas-retro-window-bg: #e3dac4;
+  --atlas-focus-ring: #e33432;
+  --atlas-retro-window-bg: #f4ead3;
   --atlas-retro-header-bg: #1a1a3a;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #d3cbb6;
+  --atlas-retro-control-bg: #e3dac4;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #f4ead3;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #7d786c;
+  --atlas-retro-control-border: #868174;
   --gray-900: 244 234 211;
-  --gray-800: 227 218 196;
-  --gray-700: 211 203 182;
-  --gray-600: 177 170 153;
-  --gray-500: 98 94 84;
-  --gray-400: 89 85 76;
-  --gray-300: 75 72 65;
-  --gray-200: 66 63 57;
-  --gray-100: 52 50 45;
+  --gray-800: 244 234 211;
+  --gray-700: 227 218 196;
+  --gray-600: 190 183 165;
+  --gray-500: 107 103 93;
+  --gray-400: 100 96 87;
+  --gray-300: 85 82 74;
+  --gray-200: 76 73 65;
+  --gray-100: 61 58 53;
   --gray-50: 0 0 0;
 }
 
@@ -1356,25 +1358,25 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: 0;
-  --atlas-accent: #c83030;
-  --atlas-focus-ring: #c83030;
-  --atlas-retro-window-bg: #e8e8df;
-  --atlas-retro-header-bg: #c83030;
+  --atlas-accent: #1a2847;
+  --atlas-focus-ring: #1a2847;
+  --atlas-retro-window-bg: #fafaf0;
+  --atlas-retro-header-bg: #1a2847;
   --atlas-retro-header-fg: #ffffff;
-  --atlas-retro-control-bg: #d8d8cf;
+  --atlas-retro-control-bg: #e8e8df;
   --atlas-retro-control-fg: #000000;
   --atlas-retro-input-bg: #fafaf0;
   --atlas-retro-input-fg: #000000;
-  --atlas-retro-control-border: #80807b;
+  --atlas-retro-control-border: #8a8a84;
   --gray-900: 250 250 240;
-  --gray-800: 232 232 223;
-  --gray-700: 216 216 207;
-  --gray-600: 181 181 174;
-  --gray-500: 102 102 98;
-  --gray-400: 95 95 91;
-  --gray-300: 81 81 78;
-  --gray-200: 72 72 69;
-  --gray-100: 58 58 56;
+  --gray-800: 250 250 240;
+  --gray-700: 232 232 223;
+  --gray-600: 195 195 187;
+  --gray-500: 112 112 108;
+  --gray-400: 105 105 101;
+  --gray-300: 90 90 86;
+  --gray-200: 82 82 79;
+  --gray-100: 68 68 65;
   --gray-50: 0 0 0;
 }
 
@@ -1384,17 +1386,17 @@
   --atlas-body-fg: #000000;
   --atlas-retro-window-fg: #000000;
   --atlas-radius: .35rem;
-  --atlas-accent: #ffff00;
-  --atlas-focus-ring: #ffff00;
+  --atlas-accent: #000000;
+  --atlas-focus-ring: #000000;
   --atlas-retro-window-bg: #ed00ed;
-  --atlas-retro-header-bg: #ffff00;
-  --atlas-retro-header-fg: #000000;
+  --atlas-retro-header-bg: #000000;
+  --atlas-retro-header-fg: #ffffff;
   --atlas-retro-control-bg: #dc00dc;
   --atlas-retro-control-fg: #000000;
-  --atlas-retro-input-bg: #ff00ff;
+  --atlas-retro-input-bg: #ed00ed;
   --atlas-retro-input-fg: #000000;
   --atlas-retro-control-border: #820082;
-  --gray-900: 255 0 255;
+  --gray-900: 237 0 237;
   --gray-800: 237 0 237;
   --gray-700: 220 0 220;
   --gray-600: 209 0 209;
@@ -1453,58 +1455,58 @@
 }
 
 [data-atlas-theme="windows-xp-luna"] {
-  --atlas-link: #030813;
-  --atlas-syntax-keyword: #091736;
-  --atlas-syntax-string: #041d0d;
-  --atlas-syntax-number: #221701;
-  --atlas-syntax-comment: #18191c;
-  --atlas-header-menu-accent: #05080d;
-  --atlas-header-accent: #020305;
-  --atlas-header-hover-accent: #020305;
+  --atlas-link: #235edf;
+  --atlas-syntax-keyword: #1f54c8;
+  --atlas-syntax-string: #0e6a30;
+  --atlas-syntax-number: #7b5402;
+  --atlas-syntax-comment: #575c68;
+  --atlas-header-menu-accent: #3d6aa0;
+  --atlas-header-accent: #375e8f;
+  --atlas-header-hover-accent: #29476c;
 }
 
 [data-atlas-theme="aqua-osx"] {
   --atlas-link: #1943a0;
-  --atlas-syntax-keyword: #1c4bb3;
-  --atlas-syntax-string: #0d602c;
-  --atlas-syntax-number: #6f4c02;
-  --atlas-syntax-comment: #4e535d;
+  --atlas-syntax-keyword: #1943a0;
+  --atlas-syntax-string: #0b5526;
+  --atlas-syntax-number: #634402;
+  --atlas-syntax-comment: #444952;
   --atlas-header-menu-accent: #2b4a70;
   --atlas-header-accent: #254062;
   --atlas-header-hover-accent: #18293e;
 }
 
 [data-atlas-theme="amiga-workbench"] {
-  --atlas-link: #dee8fc;
-  --atlas-syntax-keyword: #b9cdf9;
-  --atlas-syntax-string: #a2dab7;
-  --atlas-syntax-number: #e7c98c;
-  --atlas-syntax-comment: #cbced3;
-  --atlas-header-menu-accent: #d9e9fe;
-  --atlas-header-accent: #f4f9ff;
-  --atlas-header-hover-accent: #fdfeff;
+  --atlas-link: #2563eb;
+  --atlas-syntax-keyword: #2460e4;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8d6103;
+  --atlas-syntax-comment: #646a77;
+  --atlas-header-menu-accent: #4577b4;
+  --atlas-header-accent: #3f6da5;
+  --atlas-header-hover-accent: #315480;
 }
 
 [data-atlas-theme="nextstep"] {
-  --atlas-link: #e5ecfd;
-  --atlas-syntax-keyword: #b7ccf8;
-  --atlas-syntax-string: #9fd9b5;
-  --atlas-syntax-number: #e7c98c;
-  --atlas-syntax-comment: #caccd1;
-  --atlas-header-menu-accent: #dfedfe;
-  --atlas-header-accent: #fdfeff;
-  --atlas-header-hover-accent: #ffffff;
+  --atlas-link: #153886;
+  --atlas-syntax-keyword: #112f6e;
+  --atlas-syntax-string: #083b1b;
+  --atlas-syntax-number: #452f01;
+  --atlas-syntax-comment: #30333a;
+  --atlas-header-menu-accent: #243f5f;
+  --atlas-header-accent: #1f3550;
+  --atlas-header-hover-accent: #101c2b;
 }
 
 [data-atlas-theme="beos"] {
-  --atlas-link: #d3e0fb;
-  --atlas-syntax-keyword: #a8c1f7;
-  --atlas-syntax-string: #88d0a3;
-  --atlas-syntax-number: #e1bc70;
-  --atlas-syntax-comment: #bec1c7;
-  --atlas-header-menu-accent: #cce2fd;
-  --atlas-header-accent: #eaf3fe;
-  --atlas-header-hover-accent: #fdfeff;
+  --atlas-link: #1e50be;
+  --atlas-syntax-keyword: #1a46a7;
+  --atlas-syntax-string: #0c5828;
+  --atlas-syntax-number: #674602;
+  --atlas-syntax-comment: #484c56;
+  --atlas-header-menu-accent: #345987;
+  --atlas-header-accent: #2e4f78;
+  --atlas-header-hover-accent: #213855;
 }
 
 [data-atlas-theme="teletext"] {
@@ -1553,28 +1555,28 @@
 
 [data-atlas-theme="frutiger-aero"] {
   --atlas-link: #19429d;
-  --atlas-syntax-keyword: #1c4ab0;
-  --atlas-syntax-string: #0d5f2b;
-  --atlas-syntax-number: #6d4b02;
-  --atlas-syntax-comment: #4d525c;
+  --atlas-syntax-keyword: #19429d;
+  --atlas-syntax-string: #0b5326;
+  --atlas-syntax-number: #614202;
+  --atlas-syntax-comment: #444952;
   --atlas-header-menu-accent: #2b4a70;
   --atlas-header-accent: #254062;
   --atlas-header-hover-accent: #18293e;
 }
 
 [data-atlas-theme="winamp-skin"] {
-  --atlas-link: #b3c8f8;
+  --atlas-link: #83a6f4;
   --atlas-syntax-keyword: #83a6f4;
   --atlas-syntax-string: #53bb79;
   --atlas-syntax-number: #d39e2f;
   --atlas-syntax-comment: #a3a8b0;
-  --atlas-header-menu-accent: #a3cbfc;
-  --atlas-header-accent: #c3ddfd;
-  --atlas-header-hover-accent: #fdfeff;
+  --atlas-header-menu-accent: #68aafa;
+  --atlas-header-accent: #8dbefb;
+  --atlas-header-hover-accent: #d9e9fe;
 }
 
 [data-atlas-theme="geocities-web10"] {
-  --atlas-link: #5384ef;
+  --atlas-link: #00ffff;
   --atlas-syntax-keyword: #346eec;
   --atlas-syntax-string: #16a34a;
   --atlas-syntax-number: #ca8a04;
@@ -1618,25 +1620,25 @@
 }
 
 [data-atlas-theme="ps1-tech"] {
-  --atlas-link: #5e8cf0;
-  --atlas-syntax-keyword: #3b73ed;
-  --atlas-syntax-string: #16a34a;
-  --atlas-syntax-number: #ca8a04;
-  --atlas-syntax-comment: #747a88;
-  --atlas-header-menu-accent: #60a5fa;
-  --atlas-header-accent: #60a5fa;
-  --atlas-header-hover-accent: #aed1fc;
+  --atlas-link: #1b47a9;
+  --atlas-syntax-keyword: #173d92;
+  --atlas-syntax-string: #0b4e24;
+  --atlas-syntax-number: #5b3e02;
+  --atlas-syntax-comment: #40444d;
+  --atlas-header-menu-accent: #2e4f78;
+  --atlas-header-accent: #284569;
+  --atlas-header-hover-accent: #1b2e46;
 }
 
 [data-atlas-theme="os2-warp"] {
-  --atlas-link: #07142f;
-  --atlas-syntax-keyword: #f0f4fe;
-  --atlas-syntax-string: #eaf7ef;
-  --atlas-syntax-number: #faf3e6;
-  --atlas-syntax-comment: #f3f4f5;
-  --atlas-header-menu-accent: #0c1520;
-  --atlas-header-accent: #010203;
-  --atlas-header-hover-accent: #fdfeff;
+  --atlas-link: #1b47a9;
+  --atlas-syntax-keyword: #173d92;
+  --atlas-syntax-string: #0b4e24;
+  --atlas-syntax-number: #5b3e02;
+  --atlas-syntax-comment: #40444d;
+  --atlas-header-menu-accent: #2e4f78;
+  --atlas-header-accent: #284569;
+  --atlas-header-hover-accent: #1b2e46;
 }
 
 [data-atlas-theme="macos9-platinum"] {
@@ -1652,35 +1654,35 @@
 
 [data-atlas-theme="web20-glossy"] {
   --atlas-link: #2158d1;
-  --atlas-syntax-keyword: #2562e9;
-  --atlas-syntax-string: #117c38;
-  --atlas-syntax-number: #916303;
-  --atlas-syntax-comment: #666c7a;
+  --atlas-syntax-keyword: #2158d1;
+  --atlas-syntax-string: #0f7033;
+  --atlas-syntax-number: #835a03;
+  --atlas-syntax-comment: #5c626e;
   --atlas-header-menu-accent: #3a6396;
   --atlas-header-accent: #345987;
   --atlas-header-hover-accent: #264264;
 }
 
 [data-atlas-theme="gameboy-dmg"] {
-  --atlas-link: #14357f;
+  --atlas-link: #6d96f2;
   --atlas-syntax-keyword: #173d92;
   --atlas-syntax-string: #0b4e24;
   --atlas-syntax-number: #5b3e02;
   --atlas-syntax-comment: #3f434c;
-  --atlas-header-menu-accent: #233b5a;
-  --atlas-header-accent: #1d324b;
-  --atlas-header-hover-accent: #0d1723;
+  --atlas-header-menu-accent: #60a5fa;
+  --atlas-header-accent: #6dacfa;
+  --atlas-header-hover-accent: #bbd8fd;
 }
 
 [data-atlas-theme="braun-rams"] {
-  --atlas-link: #225bd8;
+  --atlas-link: #2563eb;
   --atlas-syntax-keyword: #2563eb;
   --atlas-syntax-string: #117f3a;
   --atlas-syntax-number: #936503;
   --atlas-syntax-comment: #686f7c;
-  --atlas-header-menu-accent: #3b6598;
-  --atlas-header-accent: #355b8a;
-  --atlas-header-hover-accent: #274467;
+  --atlas-header-menu-accent: #4170aa;
+  --atlas-header-accent: #3b6598;
+  --atlas-header-hover-accent: #2d4e76;
 }
 
 [data-atlas-theme="tron-vector"] {
@@ -1706,14 +1708,14 @@
 }
 
 [data-atlas-theme="risograph"] {
-  --atlas-link: #2158d1;
+  --atlas-link: #2562e9;
   --atlas-syntax-keyword: #2562e9;
   --atlas-syntax-string: #117c38;
   --atlas-syntax-number: #916303;
   --atlas-syntax-comment: #666c7a;
-  --atlas-header-menu-accent: #3a6396;
-  --atlas-header-accent: #345987;
-  --atlas-header-hover-accent: #264264;
+  --atlas-header-menu-accent: #3f6da5;
+  --atlas-header-accent: #3a6396;
+  --atlas-header-hover-accent: #2b4a70;
 }
 
 [data-atlas-theme="ibm-3270"] {
@@ -1783,14 +1785,14 @@
 }
 
 [data-atlas-theme="btop-meters"] {
-  --atlas-link: #6f98f2;
+  --atlas-link: #4e81ef;
   --atlas-syntax-keyword: #467aee;
   --atlas-syntax-string: #16a34a;
   --atlas-syntax-number: #ca8a04;
   --atlas-syntax-comment: #7a808d;
   --atlas-header-menu-accent: #60a5fa;
-  --atlas-header-accent: #70aefa;
-  --atlas-header-hover-accent: #c1dcfd;
+  --atlas-header-accent: #60a5fa;
+  --atlas-header-hover-accent: #99c5fc;
 }
 
 [data-atlas-theme="c64-basic"] {
@@ -1806,10 +1808,10 @@
 
 [data-atlas-theme="flat-2013"] {
   --atlas-link: #2158d1;
-  --atlas-syntax-keyword: #2562e9;
-  --atlas-syntax-string: #117c38;
-  --atlas-syntax-number: #916303;
-  --atlas-syntax-comment: #666c7a;
+  --atlas-syntax-keyword: #2158d1;
+  --atlas-syntax-string: #0f7033;
+  --atlas-syntax-number: #835a03;
+  --atlas-syntax-comment: #5c626e;
   --atlas-header-menu-accent: #3a6396;
   --atlas-header-accent: #345987;
   --atlas-header-hover-accent: #264264;
@@ -1817,10 +1819,10 @@
 
 [data-atlas-theme="glassmorphism"] {
   --atlas-link: #2461e6;
-  --atlas-syntax-keyword: #2563eb;
-  --atlas-syntax-string: #12873d;
-  --atlas-syntax-number: #9e6c03;
-  --atlas-syntax-comment: #6b7280;
+  --atlas-syntax-keyword: #2461e6;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8f6203;
+  --atlas-syntax-comment: #656b78;
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2b4a70;
@@ -1828,10 +1830,10 @@
 
 [data-atlas-theme="neumorphism"] {
   --atlas-link: #1f53c5;
-  --atlas-syntax-keyword: #225cdb;
-  --atlas-syntax-string: #107535;
-  --atlas-syntax-number: #875c03;
-  --atlas-syntax-comment: #5f6572;
+  --atlas-syntax-keyword: #1f53c5;
+  --atlas-syntax-string: #0e6a30;
+  --atlas-syntax-number: #7b5402;
+  --atlas-syntax-comment: #565b66;
   --atlas-header-menu-accent: #365c8c;
   --atlas-header-accent: #30527d;
   --atlas-header-hover-accent: #233b5a;
@@ -1850,57 +1852,57 @@
 
 [data-atlas-theme="claymorphism"] {
   --atlas-link: #2157cf;
-  --atlas-syntax-keyword: #2460e4;
-  --atlas-syntax-string: #107a38;
-  --atlas-syntax-number: #8d6103;
-  --atlas-syntax-comment: #646a77;
+  --atlas-syntax-keyword: #2157cf;
+  --atlas-syntax-string: #0f6f32;
+  --atlas-syntax-number: #815803;
+  --atlas-syntax-comment: #5a606c;
   --atlas-header-menu-accent: #396194;
   --atlas-header-accent: #335784;
   --atlas-header-hover-accent: #254062;
 }
 
 [data-atlas-theme="brutalist-web"] {
-  --atlas-link: #2461e6;
-  --atlas-syntax-keyword: #2563eb;
-  --atlas-syntax-string: #12873d;
-  --atlas-syntax-number: #9e6c03;
-  --atlas-syntax-comment: #6b7280;
+  --atlas-link: #0000ee;
+  --atlas-syntax-keyword: #2461e6;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8f6203;
+  --atlas-syntax-comment: #656b78;
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2b4a70;
 }
 
 [data-atlas-theme="swiss-intl"] {
-  --atlas-link: #225bd8;
+  --atlas-link: #2563eb;
   --atlas-syntax-keyword: #2563eb;
   --atlas-syntax-string: #117f3a;
   --atlas-syntax-number: #936503;
   --atlas-syntax-comment: #686f7c;
-  --atlas-header-menu-accent: #3b6598;
-  --atlas-header-accent: #355b8a;
-  --atlas-header-hover-accent: #274467;
+  --atlas-header-menu-accent: #4170aa;
+  --atlas-header-accent: #3b6598;
+  --atlas-header-hover-accent: #2d4e76;
 }
 
 [data-atlas-theme="bauhaus"] {
-  --atlas-link: #2157cf;
+  --atlas-link: #2460e4;
   --atlas-syntax-keyword: #2460e4;
   --atlas-syntax-string: #107a38;
   --atlas-syntax-number: #8d6103;
   --atlas-syntax-comment: #646a77;
-  --atlas-header-menu-accent: #396194;
-  --atlas-header-accent: #335784;
-  --atlas-header-hover-accent: #254062;
+  --atlas-header-menu-accent: #3e6ba2;
+  --atlas-header-accent: #396194;
+  --atlas-header-hover-accent: #2a496e;
 }
 
 [data-atlas-theme="pop-art-lichtenstein"] {
-  --atlas-link: #2460e4;
+  --atlas-link: #2563eb;
   --atlas-syntax-keyword: #2563eb;
   --atlas-syntax-string: #12873d;
   --atlas-syntax-number: #9c6a03;
   --atlas-syntax-comment: #6b7280;
-  --atlas-header-menu-accent: #3e6ba2;
-  --atlas-header-accent: #396194;
-  --atlas-header-hover-accent: #2b4a70;
+  --atlas-header-menu-accent: #4577b4;
+  --atlas-header-accent: #3e6ba2;
+  --atlas-header-hover-accent: #30527d;
 }
 
 [data-atlas-theme="op-art"] {
@@ -1916,46 +1918,46 @@
 
 [data-atlas-theme="hypnagogic"] {
   --atlas-link: #1a44a2;
-  --atlas-syntax-keyword: #1d4db7;
-  --atlas-syntax-string: #0d622c;
-  --atlas-syntax-number: #714d02;
-  --atlas-syntax-comment: #4f545f;
+  --atlas-syntax-keyword: #1a44a2;
+  --atlas-syntax-string: #0c5627;
+  --atlas-syntax-number: #654502;
+  --atlas-syntax-comment: #474b54;
   --atlas-header-menu-accent: #2c4c73;
   --atlas-header-accent: #264264;
   --atlas-header-hover-accent: #192b41;
 }
 
 [data-atlas-theme="monochrome-zen"] {
-  --atlas-link: #235edf;
+  --atlas-link: #2563eb;
   --atlas-syntax-keyword: #2563eb;
   --atlas-syntax-string: #12843c;
   --atlas-syntax-number: #9a6903;
   --atlas-syntax-comment: #6b7280;
-  --atlas-header-menu-accent: #3c689e;
-  --atlas-header-accent: #375e8f;
-  --atlas-header-hover-accent: #29476c;
+  --atlas-header-menu-accent: #4373af;
+  --atlas-header-accent: #3c689e;
+  --atlas-header-hover-accent: #2f517a;
 }
 
 [data-atlas-theme="default-browser"] {
   --atlas-link: #2461e6;
-  --atlas-syntax-keyword: #2563eb;
-  --atlas-syntax-string: #12873d;
-  --atlas-syntax-number: #9e6c03;
-  --atlas-syntax-comment: #6b7280;
+  --atlas-syntax-keyword: #2461e6;
+  --atlas-syntax-string: #107a38;
+  --atlas-syntax-number: #8f6203;
+  --atlas-syntax-comment: #656b78;
   --atlas-header-menu-accent: #3f6da5;
   --atlas-header-accent: #396194;
   --atlas-header-hover-accent: #2b4a70;
 }
 
 [data-atlas-theme="wireframe-sketch"] {
-  --atlas-link: #235edf;
+  --atlas-link: #2563eb;
   --atlas-syntax-keyword: #2563eb;
   --atlas-syntax-string: #12843c;
   --atlas-syntax-number: #9a6903;
   --atlas-syntax-comment: #6b7280;
-  --atlas-header-menu-accent: #3c689e;
-  --atlas-header-accent: #375e8f;
-  --atlas-header-hover-accent: #29476c;
+  --atlas-header-menu-accent: #4373af;
+  --atlas-header-accent: #3c689e;
+  --atlas-header-hover-accent: #2f517a;
 }
 
 [data-atlas-theme="glitch-databend"] {
@@ -1971,43 +1973,43 @@
 
 [data-atlas-theme="y2k-chrome"] {
   --atlas-link: #2157cf;
-  --atlas-syntax-keyword: #2460e4;
-  --atlas-syntax-string: #107a38;
-  --atlas-syntax-number: #8d6103;
-  --atlas-syntax-comment: #646a77;
+  --atlas-syntax-keyword: #2157cf;
+  --atlas-syntax-string: #0f6f32;
+  --atlas-syntax-number: #815803;
+  --atlas-syntax-comment: #5a606c;
   --atlas-header-menu-accent: #396194;
   --atlas-header-accent: #335784;
   --atlas-header-hover-accent: #254062;
 }
 
 [data-atlas-theme="duotone-poster"] {
-  --atlas-link: #2056cc;
+  --atlas-link: #245fe2;
   --atlas-syntax-keyword: #245fe2;
   --atlas-syntax-string: #107937;
   --atlas-syntax-number: #8d6103;
   --atlas-syntax-comment: #626976;
-  --atlas-header-menu-accent: #396194;
-  --atlas-header-accent: #335784;
-  --atlas-header-hover-accent: #254062;
+  --atlas-header-menu-accent: #3e6ba2;
+  --atlas-header-accent: #396194;
+  --atlas-header-hover-accent: #2a496e;
 }
 
 [data-atlas-theme="grid-paper"] {
-  --atlas-link: #235edf;
+  --atlas-link: #2563eb;
   --atlas-syntax-keyword: #2563eb;
   --atlas-syntax-string: #12843c;
   --atlas-syntax-number: #986803;
   --atlas-syntax-comment: #6b7280;
-  --atlas-header-menu-accent: #3c689e;
-  --atlas-header-accent: #375e8f;
-  --atlas-header-hover-accent: #29476c;
+  --atlas-header-menu-accent: #4373af;
+  --atlas-header-accent: #3c689e;
+  --atlas-header-hover-accent: #2f517a;
 }
 
 [data-atlas-theme="maximalist-banners"] {
   --atlas-link: #0b1d44;
-  --atlas-syntax-keyword: #0e275c;
-  --atlas-syntax-string: #073116;
-  --atlas-syntax-number: #392701;
-  --atlas-syntax-comment: #282a2f;
+  --atlas-syntax-keyword: #0b1d44;
+  --atlas-syntax-string: #052511;
+  --atlas-syntax-number: #2a1d01;
+  --atlas-syntax-comment: #1d1f23;
   --atlas-header-menu-accent: #121f2f;
   --atlas-header-accent: #0a1019;
   --atlas-header-hover-accent: #020305;
