@@ -100,7 +100,7 @@ const ModelSelector = () => {
         onClick={() => setDropdownOpen(!dropdownOpen)}
         className={`flex items-center gap-1 px-2 py-1 max-sm:h-8 max-sm:max-w-full rounded transition-colors max-w-[16rem] ${
           currentOutsideFilter
-            ? 'bg-amber-900/60 hover:bg-amber-900 text-amber-200 border border-amber-600'
+            ? 'atlas-notice-alert border hover:brightness-110'
             : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
         }`}
         title={buttonTitle}
@@ -199,11 +199,11 @@ const ModelSelector = () => {
                           <p className="text-gray-400">{model.description}</p>
                         )}
                         <div className="flex flex-wrap gap-1.5">
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_vision ? 'bg-green-900/50 text-green-400 border border-green-800' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_vision ? 'atlas-notice-success border' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
                             <Eye className="w-3 h-3" />
                             Vision {model.supports_vision ? '' : '(no)'}
                           </span>
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_tools !== false ? 'bg-blue-900/50 text-blue-400 border border-blue-800' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${model.supports_tools !== false ? 'atlas-notice-info border' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
                             <Wrench className="w-3 h-3" />
                             Tools {model.supports_tools !== false ? '' : '(no)'}
                           </span>

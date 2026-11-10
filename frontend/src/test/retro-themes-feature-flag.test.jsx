@@ -167,6 +167,23 @@ describe('FEATURE_RETRO_THEMES_ENABLED run-time flag', () => {
     expect(screen.getByTestId('active-theme')).toHaveTextContent('dark')
   })
 
+  it('trusts the flag the backend stamped on the bootstrap tag over a stale cache', () => {
+    const tag = document.createElement('script')
+    tag.setAttribute('data-retro-runtime', 'false')
+    document.head.appendChild(tag)
+    try {
+      localStorage.setItem('atlas-theme', 'beos')
+      localStorage.setItem('chatui-config-cache', JSON.stringify({ features: { retro_themes: true } }))
+      // useChat's features replay the stale cache (true) before /api/config
+      // answers; the stamp still wins, so the retro theme never applies.
+      renderSettings(true)
+      expect(screen.getByTestId('active-theme')).toHaveTextContent('light')
+      expect(document.documentElement.getAttribute('data-atlas-theme')).toBe('light')
+    } finally {
+      tag.remove()
+    }
+  })
+
   it('starts from the cached config so first paint and React agree before /api/config answers', () => {
     localStorage.setItem('atlas-theme', 'beos')
     localStorage.setItem('chatui-config-cache', JSON.stringify({ features: { retro_themes: false } }))

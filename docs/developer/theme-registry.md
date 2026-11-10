@@ -56,8 +56,12 @@ produces five deterministic assets:
 `theme`: `theme = effectiveThemeId(selectedTheme, retroThemesAvailable)`, so a
 retro choice falls back to its base mode while the gallery is unavailable and
 comes back unchanged when it is re-enabled. The bootstrap applies the same rule
-before React mounts, reading the cached `chatui-config-cache` for the run-time
-flag, so a disabled deployment never flashes a retro theme. Vitest resolves the
+before React mounts. For the run-time flag it reads `data-retro-runtime`, which
+the backend stamps on the bootstrap `<script>` tag every time it serves
+`index.html` (`atlas/core/spa_index.py`), and only falls back to the cached
+`chatui-config-cache` when that attribute is absent (Vite dev server).
+`ThemeContext` starts from the same value, so the first paint and React agree
+and a flag that was just flipped never flashes the old state, not even once. Vitest resolves the
 alias to the enabled module; `retro-themes-build-off.test.jsx` mocks it to the
 disabled one.
 
@@ -77,6 +81,23 @@ Two structural rules keep that true on real pages:
   status) and the composer get a gray-800 plate (`.atlas-transcript-row`,
   `.atlas-composer-plate`) in retro themes, so they never sit directly on desktop
   wallpaper such as the XP Bliss gradient or the Windows 95 teal.
+- Status notices use `.atlas-notice-danger|warning|alert|info|success|agent`
+  (composer warning rows via `ComposerNotice`, the agent-run strip, the
+  Agent Mode no-tools callout, toasts, error boxes, admin status pills, log
+  level badges, extraction-mode file chips). Each tone is an *opaque* tint
+  (16% of the hue over the theme's gray-800, or over the window colour inside
+  a content ramp) with text re-solved to 4.55:1 on that tint, generated as
+  `--atlas-notice-<tone>-bg|fg|border`. This replaces translucent fills such as
+  `bg-yellow-900/40 text-yellow-300`, whose contrast depended on whatever they
+  happened to cover.
+- Routed pages and admin views (LogViewer, Files page and panels, Telemetry,
+  Admin dashboard, cards and modals, Help, Marketplace) use the theme-aware
+  dark-first gray ramp. LogViewer and the Files page were written light-first
+  with Tailwind `dark:` variants, which follow the OS preference
+  (`darkMode: 'media'`), not the Atlas theme; those variants are gone. Coloured
+  status text uses `atlas-fg-*`, solid coloured buttons use a shade that keeps
+  white text at AA (yellow buttons use black text), and text on the gray-600
+  tint uses gray-50.
 - Where a theme's windows or header strip are painted in a different key from
   its palette (Memphis and Op Art white windows, Game Boy LCD green, DOS CGA
   gray menubar), the generator emits a window/header "content ramp" that
@@ -105,14 +126,32 @@ and renders the **real** React components in every theme: `Header`,
 in every state, tool logs at every level, system notices, agent status),
 `ToolApprovalMessage` in compact and classic layouts, `AgentQuestionPrompt`,
 `RetroWindow`/`RetroButton`/`RetroWorkbench`, and `SettingsPanel` with the
-theme gallery. Only the context providers that need a backend (chat,
-WebSocket, marketplace, Globus) are replaced by static stubs. Every visible
+theme gallery, plus the composer warning rows (`ComposerNotice`,
+`AgentRunStatus`, `EnabledToolsIndicator`, `EnabledDataSourcesIndicator`,
+`AgentModeNoToolsBanner`), toasts of every kind, and the routed pages
+`LogViewer`, `FilesPage`, `AllFilesView`, `SessionFilesView`,
+`TelemetryDashboard` (all five tabs), `AdminDashboard` with its cards,
+`AdminModal` (health and MCP-health views), `HelpPage` and `MarketplacePanel`.
+Only the context providers that need a backend (chat, WebSocket, marketplace,
+Globus) are replaced by static stubs, and `fetch` answers from canned,
+synthetic responses shaped like the real endpoints
+(`contrast-fixture/stubs/fetchFixtures.js`); the page waits until those loads
+settle, and the check fails if any of the 24 regions renders no measurable
+text. Every visible
 text node is measured at rest and again with its hover styles forced, against
 its composited background: alpha and `opacity` are blended through the
 ancestors, and gradient backgrounds are sampled at every colour stop. Text
 below 4.5:1 fails. Text whose result depends on the gradient position (some
 stops pass, some fail) or that sits on a `url()` image is listed as
-**UNMEASURABLE** with its ratio range; nothing is skipped silently. Use
+**UNMEASURABLE** with its ratio range; nothing is skipped silently.
+Full-cover `::before`/`::after` boxes with a background on any ancestor are
+composited as well (under the content for a negative `z-index`, otherwise as
+a tint over text and backdrop); the page self-tests that detection. The
+shipped CSS currently has none, because the generator folds demo overlays such
+as scanlines into the fills, so every theme reports `pseudoOverlays: []`.
+Partial-size decorations and `text-shadow` are not modelled. Disabled
+controls are measured too; WCAG 1.4.3 exempts inactive components, so below
+4.5:1 they are listed as **DISABLED** instead of failing. Use
 `--report out.json` for the full per-theme list. It also checks the
 keyboard-focus outline against both its button and surrounding window (at
 least 3:1 on the solid fills, with gradient stops below 3:1 reported as

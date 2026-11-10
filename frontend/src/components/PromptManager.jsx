@@ -202,7 +202,7 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
       </div>
 
       {userPromptsError && (
-        <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+        <div className="p-3 atlas-notice-danger border rounded-lg text-sm">
           {userPromptsError}
         </div>
       )}

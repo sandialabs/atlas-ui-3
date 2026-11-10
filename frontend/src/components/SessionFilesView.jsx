@@ -15,13 +15,13 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
   const getFileIcon = (file) => {
     switch (file.type) {
       case 'code':
-        return <Code className="w-4 h-4 text-blue-400" />
+        return <Code className="w-4 h-4 atlas-fg-info" />
       case 'image':
-        return <Image className="w-4 h-4 text-green-400" />
+        return <Image className="w-4 h-4 atlas-fg-success" />
       case 'data':
-        return <Database className="w-4 h-4 text-yellow-400" />
+        return <Database className="w-4 h-4 atlas-fg-warning" />
       case 'document':
-        return <FileText className="w-4 h-4 text-red-400" />
+        return <FileText className="w-4 h-4 atlas-fg-danger" />
       default:
         return <File className="w-4 h-4 text-gray-400" />
     }
@@ -41,7 +41,7 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
       <div className="text-gray-400 text-center py-12 px-6">
         <File className="w-12 h-12 mx-auto mb-4 opacity-50" />
         <div className="text-lg mb-4">No files in this session</div>
-        <p className="text-gray-500">
+        <p className="text-gray-400">
           Upload files or use tools that generate files to see them here
         </p>
       </div>
@@ -52,7 +52,7 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
     <div>
       {/* Section Header */}
       <div className="mb-4">
-        <h3 className="text-lg font-semibold text-white">
+        <h3 className="text-lg font-semibold text-gray-100">
           Session Files ({files.total_files})
         </h3>
         <p className="text-sm text-gray-400 mt-1">
@@ -68,18 +68,18 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
           >
             <div className="p-4 flex items-center gap-4">
               {/* File Icon */}
-              <div className="bg-gray-600 rounded-lg p-3 flex-shrink-0">
+              <div className="bg-gray-600 rounded-lg p-3 flex-shrink-0 text-gray-50">
                 {getFileIcon(file)}
               </div>
 
               {/* File Content */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-white font-semibold text-base truncate font-mono">
+                  <h3 className="text-gray-100 font-semibold text-base truncate font-mono">
                     {file.filename}
                   </h3>
                   {taggedFiles?.has(file.filename) && (
-                    <span className="px-2 py-1 bg-green-600 text-xs rounded text-white flex-shrink-0">
+                    <span className="px-2 py-1 bg-green-700 text-xs rounded flex-shrink-0 text-white">
                       Tagged
                     </span>
                   )}
@@ -97,8 +97,8 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
                   onClick={() => onToggleFileTag?.(file.filename)}
                   className={`p-2 rounded-lg transition-colors ${
                     taggedFiles?.has(file.filename)
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+                      ? 'bg-green-700 hover:bg-green-800 text-white'
+                      : 'bg-gray-600 hover:bg-gray-700 text-gray-50'
                   }`}
                   title={taggedFiles?.has(file.filename) ? "Remove from chat context" : "Tag for chat context"}
                 >
@@ -107,7 +107,7 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
 
                 <button
                   onClick={() => onDownloadFile?.(file.filename, file.s3_key)}
-                  className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors text-white"
                   title="Download file"
                 >
                   <Download className="w-4 h-4" />
@@ -115,7 +115,7 @@ const SessionFilesView = ({ files, onDownloadFile, onDeleteFile, taggedFiles, on
 
                 <button
                   onClick={() => onDeleteFile?.(file.filename)}
-                  className="p-2 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
+                  className="p-2 rounded-lg bg-red-600 hover:bg-red-700 transition-colors text-white"
                   title="Delete file"
                 >
                   <Trash2 className="w-4 h-4" />

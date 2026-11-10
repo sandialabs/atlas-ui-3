@@ -746,6 +746,42 @@
 .atlas-text-gray-600 { color: rgb(var(--atlas-text-gray-600, var(--gray-500))); }
 .atlas-text-gray-700 { color: rgb(var(--atlas-text-gray-700, var(--gray-500))); }
 
+/* Status notices (composer warnings, error boxes, the agent-run strip, tone
+   chips): opaque per-theme tints from build-retro-catalog.py with text that
+   reaches AA on that exact tint, so nothing depends on what a translucent
+   fill happens to sit on. Children inherit the notice text colour; keep
+   emphasis to font weight rather than another fixed shade. */
+.atlas-notice-danger {
+  background-color: rgb(var(--atlas-notice-danger-bg));
+  border-color: rgb(var(--atlas-notice-danger-border));
+  color: rgb(var(--atlas-notice-danger-fg));
+}
+.atlas-notice-warning {
+  background-color: rgb(var(--atlas-notice-warning-bg));
+  border-color: rgb(var(--atlas-notice-warning-border));
+  color: rgb(var(--atlas-notice-warning-fg));
+}
+.atlas-notice-alert {
+  background-color: rgb(var(--atlas-notice-alert-bg));
+  border-color: rgb(var(--atlas-notice-alert-border));
+  color: rgb(var(--atlas-notice-alert-fg));
+}
+.atlas-notice-info {
+  background-color: rgb(var(--atlas-notice-info-bg));
+  border-color: rgb(var(--atlas-notice-info-border));
+  color: rgb(var(--atlas-notice-info-fg));
+}
+.atlas-notice-success {
+  background-color: rgb(var(--atlas-notice-success-bg));
+  border-color: rgb(var(--atlas-notice-success-border));
+  color: rgb(var(--atlas-notice-success-fg));
+}
+.atlas-notice-agent {
+  background-color: rgb(var(--atlas-notice-agent-bg));
+  border-color: rgb(var(--atlas-notice-agent-border));
+  color: rgb(var(--atlas-notice-agent-fg));
+}
+
 /* Each alias is generated against the surface of its actual content state. */
 .atlas-header-accent { color: var(--atlas-header-accent); }
 .atlas-header-accent:hover { color: var(--atlas-header-hover-accent); }

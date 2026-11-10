@@ -18,12 +18,25 @@ function getInitialTheme() {
 }
 
 /**
- * The run-time FEATURE_RETRO_THEMES_ENABLED value from the cached config:
- * true/false when known, undefined before any config has been cached (the
- * saved theme is then trusted until /api/config/shell answers, matching the
- * first-paint bootstrap so the two never disagree).
+ * The run-time FEATURE_RETRO_THEMES_ENABLED value before /api/config answers.
+ * The backend stamps the live flag on the bootstrap <script> tag
+ * (data-retro-runtime, see atlas/core/spa_index.py); that wins. Otherwise
+ * (Vite dev server, tests) the cached config: true/false when known,
+ * undefined before any config has been cached (the saved theme is then
+ * trusted until /api/config/shell answers). Same order as the first-paint
+ * bootstrap, so the two never disagree.
  */
+function getStampedRetroRuntime() {
+  try {
+    const stamped = document.querySelector('script[data-retro-runtime]')?.getAttribute('data-retro-runtime')
+    if (stamped === 'true' || stamped === 'false') return stamped === 'true'
+  } catch { /* No DOM. */ }
+  return undefined
+}
+
 function getCachedRetroRuntime() {
+  const stamped = getStampedRetroRuntime()
+  if (stamped !== undefined) return stamped
   try {
     const cached = JSON.parse(localStorage.getItem(CONFIG_CACHE_KEY) || 'null')
     const value = cached?.features?.retro_themes
@@ -45,6 +58,10 @@ export function ThemeProvider({ children }) {
   // re-enabling the feature restores it.
   const [selectedTheme, setSelectedTheme] = useState(getInitialTheme)
   const [retroRuntime, setRetroRuntime] = useState(getCachedRetroRuntime)
+  // The backend's stamp is the live value for this page load. useChat's
+  // features start from the same localStorage cache, so until /api/config
+  // answers they would replay the stale value; ignore them when stamped.
+  const [stamped] = useState(getStampedRetroRuntime)
   const retroThemesAvailable = RETRO_THEMES_IN_BUILD && retroRuntime !== false
   const theme = effectiveThemeId(selectedTheme, retroThemesAvailable)
   const definition = getRegisteredTheme(theme)
@@ -68,10 +85,11 @@ export function ThemeProvider({ children }) {
   }, [])
 
   // Called with features.retro_themes once /api/config(/shell) answers.
-  // Anything but a boolean (an older backend without the field) is ignored.
+  // Anything but a boolean (an older backend without the field) is ignored,
+  // and so is every value when the backend stamped the flag on index.html.
   const setRetroThemesEnabled = useCallback(value => {
-    if (typeof value === 'boolean') setRetroRuntime(value)
-  }, [])
+    if (typeof value === 'boolean' && stamped === undefined) setRetroRuntime(value)
+  }, [stamped])
 
   // Atlas intentionally defaults to dark, not the OS color-scheme preference.
   // Keep the legacy toggle API while the new gallery supports every preset.

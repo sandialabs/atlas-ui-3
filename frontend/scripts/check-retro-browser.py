@@ -20,8 +20,19 @@ Measurement:
 - Every text pair below 4.5:1 fails (large text gets no 3:1 allowance).
   Retro focus rings must reach 3:1 on the button and its window and be 3px.
   Status badges (.atlas-status-*) must render identically in every theme.
-- Known limits: pseudo-element paint (::before/::after overlays such as CRT
-  scanlines) and text-shadow are not part of the computed background.
+- Full-cover ::before/::after boxes with a background (CRT scanlines,
+  wallpaper or shading overlays) on any ancestor are composited too: z-index
+  below 0 as part of the backdrop, otherwise as a tint over text and backdrop
+  alike. Gradient overlays are sampled per stop. The page self-tests this. The
+  shipped CSS currently has none (the generator folds demo overlays into the
+  fills), so each theme reports pseudoOverlays=[]; partial-size decorations
+  (badges, chevrons) and text-shadow are not part of the computed background.
+- Disabled controls (WCAG 1.4.3 inactive components) are measured; below
+  4.5:1 they are listed as DISABLED instead of failing the theme.
+- Routed pages (LogViewer, Files page and panels, Telemetry, Admin dashboard
+  and modals, Help, Marketplace) and the composer warning rows are mounted
+  with canned API responses (contrast-fixture/stubs/fetchFixtures.js) and
+  measured after their data loads.
 
 Requires `npm ci`, an existing `npm run build` (flag on), and Chrome/Chromium.
 No app server, network access, screenshots, fonts, or binary downloads.
@@ -44,11 +55,18 @@ FIXTURE_CONFIG = FRONTEND / 'scripts/contrast-fixture/vite.config.js'
 LEGACY_IDS = {1: 'mac7', 2: 'win95', 9: 'crt-phosphor'}
 TEXT_MIN = 4.5
 FOCUS_MIN = 3.0
+# Header, sidebar rows, transcript, approvals, agent input, retro controls,
+# composer notices, 14 routed-page/admin regions (5 Telemetry tabs), toasts, Settings.
+MIN_REGIONS = 24
 
 SCRIPT = r"""
-window.onload = () => {
+window.onload = async () => {
   const report = document.getElementById('results');
   try {
+    const fixture = window.__atlasContrastFixture;
+    if (!fixture) throw new Error('Contrast fixture did not mount: ' + document.getElementById('errors').textContent.slice(0, 1500));
+    // Routed pages fetch (stubbed) data in effects; measure the loaded state.
+    if (!(await fixture.ready())) throw new Error('Fixture pages did not finish loading');
     report.textContent = JSON.stringify(runChecks());
   } catch (error) {
     report.textContent = JSON.stringify({ fatal: String(error && error.stack || error) });
@@ -59,7 +77,6 @@ function runChecks() {
   const entries = __ENTRIES__;
   const TEXT_MIN = __TEXT_MIN__, FOCUS_MIN = __FOCUS_MIN__;
   const fixture = window.__atlasContrastFixture;
-  if (!fixture) throw new Error('Contrast fixture did not mount');
   const errors = document.getElementById('errors').textContent;
   if (errors) throw new Error('Fixture render errors: ' + errors);
 
@@ -94,13 +111,62 @@ function runChecks() {
   };
 
   // Candidate backgrounds behind `node`, bottom to top, plus opacity product.
-  const backdrop = (node, { ignoreImages = false } = {}) => {
+  // Painted ::before/::after boxes on the text's ancestors (CRT scanlines,
+  // desktop wallpaper overlays, window shading). An absolutely positioned
+  // pseudo with a background is composited as a layer: z-index < 0 paints
+  // under the content (part of the backdrop), otherwise over it (it tints the
+  // text and its backdrop alike). Cached per theme.
+  let pseudoCache = new Map();
+  const pseudoLayers = el => {
+    if (pseudoCache.has(el)) return pseudoCache.get(el);
+    const found = [];
+    for (const which of ['::before', '::after']) {
+      const ps = getComputedStyle(el, which);
+      if (!ps.content || ps.content === 'none' || ps.content === 'normal' || ps.display === 'none') continue;
+      const color = rgba(ps.backgroundColor) || [0, 0, 0, 0];
+      const image = ps.backgroundImage && ps.backgroundImage !== 'none' ? ps.backgroundImage : null;
+      if (color[3] === 0 && !image) continue;
+      if (!['absolute', 'fixed'].includes(ps.position)) continue;
+      // Only full-cover boxes (inset: 0 or the element's full size) can sit
+      // behind/over every text node inside; small decorations are skipped.
+      const inset = ['top', 'right', 'bottom', 'left'].every(k => ps[k] === '0px');
+      const sized = ps.top === '0px' && ps.left === '0px' &&
+        parseFloat(ps.width) >= el.clientWidth - 1 && parseFloat(ps.height) >= el.clientHeight - 1;
+      if (!inset && !sized) continue;
+      const alpha = Number(ps.opacity);
+      found.push({ which, color: [...color.slice(0, 3), color[3] * alpha], image,
+                   alpha, under: parseInt(ps.zIndex, 10) < 0 });
+    }
+    pseudoCache.set(el, found);
+    return found;
+  };
+  // Self-test: a full-cover translucent ::after must be found as an overlay.
+  {
+    const probe = document.createElement('div');
+    probe.id = 'atlas-pseudo-selftest';
+    document.body.appendChild(probe);
+    const found = pseudoLayers(probe);
+    probe.remove();
+    pseudoCache = new Map();
+    if (found.length !== 1 || found[0].under || Math.abs(found[0].color[3] - 0.5) > 0.01) {
+      throw new Error('Pseudo-element overlay detection regression');
+    }
+  }
+  const scaleStops = (stops, alpha) => stops.map(c => [...c.slice(0, 3), c[3] * alpha]);
+
+  const backdrop = (node, { ignoreImages = false, overlays = null } = {}) => {
     const layers = [];
     let opacity = 1;
     let base = [255, 255, 255, 1]; // opaque browser canvas
     for (let el = node; el; el = el.parentElement) {
       const style = getComputedStyle(el);
       opacity *= Number(style.opacity);
+      if (overlays && !ignoreImages) {
+        for (const p of pseudoLayers(el)) {
+          if (p.under) layers.push({ color: p.color, image: p.image, pseudo: true, alpha: p.alpha });
+          else overlays.push(p);
+        }
+      }
       const color = rgba(style.backgroundColor) || [0, 0, 0, 0];
       const image = style.backgroundImage;
       layers.push({ color, image: !ignoreImages && image && image !== 'none' ? image : null });
@@ -114,7 +180,8 @@ function runChecks() {
         candidates = candidates.map(c => over(layer.color, c));
       }
       if (layer.image) {
-        const stops = gradientStops(layer.image);
+        const raw = gradientStops(layer.image);
+        const stops = raw && layer.pseudo ? scaleStops(raw, layer.alpha) : raw;
         if (!stops) { unmeasurable = 'background-image without color stops'; continue; }
         const next = [];
         for (const c of candidates) for (const s of stops) next.push(over(s, c));
@@ -152,13 +219,26 @@ function runChecks() {
     const fill = style.webkitTextFillColor && style.webkitTextFillColor !== style.color
       ? style.webkitTextFillColor : style.color;
     const fg = rgba(fill);
-    const bd = backdrop(el);
+    const overlays = [];
+    const bd = backdrop(el, { overlays });
     if (!fg || fg[3] === 0) return { status: 'unmeasurable', reason: 'transparent text fill' };
     const text = [fg[0], fg[1], fg[2], fg[3] * bd.opacity];
-    const ratios = bd.candidates.map(bg => contrast(over(text, bg), bg));
+    // Each pair: [text over backdrop, backdrop], then every overlay pseudo
+    // (and each of its gradient stops) tints both sides equally.
+    let pairs = bd.candidates.map(bg => [over(text, bg), bg]);
+    for (const p of overlays) {
+      const tints = p.image ? (gradientStops(p.image) ? scaleStops(gradientStops(p.image), p.alpha) : null) : [];
+      if (tints === null) { bd.unmeasurable = 'pseudo-element overlay without color stops'; continue; }
+      const all = p.color[3] > 0 ? [p.color, ...tints.map(t => over(t, p.color))] : tints;
+      if (!all.length) continue;
+      pseudoSeen.add(p.which);
+      pairs = pairs.flatMap(([t, b]) => all.map(c => [over(c, t), over(c, b)])).slice(0, 192);
+      bd.gradient = bd.gradient || all.length > 1;
+    }
+    const ratios = pairs.map(([t, b]) => contrast(t, b));
     const min = Math.min(...ratios), max = Math.max(...ratios);
     const out = { min: +min.toFixed(2), max: +max.toFixed(2), fg: fill,
-                  bg: bd.candidates.slice(0, 4).map(c => 'rgb(' + c.slice(0, 3).map(Math.round).join(',') + ')') };
+                  bg: pairs.slice(0, 4).map(([, c]) => c).map(c => 'rgb(' + c.slice(0, 3).map(Math.round).join(',') + ')') };
     if (bd.unmeasurable) return { ...out, status: min >= TEXT_MIN ? 'pass' : 'unmeasurable', reason: bd.unmeasurable };
     if (min >= TEXT_MIN) return { ...out, status: 'pass' };
     if (bd.gradient && max >= TEXT_MIN) return { ...out, status: 'unmeasurable', reason: 'gradient: some stops below 4.5:1' };
@@ -182,21 +262,32 @@ function runChecks() {
 
   const HOVERABLE = 'button, a, [role="button"], [role="listitem"], [role="tab"], summary, label, .atlas-theme-option';
   const results = [];
+  let pseudoSeen = new Set();
   for (const item of entries) {
     fixture.setTheme(item.id);
+    pseudoCache = new Map();
+    pseudoSeen = new Set();
     const html = document.documentElement;
     const actualTheme = html.getAttribute('data-atlas-theme');
     const result = { id: item.id, mode: item.mode, actualTheme, actualMode: getComputedStyle(html).colorScheme,
-                     measured: 0, passed: 0, failures: [], unmeasurable: [], hovered: 0 };
+                     measured: 0, passed: 0, exempt: [], regionCounts: {}, failures: [], unmeasurable: [], hovered: 0 };
     for (const pass of ['rest', 'hover']) {
       const hovered = pass === 'hover' ? [...root.querySelectorAll(HOVERABLE)] : [];
       hovered.forEach(el => el.setAttribute('data-contrast-hover', ''));
       for (const [el, text] of textElements()) {
         if (pass === 'hover' && !el.closest('[data-contrast-hover]')) continue;
         const outcome = measure(el);
+        // WCAG 1.4.3 exempts inactive controls: a disabled control below
+        // 4.5:1 is listed (DISABLED) but does not fail the theme.
+        if (outcome.status !== 'pass' && el.closest('button:disabled, input:disabled, select:disabled, ' +
+            'textarea:disabled, fieldset:disabled, [aria-disabled="true"]')) {
+          result.exempt.push({ ...describe(el, text), state: pass, ...outcome });
+          continue;
+        }
         result.measured += 1;
         if (pass === 'hover') result.hovered += 1;
         const where = { ...describe(el, text), state: pass };
+        result.regionCounts[where.region] = (result.regionCounts[where.region] || 0) + 1;
         if (outcome.status === 'pass') result.passed += 1;
         else if (outcome.status === 'fail') result.failures.push({ ...where, ...outcome });
         else result.unmeasurable.push({ ...where, ...outcome });
@@ -231,6 +322,8 @@ function runChecks() {
     }
     button.blur();
 
+    result.pseudoOverlays = [...pseudoSeen];
+    result.regions = [...new Set([...root.querySelectorAll('[data-contrast-region]')].map(el => el.dataset.contrastRegion))];
     result.badgePairs = Object.fromEntries([...root.querySelectorAll('[class*="atlas-status-"]')].map((el, i) => {
       const s = getComputedStyle(el);
       return [i + ':' + (el.className.match(/atlas-status-\w+/) || [''])[0], [s.backgroundColor, s.color]];
@@ -308,6 +401,9 @@ def summarize(rows):
         for fail in row['failures']:
             lines.append(f"    FAIL {fail['state']:<5} {fail['region']}: \"{fail['text']}\" {fail['min']}:1 "
                          f"fg={fail['fg']} bg={','.join(fail['bg'])} [{fail['node']}]")
+        for item in row.get('exempt', []):
+            lines.append(f"    DISABLED {item['state']:<5} {item['region']}: \"{item['text']}\" {item.get('min')}:1 "
+                         f"(inactive control, WCAG 1.4.3 exempt) [{item['node']}]")
         for item in row['unmeasurable']:
             ratio = f" {item['min']}-{item['max']}:1" if 'min' in item else ''
             lines.append(f"    UNMEASURABLE {item['state']:<5} {item['region']}: \"{item['text']}\"{ratio} "
@@ -332,7 +428,10 @@ def run(chrome, timeout, report=None, fixture_js=None):
                 # Theme switches happen synchronously between measurements, so
                 # color transitions would be read mid-flight; settle them.
                 '<style>*,*::before,*::after{transition:none!important;'
-                'animation:none!important}</style></head><body>'
+                'animation:none!important}'
+                '#atlas-pseudo-selftest{position:relative;width:40px;height:20px}'
+                '#atlas-pseudo-selftest::after{content:"";position:absolute;inset:0;'
+                'background:rgba(0,0,0,.5)}</style></head><body>'
                 '<pre id="errors"></pre><pre id="results"></pre><div id="fixture-root"></div>'
                 '<script>window.onerror=function(m,s,l,c,e){document.getElementById("errors")'
                 '.textContent+=String(m)+" "+(e&&e.stack||"")+"\\n"};</script>'
@@ -343,6 +442,9 @@ def run(chrome, timeout, report=None, fixture_js=None):
         proc = subprocess.run([chrome, '--headless=new', '--no-sandbox',
                                '--disable-dev-shm-usage', '--disable-gpu',
                                '--window-size=1280,900',
+                               # Let the fixture's stubbed page loads (timers,
+                               # promises) settle before the DOM is dumped.
+                               '--virtual-time-budget=600000',
                                '--allow-file-access-from-files', '--dump-dom',
                                file.as_uri()], capture_output=True, text=True,
                               timeout=timeout, check=False)
@@ -356,6 +458,11 @@ def run(chrome, timeout, report=None, fixture_js=None):
             raise RuntimeError('Fixture check crashed: '+rows['fatal'][:1500])
     if len(rows) != 55:
         raise RuntimeError('Expected 55 browser tests, got '+str(len(rows)))
+    for row in rows:
+        empty = [name for name in row['regions'] if not row['regionCounts'].get(name)]
+        if empty or len(row['regions']) < MIN_REGIONS:
+            raise RuntimeError(f"{row['id']}: fixture regions rendered no measurable text: {empty} "
+                               f"({len(row['regions'])} regions)")
     if report:
         Path(report).write_text(json.dumps(rows, indent=1))
     print(summarize(rows))
@@ -363,9 +470,12 @@ def run(chrome, timeout, report=None, fixture_js=None):
     measured = sum(row['measured'] for row in rows)
     unmeasurable = sum(len(row['unmeasurable']) for row in rows)
     failed_pairs = sum(len(row['failures']) for row in rows)
+    exempt = sum(len(row.get('exempt', [])) for row in rows)
+    regions = sorted(set().union(*(row['regions'] for row in rows)))
     print(f'Chrome component check: {55-len(failures)}/55 themes passed; {measured} text pairs measured '
-          f'(rest + hover) on the real Header, Settings, transcript, tool/approval, agent-input and '
-          f'conversation-metadata components; {failed_pairs} below {TEXT_MIN}:1; '
+          f'(rest + hover) on the real Header, Settings, transcript, tool/approval, agent-input, '
+          f'conversation-metadata, composer-notice and routed-page components ({len(regions)} regions); '
+          f'{exempt} disabled-control pairs listed; {failed_pairs} below {TEXT_MIN}:1; '
           f'{unmeasurable} unmeasurable (listed above); focus rings >= {FOCUS_MIN}:1 and 3px; '
           f'status badges theme-invariant')
     if failures:

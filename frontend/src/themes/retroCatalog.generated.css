@@ -1427,10 +1427,28 @@
   --atlas-fg-agent: #57178e;
   --atlas-text-gray-600: 61 61 61;
   --atlas-text-gray-700: 60 60 60;
+  --atlas-notice-danger-bg: 224 197 197;
+  --atlas-notice-danger-fg: 168 25 25;
+  --atlas-notice-danger-border: 231 137 137;
+  --atlas-notice-warning-bg: 223 214 187;
+  --atlas-notice-warning-fg: 132 80 6;
+  --atlas-notice-warning-border: 228 198 104;
+  --atlas-notice-alert-bg: 225 204 189;
+  --atlas-notice-alert-fg: 157 53 10;
+  --atlas-notice-alert-border: 236 163 112;
+  --atlas-notice-info-bg: 195 206 225;
+  --atlas-notice-info-fg: 27 73 203;
+  --atlas-notice-info-border: 132 171 235;
+  --atlas-notice-success-bg: 191 217 201;
+  --atlas-notice-success-fg: 17 104 49;
+  --atlas-notice-success-border: 118 208 151;
+  --atlas-notice-agent-bg: 213 199 225;
+  --atlas-notice-agent-fg: 121 33 198;
+  --atlas-notice-agent-border: 192 146 235;
 }
 
 [data-atlas-theme="win95"] {
-  --atlas-link: #2159d4;
+  --atlas-link: #1b47a9;
   --atlas-syntax-keyword: #1b47a9;
   --atlas-syntax-string: #0c5a29;
   --atlas-syntax-number: #694802;
@@ -1446,10 +1464,28 @@
   --atlas-fg-agent: #5e1a9a;
   --atlas-text-gray-600: 66 66 66;
   --atlas-text-gray-700: 66 66 66;
+  --atlas-notice-danger-bg: 226 198 198;
+  --atlas-notice-danger-fg: 170 26 26;
+  --atlas-notice-danger-border: 232 138 138;
+  --atlas-notice-warning-bg: 225 216 189;
+  --atlas-notice-warning-fg: 135 82 6;
+  --atlas-notice-warning-border: 229 199 105;
+  --atlas-notice-alert-bg: 227 206 191;
+  --atlas-notice-alert-fg: 159 53 10;
+  --atlas-notice-alert-border: 237 164 112;
+  --atlas-notice-info-bg: 197 208 227;
+  --atlas-notice-info-fg: 28 75 207;
+  --atlas-notice-info-border: 133 172 236;
+  --atlas-notice-success-bg: 193 219 202;
+  --atlas-notice-success-fg: 17 105 50;
+  --atlas-notice-success-border: 119 209 152;
+  --atlas-notice-agent-bg: 214 201 227;
+  --atlas-notice-agent-fg: 123 33 202;
+  --atlas-notice-agent-border: 193 147 236;
 }
 
 [data-atlas-theme="windows-xp-luna"] {
-  --atlas-link: #235edf;
+  --atlas-link: #1f54c8;
   --atlas-syntax-keyword: #1f54c8;
   --atlas-syntax-string: #0e6a30;
   --atlas-syntax-number: #7b5402;
@@ -1465,6 +1501,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 92 91 84;
   --atlas-text-gray-700: 92 91 84;
+  --atlas-notice-danger-bg: 236 207 192;
+  --atlas-notice-danger-fg: 179 27 27;
+  --atlas-notice-danger-border: 238 142 135;
+  --atlas-notice-warning-bg: 236 224 183;
+  --atlas-notice-warning-fg: 142 86 6;
+  --atlas-notice-warning-border: 235 203 102;
+  --atlas-notice-alert-bg: 238 214 185;
+  --atlas-notice-alert-fg: 169 57 10;
+  --atlas-notice-alert-border: 243 168 109;
+  --atlas-notice-info-bg: 208 217 221;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 139 176 232;
+  --atlas-notice-success-bg: 204 227 196;
+  --atlas-notice-success-fg: 18 111 53;
+  --atlas-notice-success-border: 125 213 149;
+  --atlas-notice-agent-bg: 225 209 221;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 199 152 233;
 }
 
 [data-atlas-theme="aqua-osx"] {
@@ -1484,10 +1538,28 @@
   --atlas-fg-agent: #5c1996;
   --atlas-text-gray-600: 59 64 71;
   --atlas-text-gray-700: 59 64 71;
+  --atlas-notice-danger-bg: 182 168 186;
+  --atlas-notice-danger-fg: 128 19 19;
+  --atlas-notice-danger-border: 208 122 131;
+  --atlas-notice-warning-bg: 181 186 176;
+  --atlas-notice-warning-fg: 103 63 4;
+  --atlas-notice-warning-border: 206 183 98;
+  --atlas-notice-alert-bg: 183 175 178;
+  --atlas-notice-alert-fg: 122 41 8;
+  --atlas-notice-alert-border: 214 147 106;
+  --atlas-notice-info-bg: 153 178 214;
+  --atlas-notice-info-fg: 21 57 158;
+  --atlas-notice-info-border: 109 156 229;
+  --atlas-notice-success-bg: 149 189 190;
+  --atlas-notice-success-fg: 13 82 39;
+  --atlas-notice-success-border: 96 192 145;
+  --atlas-notice-agent-bg: 171 171 214;
+  --atlas-notice-agent-fg: 94 26 154;
+  --atlas-notice-agent-border: 169 131 229;
 }
 
 [data-atlas-theme="amiga-workbench"] {
-  --atlas-link: #2563eb;
+  --atlas-link: #2460e4;
   --atlas-syntax-keyword: #2460e4;
   --atlas-syntax-string: #107a38;
   --atlas-syntax-number: #8d6103;
@@ -1503,10 +1575,28 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 105 105 105;
   --atlas-text-gray-700: 104 104 104;
+  --atlas-notice-danger-bg: 252 225 225;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 246 152 152;
+  --atlas-notice-warning-bg: 252 243 215;
+  --atlas-notice-warning-fg: 158 96 7;
+  --atlas-notice-warning-border: 243 213 119;
+  --atlas-notice-alert-bg: 254 233 218;
+  --atlas-notice-alert-fg: 190 64 12;
+  --atlas-notice-alert-border: 252 178 127;
+  --atlas-notice-info-bg: 224 235 254;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 147 186 250;
+  --atlas-notice-success-bg: 220 246 229;
+  --atlas-notice-success-fg: 21 125 60;
+  --atlas-notice-success-border: 133 223 166;
+  --atlas-notice-agent-bg: 241 228 254;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 207 162 251;
 }
 
 [data-atlas-theme="nextstep"] {
-  --atlas-link: #153886;
+  --atlas-link: #112f6e;
   --atlas-syntax-keyword: #112f6e;
   --atlas-syntax-string: #083b1b;
   --atlas-syntax-number: #452f01;
@@ -1522,10 +1612,28 @@
   --atlas-fg-agent: #491477;
   --atlas-text-gray-600: 51 51 53;
   --atlas-text-gray-700: 51 51 54;
+  --atlas-notice-danger-bg: 179 152 159;
+  --atlas-notice-danger-fg: 107 16 16;
+  --atlas-notice-danger-border: 207 113 117;
+  --atlas-notice-warning-bg: 179 170 149;
+  --atlas-notice-warning-fg: 90 55 4;
+  --atlas-notice-warning-border: 204 174 84;
+  --atlas-notice-alert-bg: 181 160 151;
+  --atlas-notice-alert-fg: 105 35 6;
+  --atlas-notice-alert-border: 213 139 91;
+  --atlas-notice-info-bg: 151 162 187;
+  --atlas-notice-info-fg: 18 48 134;
+  --atlas-notice-info-border: 108 147 214;
+  --atlas-notice-success-bg: 147 173 163;
+  --atlas-notice-success-fg: 12 70 34;
+  --atlas-notice-success-border: 94 184 131;
+  --atlas-notice-agent-bg: 168 155 187;
+  --atlas-notice-agent-fg: 79 21 130;
+  --atlas-notice-agent-border: 168 122 215;
 }
 
 [data-atlas-theme="beos"] {
-  --atlas-link: #1e50be;
+  --atlas-link: #1a46a7;
   --atlas-syntax-keyword: #1a46a7;
   --atlas-syntax-string: #0c5828;
   --atlas-syntax-number: #674602;
@@ -1541,6 +1649,24 @@
   --atlas-fg-agent: #6c1db1;
   --atlas-text-gray-600: 76 76 76;
   --atlas-text-gray-700: 75 75 75;
+  --atlas-notice-danger-bg: 212 185 185;
+  --atlas-notice-danger-fg: 154 23 23;
+  --atlas-notice-danger-border: 225 131 131;
+  --atlas-notice-warning-bg: 211 203 175;
+  --atlas-notice-warning-fg: 122 74 5;
+  --atlas-notice-warning-border: 222 192 98;
+  --atlas-notice-alert-bg: 214 192 177;
+  --atlas-notice-alert-fg: 144 48 9;
+  --atlas-notice-alert-border: 230 156 105;
+  --atlas-notice-info-bg: 183 195 213;
+  --atlas-notice-info-fg: 25 67 186;
+  --atlas-notice-info-border: 126 165 228;
+  --atlas-notice-success-bg: 179 205 189;
+  --atlas-notice-success-fg: 16 95 45;
+  --atlas-notice-success-border: 112 202 145;
+  --atlas-notice-agent-bg: 201 187 213;
+  --atlas-notice-agent-fg: 111 30 181;
+  --atlas-notice-agent-border: 186 140 229;
 }
 
 [data-atlas-theme="teletext"] {
@@ -1560,6 +1686,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 [data-atlas-theme="crt-phosphor"] {
@@ -1579,6 +1723,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 138 175 138;
   --atlas-text-gray-700: 143 174 143;
+  --atlas-notice-danger-bg: 38 49 11;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 131 58 37;
+  --atlas-notice-warning-bg: 37 66 1;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 129 119 4;
+  --atlas-notice-alert-bg: 40 56 4;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 137 84 12;
+  --atlas-notice-info-bg: 9 59 39;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 32 92 135;
+  --atlas-notice-success-bg: 5 69 15;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 19 129 52;
+  --atlas-notice-agent-bg: 27 51 40;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 92 67 136;
 }
 
 /* Window content ramp: crt-phosphor windows are #1f351f. */
@@ -1602,6 +1764,24 @@
   --atlas-fg-info: #93c5fd;
   --atlas-fg-success: #86efac;
   --atlas-fg-agent: #d8b4fe;
+  --atlas-notice-danger-bg: 64 55 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 61 51;
+  --atlas-notice-warning-bg: 63 73 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 122 18;
+  --atlas-notice-alert-bg: 66 63 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 87 26;
+  --atlas-notice-info-bg: 35 65 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 95 149;
+  --atlas-notice-success-bg: 31 76 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 132 66;
+  --atlas-notice-agent-bg: 53 58 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 71 150;
 }
 
 [data-atlas-theme="dos-cga"] {
@@ -1621,6 +1801,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 /* Header content ramp: dos-cga headers are #aaaaaa. */
@@ -1643,6 +1841,24 @@
   --atlas-fg-info: #112c7b;
   --atlas-fg-success: #0a3c1d;
   --atlas-fg-agent: #4a147a;
+  --atlas-notice-danger-bg: 181 154 154;
+  --atlas-notice-danger-fg: 111 17 17;
+  --atlas-notice-danger-border: 208 114 114;
+  --atlas-notice-warning-bg: 180 171 144;
+  --atlas-notice-warning-fg: 90 55 4;
+  --atlas-notice-warning-border: 205 175 81;
+  --atlas-notice-alert-bg: 183 161 146;
+  --atlas-notice-alert-fg: 105 35 6;
+  --atlas-notice-alert-border: 213 140 89;
+  --atlas-notice-info-bg: 152 164 182;
+  --atlas-notice-info-fg: 18 49 136;
+  --atlas-notice-info-border: 109 148 212;
+  --atlas-notice-success-bg: 148 174 158;
+  --atlas-notice-success-fg: 12 70 34;
+  --atlas-notice-success-border: 95 185 128;
+  --atlas-notice-agent-bg: 170 156 182;
+  --atlas-notice-agent-fg: 79 21 130;
+  --atlas-notice-agent-border: 169 123 212;
 }
 
 [data-atlas-theme="8bit-arcade"] {
@@ -1662,6 +1878,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 162 162 169;
   --atlas-text-gray-700: 163 163 170;
+  --atlas-notice-danger-bg: 72 44 59;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 149 55 63;
+  --atlas-notice-warning-bg: 71 62 49;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 147 116 30;
+  --atlas-notice-alert-bg: 73 52 51;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 155 81 38;
+  --atlas-notice-info-bg: 43 54 87;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 50 90 161;
+  --atlas-notice-success-bg: 39 65 63;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 37 126 77;
+  --atlas-notice-agent-bg: 60 47 87;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 110 65 162;
 }
 
 [data-atlas-theme="frutiger-aero"] {
@@ -1681,6 +1915,24 @@
   --atlas-fg-agent: #5b1894;
   --atlas-text-gray-600: 40 66 81;
   --atlas-text-gray-700: 41 66 81;
+  --atlas-notice-danger-bg: 137 173 210;
+  --atlas-notice-danger-fg: 124 19 19;
+  --atlas-notice-danger-border: 185 124 144;
+  --atlas-notice-warning-bg: 137 191 200;
+  --atlas-notice-warning-fg: 101 62 4;
+  --atlas-notice-warning-border: 182 185 111;
+  --atlas-notice-alert-bg: 139 181 203;
+  --atlas-notice-alert-fg: 118 40 7;
+  --atlas-notice-alert-border: 190 150 119;
+  --atlas-notice-info-bg: 109 183 238;
+  --atlas-notice-info-fg: 21 57 158;
+  --atlas-notice-info-border: 86 158 242;
+  --atlas-notice-success-bg: 105 194 214;
+  --atlas-notice-success-fg: 13 82 39;
+  --atlas-notice-success-border: 72 195 158;
+  --atlas-notice-agent-bg: 126 176 239;
+  --atlas-notice-agent-fg: 92 25 150;
+  --atlas-notice-agent-border: 146 134 242;
 }
 
 [data-atlas-theme="winamp-skin"] {
@@ -1700,6 +1952,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 187 187 187;
   --atlas-text-gray-700: 186 186 186;
+  --atlas-notice-danger-bg: 89 61 61;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 158 64 64;
+  --atlas-notice-warning-bg: 88 79 52;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 156 125 31;
+  --atlas-notice-alert-bg: 90 69 54;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 164 90 39;
+  --atlas-notice-info-bg: 60 71 90;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 59 98 162;
+  --atlas-notice-success-bg: 56 82 65;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 46 135 79;
+  --atlas-notice-agent-bg: 77 64 90;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 119 74 163;
 }
 
 /* Window content ramp: winamp-skin windows are #656565. */
@@ -1723,6 +1993,24 @@
   --atlas-fg-info: #f2f8ff;
   --atlas-fg-success: #e8fcef;
   --atlas-fg-agent: #faf6ff;
+  --atlas-notice-danger-bg: 123 96 96;
+  --atlas-notice-danger-fg: 254 223 223;
+  --atlas-notice-danger-border: 177 83 83;
+  --atlas-notice-warning-bg: 122 113 86;
+  --atlas-notice-warning-fg: 255 249 218;
+  --atlas-notice-warning-border: 174 144 50;
+  --atlas-notice-alert-bg: 125 103 88;
+  --atlas-notice-alert-fg: 254 235 215;
+  --atlas-notice-alert-border: 182 109 58;
+  --atlas-notice-info-bg: 94 106 124;
+  --atlas-notice-info-fg: 219 236 254;
+  --atlas-notice-info-border: 78 117 181;
+  --atlas-notice-success-bg: 90 116 100;
+  --atlas-notice-success-fg: 217 250 229;
+  --atlas-notice-success-border: 64 154 97;
+  --atlas-notice-agent-bg: 112 98 124;
+  --atlas-notice-agent-fg: 240 226 255;
+  --atlas-notice-agent-border: 138 92 181;
 }
 
 [data-atlas-theme="geocities-web10"] {
@@ -1742,6 +2030,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 [data-atlas-theme="cassette-futurism"] {
@@ -1761,6 +2067,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 158 157 155;
   --atlas-text-gray-700: 159 158 156;
+  --atlas-notice-danger-bg: 71 42 39;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 149 54 53;
+  --atlas-notice-warning-bg: 70 60 30;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 146 115 20;
+  --atlas-notice-alert-bg: 73 49 32;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 154 80 27;
+  --atlas-notice-info-bg: 42 52 68;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 50 88 151;
+  --atlas-notice-success-bg: 38 63 44;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 36 125 67;
+  --atlas-notice-agent-bg: 60 45 68;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 110 63 151;
 }
 
 [data-atlas-theme="vaporwave"] {
@@ -1780,6 +2104,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 171 166 179;
   --atlas-text-gray-700: 170 165 178;
+  --atlas-notice-danger-bg: 83 44 71;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 155 55 69;
+  --atlas-notice-warning-bg: 82 62 61;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 153 116 36;
+  --atlas-notice-alert-bg: 84 52 63;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 161 81 44;
+  --atlas-notice-info-bg: 54 54 99;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 56 90 167;
+  --atlas-notice-success-bg: 50 65 75;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 43 126 84;
+  --atlas-notice-agent-bg: 71 47 99;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 116 65 168;
 }
 
 [data-atlas-theme="memphis"] {
@@ -1799,6 +2141,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 /* Window content ramp: memphis windows are #ffffff. */
@@ -1822,10 +2182,28 @@
   --atlas-fg-info: #1d4ed8;
   --atlas-fg-success: #147839;
   --atlas-fg-agent: #7e22ce;
+  --atlas-notice-danger-bg: 252 225 225;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 246 152 152;
+  --atlas-notice-warning-bg: 252 243 215;
+  --atlas-notice-warning-fg: 158 96 7;
+  --atlas-notice-warning-border: 243 213 119;
+  --atlas-notice-alert-bg: 254 233 218;
+  --atlas-notice-alert-fg: 190 64 12;
+  --atlas-notice-alert-border: 252 178 127;
+  --atlas-notice-info-bg: 224 235 254;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 147 186 250;
+  --atlas-notice-success-bg: 220 246 229;
+  --atlas-notice-success-fg: 21 125 60;
+  --atlas-notice-success-border: 133 223 166;
+  --atlas-notice-agent-bg: 241 228 254;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 207 162 251;
 }
 
 [data-atlas-theme="ps1-tech"] {
-  --atlas-link: #1b47a9;
+  --atlas-link: #173d92;
   --atlas-syntax-keyword: #173d92;
   --atlas-syntax-string: #0b4e24;
   --atlas-syntax-number: #5b3e02;
@@ -1841,10 +2219,28 @@
   --atlas-fg-agent: #601a9d;
   --atlas-text-gray-600: 66 66 66;
   --atlas-text-gray-700: 66 66 66;
+  --atlas-notice-danger-bg: 200 172 172;
+  --atlas-notice-danger-fg: 137 21 21;
+  --atlas-notice-danger-border: 218 124 124;
+  --atlas-notice-warning-bg: 199 190 163;
+  --atlas-notice-warning-fg: 109 67 5;
+  --atlas-notice-warning-border: 215 185 91;
+  --atlas-notice-alert-bg: 201 180 165;
+  --atlas-notice-alert-fg: 130 44 8;
+  --atlas-notice-alert-border: 223 150 98;
+  --atlas-notice-info-bg: 171 182 201;
+  --atlas-notice-info-fg: 22 60 166;
+  --atlas-notice-info-border: 119 158 222;
+  --atlas-notice-success-bg: 167 193 176;
+  --atlas-notice-success-fg: 14 86 41;
+  --atlas-notice-success-border: 105 195 138;
+  --atlas-notice-agent-bg: 188 175 201;
+  --atlas-notice-agent-fg: 98 27 161;
+  --atlas-notice-agent-border: 179 133 222;
 }
 
 [data-atlas-theme="os2-warp"] {
-  --atlas-link: #1b47a9;
+  --atlas-link: #173d92;
   --atlas-syntax-keyword: #173d92;
   --atlas-syntax-string: #0b4e24;
   --atlas-syntax-number: #5b3e02;
@@ -1860,6 +2256,24 @@
   --atlas-fg-agent: #601a9d;
   --atlas-text-gray-600: 66 66 66;
   --atlas-text-gray-700: 66 66 66;
+  --atlas-notice-danger-bg: 200 172 172;
+  --atlas-notice-danger-fg: 137 21 21;
+  --atlas-notice-danger-border: 218 124 124;
+  --atlas-notice-warning-bg: 199 190 163;
+  --atlas-notice-warning-fg: 109 67 5;
+  --atlas-notice-warning-border: 215 185 91;
+  --atlas-notice-alert-bg: 201 180 165;
+  --atlas-notice-alert-fg: 130 44 8;
+  --atlas-notice-alert-border: 223 150 98;
+  --atlas-notice-info-bg: 171 182 201;
+  --atlas-notice-info-fg: 22 60 166;
+  --atlas-notice-info-border: 119 158 222;
+  --atlas-notice-success-bg: 167 193 176;
+  --atlas-notice-success-fg: 14 86 41;
+  --atlas-notice-success-border: 105 195 138;
+  --atlas-notice-agent-bg: 188 175 201;
+  --atlas-notice-agent-fg: 98 27 161;
+  --atlas-notice-agent-border: 179 133 222;
 }
 
 [data-atlas-theme="macos9-platinum"] {
@@ -1879,6 +2293,24 @@
   --atlas-fg-agent: #000000;
   --atlas-text-gray-600: 0 0 0;
   --atlas-text-gray-700: 0 0 0;
+  --atlas-notice-danger-bg: 138 111 111;
+  --atlas-notice-danger-fg: 2 0 0;
+  --atlas-notice-danger-border: 185 91 91;
+  --atlas-notice-warning-bg: 137 129 101;
+  --atlas-notice-warning-fg: 34 21 1;
+  --atlas-notice-warning-border: 182 152 58;
+  --atlas-notice-alert-bg: 140 118 103;
+  --atlas-notice-alert-fg: 25 8 2;
+  --atlas-notice-alert-border: 190 117 66;
+  --atlas-notice-info-bg: 109 121 139;
+  --atlas-notice-info-fg: 3 7 19;
+  --atlas-notice-info-border: 86 125 189;
+  --atlas-notice-success-bg: 105 131 115;
+  --atlas-notice-success-fg: 3 20 10;
+  --atlas-notice-success-border: 72 162 105;
+  --atlas-notice-agent-bg: 127 114 139;
+  --atlas-notice-agent-fg: 9 2 14;
+  --atlas-notice-agent-border: 146 100 189;
 }
 
 [data-atlas-theme="web20-glossy"] {
@@ -1898,6 +2330,24 @@
   --atlas-fg-agent: #7b21ca;
   --atlas-text-gray-600: 84 87 90;
   --atlas-text-gray-700: 84 87 90;
+  --atlas-notice-danger-bg: 220 198 204;
+  --atlas-notice-danger-fg: 168 25 25;
+  --atlas-notice-danger-border: 229 138 141;
+  --atlas-notice-warning-bg: 219 216 194;
+  --atlas-notice-warning-fg: 134 81 6;
+  --atlas-notice-warning-border: 226 199 108;
+  --atlas-notice-alert-bg: 221 206 197;
+  --atlas-notice-alert-fg: 159 53 10;
+  --atlas-notice-alert-border: 234 164 116;
+  --atlas-notice-info-bg: 191 208 233;
+  --atlas-notice-info-fg: 28 74 205;
+  --atlas-notice-info-border: 130 172 239;
+  --atlas-notice-success-bg: 187 219 208;
+  --atlas-notice-success-fg: 17 105 50;
+  --atlas-notice-success-border: 116 209 155;
+  --atlas-notice-agent-bg: 208 201 233;
+  --atlas-notice-agent-fg: 122 33 200;
+  --atlas-notice-agent-border: 190 147 239;
 }
 
 [data-atlas-theme="gameboy-dmg"] {
@@ -1917,6 +2367,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 158 174 158;
   --atlas-text-gray-700: 157 174 157;
+  --atlas-notice-danger-bg: 51 58 23;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 138 63 44;
+  --atlas-notice-warning-bg: 50 76 14;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 135 124 11;
+  --atlas-notice-alert-bg: 52 65 16;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 144 88 19;
+  --atlas-notice-info-bg: 22 68 52;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 39 97 142;
+  --atlas-notice-success-bg: 18 79 28;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 25 134 58;
+  --atlas-notice-agent-bg: 39 61 52;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 99 72 143;
 }
 
 /* Window content ramp: gameboy-dmg windows are #9bbc0f. */
@@ -1940,6 +2408,24 @@
   --atlas-fg-info: #123084;
   --atlas-fg-success: #0b411f;
   --atlas-fg-agent: #4f1582;
+  --atlas-notice-danger-bg: 168 169 23;
+  --atlas-notice-danger-fg: 115 17 17;
+  --atlas-notice-danger-border: 201 122 44;
+  --atlas-notice-warning-bg: 168 187 14;
+  --atlas-notice-warning-fg: 97 59 4;
+  --atlas-notice-warning-border: 198 183 11;
+  --atlas-notice-alert-bg: 170 176 16;
+  --atlas-notice-alert-fg: 111 37 7;
+  --atlas-notice-alert-border: 207 148 19;
+  --atlas-notice-info-bg: 140 179 52;
+  --atlas-notice-info-fg: 19 51 140;
+  --atlas-notice-info-border: 102 156 142;
+  --atlas-notice-success-bg: 136 189 28;
+  --atlas-notice-success-fg: 12 74 35;
+  --atlas-notice-success-border: 88 193 58;
+  --atlas-notice-agent-bg: 157 172 52;
+  --atlas-notice-agent-fg: 83 22 136;
+  --atlas-notice-agent-border: 162 131 143;
 }
 
 [data-atlas-theme="braun-rams"] {
@@ -1959,6 +2445,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 99 99 97;
   --atlas-text-gray-700: 100 99 98;
+  --atlas-notice-danger-bg: 243 215 212;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 241 147 145;
+  --atlas-notice-warning-bg: 242 233 203;
+  --atlas-notice-warning-fg: 150 91 7;
+  --atlas-notice-warning-border: 238 208 112;
+  --atlas-notice-alert-bg: 245 223 205;
+  --atlas-notice-alert-fg: 178 60 11;
+  --atlas-notice-alert-border: 247 173 120;
+  --atlas-notice-info-bg: 214 225 241;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 142 181 243;
+  --atlas-notice-success-bg: 210 236 217;
+  --atlas-notice-success-fg: 19 118 56;
+  --atlas-notice-success-border: 128 218 160;
+  --atlas-notice-agent-bg: 232 218 241;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 202 156 244;
 }
 
 [data-atlas-theme="tron-vector"] {
@@ -1978,6 +2482,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 151 151 154;
   --atlas-text-gray-700: 151 151 154;
+  --atlas-notice-danger-bg: 64 37 43;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 54;
+  --atlas-notice-warning-bg: 63 55 33;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 22;
+  --atlas-notice-alert-bg: 66 44 35;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 29;
+  --atlas-notice-info-bg: 35 47 71;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 152;
+  --atlas-notice-success-bg: 31 58 47;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 69;
+  --atlas-notice-agent-bg: 53 40 71;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 153;
 }
 
 [data-atlas-theme="vhs-tracking"] {
@@ -1997,6 +2519,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 159 159 159;
   --atlas-text-gray-700: 159 159 159;
+  --atlas-notice-danger-bg: 71 44 44;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 149 55 55;
+  --atlas-notice-warning-bg: 70 61 34;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 146 116 22;
+  --atlas-notice-alert-bg: 73 51 36;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 154 81 30;
+  --atlas-notice-info-bg: 42 54 72;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 50 89 153;
+  --atlas-notice-success-bg: 38 64 48;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 36 126 69;
+  --atlas-notice-agent-bg: 60 46 72;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 110 64 153;
 }
 
 [data-atlas-theme="risograph"] {
@@ -2016,6 +2556,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 99 97 93;
   --atlas-text-gray-700: 99 98 93;
+  --atlas-notice-danger-bg: 242 212 202;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 241 145 140;
+  --atlas-notice-warning-bg: 242 229 193;
+  --atlas-notice-warning-fg: 147 89 6;
+  --atlas-notice-warning-border: 238 206 107;
+  --atlas-notice-alert-bg: 244 219 195;
+  --atlas-notice-alert-fg: 175 58 11;
+  --atlas-notice-alert-border: 246 171 115;
+  --atlas-notice-info-bg: 214 222 231;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 142 179 238;
+  --atlas-notice-success-bg: 210 232 207;
+  --atlas-notice-success-fg: 19 115 55;
+  --atlas-notice-success-border: 128 216 154;
+  --atlas-notice-agent-bg: 231 214 231;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 202 154 238;
 }
 
 [data-atlas-theme="ibm-3270"] {
@@ -2035,6 +2593,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 [data-atlas-theme="nethack-ascii"] {
@@ -2054,6 +2630,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 [data-atlas-theme="templeos"] {
@@ -2073,6 +2667,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 176 176 228;
   --atlas-text-gray-700: 176 176 228;
+  --atlas-notice-danger-bg: 64 37 162;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 118;
+  --atlas-notice-warning-bg: 63 55 152;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 85;
+  --atlas-notice-alert-bg: 66 44 155;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 93;
+  --atlas-notice-info-bg: 35 47 191;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 216;
+  --atlas-notice-success-bg: 31 58 166;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 133;
+  --atlas-notice-agent-bg: 53 40 191;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 217;
 }
 
 [data-atlas-theme="bbs-ansi"] {
@@ -2092,6 +2704,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 [data-atlas-theme="midnight-commander"] {
@@ -2111,6 +2741,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 176 176 228;
   --atlas-text-gray-700: 176 176 228;
+  --atlas-notice-danger-bg: 64 37 162;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 118;
+  --atlas-notice-warning-bg: 63 55 152;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 85;
+  --atlas-notice-alert-bg: 66 44 155;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 93;
+  --atlas-notice-info-bg: 35 47 191;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 216;
+  --atlas-notice-success-bg: 31 58 166;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 133;
+  --atlas-notice-agent-bg: 53 40 191;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 217;
 }
 
 /* Header content ramp: midnight-commander headers are #aaaaaa. */
@@ -2133,6 +2781,24 @@
   --atlas-fg-info: #112c7b;
   --atlas-fg-success: #0a3c1d;
   --atlas-fg-agent: #4a147a;
+  --atlas-notice-danger-bg: 181 154 154;
+  --atlas-notice-danger-fg: 111 17 17;
+  --atlas-notice-danger-border: 208 114 114;
+  --atlas-notice-warning-bg: 180 171 144;
+  --atlas-notice-warning-fg: 90 55 4;
+  --atlas-notice-warning-border: 205 175 81;
+  --atlas-notice-alert-bg: 183 161 146;
+  --atlas-notice-alert-fg: 105 35 6;
+  --atlas-notice-alert-border: 213 140 89;
+  --atlas-notice-info-bg: 152 164 182;
+  --atlas-notice-info-fg: 18 49 136;
+  --atlas-notice-info-border: 109 148 212;
+  --atlas-notice-success-bg: 148 174 158;
+  --atlas-notice-success-fg: 12 70 34;
+  --atlas-notice-success-border: 95 185 128;
+  --atlas-notice-agent-bg: 170 156 182;
+  --atlas-notice-agent-fg: 79 21 130;
+  --atlas-notice-agent-border: 169 123 212;
 }
 
 [data-atlas-theme="matrix-rain"] {
@@ -2152,6 +2818,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 152 152 152;
   --atlas-text-gray-700: 151 151 151;
+  --atlas-notice-danger-bg: 64 37 37;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 145 51 51;
+  --atlas-notice-warning-bg: 63 55 27;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 143 112 18;
+  --atlas-notice-alert-bg: 66 44 30;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 151 77 26;
+  --atlas-notice-info-bg: 35 47 65;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 46 85 149;
+  --atlas-notice-success-bg: 31 58 41;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 33 122 66;
+  --atlas-notice-agent-bg: 53 40 66;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 106 61 150;
 }
 
 [data-atlas-theme="btop-meters"] {
@@ -2171,6 +2855,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 148 149 158;
   --atlas-text-gray-700: 148 150 158;
+  --atlas-notice-danger-bg: 60 34 51;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 143 50 59;
+  --atlas-notice-warning-bg: 59 52 42;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 140 111 26;
+  --atlas-notice-alert-bg: 62 42 44;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 149 76 34;
+  --atlas-notice-info-bg: 31 44 80;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 44 84 157;
+  --atlas-notice-success-bg: 27 55 55;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 30 121 73;
+  --atlas-notice-agent-bg: 49 37 80;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 104 59 157;
 }
 
 [data-atlas-theme="c64-basic"] {
@@ -2190,6 +2892,24 @@
   --atlas-fg-agent: #f8f1ff;
   --atlas-text-gray-600: 243 243 251;
   --atlas-text-gray-700: 244 244 252;
+  --atlas-notice-danger-bg: 114 82 181;
+  --atlas-notice-danger-fg: 254 219 219;
+  --atlas-notice-danger-border: 172 76 129;
+  --atlas-notice-warning-bg: 113 100 172;
+  --atlas-notice-warning-fg: 254 244 187;
+  --atlas-notice-warning-border: 169 137 96;
+  --atlas-notice-alert-bg: 115 90 174;
+  --atlas-notice-alert-fg: 254 230 205;
+  --atlas-notice-alert-border: 177 102 103;
+  --atlas-notice-info-bg: 85 92 210;
+  --atlas-notice-info-fg: 222 237 254;
+  --atlas-notice-info-border: 73 110 227;
+  --atlas-notice-success-bg: 81 103 186;
+  --atlas-notice-success-fg: 207 249 222;
+  --atlas-notice-success-border: 59 147 143;
+  --atlas-notice-agent-bg: 102 85 210;
+  --atlas-notice-agent-fg: 241 228 255;
+  --atlas-notice-agent-border: 133 85 227;
 }
 
 [data-atlas-theme="flat-2013"] {
@@ -2209,6 +2929,24 @@
   --atlas-fg-agent: #7b21ca;
   --atlas-text-gray-600: 86 87 88;
   --atlas-text-gray-700: 86 87 87;
+  --atlas-notice-danger-bg: 222 198 199;
+  --atlas-notice-danger-fg: 168 25 25;
+  --atlas-notice-danger-border: 230 138 138;
+  --atlas-notice-warning-bg: 221 216 189;
+  --atlas-notice-warning-fg: 134 81 6;
+  --atlas-notice-warning-border: 227 199 105;
+  --atlas-notice-alert-bg: 224 206 192;
+  --atlas-notice-alert-fg: 159 53 10;
+  --atlas-notice-alert-border: 236 164 113;
+  --atlas-notice-info-bg: 193 208 228;
+  --atlas-notice-info-fg: 28 74 205;
+  --atlas-notice-info-border: 131 172 236;
+  --atlas-notice-success-bg: 189 219 203;
+  --atlas-notice-success-fg: 17 105 50;
+  --atlas-notice-success-border: 117 209 152;
+  --atlas-notice-agent-bg: 211 201 228;
+  --atlas-notice-agent-fg: 122 33 200;
+  --atlas-notice-agent-border: 191 147 237;
 }
 
 [data-atlas-theme="glassmorphism"] {
@@ -2228,6 +2966,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 96 96 96;
   --atlas-text-gray-700: 95 95 95;
+  --atlas-notice-danger-bg: 237 210 210;
+  --atlas-notice-danger-fg: 183 28 28;
+  --atlas-notice-danger-border: 238 144 144;
+  --atlas-notice-warning-bg: 237 228 200;
+  --atlas-notice-warning-fg: 145 88 6;
+  --atlas-notice-warning-border: 235 205 111;
+  --atlas-notice-alert-bg: 239 217 203;
+  --atlas-notice-alert-fg: 173 58 11;
+  --atlas-notice-alert-border: 244 170 119;
+  --atlas-notice-info-bg: 209 220 238;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 139 178 242;
+  --atlas-notice-success-bg: 205 231 214;
+  --atlas-notice-success-fg: 19 114 54;
+  --atlas-notice-success-border: 125 215 158;
+  --atlas-notice-agent-bg: 226 213 239;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 199 153 242;
 }
 
 [data-atlas-theme="neumorphism"] {
@@ -2247,6 +3003,24 @@
   --atlas-fg-agent: #741fbe;
   --atlas-text-gray-600: 79 81 84;
   --atlas-text-gray-700: 79 81 84;
+  --atlas-notice-danger-bg: 213 190 195;
+  --atlas-notice-danger-fg: 159 24 24;
+  --atlas-notice-danger-border: 225 133 136;
+  --atlas-notice-warning-bg: 212 208 185;
+  --atlas-notice-warning-fg: 127 77 6;
+  --atlas-notice-warning-border: 222 194 103;
+  --atlas-notice-alert-bg: 215 197 187;
+  --atlas-notice-alert-fg: 149 50 9;
+  --atlas-notice-alert-border: 231 159 111;
+  --atlas-notice-info-bg: 184 200 223;
+  --atlas-notice-info-fg: 26 70 194;
+  --atlas-notice-info-border: 126 167 234;
+  --atlas-notice-success-bg: 180 210 199;
+  --atlas-notice-success-fg: 16 99 47;
+  --atlas-notice-success-border: 112 204 150;
+  --atlas-notice-agent-bg: 202 193 223;
+  --atlas-notice-agent-fg: 116 31 190;
+  --atlas-notice-agent-border: 186 143 234;
 }
 
 [data-atlas-theme="blueprint-cad"] {
@@ -2266,6 +3040,24 @@
   --atlas-fg-agent: #e4cbfe;
   --atlas-text-gray-600: 205 214 225;
   --atlas-text-gray-700: 206 215 225;
+  --atlas-notice-danger-bg: 74 80 116;
+  --atlas-notice-danger-fg: 253 180 180;
+  --atlas-notice-danger-border: 150 74 94;
+  --atlas-notice-warning-bg: 73 98 106;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 148 135 61;
+  --atlas-notice-alert-bg: 75 87 109;
+  --atlas-notice-alert-fg: 253 193 130;
+  --atlas-notice-alert-border: 156 100 68;
+  --atlas-notice-info-bg: 45 90 144;
+  --atlas-notice-info-fg: 174 212 254;
+  --atlas-notice-info-border: 51 108 192;
+  --atlas-notice-success-bg: 41 100 120;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 38 145 108;
+  --atlas-notice-agent-bg: 62 82 145;
+  --atlas-notice-agent-fg: 221 190 254;
+  --atlas-notice-agent-border: 111 84 192;
 }
 
 [data-atlas-theme="claymorphism"] {
@@ -2285,6 +3077,24 @@
   --atlas-fg-agent: #7a21c8;
   --atlas-text-gray-600: 87 84 92;
   --atlas-text-gray-700: 87 85 92;
+  --atlas-notice-danger-bg: 226 193 210;
+  --atlas-notice-danger-fg: 166 25 25;
+  --atlas-notice-danger-border: 232 135 144;
+  --atlas-notice-warning-bg: 225 211 200;
+  --atlas-notice-warning-fg: 132 80 6;
+  --atlas-notice-warning-border: 229 196 111;
+  --atlas-notice-alert-bg: 227 201 203;
+  --atlas-notice-alert-fg: 157 53 10;
+  --atlas-notice-alert-border: 237 161 119;
+  --atlas-notice-info-bg: 197 203 238;
+  --atlas-notice-info-fg: 27 73 203;
+  --atlas-notice-info-border: 133 169 242;
+  --atlas-notice-success-bg: 193 214 214;
+  --atlas-notice-success-fg: 17 102 49;
+  --atlas-notice-success-border: 119 206 158;
+  --atlas-notice-agent-bg: 214 196 239;
+  --atlas-notice-agent-fg: 121 33 198;
+  --atlas-notice-agent-border: 193 144 242;
 }
 
 [data-atlas-theme="brutalist-web"] {
@@ -2304,6 +3114,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 96 96 96;
   --atlas-text-gray-700: 95 95 95;
+  --atlas-notice-danger-bg: 237 210 210;
+  --atlas-notice-danger-fg: 183 28 28;
+  --atlas-notice-danger-border: 238 144 144;
+  --atlas-notice-warning-bg: 237 228 200;
+  --atlas-notice-warning-fg: 145 88 6;
+  --atlas-notice-warning-border: 235 205 111;
+  --atlas-notice-alert-bg: 239 217 203;
+  --atlas-notice-alert-fg: 173 58 11;
+  --atlas-notice-alert-border: 244 170 119;
+  --atlas-notice-info-bg: 209 220 238;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 139 178 242;
+  --atlas-notice-success-bg: 205 231 214;
+  --atlas-notice-success-fg: 19 114 54;
+  --atlas-notice-success-border: 125 215 158;
+  --atlas-notice-agent-bg: 226 213 239;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 199 153 242;
 }
 
 [data-atlas-theme="swiss-intl"] {
@@ -2323,6 +3151,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 99 99 97;
   --atlas-text-gray-700: 100 99 97;
+  --atlas-notice-danger-bg: 243 215 211;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 241 147 144;
+  --atlas-notice-warning-bg: 242 233 201;
+  --atlas-notice-warning-fg: 150 91 7;
+  --atlas-notice-warning-border: 238 208 112;
+  --atlas-notice-alert-bg: 245 223 203;
+  --atlas-notice-alert-fg: 178 60 11;
+  --atlas-notice-alert-border: 247 173 119;
+  --atlas-notice-info-bg: 214 225 239;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 142 181 242;
+  --atlas-notice-success-bg: 210 236 215;
+  --atlas-notice-success-fg: 19 116 56;
+  --atlas-notice-success-border: 128 218 159;
+  --atlas-notice-agent-bg: 232 218 239;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 202 156 243;
 }
 
 [data-atlas-theme="bauhaus"] {
@@ -2342,6 +3188,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 97 95 91;
   --atlas-text-gray-700: 96 94 89;
+  --atlas-notice-danger-bg: 240 208 199;
+  --atlas-notice-danger-fg: 183 28 28;
+  --atlas-notice-danger-border: 239 143 138;
+  --atlas-notice-warning-bg: 239 226 189;
+  --atlas-notice-warning-fg: 143 87 6;
+  --atlas-notice-warning-border: 237 204 105;
+  --atlas-notice-alert-bg: 241 216 192;
+  --atlas-notice-alert-fg: 171 57 11;
+  --atlas-notice-alert-border: 245 169 113;
+  --atlas-notice-info-bg: 211 218 228;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 140 177 236;
+  --atlas-notice-success-bg: 207 229 203;
+  --atlas-notice-success-fg: 18 113 54;
+  --atlas-notice-success-border: 127 214 152;
+  --atlas-notice-agent-bg: 228 211 228;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 200 152 237;
 }
 
 [data-atlas-theme="pop-art-lichtenstein"] {
@@ -2361,6 +3225,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 105 105 102;
   --atlas-text-gray-700: 107 106 104;
+  --atlas-notice-danger-bg: 252 224 219;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 246 152 149;
+  --atlas-notice-warning-bg: 252 242 210;
+  --atlas-notice-warning-fg: 156 95 7;
+  --atlas-notice-warning-border: 243 213 116;
+  --atlas-notice-alert-bg: 254 232 212;
+  --atlas-notice-alert-fg: 188 63 12;
+  --atlas-notice-alert-border: 252 178 124;
+  --atlas-notice-info-bg: 224 234 248;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 147 186 247;
+  --atlas-notice-success-bg: 220 245 223;
+  --atlas-notice-success-fg: 20 124 59;
+  --atlas-notice-success-border: 133 223 163;
+  --atlas-notice-agent-bg: 241 227 248;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 207 161 247;
 }
 
 [data-atlas-theme="op-art"] {
@@ -2380,6 +3262,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 159 159 159;
   --atlas-text-gray-700: 159 159 159;
+  --atlas-notice-danger-bg: 71 44 44;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 149 55 55;
+  --atlas-notice-warning-bg: 70 61 34;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 146 116 22;
+  --atlas-notice-alert-bg: 73 51 36;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 154 81 30;
+  --atlas-notice-info-bg: 42 54 72;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 50 89 153;
+  --atlas-notice-success-bg: 38 64 48;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 36 126 69;
+  --atlas-notice-agent-bg: 60 46 72;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 110 64 153;
 }
 
 /* Window content ramp: op-art windows are #f5f5f5. */
@@ -2403,6 +3303,24 @@
   --atlas-fg-info: #1d4ed8;
   --atlas-fg-success: #137236;
   --atlas-fg-agent: #7e22ce;
+  --atlas-notice-danger-bg: 244 217 217;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 242 148 148;
+  --atlas-notice-warning-bg: 243 234 207;
+  --atlas-notice-warning-fg: 150 91 7;
+  --atlas-notice-warning-border: 239 209 115;
+  --atlas-notice-alert-bg: 246 224 209;
+  --atlas-notice-alert-fg: 180 60 11;
+  --atlas-notice-alert-border: 247 174 122;
+  --atlas-notice-info-bg: 215 227 245;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 143 182 246;
+  --atlas-notice-success-bg: 211 237 221;
+  --atlas-notice-success-fg: 19 118 56;
+  --atlas-notice-success-border: 129 219 162;
+  --atlas-notice-agent-bg: 233 219 245;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 203 157 246;
 }
 
 [data-atlas-theme="hypnagogic"] {
@@ -2422,6 +3340,24 @@
   --atlas-fg-agent: #5e1a9a;
   --atlas-text-gray-600: 72 65 50;
   --atlas-text-gray-700: 71 64 49;
+  --atlas-notice-danger-bg: 210 167 131;
+  --atlas-notice-danger-fg: 133 20 20;
+  --atlas-notice-danger-border: 224 121 102;
+  --atlas-notice-warning-bg: 210 185 121;
+  --atlas-notice-warning-fg: 106 65 5;
+  --atlas-notice-warning-border: 221 182 69;
+  --atlas-notice-alert-bg: 212 175 124;
+  --atlas-notice-alert-fg: 126 42 8;
+  --atlas-notice-alert-border: 229 147 76;
+  --atlas-notice-info-bg: 182 177 159;
+  --atlas-notice-info-fg: 21 58 160;
+  --atlas-notice-info-border: 125 155 200;
+  --atlas-notice-success-bg: 178 188 135;
+  --atlas-notice-success-fg: 14 83 40;
+  --atlas-notice-success-border: 111 192 116;
+  --atlas-notice-agent-bg: 199 170 160;
+  --atlas-notice-agent-fg: 94 26 154;
+  --atlas-notice-agent-border: 185 130 200;
 }
 
 [data-atlas-theme="monochrome-zen"] {
@@ -2441,6 +3377,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 103 103 102;
   --atlas-text-gray-700: 102 102 101;
+  --atlas-notice-danger-bg: 248 221 218;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 244 150 149;
+  --atlas-notice-warning-bg: 247 239 209;
+  --atlas-notice-warning-fg: 155 94 7;
+  --atlas-notice-warning-border: 241 211 116;
+  --atlas-notice-alert-bg: 250 228 211;
+  --atlas-notice-alert-fg: 184 62 11;
+  --atlas-notice-alert-border: 249 176 123;
+  --atlas-notice-info-bg: 219 231 247;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 145 184 246;
+  --atlas-notice-success-bg: 215 242 223;
+  --atlas-notice-success-fg: 20 122 58;
+  --atlas-notice-success-border: 131 221 163;
+  --atlas-notice-agent-bg: 237 224 247;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 205 159 247;
 }
 
 [data-atlas-theme="default-browser"] {
@@ -2460,6 +3414,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 96 96 96;
   --atlas-text-gray-700: 95 95 95;
+  --atlas-notice-danger-bg: 237 210 210;
+  --atlas-notice-danger-fg: 183 28 28;
+  --atlas-notice-danger-border: 238 144 144;
+  --atlas-notice-warning-bg: 237 228 200;
+  --atlas-notice-warning-fg: 145 88 6;
+  --atlas-notice-warning-border: 235 205 111;
+  --atlas-notice-alert-bg: 239 217 203;
+  --atlas-notice-alert-fg: 173 58 11;
+  --atlas-notice-alert-border: 244 170 119;
+  --atlas-notice-info-bg: 209 220 238;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 139 178 242;
+  --atlas-notice-success-bg: 205 231 214;
+  --atlas-notice-success-fg: 19 114 54;
+  --atlas-notice-success-border: 125 215 158;
+  --atlas-notice-agent-bg: 226 213 239;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 199 153 242;
 }
 
 [data-atlas-theme="wireframe-sketch"] {
@@ -2479,6 +3451,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 104 103 101;
   --atlas-text-gray-700: 103 102 100;
+  --atlas-notice-danger-bg: 249 221 216;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 244 150 147;
+  --atlas-notice-warning-bg: 248 239 206;
+  --atlas-notice-warning-fg: 155 94 7;
+  --atlas-notice-warning-border: 242 211 114;
+  --atlas-notice-alert-bg: 251 228 208;
+  --atlas-notice-alert-fg: 184 62 11;
+  --atlas-notice-alert-border: 250 176 122;
+  --atlas-notice-info-bg: 220 231 244;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 145 184 245;
+  --atlas-notice-success-bg: 216 242 220;
+  --atlas-notice-success-fg: 20 122 58;
+  --atlas-notice-success-border: 132 221 162;
+  --atlas-notice-agent-bg: 238 224 244;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 205 159 246;
 }
 
 [data-atlas-theme="glitch-databend"] {
@@ -2498,6 +3488,24 @@
   --atlas-fg-agent: #d8b4fe;
   --atlas-text-gray-600: 159 159 159;
   --atlas-text-gray-700: 159 159 159;
+  --atlas-notice-danger-bg: 71 44 44;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 149 55 55;
+  --atlas-notice-warning-bg: 70 61 34;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 146 116 22;
+  --atlas-notice-alert-bg: 73 51 36;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 154 81 30;
+  --atlas-notice-info-bg: 42 54 72;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 50 89 153;
+  --atlas-notice-success-bg: 38 64 48;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 36 126 69;
+  --atlas-notice-agent-bg: 60 46 72;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 110 64 153;
 }
 
 [data-atlas-theme="y2k-chrome"] {
@@ -2517,6 +3525,24 @@
   --atlas-fg-agent: #7921c6;
   --atlas-text-gray-600: 78 87 92;
   --atlas-text-gray-700: 78 87 92;
+  --atlas-notice-danger-bg: 206 198 210;
+  --atlas-notice-danger-fg: 166 25 25;
+  --atlas-notice-danger-border: 221 138 144;
+  --atlas-notice-warning-bg: 205 216 200;
+  --atlas-notice-warning-fg: 132 80 6;
+  --atlas-notice-warning-border: 219 199 111;
+  --atlas-notice-alert-bg: 208 206 203;
+  --atlas-notice-alert-fg: 155 52 10;
+  --atlas-notice-alert-border: 227 164 119;
+  --atlas-notice-info-bg: 177 208 238;
+  --atlas-notice-info-fg: 27 73 203;
+  --atlas-notice-info-border: 122 172 242;
+  --atlas-notice-success-bg: 173 219 214;
+  --atlas-notice-success-fg: 17 104 49;
+  --atlas-notice-success-border: 109 209 158;
+  --atlas-notice-agent-bg: 195 201 239;
+  --atlas-notice-agent-fg: 120 32 196;
+  --atlas-notice-agent-border: 182 147 242;
 }
 
 [data-atlas-theme="duotone-poster"] {
@@ -2536,6 +3562,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 99 95 86;
   --atlas-text-gray-700: 98 94 84;
+  --atlas-notice-danger-bg: 243 207 188;
+  --atlas-notice-danger-fg: 181 27 27;
+  --atlas-notice-danger-border: 241 143 132;
+  --atlas-notice-warning-bg: 242 225 179;
+  --atlas-notice-warning-fg: 143 87 6;
+  --atlas-notice-warning-border: 238 204 99;
+  --atlas-notice-alert-bg: 245 215 181;
+  --atlas-notice-alert-fg: 171 57 11;
+  --atlas-notice-alert-border: 247 169 107;
+  --atlas-notice-info-bg: 214 217 217;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 142 177 230;
+  --atlas-notice-success-bg: 210 228 192;
+  --atlas-notice-success-fg: 18 111 53;
+  --atlas-notice-success-border: 128 214 147;
+  --atlas-notice-agent-bg: 232 210 217;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 202 152 231;
 }
 
 [data-atlas-theme="grid-paper"] {
@@ -2555,6 +3599,24 @@
   --atlas-fg-agent: #7e22ce;
   --atlas-text-gray-600: 103 103 99;
   --atlas-text-gray-700: 102 102 98;
+  --atlas-notice-danger-bg: 248 221 212;
+  --atlas-notice-danger-fg: 185 28 28;
+  --atlas-notice-danger-border: 244 150 145;
+  --atlas-notice-warning-bg: 247 239 203;
+  --atlas-notice-warning-fg: 153 93 7;
+  --atlas-notice-warning-border: 241 211 112;
+  --atlas-notice-alert-bg: 250 228 205;
+  --atlas-notice-alert-fg: 184 62 11;
+  --atlas-notice-alert-border: 249 176 120;
+  --atlas-notice-info-bg: 219 231 241;
+  --atlas-notice-info-fg: 29 78 216;
+  --atlas-notice-info-border: 145 184 243;
+  --atlas-notice-success-bg: 215 242 217;
+  --atlas-notice-success-fg: 20 120 57;
+  --atlas-notice-success-border: 131 221 160;
+  --atlas-notice-agent-bg: 237 224 241;
+  --atlas-notice-agent-fg: 126 34 206;
+  --atlas-notice-agent-border: 205 159 244;
 }
 
 [data-atlas-theme="maximalist-banners"] {
@@ -2574,6 +3636,24 @@
   --atlas-fg-agent: #1a072b;
   --atlas-text-gray-600: 38 0 38;
   --atlas-text-gray-700: 37 0 37;
+  --atlas-notice-danger-bg: 237 11 210;
+  --atlas-notice-danger-fg: 57 9 9;
+  --atlas-notice-danger-border: 238 37 144;
+  --atlas-notice-warning-bg: 237 29 200;
+  --atlas-notice-warning-fg: 40 24 2;
+  --atlas-notice-warning-border: 235 98 111;
+  --atlas-notice-alert-bg: 239 18 203;
+  --atlas-notice-alert-fg: 52 18 3;
+  --atlas-notice-alert-border: 244 63 119;
+  --atlas-notice-info-bg: 209 21 238;
+  --atlas-notice-info-fg: 6 15 41;
+  --atlas-notice-info-border: 139 72 242;
+  --atlas-notice-success-bg: 205 32 214;
+  --atlas-notice-success-fg: 2 10 5;
+  --atlas-notice-success-border: 125 108 158;
+  --atlas-notice-agent-bg: 226 14 239;
+  --atlas-notice-agent-fg: 40 11 66;
+  --atlas-notice-agent-border: 199 47 242;
 }
 
 /* Window content ramp: maximalist-banners windows are #000000. */
@@ -2597,4 +3677,22 @@
   --atlas-fg-info: #93c5fd;
   --atlas-fg-success: #86efac;
   --atlas-fg-agent: #d8b4fe;
+  --atlas-notice-danger-bg: 38 11 11;
+  --atlas-notice-danger-fg: 252 165 165;
+  --atlas-notice-danger-border: 131 37 37;
+  --atlas-notice-warning-bg: 37 29 1;
+  --atlas-notice-warning-fg: 253 224 71;
+  --atlas-notice-warning-border: 129 98 4;
+  --atlas-notice-alert-bg: 40 18 4;
+  --atlas-notice-alert-fg: 253 186 116;
+  --atlas-notice-alert-border: 137 63 12;
+  --atlas-notice-info-bg: 9 21 39;
+  --atlas-notice-info-fg: 147 197 253;
+  --atlas-notice-info-border: 32 72 135;
+  --atlas-notice-success-bg: 5 32 15;
+  --atlas-notice-success-fg: 134 239 172;
+  --atlas-notice-success-border: 19 108 52;
+  --atlas-notice-agent-bg: 27 14 40;
+  --atlas-notice-agent-fg: 216 180 254;
+  --atlas-notice-agent-border: 92 47 136;
 }

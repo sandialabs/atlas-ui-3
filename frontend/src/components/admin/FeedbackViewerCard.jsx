@@ -62,9 +62,9 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'healthy': return 'text-green-400 bg-green-900/20'
-      case 'warning': return 'text-yellow-400 bg-yellow-900/20'
-      case 'error': return 'text-red-400 bg-red-900/20'
+      case 'healthy': return 'atlas-notice-success'
+      case 'warning': return 'atlas-notice-warning'
+      case 'error': return 'atlas-notice-danger'
       default: return 'text-gray-400 bg-gray-800'
     }
   }
@@ -72,7 +72,7 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center gap-3 mb-4">
-        <Heart className="w-6 h-6 text-pink-400" />
+        <Heart className="w-6 h-6 atlas-fg-agent" />
         <h2 className="text-lg font-semibold">User Feedback</h2>
         <button
           onClick={loadStats}
@@ -90,21 +90,21 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
         <div className="mb-4 p-3 bg-gray-700/50 rounded-lg">
           <div className="grid grid-cols-3 gap-2 text-center text-sm">
             <div className="flex flex-col items-center">
-              <div className="flex items-center gap-1 text-green-400">
+              <div className="flex items-center gap-1 atlas-fg-success">
                 <ThumbsUp className="w-3 h-3" />
                 <span className="font-medium">{stats.rating_distribution?.positive || 0}</span>
               </div>
               <span className="text-xs text-gray-400">Positive</span>
             </div>
             <div className="flex flex-col items-center">
-              <div className="flex items-center gap-1 text-yellow-400">
+              <div className="flex items-center gap-1 atlas-fg-warning">
                 <Minus className="w-3 h-3" />
                 <span className="font-medium">{stats.rating_distribution?.neutral || 0}</span>
               </div>
               <span className="text-xs text-gray-400">Neutral</span>
             </div>
             <div className="flex flex-col items-center">
-              <div className="flex items-center gap-1 text-red-400">
+              <div className="flex items-center gap-1 atlas-fg-danger">
                 <ThumbsDown className="w-3 h-3" />
                 <span className="font-medium">{stats.rating_distribution?.negative || 0}</span>
               </div>
@@ -113,7 +113,7 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
           </div>
           <div className="mt-2 pt-2 border-t border-gray-600 text-center">
             <span className="text-sm text-gray-300">
-              Total: <span className="font-medium text-blue-400">{stats.total_feedback || 0}</span>
+              Total: <span className="font-medium atlas-fg-info">{stats.total_feedback || 0}</span>
             </span>
             {stats.recent_feedback > 0 && (
               <span className="text-sm text-gray-400 ml-2">
@@ -131,7 +131,7 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
       <div className="space-y-2">
         <button 
           onClick={viewFeedback}
-          className="w-full px-4 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg transition-colors"
+          className="w-full px-4 py-2 bg-pink-700 hover:bg-pink-800 rounded-lg transition-colors text-white"
         >
           View Feedback
         </button>
@@ -147,7 +147,7 @@ const FeedbackViewerCard = ({ openModal, addNotification }) => {
           </select>
           <button 
             onClick={downloadFeedback}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors text-gray-50"
           >
             <Download className="w-4 h-4" />
             Download

@@ -49,7 +49,7 @@ running deployment:
 
 | Variable | When it applies | Default | Effect |
 |---|---|---|---|
-| `VITE_FEATURE_RETRO_THEMES` | `npm run build` / Docker build (`ARG`) | `true` | Only the literal `false` compiles the 53 retro themes, their window chrome CSS, and the gallery out. The bundle then ships just Light and Dark (about 139 kB of CSS instead of about 345 kB). |
+| `VITE_FEATURE_RETRO_THEMES` | `npm run build` / Docker build (`ARG`) | `true` | Only the literal `false` compiles the 53 retro themes, their window chrome CSS, and the gallery out. The bundle then ships just Light and Dark (about 133 kB of CSS instead of about 380 kB). |
 | `FEATURE_RETRO_THEMES_ENABLED` | backend start-up | `false` | Exposed as `features.retro_themes` by `/api/config/shell` and `/api/config`. When false the gallery is hidden even in a build that contains it. |
 
 ```
@@ -61,8 +61,11 @@ FEATURE_RETRO_THEMES_ENABLED=false
 When either flag is off, a user whose saved theme is a retro theme sees its base
 Light or Dark mode. The inline bootstrap script applies that fallback before
 React mounts (it reads the build flag from its `data-retro-themes` attribute and
-the run-time flag from the cached config), so there is no flash of the retro
-theme. The saved choice is kept and returns if the themes are turned back on.
+the run-time flag from `data-retro-runtime`, which the backend adds to that tag
+whenever it serves `index.html`), so there is no flash of the retro theme, even
+on the first load after the flag changes. Behind the Vite dev server, which does
+not add the attribute, the bootstrap falls back to the config cached by the
+previous visit. The saved choice is kept and returns if the themes are turned back on.
 Classic Light and Dark are always available.
 
 ### MCP Auto-Reconnect Settings

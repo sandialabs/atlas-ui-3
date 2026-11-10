@@ -104,7 +104,7 @@ const CaptureConsentSection = ({ isOpen }) => {
       )}
 
       {error && (
-        <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm mt-3">
+        <div className="p-3 atlas-notice-danger border rounded-lg text-sm mt-3">
           {error}
         </div>
       )}

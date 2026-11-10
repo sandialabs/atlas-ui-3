@@ -245,9 +245,9 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'healthy': return 'text-green-400 bg-green-900/20'
-      case 'warning': return 'text-yellow-400 bg-yellow-900/20'
-      case 'error': return 'text-red-400 bg-red-900/20'
+      case 'healthy': return 'atlas-notice-success'
+      case 'warning': return 'atlas-notice-warning'
+      case 'error': return 'atlas-notice-danger'
       default: return 'text-gray-400 bg-gray-800'
     }
   }
@@ -255,7 +255,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center gap-3 mb-4">
-        <Settings className="w-6 h-6 text-purple-400" />
+        <Settings className="w-6 h-6 atlas-fg-agent" />
         <h2 className="text-lg font-semibold">MCP Configuration & Controls</h2>
       </div>
       <p className="text-gray-400 mb-4">Configure MCP servers and manage hot reload and reconnect.</p>
@@ -280,7 +280,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
                 return (
                   <span
                     key={name}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-900/40 text-green-300 border border-green-700/60"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border atlas-notice-success"
                     title={`${tools} tools, ${prompts} prompts`}
                   >
                     {name} ({tools}t/{prompts}p)
@@ -310,8 +310,8 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
                   key={name}
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${
                     info?.auth_required
-                      ? 'bg-yellow-900/40 text-yellow-300 border border-yellow-700/60'
-                      : 'bg-red-900/40 text-red-300 border border-red-700/60'
+                      ? 'border atlas-notice-warning'
+                      : 'border atlas-notice-danger'
                   }`}
                   title={info?.error || (info?.auth_required ? 'OAuth authentication required' : 'Failed to connect')}
                 >
@@ -335,13 +335,13 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
           </div>
         )}
         {mcpStatus.connected_servers.length === 0 && Object.keys(mcpStatus.failed_servers).length === 0 && (
-          <div className="text-gray-500 text-xs">No MCP status available yet.</div>
+          <div className="text-gray-400 text-xs">No MCP status available yet.</div>
         )}
       </div>
       <div className="space-y-2">
         <button
           onClick={viewMCPDetails}
-          className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors flex items-center justify-center gap-2 text-white"
         >
           <Settings className="w-4 h-4" />
           View MCP Details
@@ -350,7 +350,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
           <button
             onClick={reloadMCP}
             disabled={reloadLoading}
-            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-900 disabled:opacity-60 rounded-lg text-sm flex items-center justify-center gap-2"
+            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-900 disabled:opacity-60 rounded-lg text-sm flex items-center justify-center gap-2 text-white"
           >
             <RefreshCw className={`w-4 h-4 ${reloadLoading ? 'animate-spin' : ''}`} />
             {reloadLoading ? 'Reloading and reconnecting…' : 'Reload and reconnect all MCP servers'}
@@ -358,7 +358,7 @@ const MCPConfigurationCard = ({ openModal, addNotification, systemStatus }) => {
           <button
             onClick={reconnectMCP}
             disabled={reconnectLoading}
-            className="px-3 py-2 bg-sky-600 hover:bg-sky-700 disabled:bg-sky-900 disabled:opacity-60 rounded-lg text-sm flex items-center justify-center gap-2"
+            className="px-3 py-2 bg-sky-700 hover:bg-sky-800 disabled:bg-sky-900 disabled:opacity-60 rounded-lg text-sm flex items-center justify-center gap-2 text-white"
           >
             <RotateCcw className={`w-4 h-4 ${reconnectLoading ? 'animate-spin' : ''}`} />
             {reconnectLoading ? 'Reconnecting failed servers…' : 'Reconnect disconnected MCP servers only'}

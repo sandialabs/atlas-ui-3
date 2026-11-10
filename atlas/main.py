@@ -43,7 +43,7 @@ from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
@@ -83,6 +83,7 @@ from atlas.core.otel_config import setup_opentelemetry
 from atlas.core.rate_limit_middleware import RateLimitMiddleware
 from atlas.core.security_headers_middleware import SecurityHeadersMiddleware
 from atlas.core.session_middleware import SessionMiddleware
+from atlas.core.spa_index import render_spa_index
 from atlas.core.user_identity import normalize_user_email
 from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
@@ -1617,11 +1618,19 @@ app.include_router(oidc_api_router)
 _package_static = Path(__file__).resolve().parent / "static"
 _dev_static = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 static_dir = _package_static if _package_static.exists() else _dev_static
+
+
+def _spa_index_response() -> HTMLResponse:
+    """index.html with the live retro-themes flag for the first-paint bootstrap."""
+    settings = app_factory.get_config_manager().app_settings
+    return HTMLResponse(render_spa_index(static_dir / "index.html", settings.feature_retro_themes_enabled))
+
+
 if static_dir.exists():
     # Serve the SPA entry
     @app.get("/")
     async def read_root():
-        return FileResponse(str(static_dir / "index.html"))
+        return _spa_index_response()
 
     # Serve hashed asset files under /assets (CSS/JS/images from Vite build)
     assets_dir = static_dir / "assets"
@@ -1658,6 +1667,16 @@ if static_dir.exists():
     async def logo2_png():
         path = static_dir / "sandia-powered-by-atlas.png"
         return FileResponse(str(path))
+
+    # Blocking first-paint theme script referenced by index.html (PR #1175).
+    # Without this route it 404'd behind the backend and the saved theme was
+    # only applied once React mounted.
+    @app.get("/theme-bootstrap.js")
+    async def theme_bootstrap_js():
+        path = static_dir / "theme-bootstrap.js"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(str(path), media_type="text/javascript")
 
 
 # Serve images referenced from help.md
@@ -3272,7 +3291,7 @@ if static_dir.exists():
         first = full_path.split("/", 1)[0]
         if first not in _SPA_ROUTE_PREFIXES:
             raise HTTPException(status_code=404, detail="Not Found")
-        return FileResponse(str(static_dir / "index.html"))
+        return _spa_index_response()
 
 
 if __name__ == "__main__":

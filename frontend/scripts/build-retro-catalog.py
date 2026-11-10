@@ -270,6 +270,28 @@ TONE_SEEDS = {
 # steps as surface tints (hover rows, panels), so text that wants "dimmer than
 # gray-500" uses these aliases instead (sidebar timestamps, message counts).
 TEXT_GRAY_STEPS = (600, 700)
+# Status notices (composer warnings, error boxes, agent-run strip): an opaque
+# tint of the panel toward the tone's Tailwind -500 hue, with the tone text
+# re-solved against that tint. Replaces yellow-300-on-yellow-900/40 style
+# translucent fills, whose real backdrop (and so contrast) varied by theme.
+NOTICE_HUES = {
+    'danger': '#ef4444', 'warning': '#eab308', 'alert': '#f97316',
+    'info': '#3b82f6', 'success': '#22c55e', 'agent': '#a855f7',
+}
+NOTICE_TINT, NOTICE_BORDER = .16, .55
+
+
+def notice_declarations(panel, light_panel):
+    """--atlas-notice-<tone>-bg/-fg/-border for notices drawn on `panel`."""
+    lines = []
+    for tone, (dark, light) in TONE_SEEDS.items():
+        hue = rgb(NOTICE_HUES[tone])
+        bg = blend(panel, hue, NOTICE_TINT)
+        fg = content_foreground(rgb(light if light_panel else dark), [bg])
+        lines += [f'  --atlas-notice-{tone}-bg: {css_rgb(bg)};',
+                  f'  --atlas-notice-{tone}-fg: {css_rgb(fg)};',
+                  f'  --atlas-notice-{tone}-border: {css_rgb(blend(panel, hue, NOTICE_BORDER))};']
+    return lines
 
 
 # Window/dialog fill and text colour per theme, recorded by generate_chrome().
@@ -328,6 +350,7 @@ def island_rule(ident, grays, bg, fg, selectors, label, tone_surfaces=()):
     lines += [f'  --atlas-fg-{tone}: '
               f'{hexcolor(content_foreground(rgb(light if light_panel else dark), tone_targets))};'
               for tone, (dark, light) in TONE_SEEDS.items()]
+    lines += notice_declarations(bg, light_panel)
     selector = ',\n'.join(f'[data-atlas-theme="{ident}"] {sel}' for sel in selectors)
     return (f'/* {label} content ramp: {ident} {label.lower()}s are {hexcolor(bg)}. */\n'
             f'{selector} {{\n'+'\n'.join(lines)+'\n}')
@@ -364,7 +387,14 @@ def content_adapters(catalog, generated_css, link_accents=None):
         if not any(all(contrast(c, bg) >= 4.55 for bg in transcript)
                    for c in ((0, 0, 0), (255, 255, 255))):
             transcript = [grays[800], grays[700]]
-        surfaces = {'link': [grays[800]], 'syntax-keyword': [grays[900]],
+        # Links sit on conversation panels (gray-800) and on page canvases
+        # (Help, Files: gray-900); use both unless no shade can (Game Boy DMG).
+        link_surfaces = [grays[800], grays[900]]
+        try:
+            content_foreground(rgb(link_accents.get(entry['id'], '#2563eb')), link_surfaces)
+        except ValueError:
+            link_surfaces = [grays[800]]
+        surfaces = {'link': link_surfaces, 'syntax-keyword': [grays[900]],
                     'syntax-string': [grays[900]], 'syntax-number': [grays[900]],
                     'syntax-comment': [grays[900]],
                     'header-menu-accent': [grays[800]],
@@ -383,6 +413,7 @@ def content_adapters(catalog, generated_css, link_accents=None):
         declarations += [f'  --atlas-text-gray-{step}: '
                          f'{css_rgb(content_foreground(grays[step], transcript))};'
                          for step in TEXT_GRAY_STEPS]
+        declarations += notice_declarations(grays[800], light_panel)
         rule = (f'[data-atlas-theme="{entry["id"]}"] {{\n'+
                 '\n'.join(declarations)+'\n}')
         (base_rules if entry['id'] in ('dark', 'light') else retro_rules).append(rule)
@@ -404,9 +435,11 @@ def theme_bootstrap(catalog):
             "// Synchronous first-paint counterpart of ThemeContext / resolveThemeId.\n"
             "// A retro ID is only applied when the build ships the catalog\n"
             "// (data-retro-themes=\"true\" on this script tag, from\n"
-            "// VITE_FEATURE_RETRO_THEMES) and the cached server config has not\n"
-            "// turned FEATURE_RETRO_THEMES_ENABLED off. Otherwise the saved ID\n"
-            "// falls back to its own light/dark base mode, so there is no flash.\n"
+            "// VITE_FEATURE_RETRO_THEMES) and FEATURE_RETRO_THEMES_ENABLED is on:\n"
+            "// the live value the backend stamps on this tag (data-retro-runtime)\n"
+            "// wins; without it (Vite dev server) the cached server config is used.\n"
+            "// Otherwise the saved ID falls back to its own light/dark base mode,\n"
+            "// so there is no flash.\n"
             "(function () {\n"
             "  var modes = "+json.dumps(modes, separators=(',', ':'))+";\n"
             "  var script = document.currentScript;\n"
@@ -416,7 +449,10 @@ def theme_bootstrap(catalog):
             "    var saved = localStorage.getItem('atlas-theme');\n"
             "    if (Object.prototype.hasOwnProperty.call(modes, saved)) id = saved;\n"
             "    var cached = JSON.parse(localStorage.getItem('chatui-config-cache') || 'null');\n"
-            "    if (cached && cached.features && cached.features.retro_themes === false) retro = false;\n"
+            "    var runtime = script && script.getAttribute('data-retro-runtime');\n"
+            "    if (runtime === 'false') retro = false;\n"
+            "    else if (runtime !== 'true' && cached && cached.features &&\n"
+            "             cached.features.retro_themes === false) retro = false;\n"
             "  } catch { /* Storage can be unavailable in privacy modes. */ }\n"
             "  if (!retro && id !== 'dark' && id !== 'light') id = modes[id];\n"
             "  document.documentElement.setAttribute('data-theme', modes[id]);\n"

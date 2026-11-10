@@ -10,7 +10,7 @@ const bootstrap = readFileSync('public/theme-bootstrap.js', 'utf8')
  * script tag's data-retro-themes (VITE_FEATURE_RETRO_THEMES); `cachedConfig`
  * is the /api/config cache useChatConfig keeps in localStorage.
  */
-function firstPaint(saved, { blocked = false, retroBuild = 'true', cachedConfig = null } = {}) {
+function firstPaint(saved, { blocked = false, retroBuild = 'true', cachedConfig = null, runtime = null } = {}) {
   const attributes = {}
   const storage = {
     'atlas-theme': saved,
@@ -24,7 +24,9 @@ function firstPaint(saved, { blocked = false, retroBuild = 'true', cachedConfig 
       },
     },
     document: {
-      currentScript: { getAttribute: name => (name === 'data-retro-themes' ? retroBuild : null) },
+      currentScript: {
+        getAttribute: name => ({ 'data-retro-themes': retroBuild, 'data-retro-runtime': runtime })[name] ?? null,
+      },
       documentElement: { setAttribute(key, value) { attributes[key] = value } },
     },
   })
@@ -76,6 +78,20 @@ describe('first paint with retro themes turned off (issue #1119)', () => {
       expect(firstPaint(id, { retroBuild: 'false', cachedConfig: { features: { retro_themes: false } } }))
         .toEqual({ 'data-theme': id, 'data-atlas-theme': id })
     }
+  })
+  // The backend stamps the live FEATURE_RETRO_THEMES_ENABLED on the tag
+  // (atlas/core/spa_index.py), so a just-flipped flag never flashes.
+  it('the stamped run-time flag beats a stale cached config', () => {
+    expect(firstPaint('windows-xp-luna', { runtime: 'false', cachedConfig: { features: { retro_themes: true } } }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
+    expect(firstPaint('dos-cga', { runtime: 'false' }))
+      .toEqual({ 'data-theme': 'dark', 'data-atlas-theme': 'dark' })
+    expect(firstPaint('windows-xp-luna', { runtime: 'true', cachedConfig: { features: { retro_themes: false } } }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'windows-xp-luna' })
+  })
+  it('a stamped run-time flag cannot enable themes the build left out', () => {
+    expect(firstPaint('win95', { retroBuild: 'false', runtime: 'true' }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
   })
   it('a corrupt config cache does not break first paint', () => {
     const attributes = {}

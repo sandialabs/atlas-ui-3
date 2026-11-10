@@ -855,7 +855,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               </p>
 
               {globusError && (
-                <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm mb-3">
+                <div className="p-3 atlas-notice-danger border rounded-lg text-sm mb-3">
                   {globusError}
                 </div>
               )}

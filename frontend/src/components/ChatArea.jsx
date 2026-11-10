@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
-import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench, WifiOff, Sparkles } from 'lucide-react'
+import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench, WifiOff } from 'lucide-react'
 import Message from './Message'
 import WelcomeScreen from './WelcomeScreen'
 import encodeFileKeyPath from '../utils/encodeFileKeyPath'
@@ -26,7 +26,8 @@ import ContextUsageMeter from './ContextUsageMeter'
 import { parseCompactCommand } from '../hooks/chat/useContextCompaction'
 import AgentRunStatus from './AgentRunStatus'
 import AgentQuestionPrompt from './AgentQuestionPrompt'
-import { openSettingsPanel } from '../utils/settingsPanelEvents'
+import AgentModeNoToolsBanner from './AgentModeNoToolsBanner'
+import ComposerNotice from './ComposerNotice'
 import { useToast } from './ui/toastContext'
 import { followAfterScroll, NEAR_BOTTOM_PX } from '../utils/scrollDecision'
 import { currentTurnHasActiveRow, currentTurnIsSleeping } from '../utils/executionState'
@@ -1175,30 +1176,21 @@ const ChatArea = () => {
               when no static model exists at all; a mixed deployment always
               has a default selected. */}
           {isConnected && !currentModel && models.length === 0 && llmGateways?.length > 0 && (
-            <div
-              className="mb-2 px-3 py-2 bg-blue-900/30 border border-blue-600/50 rounded-lg flex items-center gap-2 text-blue-200 text-sm"
-              role="status"
-              data-testid="choose-team-model-hint"
-            >
+            <ComposerNotice tone="info" role="status" data-testid="choose-team-model-hint">
               <span>
                 Choose a model to start chatting: open the model selector and pick one of
                 your LiteLLM teams, then a model that team may call.
               </span>
-            </div>
+            </ComposerNotice>
           )}
           {!isConnected && (
-            <div
-              className="mb-2 px-3 py-2 bg-red-900/40 border border-red-600/50 rounded-lg flex items-center gap-2 text-red-300 text-sm"
-              role="status"
-              data-testid="ws-disconnected-banner"
-            >
-              <WifiOff className="w-4 h-4 flex-shrink-0" />
+            <ComposerNotice tone="danger" icon={WifiOff} role="status" data-testid="ws-disconnected-banner">
               {sessionEnded ? (
                 <span data-testid="session-ended-banner">
                   Your session ended.{' '}
                   <a
                     href={`/auth/oidc/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`}
-                    className="underline font-medium hover:text-red-200"
+                    className="underline font-medium hover:decoration-2"
                     data-testid="session-signin-link"
                   >
                     Sign in again
@@ -1210,27 +1202,25 @@ const ChatArea = () => {
                   Disconnected from server{connectionStatus ? ` (${connectionStatus})` : ''}. Messages can't be sent until the connection is restored.
                 </span>
               )}
-            </div>
+            </ComposerNotice>
           )}
 
           {/* Warning: tools selected but model doesn't support tools */}
           {selectedTools.size > 0 && !currentModelSupportsTools && (
-            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
-              <Wrench className="w-4 h-4 flex-shrink-0" />
+            <ComposerNotice tone="warning" icon={Wrench}>
               <span>
                 <strong>{currentModelLabel}</strong> does not support tool/function calling. Selected tools will be ignored. Switch to a tool-capable model to use tools.
               </span>
-            </div>
+            </ComposerNotice>
           )}
 
           {/* Warning: images uploaded but model doesn't support vision */}
           {Object.keys(uploadedFiles).some(f => isImageFile(f)) && !currentModelSupportsVision && (
-            <div className="mb-2 px-3 py-2 bg-yellow-900/40 border border-yellow-600/50 rounded-lg flex items-center gap-2 text-yellow-300 text-sm">
-              <Image className="w-4 h-4 flex-shrink-0" />
+            <ComposerNotice tone="warning" icon={Image}>
               <span>
                 <strong>{currentModelLabel}</strong> does not support vision/image input. Uploaded images will be listed as file references but cannot be visually analyzed. Switch to a vision-capable model for image analysis.
               </span>
-            </div>
+            </ComposerNotice>
           )}
 
           {/* A running agent is easy to lose once the transcript is scrolled
@@ -1269,83 +1259,13 @@ const ChatArea = () => {
               shortens the copy but keeps the state, the model requirement, and
               both actions. */}
           {agentModeAvailable && agentModeEnabled && effectiveToolCount === 0 && (
-            <div
-              className="mb-2 px-3 py-3 bg-amber-950/50 border-2 border-amber-500/70 rounded-lg text-amber-100"
-              data-testid="agent-mode-no-tools-banner"
-            >
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-300" aria-hidden="true" />
-                <div className="flex-1 min-w-0">
-                  {/* Only the title is announced; the explanation and buttons
-                      are reachable but not re-read on every change. */}
-                  <p className="text-sm font-semibold text-amber-200" role="status">
-                    {features?.tools
-                      ? 'Agent Mode is on, but no tools are selected'
-                      : 'Agent Mode is on, but tools are disabled'}
-                  </p>
-                  {/* The title and actions stay put on short viewports; only the
-                      explanation scrolls, so the composer never gets pushed
-                      off screen and the tools action stays reachable. */}
-                  <div
-                    data-testid="agent-mode-no-tools-detail"
-                    className="max-h-24 overflow-y-auto custom-scrollbar sm:max-h-none sm:overflow-visible"
-                  >
-                    {!features?.tools ? (
-                      // Nothing to select and no model to switch for, so the
-                      // tool and model guidance would only be noise here.
-                      <p className="mt-1 text-sm text-amber-100/90">
-                        Tools are disabled for this deployment, so messages run as normal chat.
-                      </p>
-                    ) : (
-                      <>
-                        {reduceHelpText ? (
-                          <p className="mt-1 text-sm text-amber-100/90">
-                            Select at least one tool to let the assistant take multiple steps.
-                          </p>
-                        ) : (
-                          <p className="mt-1 text-sm text-amber-100/90">
-                            Agent Mode lets the assistant take multiple steps: it calls the tools you
-                            select, inspects the results, and continues until the task is done. With no
-                            tools selected, this chat behaves like normal chat.
-                          </p>
-                        )}
-                        <p className={reduceHelpText ? 'mt-1 text-sm text-amber-100/90' : 'mt-1.5 text-sm text-amber-100/90'}>
-                          You also need a tool-capable model.
-                          {currentModelToolSupport === true && (
-                            <> <strong>{currentModelLabel}</strong> supports tools.</>
-                          )}
-                          {currentModelToolSupport === false && (
-                            <>
-                              {' '}<strong>{currentModelLabel}</strong> does not support tools, so switch
-                              to a tool-capable model to use Agent Mode.
-                            </>
-                          )}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {features?.tools && (
-                      <button
-                        type="button"
-                        onClick={() => openSettingsPanel({ tab: 'tools' })}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-semibold transition-colors"
-                      >
-                        <Wrench className="w-3.5 h-3.5" aria-hidden="true" />
-                        Choose tools
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setAgentModeEnabled(false)}
-                      className="px-1.5 py-1 text-xs text-amber-200 underline decoration-dotted hover:text-amber-100 transition-colors"
-                    >
-                      Turn off Agent Mode
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <AgentModeNoToolsBanner
+              toolsEnabled={!!features?.tools}
+              reduceHelpText={reduceHelpText}
+              currentModelToolSupport={currentModelToolSupport}
+              currentModelLabel={currentModelLabel}
+              onTurnOff={() => setAgentModeEnabled(false)}
+            />
           )}
 
           {/* Uploaded Files Display. The count used to be repeated again under
@@ -1441,8 +1361,8 @@ const ChatArea = () => {
                   const supportsExtraction = canExtractFile(filename)
                   const mode = fileData.extractMode || 'none'
                   const borderColors = {
-                    full: 'bg-green-900/30 border border-green-600/50',
-                    preview: 'bg-blue-900/30 border border-blue-600/50',
+                    full: 'atlas-notice-success border',
+                    preview: 'atlas-notice-info border',
                     none: 'bg-gray-700'
                   }
                   const iconColors = {
@@ -1468,7 +1388,7 @@ const ChatArea = () => {
                           <ModeIcon className="w-3 h-3" />
                         </button>
                       )}
-                      <span className="text-gray-200 min-w-0 truncate" title={filename}>{filename}</span>
+                      <span className={`min-w-0 truncate ${supportsExtraction && mode !== 'none' ? '' : 'text-gray-200'}`} title={filename}>{filename}</span>
                       <button
                         onClick={() => removeFile(filename)}
                         className="text-gray-400 hover:text-red-400 transition-colors flex-shrink-0"

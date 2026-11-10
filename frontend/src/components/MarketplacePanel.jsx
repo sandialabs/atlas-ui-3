@@ -109,7 +109,7 @@ const MarketplacePanel = () => {
                 sessionStorage.setItem('openToolsPanel', 'true')
                 navigate('/')
               }}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 font-medium transition-colors text-white"
             >
               <ArrowLeft className="w-5 h-5" />
               Back to Tools
@@ -135,7 +135,7 @@ const MarketplacePanel = () => {
           <div className="flex gap-4">
             <button
               onClick={deselectAllServers}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg transition-colors hover:text-gray-50"
             >
               Deselect All
             </button>
@@ -157,11 +157,11 @@ const MarketplacePanel = () => {
         {/* Server Grid */}
         {filteredServers.length === 0 && searchTerm ? (
           <div className="text-center py-12">
-            <Search className="w-16 h-16 text-gray-500 mx-auto mb-4" />
+            <Search className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-300 mb-2">
               No results found
             </h3>
-            <p className="text-gray-500">
+            <p className="text-gray-400">
               Try adjusting your search terms or browse all available servers.
             </p>
           </div>
@@ -173,9 +173,7 @@ const MarketplacePanel = () => {
             return (
               <div
                 key={server.server}
-                className={`
-                  relative p-4 rounded-lg border-2 transition-all cursor-pointer
-                  ${isSelected 
+                className={`relative p-4 rounded-lg border-2 transition-all cursor-pointer ${isSelected 
                     ? 'border-blue-500 bg-blue-500/10' 
                     : 'border-gray-600 bg-gray-800 hover:border-gray-500'
                   }
@@ -183,10 +181,8 @@ const MarketplacePanel = () => {
                 onClick={() => toggleServer(server.server)}
               >
                 {/* Selection Indicator */}
-                <div className={`
-                  absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors
-                  ${isSelected 
-                    ? 'border-blue-500 bg-blue-500' 
+                <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected 
+                    ? 'border-blue-500 bg-blue-600 text-white' 
                     : 'border-gray-500'
                   }
                 `}>
@@ -201,7 +197,7 @@ const MarketplacePanel = () => {
                   
                   {/* Short Description */}
                   {server.short_description && (
-                    <p className="text-xs text-blue-300 mb-1 font-medium">
+                    <p className="text-xs atlas-fg-info mb-1 font-medium">
                       {server.short_description}
                     </p>
                   )}
@@ -214,13 +210,13 @@ const MarketplacePanel = () => {
                   <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
                     {server.author && (
                       <span className="text-gray-300">
-                        <span className="text-gray-500">By:</span> {server.author}
+                        <span className="text-gray-400">By:</span> {server.author}
                       </span>
                     )}
                     {server.help_email && (
                       <a 
                         href={`mailto:${server.help_email}`}
-                        className="text-blue-400 hover:text-blue-300 underline"
+                        className="atlas-fg-info hover:underline underline"
                         onClick={(e) => e.stopPropagation()}
                       >
                         Help
@@ -233,7 +229,7 @@ const MarketplacePanel = () => {
                     {server.tool_count > 0 && <span>{server.tool_count} tools</span>}
                     {server.prompt_count > 0 && <span>{server.prompt_count} prompts</span>}
                     {server.is_exclusive && (
-                      <span className="px-1 py-0.5 bg-orange-600 text-white rounded text-xs">
+                      <span className="px-1 py-0.5 bg-orange-700 rounded text-xs text-white">
                         Exclusive
                       </span>
                     )}
@@ -256,7 +252,7 @@ const MarketplacePanel = () => {
                   {server.prompts.slice(0, 3).map((prompt) => (
                     <span
                       key={prompt.name}
-                      className="px-1.5 py-0.5 bg-purple-700 text-xs rounded text-gray-300"
+                      className="px-1.5 py-0.5 bg-purple-700 text-xs rounded text-white"
                       title={prompt.description}
                     >
                       {prompt.name}
@@ -278,11 +274,11 @@ const MarketplacePanel = () => {
 
         {serverList.length === 0 && (
           <div className="text-center py-12">
-            <X className="w-16 h-16 text-gray-500 mx-auto mb-4" />
+            <X className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-300 mb-2">
               No MCP Servers Available
             </h3>
-            <p className="text-gray-500">
+            <p className="text-gray-400">
               No MCP servers are currently authorized for your account.
             </p>
           </div>
@@ -294,7 +290,7 @@ const MarketplacePanel = () => {
           <ul className="text-sm text-gray-400 space-y-1">
             <li>• Select the MCP servers you want to use in your chat interface</li>
             <li>• Only selected servers will appear in the Tools & Integrations panel</li>
-            <li>• <span className="text-purple-400">Purple tags</span> indicate custom prompts, <span className="text-gray-300">gray tags</span> indicate tools</li>
+            <li>• <span className="atlas-fg-agent">Purple tags</span> indicate custom prompts, <span className="text-gray-300">gray tags</span> indicate tools</li>
             <li>• Your selections are saved in your browser</li>
             <li>• You can change your selection anytime by returning to this marketplace</li>
           </ul>
@@ -305,4 +301,4 @@ const MarketplacePanel = () => {
   )
 }
 
-export default MarketplacePanel
+export default MarketplacePanel
