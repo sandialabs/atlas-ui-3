@@ -41,6 +41,10 @@ class PromptLibraryListing:
         decided from id-level grant data first; the database then filters,
         searches, counts and pages that authorized set, and the page is
         rendered with one query each for grants and latest versions.
+
+        Group membership checks are bounded (count and time). When a bound
+        cuts them short the page carries ``"incomplete": true`` and omits the
+        entries only those unchecked groups would have shown.
         """
         if scope not in SCOPES:
             raise PromptValidationError(f"scope must be one of {', '.join(SCOPES)}")
@@ -57,10 +61,10 @@ class PromptLibraryListing:
         direct = await self._db(self._repo.prompt_ids_granted_to_user, user_email)
         member_groups: Set[str] = set()
         team: Dict[str, List[str]] = {}
+        complete = True
         if scope in ("all", "team"):
-            member_groups = await self._member_groups(
-                user_email, await self._db(self._repo.distinct_granted_groups)
-            )
+            # Bounded in group count and time; see _listing_member_groups.
+            member_groups, complete = await self._listing_member_groups(user_email)
             team = await self._db(self._repo.prompt_ids_granted_to_groups, member_groups)
 
         if scope == "mine":
@@ -99,4 +103,8 @@ class PromptLibraryListing:
             if access.level == LEVEL_NONE:  # membership changed mid-request
                 continue
             results.append(summary_view(prompt, access, grants, latest_by_id.get(prompt.get("latest_version_id"))))
-        return {"prompts": results, "total": total, "limit": limit, "offset": offset}
+        page = {"prompts": results, "total": total, "limit": limit, "offset": offset}
+        if not complete:
+            # Some team entries may be missing: the group checks were cut short.
+            page["incomplete"] = True
+        return page

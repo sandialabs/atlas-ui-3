@@ -74,23 +74,32 @@ def share(pid, groups, users=(), user=None):
                {"groups": list(groups), "users": list(users), "expected_revision": revision})
 
 
-async def chat(user, conversation_id, library_prompt, extra=None):
-    """One chat turn; returns ("ok", None) or ("error", frame)."""
+async def turn_on(ws, conversation_id, library_prompt, extra=None):
+    """One chat turn on an open socket; returns ("ok", frame) or ("error", frame)."""
     frame = {
         "type": "chat", "content": "Please review this function.", "model": MODEL,
         "save_mode": "server", "conversation_id": conversation_id, "selected_tools": [],
         **({"library_prompt": library_prompt} if library_prompt is not ... else {}),
         **(extra or {}),
     }
+    await ws.send(json.dumps(frame))
+    async with asyncio.timeout(60):
+        while True:
+            msg = json.loads(await ws.recv())
+            if msg.get("type") == "error":
+                return "error", msg
+            if msg.get("type") == "conversation_saved":
+                return "ok", msg
+
+
+async def chat(user, conversation_id, library_prompt, extra=None):
+    """One chat turn on a fresh connection (a new server-side session)."""
     async with websockets.connect(WS, additional_headers={"X-User-Email": user}) as ws:
-        await ws.send(json.dumps(frame))
-        async with asyncio.timeout(60):
-            while True:
-                msg = json.loads(await ws.recv())
-                if msg.get("type") == "error":
-                    return "error", msg
-                if msg.get("type") == "conversation_saved":
-                    return "ok", msg
+        return await turn_on(ws, conversation_id, library_prompt, extra)
+
+
+def audit_count(pid, kind):
+    return sum(1 for e in api("GET", f"/api/prompts/{pid}/audit", OWNER)[1]["events"] if e["event_type"] == kind)
 
 
 async def main():
@@ -160,13 +169,52 @@ async def main():
     for label, ref, extra in (
         ("outsider naming the shared prompt", {"prompt_id": pid, "version_id": None}, None),
         ("outsider naming a version id", {"prompt_id": pid, "version_id": v1["id"]}, None),
-        ("outsider with inline text riding along", {"prompt_id": pid, "version_id": None},
-         {"custom_system_prompt": "INJECTED"}),
     ):
         status, frame = await chat(OUTSIDER, str(uuid.uuid4()), ref, extra)
         check(status == "error" and frame.get("error_type") == "authorization" and V1 not in json.dumps(frame),
               f"crafted frame refused: {label}")
+
+    # --- Conflicting prompts -----------------------------------------------
+    uses, denials = audit_count(pid, "use"), audit_count(pid, "use_denied")
+    for label, who, extra in (
+        ("member, inline text", MEMBER, {"custom_system_prompt": "INJECTED"}),
+        ("member, persona", MEMBER, {"persona_id": "any-persona"}),
+        ("outsider, inline text", OUTSIDER, {"custom_system_prompt": "INJECTED"}),
+    ):
+        status, frame = await chat(who, str(uuid.uuid4()), {"prompt_id": pid, "version_id": None}, extra)
+        check(status == "error" and frame.get("error_type") == "validation"
+              and "not both" in frame.get("message", "") and V1 not in json.dumps(frame),
+              f"a team prompt plus another prompt is rejected ({label})")
+    check(audit_count(pid, "use") == uses and audit_count(pid, "use_denied") == denials,
+          "a rejected conflicting frame audits no use or denial")
     check(last_llm_request().get("timestamp") == before, "no refused turn reached the model")
+
+    # --- Clearing a pin binds a session that is already open ---------------
+    live = str(uuid.uuid4())
+    async with websockets.connect(WS, additional_headers={"X-User-Email": MEMBER}) as ws:
+        status, _ = await turn_on(ws, live, {"prompt_id": pid, "version_id": v1["id"]})
+        check(status == "ok" and system_prompt_sent().startswith(V1), "open session pins v1")
+        s, body = api("DELETE", f"/api/prompts/pins/{live}", MEMBER)
+        check(s == 200 and body == {"cleared": True}, "pin cleared while the session stays open")
+        status, _ = await turn_on(ws, live, ...)
+        check(status == "ok" and not system_prompt_sent().startswith(V1),
+              "the open session's next turn runs unpinned")
+    s, stored = api("GET", f"/api/conversations/{live}", MEMBER)
+    meta = stored.get("metadata") or {}
+    check(s == 200 and "prompt_library" not in meta and meta.get("prompt_library_pin_epoch") == 1,
+          "the open session's save did not restore the cleared pin")
+
+    # --- Save-and-publish publishes only what was saved -------------------
+    rev = draft_revision(pid)
+    s, a_saved = api("PUT", f"/api/prompts/{pid}", OWNER, {"content": V2 + " (A)", "expected_draft_revision": rev})
+    a_saved = a_saved["prompt"]
+    check(s == 200 and a_saved["draft_content"] == V2 + " (A)" and a_saved["draft_revision"] == rev + 1,
+          "a save returns exactly the draft it wrote")
+    api("PUT", f"/api/prompts/{pid}", OWNER, {"content": "B'S UNSEEN TEXT", "expected_draft_revision": rev + 1})
+    s, _ = api("POST", f"/api/prompts/{pid}/publish", OWNER, {"expected_draft_revision": a_saved["draft_revision"]})
+    versions = api("GET", f"/api/prompts/{pid}/versions", OWNER)[1]["versions"]
+    check(s == 409 and all("B'S UNSEEN" not in v["content"] for v in versions),
+          "publishing the saved revision after another save is refused")
 
     # --- Revocation --------------------------------------------------------
     share(pid, [])

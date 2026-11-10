@@ -19,7 +19,9 @@ Filter the list with **All**, **Mine** (entries you own), **Shared with me**
 (entries someone shared with you by name) and **Team** (entries shared with a
 group you are in), and search by title or description. Each row shows the
 owner, how it is shared, the latest published version, and your access level.
-You only ever see entries you are allowed to use.
+You only ever see entries you are allowed to use. On a very large deployment
+the list may say that some team prompts could not be checked right now; those
+entries are left out rather than guessed.
 
 ## Create, edit and publish
 
@@ -30,7 +32,9 @@ copied as a new private entry.
 
 Editing changes the **draft** only. If someone else saved the draft after you
 opened it, your save or publish is refused with a message asking you to reload
--- nobody can publish text they did not see. Use **Preview** to read the draft, and
+-- nobody can publish text they did not see. **Publish version** with unsaved
+changes saves them first and publishes exactly that save; if someone else
+saves in between, the publish is refused. Use **Preview** to read the draft, and
 **Test in chat** to try it on your next messages without publishing (the test
 selection is not saved and does not affect anyone else). **Publish version**
 saves the draft as the next numbered version with an optional change
@@ -73,7 +77,14 @@ The conversation records the exact version it ran with:
   follow-up and API runs, older browser versions) is told how to continue: the
   conversation's owner clears its team prompt with
   `DELETE /api/prompts/pins/{conversation_id}`, and the next run continues
-  with the default prompt. Clearing is recorded in the prompt's audit trail.
+  with the default prompt -- including in a window or session that already has
+  the conversation open. Clearing is recorded in the prompt's audit trail.
+- If the conversation cannot be loaded (for example a brief database outage),
+  Atlas refuses the message rather than running it with a different prompt;
+  try again once it is back.
+- A message cannot use a team prompt and a custom prompt or persona at the
+  same time; such a request is refused with "Choose either a team library
+  prompt or a custom prompt, not both."
 
 **Fork** copies a published version into a new private entry you own; changes
 to either entry do not affect the other. Owners can **archive** an entry: it
@@ -92,7 +103,7 @@ that does not exist.
 
 | Method | Path | Needs |
 |--------|------|-------|
-| GET | `/api/prompts?scope=all\|mine\|shared\|team&q=&limit=&offset=` | -- (paged: `{prompts, total, limit, offset}`; `limit` 1-200, default 50) |
+| GET | `/api/prompts?scope=all\|mine\|shared\|team&q=&limit=&offset=` | -- (paged: `{prompts, total, limit, offset}`, plus `incomplete: true` when group checks were cut short; `limit` 1-200, default 50) |
 | POST | `/api/prompts` | -- (creates a private entry) |
 | GET | `/api/prompts/groups` | -- (groups you may share with) |
 | GET | `/api/prompts/{id}` | use (draft only for edit) |
@@ -114,6 +125,8 @@ and retry); `503` means the library's storage is unavailable.
 A chat frame names a library entry with
 `"library_prompt": {"prompt_id": "...", "version_id": "..." | null}` (`null` =
 latest; `"library_prompt": null` = no library prompt). The server resolves and
-authorizes it on every turn; prompt text never comes from the client. See the
+authorizes it on every turn; prompt text never comes from the client. A frame
+that names an entry and also carries `custom_system_prompt` or `persona_id` is
+rejected (`error_type: "validation"`). See the
 [design note](../../developer/design-notes/team-prompt-library-2026-11-09.md)
 for the full rules.

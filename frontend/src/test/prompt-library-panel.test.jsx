@@ -235,3 +235,60 @@ describe('PromptSelector team library section', () => {
     expect(screen.getByText('Team helper (v7)')).toBeInTheDocument()
   })
 })
+
+describe('third review: search debounce and disclosure accessibility', () => {
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+  it('debounces search even though the library object changes every render', async () => {
+    // The real hook returns a new object on every render; its functions are stable.
+    useChat.mockImplementation(() => ({ promptLibrary: { ...library }, activePromptKey: null, makePromptActive }))
+    render(<PromptLibraryPanel />)
+    await row('My reviewer')
+    await sleep(700)
+    expect(library.listPrompts).toHaveBeenCalledTimes(1) // no re-fetch loop
+
+    const search = screen.getByPlaceholderText('Search title or description')
+    for (const value of ['t', 'to', 'ton', 'tone']) fireEvent.change(search, { target: { value } })
+    await waitFor(() => expect(library.listPrompts).toHaveBeenLastCalledWith('all', 'tone', 0))
+    await sleep(700)
+    expect(library.listPrompts).toHaveBeenCalledTimes(2)
+    expect(library.listPrompts.mock.calls.map(c => c[1])).toEqual(['', 'tone'])
+  })
+
+  it('Edit, History and Share are disclosure buttons that move focus in and back', async () => {
+    render(<PromptLibraryPanel />)
+    const mine = await row('My reviewer')
+    const edit = within(mine).getByRole('button', { name: 'Edit My reviewer' })
+    expect(edit).toHaveAttribute('aria-expanded', 'false')
+    expect(edit).not.toHaveAttribute('aria-controls')
+
+    fireEvent.click(edit)
+    const region = await screen.findByRole('region', { name: 'Edit My reviewer' })
+    expect(edit).toHaveAttribute('aria-expanded', 'true')
+    expect(edit).toHaveAttribute('aria-controls', region.id)
+    await waitFor(() => expect(region).toHaveFocus())
+
+    fireEvent.keyDown(region, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Edit My reviewer' })).toBeNull())
+    expect(edit).toHaveAttribute('aria-expanded', 'false')
+    expect(edit).toHaveFocus()
+
+    const history = within(mine).getByRole('button', { name: 'Version history for My reviewer' })
+    fireEvent.click(history)
+    expect(await screen.findByRole('region', { name: 'Version history for My reviewer' })).toBeInTheDocument()
+    fireEvent.click(history) // the same button closes it
+    await waitFor(() => expect(screen.queryByRole('region', { name: /Version history/ })).toBeNull())
+    expect(history).toHaveFocus()
+
+    const share = within(mine).getByRole('button', { name: 'Share My reviewer' })
+    fireEvent.click(share)
+    const sharing = await screen.findByRole('region', { name: 'Sharing for My reviewer' })
+    expect(share).toHaveAttribute('aria-controls', sharing.id)
+  })
+
+  it('says when the server could not check every group', async () => {
+    library.listPrompts.mockResolvedValue({ prompts: [owned], total: 1, incomplete: true })
+    render(<PromptLibraryPanel />)
+    expect(await screen.findByRole('status')).toHaveTextContent(/could not be checked/)
+  })
+})

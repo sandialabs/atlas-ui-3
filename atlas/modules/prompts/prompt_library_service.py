@@ -43,7 +43,7 @@ that thread, so no session is shared across threads. Storage failures become
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar
 
 from atlas.core.user_identity import normalize_user_email
 from atlas.modules.chat_history.prompt_library_repository import (
@@ -88,6 +88,14 @@ logger = logging.getLogger(__name__)
 # Concurrent group checks per request: an external authorizer is an HTTP call
 # per (user, group), so a large sharing footprint must not fan out unbounded.
 GROUP_CHECK_CONCURRENCY = 8
+# Listing a library checks the caller against the groups named in grants.
+# Bounded twice: at most this many groups (the most-granted first), and the
+# whole membership pass within this many seconds. Past either bound the
+# listing is marked incomplete and leaves the unchecked groups' entries out
+# (fail closed); an entry is still usable by reference, where its own grants
+# are checked.
+MAX_LISTING_GROUP_CHECKS = 100
+LISTING_GROUP_CHECK_TIMEOUT_S = 10.0
 
 T = TypeVar("T")
 
@@ -156,6 +164,25 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
 
         results = await asyncio.gather(*(check(g) for g in names))
         return {g for g in results if g}
+
+    async def _listing_member_groups(self, user_email: str) -> Tuple[Set[str], bool]:
+        """The caller's groups among those granted, and whether the check was complete."""
+        groups = await self._db(self._repo.granted_groups_by_use, MAX_LISTING_GROUP_CHECKS + 1)
+        complete = len(groups) <= MAX_LISTING_GROUP_CHECKS
+        if not complete:
+            groups = groups[:MAX_LISTING_GROUP_CHECKS]
+            logger.warning(
+                "Prompt-library listing checked only the %d most-granted groups", MAX_LISTING_GROUP_CHECKS
+            )
+        try:
+            member = await asyncio.wait_for(
+                self._member_groups(user_email, groups), timeout=LISTING_GROUP_CHECK_TIMEOUT_S
+            )
+        except asyncio.TimeoutError:
+            # Fail closed: team entries are left out rather than guessed.
+            logger.warning("Prompt-library listing group checks timed out; team entries omitted")
+            return set(), False
+        return member, complete
 
     async def _access(
         self,
@@ -226,6 +253,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
 
     async def get_prompt(self, user_email: str, prompt_id: str) -> Dict[str, Any]:
         user_email, prompt, access = await self._authorize(user_email, prompt_id, LEVEL_USE)
+        return await self._detail_view(prompt_id, prompt, access)
+
+    async def _detail_view(self, prompt_id: str, prompt: Dict[str, Any], access: Any) -> Dict[str, Any]:
+        """The detail view of ``prompt`` -- a row snapshot the caller already holds."""
         grants = await self._db(self._repo.list_grants, prompt_id)
         latest = await self._db(self._repo.get_latest_version, prompt_id) if prompt.get("latest_version_id") else None
         data = summary_view(prompt, access, grants, latest)
@@ -296,9 +327,16 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         description: Optional[str] = None,
         content: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Change the draft, if it is still at ``expected_draft_revision``."""
+        """Change the draft, if it is still at ``expected_draft_revision``.
+
+        The response describes the draft *this* call wrote (or confirmed):
+        its ``draft_content`` and ``draft_revision`` come from the snapshot the
+        compare-and-set produced, never from a later read. The editor then
+        publishes with that revision, so a save-and-publish publishes exactly
+        what its user saved -- or gets a conflict if anyone saved in between.
+        """
         expected = check_revision(expected_draft_revision, "expected_draft_revision")
-        user_email, prompt, _ = await self._authorize(user_email, prompt_id, LEVEL_EDIT)
+        user_email, prompt, access = await self._authorize(user_email, prompt_id, LEVEL_EDIT)
         title = clean_title(title, required=False)
         content = clean_content(content, required=False)
         description = clean_description(description)
@@ -313,7 +351,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         if not changed:
             if prompt["draft_revision"] != expected:
                 raise PromptConflict("draft")
-            return await self.get_prompt(user_email, prompt_id)
+            return await self._detail_view(prompt_id, prompt, access)
         updated = await self._db(self._repo.update_prompt, prompt_id, expected, title, description, content)
         if updated is None:
             raise PromptNotFound()
@@ -321,7 +359,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             prompt_id, "update_draft", user_email,
             details={"fields": changed, "draft_revision": updated["draft_revision"]},
         )
-        return await self.get_prompt(user_email, prompt_id)
+        return await self._detail_view(prompt_id, updated, access)
 
     async def publish(
         self,

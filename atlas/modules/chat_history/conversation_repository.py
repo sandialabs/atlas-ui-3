@@ -35,6 +35,12 @@ from atlas.domain.conversation_lineage import (
     parent_conversation_id_from_metadata,
 )
 from atlas.domain.conversation_origin import carry_recorded_origin, origin_fields
+from atlas.domain.conversation_prompt_pin import (
+    PIN_EPOCH_METADATA_KEY,
+    PIN_METADATA_KEY,
+    pin_epoch,
+    reconcile_prompt_pin,
+)
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
 
@@ -49,6 +55,24 @@ class ConversationRepository:
 
     def _get_session(self) -> Session:
         return self._session_factory()
+
+    @staticmethod
+    def _owned_conversation(session: Session, conversation_id: str, user_email: str):
+        """The user's conversation row, locked for update on PostgreSQL.
+
+        Saves and pin clears read-modify-write the metadata blob; the row
+        lock serializes them so neither can overwrite the other's change
+        (issue #1169). DuckDB has no row locks; there a concurrent writer
+        fails the commit instead of interleaving.
+        """
+        query = session.query(ConversationRecord).filter(
+            ConversationRecord.id == conversation_id,
+            ConversationRecord.user_email == user_email,
+        )
+        bind = session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.first()
 
     def _visible_parent_ids(
         self,
@@ -154,10 +178,7 @@ class ConversationRepository:
         """
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
-            existing = session.query(ConversationRecord).filter(
-                ConversationRecord.id == conversation_id,
-                ConversationRecord.user_email == user_email,
-            ).first()
+            existing = self._owned_conversation(session, conversation_id, user_email)
 
             if existing:
                 # Count the rows rather than trusting ``message_count``: the
@@ -199,11 +220,12 @@ class ConversationRepository:
                 existing.updated_at = datetime.now(timezone.utc)
                 existing.message_count = len(messages)
                 if metadata:
+                    stored_metadata = _load_metadata(existing.metadata_json)
                     # The launch origin (issue #1187) is fixed at creation:
                     # the stored record decides it for every later save.
-                    metadata = carry_recorded_origin(
-                        _load_metadata(existing.metadata_json), metadata
-                    )
+                    metadata = carry_recorded_origin(stored_metadata, metadata)
+                    # A cleared team-prompt pin stays cleared (issue #1169).
+                    metadata = reconcile_prompt_pin(stored_metadata, metadata)
                     existing.metadata_json = json.dumps(metadata)
 
                 # Delete old messages
@@ -240,6 +262,8 @@ class ConversationRepository:
                     )
                     return None
 
+                if metadata:
+                    metadata = reconcile_prompt_pin(None, metadata)
                 conv = ConversationRecord(
                     id=conversation_id,
                     user_email=user_email,
@@ -737,31 +761,58 @@ class ConversationRepository:
             session.commit()
             return True
 
-    def pop_metadata_keys(
-        self, conversation_id: str, user_email: str, keys: List[str]
+    def get_conversation_metadata(
+        self, conversation_id: str, user_email: str
     ) -> Optional[Dict[str, Any]]:
-        """Remove ``keys`` from one of the user's conversations' metadata.
+        """The metadata of one of the user's conversations, without its messages.
 
-        Returns the removed ``{key: value}`` entries (empty when none were
-        present), or None when the user owns no such conversation. Used to
-        clear a conversation's pinned team-library prompt (issue #1169)
-        without rewriting its messages.
+        Returns ``{}`` for a conversation with no (or unreadable) metadata and
+        None when the user owns no such conversation. Active sessions use it
+        to pick up a pin cleared elsewhere (issue #1169).
         """
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
-            conv = session.query(ConversationRecord).filter(
+            row = session.query(ConversationRecord.metadata_json).filter(
                 ConversationRecord.id == conversation_id,
                 ConversationRecord.user_email == user_email,
             ).first()
+            if row is None:
+                return None
+            current = _load_metadata(row[0])
+            return current if isinstance(current, dict) else {}
+
+    def clear_prompt_pin(
+        self, conversation_id: str, user_email: str
+    ) -> Optional[Dict[str, Any]]:
+        """Clear a conversation's pinned team-library prompt (issue #1169).
+
+        Removes the pin and bumps the pin epoch under the row lock, so a
+        session that still holds the old pin cannot save it back (see
+        ``atlas.domain.conversation_prompt_pin``). The epoch is bumped even
+        when no pin is stored: a session may hold one it has not saved yet.
+        The pin history is kept. Returns ``{"prompt_library": <removed pin>}``
+        (empty when none was stored), or None when the user owns no such
+        conversation. Unreadable metadata is left alone and reported as
+        ``{}``.
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            conv = self._owned_conversation(session, conversation_id, user_email)
             if not conv:
                 return None
             current = _load_metadata(conv.metadata_json)
+            if current is None:
+                current = {}
             if not isinstance(current, dict):
                 return {}
-            removed = {k: current.pop(k) for k in keys if k in current}
-            if removed:
-                conv.metadata_json = json.dumps(current)
-                session.commit()
+            removed = (
+                {PIN_METADATA_KEY: current.pop(PIN_METADATA_KEY)}
+                if PIN_METADATA_KEY in current
+                else {}
+            )
+            current[PIN_EPOCH_METADATA_KEY] = pin_epoch(current) + 1
+            conv.metadata_json = json.dumps(current)
+            session.commit()
             return removed
 
     def stamp_legacy_classification(

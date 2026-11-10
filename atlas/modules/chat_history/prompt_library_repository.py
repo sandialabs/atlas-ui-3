@@ -251,8 +251,13 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
     ) -> Optional[Dict[str, Any]]:
         """Compare-and-set the draft. Published versions are never touched.
 
-        Returns the updated prompt, None when it is missing or archived, or
-        raises ``PromptConflictError("draft")`` when the draft moved past
+        Returns the prompt exactly as this write left it -- read inside the
+        compare-and-set transaction, so its ``draft_revision`` and
+        ``draft_content`` are this save's even when another editor saves a
+        moment later. A caller that publishes with that revision therefore
+        publishes this save's text or gets a conflict, never someone else's
+        unseen change. Returns None when the prompt is missing or archived,
+        or raises ``PromptConflictError("draft")`` when the draft moved past
         ``expected_draft_revision`` (someone else saved).
         """
         values: Dict[str, Any] = {
@@ -276,19 +281,30 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                             PromptLibraryPromptRecord.archived_at.is_(None),
                         )
                         .values(**values)
+                        # RETURNING, not rowcount: DuckDB's driver reports
+                        # rowcount -1 for UPDATE, so only the returned rows
+                        # say whether the compare-and-set matched.
+                        .returning(PromptLibraryPromptRecord.id)
                         .execution_options(synchronize_session=False)
                     )
-                    if result.rowcount != 1:
+                    if len(result.fetchall()) != 1:
                         record = session.get(PromptLibraryPromptRecord, prompt_id)
                         if record is None or record.archived_at is not None:
                             return None
                         raise PromptConflictError("draft")
+                    # Still inside the transaction that made the write (and,
+                    # on PostgreSQL, holds its row lock): this is the state the
+                    # write produced, not whatever lands after it.
+                    record = session.get(
+                        PromptLibraryPromptRecord, prompt_id, populate_existing=True
+                    )
+                    snapshot = self.prompt_to_dict(record)
                     session.commit()
             except SQLAlchemyError as e:
                 if is_transient_conflict(e):
                     raise PromptConflictError("draft") from None
                 raise
-        return self.get_prompt(prompt_id)
+        return snapshot
 
     @guarded("archive prompt")
     def archive_prompt(self, prompt_id: str) -> bool:

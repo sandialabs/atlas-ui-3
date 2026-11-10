@@ -84,6 +84,9 @@ export function usePromptLibrary(enabled = true) {
     return {
       prompts: Array.isArray(data?.prompts) ? data.prompts : [],
       total: typeof data?.total === 'number' ? data.total : 0,
+      // The server could not check every group (too many, or too slow):
+      // some team entries may be missing from this listing.
+      incomplete: data?.incomplete === true,
     }
   }, [])
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Plus, Search, Pencil, History, Share2, GitFork, Archive, Users, Lock } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { libraryPromptKey, libraryDraftKey, parseLibraryPromptKey } from '../hooks/chat/useSelections'
@@ -16,6 +16,10 @@ import PromptLibraryVersions from './PromptLibraryVersions'
  * chat. Buttons follow the permission the server reports for each entry; the
  * server enforces the same rules on every request regardless.
  */
+const PANEL_LABELS = { edit: 'Edit', versions: 'Version history for', share: 'Sharing for' }
+const panelDomId = id => `prompt-library-panel-${id}`
+const FOCUS_RING = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-1 focus-visible:ring-offset-gray-800'
+
 const FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'mine', label: 'Mine' },
@@ -31,24 +35,36 @@ const PromptLibraryPanel = () => {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [incomplete, setIncomplete] = useState(false)
   // { type: 'create' } | { type: 'edit'|'share'|'versions', id }
   const [open, setOpen] = useState(null)
   const [detail, setDetail] = useState(null)
+  // The Edit/History/Share button that opened the current panel, so closing
+  // it returns keyboard focus there; and the open panel, which takes focus.
+  const triggers = useRef({})
+  const panelRef = useRef(null)
+  const focusPanel = useRef(false)
 
+  // `library` is a fresh object on every render; its functions are stable.
+  // Depending on the function (not the object) keeps `load` stable, so the
+  // debounce below fires once per filter/search change instead of re-arming
+  // on every render.
+  const listPrompts = library?.listPrompts
   const load = useCallback(async () => {
-    if (!library) return
+    if (!listPrompts) return
     setLoading(true)
     setError(null)
     try {
-      const page = await library.listPrompts(scope, query, 0)
+      const page = await listPrompts(scope, query, 0)
       setItems(page.prompts)
       setTotal(page.total)
+      setIncomplete(Boolean(page.incomplete))
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [library, scope, query])
+  }, [listPrompts, scope, query])
 
   // Next page, appended. The server orders newest first, so a page never
   // repeats an entry unless the list changed meanwhile (dropped as a duplicate).
@@ -75,6 +91,15 @@ const PromptLibraryPanel = () => {
     return () => clearTimeout(t)
   }, [load])
 
+  // Move focus into a panel once it is on screen (keyboard and screen-reader
+  // users land on what they opened).
+  useEffect(() => {
+    if (focusPanel.current && panelRef.current) {
+      focusPanel.current = false
+      panelRef.current.focus()
+    }
+  }, [open, detail, items])
+
   if (!library) return null
 
   const act = async fn => {
@@ -86,7 +111,23 @@ const PromptLibraryPanel = () => {
     }
   }
 
+  const isOpen = (type, id) => open?.type === type && open.id === id
+
+  const close = () => {
+    const trigger = open ? triggers.current[`${open.type}:${open.id}`] : null
+    setOpen(null)
+    setDetail(null)
+    load()
+    if (trigger && trigger.isConnected) trigger.focus()
+  }
+
   const openPanel = async (type, prompt) => {
+    // The same button again closes its panel (it is a disclosure toggle).
+    if (isOpen(type, prompt.id)) {
+      close()
+      return
+    }
+    focusPanel.current = true
     if (type === 'edit') {
       await act(async () => {
         setDetail(await library.getPrompt(prompt.id))
@@ -96,11 +137,6 @@ const PromptLibraryPanel = () => {
     }
     setDetail(prompt)
     setOpen({ type, id: prompt.id })
-  }
-  const close = () => {
-    setOpen(null)
-    setDetail(null)
-    load()
   }
 
   const active = parseLibraryPromptKey(activePromptKey)
@@ -119,7 +155,26 @@ const PromptLibraryPanel = () => {
     await load()
   })
 
+  // The open panel, as a labelled region that takes focus and closes on Escape.
   const renderPanelFor = prompt => {
+    const body = renderPanelBody(prompt)
+    if (!body) return null
+    return (
+      <div id={panelDomId(prompt.id)} ref={panelRef} role="region" tabIndex={-1}
+        aria-label={`${PANEL_LABELS[open.type] || 'Details for'} ${prompt.title}`}
+        onKeyDown={e => {
+          if (e.key === 'Escape') {
+            e.stopPropagation()
+            close()
+          }
+        }}
+        className={`rounded-lg ${FOCUS_RING}`}>
+        {body}
+      </div>
+    )
+  }
+
+  const renderPanelBody = prompt => {
     if (!open || open.id !== prompt.id || !detail) return null
     if (open.type === 'edit') {
       return (
@@ -160,10 +215,26 @@ const PromptLibraryPanel = () => {
 
   const iconButton = (label, Icon, onClick, extra = '') => (
     <button type="button" onClick={onClick} title={label} aria-label={label}
-      className={`p-1.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors ${extra}`}>
-      <Icon className="w-4 h-4" />
+      className={`p-1.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors ${FOCUS_RING} ${extra}`}>
+      <Icon className="w-4 h-4" aria-hidden="true" />
     </button>
   )
+
+  // Edit / History / Share open a panel below the entry: a disclosure button
+  // that reports whether its panel is open and which element it controls.
+  const panelButton = (type, prompt, label, icon) => {
+    const Icon = icon
+    const expanded = isOpen(type, prompt.id)
+    return (
+      <button type="button" onClick={() => openPanel(type, prompt)} title={label} aria-label={label}
+        aria-expanded={expanded}
+        aria-controls={expanded ? panelDomId(prompt.id) : undefined}
+        ref={el => { triggers.current[`${type}:${prompt.id}`] = el }}
+        className={`p-1.5 rounded transition-colors ${expanded ? 'bg-blue-700 text-white' : 'bg-gray-600 hover:bg-gray-500 text-gray-200'} ${FOCUS_RING}`}>
+        <Icon className="w-4 h-4" aria-hidden="true" />
+      </button>
+    )
+  }
 
   return (
     <section className="space-y-4" aria-labelledby="team-library-heading">
@@ -186,7 +257,7 @@ const PromptLibraryPanel = () => {
         <div role="group" aria-label="Filter library" className="flex rounded-lg overflow-hidden border border-gray-600">
           {FILTERS.map(f => (
             <button key={f.value} type="button" aria-pressed={scope === f.value} onClick={() => setScope(f.value)}
-              className={`px-3 py-1.5 text-sm ${scope === f.value ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+              className={`px-3 py-1.5 text-sm ${scope === f.value ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'} ${FOCUS_RING}`}>
               {f.label}
             </button>
           ))}
@@ -216,6 +287,11 @@ const PromptLibraryPanel = () => {
           on screen rather than letting it vanish. */}
       {open && open.type !== 'create' && detail && !items.some(p => p.id === open.id) && renderPanelFor(detail)}
 
+      {incomplete && (
+        <div role="status" className="p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-300 text-xs">
+          Some team prompts could not be checked right now and may be missing from this list.
+        </div>
+      )}
       {error && <div role="alert" className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">{error}</div>}
       {loading && items.length === 0 && <div className="text-sm text-gray-400">Loading library...</div>}
       {!loading && items.length === 0 && !error && (
@@ -255,12 +331,12 @@ const PromptLibraryPanel = () => {
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" disabled={!p.latest_version} onClick={() => selectEntry(p.id)}
-                      className={`px-2 py-1 rounded text-xs font-medium ${isActive ? 'bg-emerald-700 text-white' : 'bg-gray-600 hover:bg-gray-500 text-gray-200'} disabled:opacity-40`}>
+                      className={`px-2 py-1 rounded text-xs font-medium ${isActive ? 'bg-emerald-700 text-white' : 'bg-gray-600 hover:bg-gray-500 text-gray-200'} disabled:opacity-40 ${FOCUS_RING}`}>
                       {isActive ? 'Active' : 'Use'}
                     </button>
-                    {p.can_edit && iconButton(`Edit ${p.title}`, Pencil, () => openPanel('edit', p))}
-                    {iconButton(`Version history for ${p.title}`, History, () => openPanel('versions', p))}
-                    {p.can_manage && iconButton(`Share ${p.title}`, Share2, () => openPanel('share', p))}
+                    {p.can_edit && panelButton('edit', p, `Edit ${p.title}`, Pencil)}
+                    {panelButton('versions', p, `Version history for ${p.title}`, History)}
+                    {p.can_manage && panelButton('share', p, `Share ${p.title}`, Share2)}
                     {p.latest_version && iconButton(`Fork ${p.title}`, GitFork, () => fork(p))}
                     {p.is_owner && iconButton(`Archive ${p.title}`, Archive, () => archive(p), 'hover:bg-red-600')}
                   </div>

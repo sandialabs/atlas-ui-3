@@ -802,6 +802,7 @@ class ChatService:
             library=getattr(self, "prompt_library_service", None),
             message_index=len(session.history.messages),
             omitted=UNSET,
+            load_metadata=self._conversation_metadata_loader(session, user_email),
         )
         if library_text is not None:
             kwargs["custom_system_prompt"] = library_text
@@ -1876,6 +1877,34 @@ class ChatService:
             return False
         return bool(session.context.get("rewind_removed"))
 
+    def _conversation_metadata_loader(self, session: Session, user_email: Optional[str]):
+        """Reads the bound conversation's stored metadata, or None without a store.
+
+        Lets a turn see a pin cleared elsewhere (issue #1169). The read is
+        owner-filtered and skips the messages.
+        """
+        repository = self.conversation_repository
+        conversation_id = session.context.get("conversation_id")
+        if repository is None or not user_email or not isinstance(conversation_id, str):
+            return None
+
+        read_metadata = getattr(repository, "get_conversation_metadata", None)
+
+        def read_via_record():
+            # Repositories without the light read: take it from the record.
+            record = repository.get_conversation(conversation_id, user_email)
+            if record is None:
+                return None
+            metadata = record.get("metadata")
+            return metadata if isinstance(metadata, dict) else {}
+
+        async def load():
+            if callable(read_metadata):
+                return await asyncio.to_thread(read_metadata, conversation_id, user_email)
+            return await asyncio.to_thread(read_via_record)
+
+        return load
+
     async def _hydrate_session_from_store(
         self,
         session: Session,
@@ -1909,6 +1938,9 @@ class ChatService:
             # in place, a later saving turn would create a new conversation
             # marked as launched by the API.
             session.context.pop(ORIGIN_METADATA_KEY, None)
+            # Nor does the previous conversation's team-prompt pin travel.
+            if previous_conversation_id != conversation_id:
+                library_turn.clear_pin(session.context)
             return 0
 
         # The caller only gets here when the session's bound conversation
@@ -1929,10 +1961,7 @@ class ChatService:
         previous_origin = session.context.get(ORIGIN_METADATA_KEY, UNSET)
         session.context[ORIGIN_METADATA_KEY] = None
         # And for the pinned team-library prompt version (issue #1169).
-        previous_pin = {
-            key: session.context.get(key)
-            for key in (library_turn.PIN_CONTEXT_KEY, library_turn.PIN_HISTORY_CONTEXT_KEY)
-        }
+        previous_pin = library_turn.save_pin_state(session.context)
         library_turn.clear_pin(session.context)
 
         try:
@@ -1988,8 +2017,17 @@ class ChatService:
                 session.context[ORIGIN_METADATA_KEY] = previous_origin
             else:
                 session.context.pop(ORIGIN_METADATA_KEY, None)
+            # The pin likewise: the session's own state when it was already
+            # carrying this conversation (the turn re-reads the record before
+            # running it on a pin). For a conversation it was not carrying, the
+            # pin is *unknown* -- never "none": treating it as absent would
+            # silently run the default prompt in a pinned conversation, with or
+            # without compliance enforcement. The turn is refused until the
+            # record can be read (prompt_library_turn).
             if previous_conversation_id == conversation_id:
                 session.context.update(previous_pin)
+            else:
+                library_turn.mark_pin_unknown(session.context)
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),

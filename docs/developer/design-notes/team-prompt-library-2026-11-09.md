@@ -1,6 +1,6 @@
 # Team Prompt Library (issue #1169)
 
-Date: 2026-11-09 (review revisions 2026-11-10)
+Date: 2026-11-09 (review revisions 2026-11-10, third review 2026-11-10)
 
 How the team-shared, versioned prompt library was built, and why. User-facing
 behaviour is in the [user guide](../../user-guide/team-prompt-library/README.md).
@@ -49,7 +49,12 @@ model.
   the MVP cannot become an organization-wide catalog.
 - List/search first computes the authorized id set, then narrows it with the
   search term, so a search can never widen visibility. For the Team scope the
-  distinct granted groups are checked once per request (bounded concurrency).
+  granted groups are checked once per request, bounded three ways: 8 checks
+  at a time, at most 100 groups (the most-granted on live prompts first),
+  and 10 seconds for the whole pass. Past a bound the page carries
+  `"incomplete": true` and leaves out entries only the unchecked groups
+  would show (fail closed); the panel says so. Using an entry by reference
+  is unaffected -- its own grants are checked.
 - A use-only caller does not see an entry until something is published.
 
 ## Execution and pinning
@@ -67,6 +72,14 @@ is hydrated, using the server-authenticated user. Outcomes:
 | `library_prompt: null` | any | unpin; inline/persona/default applies |
 | omitted | yes, no other prompt in frame | pinned version, re-authorized |
 | omitted | yes, inline/persona in frame | unpin; that prompt applies |
+| names an entry **and** inline/persona | any | rejected (`ValidationError`), nothing looked up |
+
+A frame that names a library entry together with an inline custom prompt or a
+persona is ambiguous, so it is rejected with "Choose either a team library
+prompt or a custom prompt, not both." -- on the raw WebSocket frame before
+either side is resolved (`frame_has_conflicting_prompts`, error type
+`validation`), and again in the service for other callers. No library lookup
+happens, so no `use` or `use_denied` is audited; the pin is untouched.
 
 Any refusal raises `AuthorizationError` before the turn runs or is saved, with
 one generic message. It never falls back to another version or the default
@@ -81,6 +94,35 @@ key afterwards; an explicit workspace switch by the user does not. Because versi
 and archiving is a soft delete, a pinned id always resolves to its original
 text; running it again still needs current access. That is the distinction
 between preserving history and permitting new use.
+
+### Pin state is the stored record's
+
+`atlas.domain.conversation_prompt_pin` owns the stored rules:
+
+- `metadata.prompt_library_pin_epoch` counts explicit clears. The clear bumps
+  it under the conversation's row lock (`SELECT ... FOR UPDATE` on
+  PostgreSQL), even when no pin is stored, because a session may hold one it
+  has not saved yet.
+- Every save reads the record under the same row lock and reconciles: a pin
+  sent with an older epoch than the stored one is dropped, the stored epoch
+  is kept, and stored pin history the save lacks is carried over. So a
+  session that was open during a clear can never write the pin back,
+  whichever way its save and the clear interleave.
+- Before a turn that is pinned, selects a library entry, or has an unknown
+  pin state, the session re-reads the record's metadata (owner-filtered, no
+  messages) and adopts the stored pin when the epoch moved. A clear therefore
+  takes effect on an already-open session's next turn, and re-choosing the
+  entry afterwards pins its current latest under the new epoch.
+- When a conversation fails to load and the session was not already carrying
+  it, the pin is *unknown*, never "none": the turn re-reads the metadata and
+  runs the stored pin (re-authorized), or is refused with "could not be
+  loaded right now ... try again" when the store cannot answer. This holds
+  with compliance enforcement on or off, so a failed load never swaps a
+  pinned prompt for the default. A session in that state saves
+  `KEEP_STORED_PIN` instead of pin keys, which carries the stored pin,
+  history and epoch through untouched. A failed reload of the conversation
+  the session already carries keeps its own pin, which the re-read then
+  checks against the store.
 
 ## Recovering from an unavailable pin
 
@@ -106,7 +148,13 @@ such and keeps the pin. Browsers choose explicitly every turn
   (HTTP 409), never an unhandled exception.
 - Drafts carry `draft_revision`; saving is a compare-and-set on it and
   publishing names the revision the editor reviewed, so concurrent editors get
-  a 409 instead of overwriting each other or publishing unseen text.
+  a 409 instead of overwriting each other or publishing unseen text. The save
+  response is the row as *that* write left it, read inside the compare-and-set
+  transaction (under its row lock on PostgreSQL), never a later read: the
+  editor's save-then-publish names this save's revision, so a save that lands
+  in between makes the publish fail instead of publishing it. The
+  compare-and-set tests the `UPDATE ... RETURNING` rows, not `rowcount`,
+  which DuckDB's driver reports as -1.
 - Grants carry `sharing_revision`. A sharing change is an `UPDATE ... WHERE
   sharing_revision = expected` (which takes the prompt's row lock on
   PostgreSQL) followed by a diff of the grant rows, all in one transaction;
@@ -141,6 +189,6 @@ Prompt text is never written to audit rows or logs.
 
 `atlas/tests/test_prompt_library_access.py`, `..._routes.py`,
 `..._chat_turn.py`, `..._migration.py`, `..._concurrency.py`,
-`..._storage.py` (SQLite, DuckDB and, with `ATLAS_TEST_POSTGRES_URL`,
-PostgreSQL); frontend `src/test/prompt-library-*.test.*`;
+`..._storage.py`, `atlas/tests/test_conversation_prompt_pin.py` (SQLite,
+DuckDB and, with `ATLAS_TEST_POSTGRES_URL`, PostgreSQL); frontend `src/test/prompt-library-*.test.*`;
 end-to-end `test/pr-validation/test_pr1169_team_prompt_library.sh`.

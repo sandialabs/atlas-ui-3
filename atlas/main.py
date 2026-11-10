@@ -2336,9 +2336,33 @@ async def websocket_endpoint(websocket: WebSocket):
                 # persona's access group for this user and the turn's compliance
                 # filter, which also means a hand-crafted client cannot use
                 # persona_id to smuggle in a prompt of its own.
+                from atlas.application.chat.prompt_library_turn import (
+                    CONFLICTING_PROMPTS_MESSAGE,
+                    frame_has_conflicting_prompts,
+                )
                 from atlas.modules.prompts.persona_library import (
                     resolve_chat_system_prompt,
                 )
+
+                # A team library prompt (issue #1169) is never combined with
+                # an inline prompt or persona. Rejected on the raw frame,
+                # before either side is resolved, so nothing is looked up or
+                # audited for a turn that never runs.
+                if frame_has_conflicting_prompts(
+                    data.get("library_prompt", UNSET),
+                    data.get("custom_system_prompt"),
+                    data.get("persona_id"),
+                    UNSET,
+                ):
+                    logger.warning(
+                        "Rejected a chat frame naming both a team prompt and another prompt"
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": CONFLICTING_PROMPTS_MESSAGE,
+                        "error_type": "validation",
+                    })
+                    continue
 
                 custom_system_prompt = await resolve_chat_system_prompt(
                     data.get("custom_system_prompt"),

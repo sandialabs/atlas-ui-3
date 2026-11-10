@@ -345,8 +345,12 @@ async def clear_conversation_pin(conversation_id: str, current_user: str = Depen
     Deliberately not gated on the library feature flag: with the feature
     turned off, a pinned conversation is refused on every turn, and this is
     how its owner continues. It needs only the conversation store.
+
+    The clear also binds sessions that already have the conversation open:
+    it bumps the stored pin epoch, so their next turn re-reads the record and
+    runs unpinned, and their saves cannot write the old pin back.
     """
-    from atlas.application.chat.prompt_library_turn import PIN_METADATA_KEY
+    from atlas.domain.conversation_prompt_pin import PIN_METADATA_KEY
     from atlas.infrastructure.app_factory import app_factory
 
     conversations = getattr(app_factory, "conversation_repository", None)
@@ -354,7 +358,7 @@ async def clear_conversation_pin(conversation_id: str, current_user: str = Depen
         raise HTTPException(status_code=503, detail=app_factory.chat_history_unavailable_reason())
     try:
         removed = await asyncio.to_thread(
-            conversations.pop_metadata_keys, conversation_id, current_user, [PIN_METADATA_KEY]
+            conversations.clear_prompt_pin, conversation_id, current_user
         )
     except Exception as e:
         logger.error("Clearing a conversation pin failed (%s)", type(e).__name__)

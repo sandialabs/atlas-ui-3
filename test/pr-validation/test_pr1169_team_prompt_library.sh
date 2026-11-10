@@ -6,7 +6,9 @@
 # the mock LLM's own request log, which system prompt each chat turn sent:
 # privacy by default, group sharing (use only), ID probing, server-side
 # resolution, exact-version pinning across publications, crafted frames,
-# revocation and pin clearing, stale-revision refusals, forks and audit. Then runs the targeted unit/integration tests
+# conflicting prompt selections, revocation and pin clearing (including a
+# session that stays open across the clear), stale-revision refusals,
+# save-then-publish against a concurrent save, forks and audit. Then runs the targeted unit/integration tests
 # (the PostgreSQL ones too when ATLAS_TEST_POSTGRES_URL is set), the frontend
 # library tests, and the backend suite.
 set -euo pipefail
@@ -103,6 +105,7 @@ python -m pytest -q -p no:warnings \
     atlas/tests/test_prompt_library_migration.py \
     atlas/tests/test_prompt_library_concurrency.py \
     atlas/tests/test_prompt_library_storage.py \
+    atlas/tests/test_conversation_prompt_pin.py \
     atlas/tests/test_user_prompts.py \
     atlas/tests/test_schema_migration.py
 if [ -z "${ATLAS_TEST_POSTGRES_URL:-}" ]; then

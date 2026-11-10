@@ -152,9 +152,13 @@ class PromptLibraryGrantStore:
                             sharing_revision=PromptLibraryPromptRecord.sharing_revision + 1,
                             updated_at=datetime.now(timezone.utc),
                         )
+                        # RETURNING, not rowcount: DuckDB's driver reports
+                        # rowcount -1 for UPDATE, so only the returned rows
+                        # say whether the compare-and-set matched.
+                        .returning(PromptLibraryPromptRecord.id)
                         .execution_options(synchronize_session=False)
                     )
-                    if claimed.rowcount != 1:
+                    if len(claimed.fetchall()) != 1:
                         prompt = session.get(PromptLibraryPromptRecord, prompt_id)
                         if prompt is None or prompt.archived_at is not None:
                             return None
@@ -195,16 +199,33 @@ class PromptLibraryGrantStore:
             return {r[0]: r[1] for r in rows}
 
     @guarded("list grants")
-    def distinct_granted_groups(self) -> List[str]:
-        """Every group name that appears in any grant, exactly as stored."""
+    def granted_groups_by_use(self, limit: int) -> List[str]:
+        """Up to ``limit`` group names granted on live prompts, most-granted first.
+
+        The listing checks the caller's membership in each, so it reads a
+        bounded, deterministic set (ties broken by name) rather than every
+        group ever named in a grant. Archived prompts do not count.
+        """
+        from sqlalchemy import func
+
         with self._session() as session:
+            uses = func.count(PromptLibraryGrantRecord.id)
             rows = (
-                session.query(PromptLibraryGrantRecord.grantee)
-                .filter(PromptLibraryGrantRecord.grantee_type == GRANTEE_GROUP)
-                .distinct()
+                session.query(PromptLibraryGrantRecord.grantee, uses)
+                .join(
+                    PromptLibraryPromptRecord,
+                    PromptLibraryPromptRecord.id == PromptLibraryGrantRecord.prompt_id,
+                )
+                .filter(
+                    PromptLibraryGrantRecord.grantee_type == GRANTEE_GROUP,
+                    PromptLibraryPromptRecord.archived_at.is_(None),
+                )
+                .group_by(PromptLibraryGrantRecord.grantee)
+                .order_by(uses.desc(), PromptLibraryGrantRecord.grantee)
+                .limit(limit)
                 .all()
             )
-            return sorted({r[0] for r in rows})
+            return [r[0] for r in rows]
 
     @guarded("list grants")
     def prompt_ids_granted_to_groups(self, groups: Iterable[str]) -> Dict[str, List[str]]:

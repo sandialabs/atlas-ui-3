@@ -253,3 +253,95 @@ def test_publish_requires_the_reviewed_draft(backend, request):
     assert repo.list_versions(prompt["id"]) == []
     version = repo.publish_version(prompt["id"], OWNER, None, 2)
     assert version["content"] == "unreviewed text"
+
+
+# --- Save-and-publish (issue #1169, third review) -------------------------
+
+
+@pytest.mark.parametrize("backend", ["duckdb", "postgresql"])
+@pytest.mark.asyncio
+async def test_save_and_publish_never_publishes_another_editors_unseen_save(backend, request):
+    """Editor A saves, editor B saves right after, A publishes "what it saved".
+
+    The save response used to be a fresh read taken after the commit, so it
+    could carry B's text and revision; the editor then published B's unseen
+    change under A's name. The response is now the compare-and-set's own
+    snapshot, so A's publish names A's revision and is refused.
+    """
+    from atlas.modules.prompts.prompt_library_policy import PromptConflict
+    from atlas.modules.prompts.prompt_library_service import PromptLibraryService
+
+    repos = [request.getfixturevalue("duck")] * 2 if backend == "duckdb" else request.getfixturevalue("replicas")
+
+    async def everyone(user_email, group_name):
+        return False
+
+    editor_a = PromptLibraryService(repos[0], group_check=everyone)
+    prompt = await editor_a.create_prompt(OWNER, "Draft", "v1")
+    original_update = repos[0].update_prompt
+
+    def update_then_b_saves(prompt_id, expected, *args, **kwargs):
+        saved = original_update(prompt_id, expected, *args, **kwargs)
+        # B lands between A's commit and anything A does next.
+        # (Unbound call: on DuckDB both editors share one repository object.)
+        PromptLibraryRepository.update_prompt(
+            repos[1], prompt_id, saved["draft_revision"], draft_content="B's unseen text"
+        )
+        return saved
+
+    repos[0].update_prompt = update_then_b_saves
+    try:
+        saved = await editor_a.update_prompt(OWNER, prompt["id"], 1, content="A's text")
+    finally:
+        repos[0].update_prompt = original_update
+    assert saved["draft_content"] == "A's text"
+    assert saved["draft_revision"] == 2
+    with pytest.raises(PromptConflict):
+        await editor_a.publish(OWNER, prompt["id"], saved["draft_revision"], "A publishes")
+    assert repos[0].list_versions(prompt["id"]) == []
+    # Without interference the snapshot's revision publishes exactly that text.
+    again = await editor_a.update_prompt(OWNER, prompt["id"], 3, content="A reviewed B")
+    version = await editor_a.publish(OWNER, prompt["id"], again["draft_revision"], None)
+    assert version["content"] == "A reviewed B"
+
+
+def test_save_snapshot_is_read_under_the_postgresql_row_lock(replicas):
+    """A's snapshot is taken while A holds the row lock.
+
+    A racing save (same expected revision) blocks until A commits and then
+    loses; a save made after A's commit cannot leak into A's response.
+    """
+    a, b = replicas
+    prompt = a.create_prompt(OWNER, "Draft", None, "v1")
+    b_result = {}
+    original = a.prompt_to_dict
+
+    def snapshot_while_b_waits(record):
+        if record.draft_content == "A's text" and "thread" not in b_result:
+            def b_save():
+                try:
+                    b_result["value"] = b.update_prompt(prompt["id"], 1, draft_content="B's text")
+                except Exception as e:  # collected for the assertion
+                    b_result["value"] = e
+
+            thread = threading.Thread(target=b_save)
+            b_result["thread"] = thread
+            thread.start()
+            time.sleep(0.5)  # B is now blocked on A's row lock
+            assert "value" not in b_result
+        return original(record)
+
+    a.prompt_to_dict = snapshot_while_b_waits
+    try:
+        saved = a.update_prompt(prompt["id"], 1, draft_content="A's text")
+    finally:
+        a.prompt_to_dict = original
+    b_result["thread"].join(10)
+    assert saved["draft_content"] == "A's text" and saved["draft_revision"] == 2
+    assert isinstance(b_result["value"], PromptConflictError)
+    # B reloads and saves on top of A; A's publish of revision 2 is refused.
+    later = b.update_prompt(prompt["id"], 2, draft_content="B's text")
+    assert later["draft_revision"] == 3
+    assert saved["draft_content"] == "A's text"
+    with pytest.raises(PromptConflictError):
+        a.publish_version(prompt["id"], OWNER, None, saved["draft_revision"])

@@ -176,9 +176,7 @@ async def test_crafted_frames_cannot_bypass_access(env, user):
     for frame in frames:
         conv = str(uuid4())
         with pytest.raises(AuthorizationError) as exc:
-            # Inline text riding along must not become the fallback either.
-            await _turn(service, uuid4(), conv, user=user, library_prompt=frame,
-                        custom_system_prompt="client text")
+            await _turn(service, uuid4(), conv, user=user, library_prompt=frame)
         assert "PRIVATE BODY" not in exc.value.message
         assert env["conversations"].get_conversation(conv, user) is None
     assert calls == []
@@ -482,3 +480,239 @@ async def test_pin_can_be_cleared_while_the_library_is_switched_off(env, monkeyp
     assert cleared.status_code == 200 and cleared.json() == {"cleared": True}
     await _turn(off, uuid4(), conv)
     assert off_calls[-1].get("custom_system_prompt") is None
+
+
+# --- Third review: conflicting prompts, live pin clearing, failed loads -----
+
+
+def _set_execute(service, fn):
+    """Replace the stub orchestrator's turn body (keeps the recorded calls)."""
+    service._get_orchestrator.return_value.execute.side_effect = fn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pinned_version", [False, True])
+async def test_conflicting_prompts_are_rejected_before_any_lookup(env, monkeypatch, pinned_version):
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    events_before = len(lib.repository.list_audit_events(prompt["id"]))
+    lookups = []
+    real_resolve = lib.resolve_for_execution
+
+    async def spy(*args, **kwargs):
+        lookups.append(args)
+        return await real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(lib, "resolve_for_execution", spy)
+    service, calls, _ = _service(env)
+    conv = str(uuid4())
+    ref = {"prompt_id": prompt["id"], "version_id": v1["id"] if pinned_version else None}
+    with pytest.raises(ValidationError) as exc:
+        await _turn(service, uuid4(), conv, library_prompt=ref, custom_system_prompt="client text")
+    assert exc.value.message == library_turn.CONFLICTING_PROMPTS_MESSAGE
+    assert calls == [] and lookups == []
+    # Nothing was attempted, so nothing is audited (no use, no denial).
+    assert len(lib.repository.list_audit_events(prompt["id"])) == events_before
+    assert env["conversations"].get_conversation(conv, USER) is None
+
+
+@pytest.mark.asyncio
+async def test_conflicting_prompts_leave_an_existing_pin_alone(env):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    ref = {"prompt_id": prompt["id"], "version_id": None}
+    await _turn(service, session_id, conv, library_prompt=ref)
+    with pytest.raises(ValidationError):
+        await _turn(service, session_id, conv, library_prompt=ref, custom_system_prompt="client text")
+    assert len(calls) == 1
+    assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY]["version_id"] == v1["id"]
+    assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
+
+
+@pytest.mark.parametrize(
+    "library_prompt, custom, persona, conflict",
+    [
+        ({"prompt_id": "p"}, "text", None, True),
+        ({"prompt_id": "p"}, None, "persona-1", True),
+        ({"prompt_id": "p"}, "   ", None, False),  # blank inline text is no prompt
+        ("malformed", "text", None, True),  # any non-null reference is a selection
+        (None, "text", None, False),  # explicit null: the client chose the other prompt
+        ("<omitted>", "text", "persona-1", False),
+        ({"prompt_id": "p"}, None, None, False),
+    ],
+)
+def test_raw_frame_conflict_check(library_prompt, custom, persona, conflict):
+    omitted = object()
+    value = omitted if library_prompt == "<omitted>" else library_prompt
+    assert library_turn.frame_has_conflicting_prompts(value, custom, persona, omitted) is conflict
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_pin_binds_a_session_that_is_already_open(env, monkeypatch):
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    uses_before = [e for e in lib.repository.list_audit_events(prompt["id"]) if e["event_type"] == "use"]
+
+    client = _pin_client(env, monkeypatch, env["members"])
+    cleared = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert cleared.json() == {"cleared": True}
+
+    # The same session -- still holding the pin in memory -- runs unpinned.
+    await _turn(service, session_id, conv)
+    assert calls[-1].get("custom_system_prompt") is None
+    assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY] is None
+    meta = _stored_meta(env, conv)
+    assert "prompt_library" not in meta
+    assert meta["prompt_library_pin_epoch"] == 1
+    assert meta["prompt_library_history"][0]["version_id"] == v1["id"]
+    uses_after = [e for e in lib.repository.list_audit_events(prompt["id"]) if e["event_type"] == "use"]
+    assert len(uses_after) == len(uses_before)
+
+
+@pytest.mark.asyncio
+async def test_a_clear_during_a_running_turn_is_not_undone_by_its_save(env):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+
+    async def clear_mid_turn(**kwargs):
+        calls.append(kwargs)
+        # The turn already resolved the pin; the owner clears it before the save.
+        removed = env["conversations"].clear_prompt_pin(conv, USER)
+        assert removed is not None
+        session = kwargs["session"]
+        session.history.add_message(Message(role=MessageRole.USER, content=kwargs["content"]))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="reply"))
+        return {"type": "done"}
+
+    _set_execute(service, clear_mid_turn)
+    await _turn(service, session_id, conv)
+    assert calls[-1]["custom_system_prompt"] == "v1 body"  # resolved before the clear
+    assert "prompt_library" not in _stored_meta(env, conv)  # ... but not written back
+    assert len(env["conversations"].get_conversation(conv, USER)["messages"]) == 4
+
+    async def plain(**kwargs):
+        calls.append(kwargs)
+        session = kwargs["session"]
+        session.history.add_message(Message(role=MessageRole.USER, content=kwargs["content"]))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="reply"))
+        return {"type": "done"}
+
+    _set_execute(service, plain)
+    await _turn(service, session_id, conv)
+    assert calls[-1].get("custom_system_prompt") is None
+    assert "prompt_library" not in _stored_meta(env, conv)
+
+
+@pytest.mark.asyncio
+async def test_choosing_the_prompt_again_after_a_clear_pins_the_current_version(env):
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    service, calls, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    ref = {"prompt_id": prompt["id"], "version_id": None}
+    await _turn(service, session_id, conv, library_prompt=ref)
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"], "second")
+    env["conversations"].clear_prompt_pin(conv, USER)
+    # "Latest" in this session no longer means "the version I had pinned".
+    await _turn(service, session_id, conv, library_prompt=ref)
+    assert calls[-1]["custom_system_prompt"] == "v2 body"
+    meta = _stored_meta(env, conv)
+    assert meta["prompt_library"]["version_id"] == v2["id"]  # saved under the new epoch
+    assert meta["prompt_library_pin_epoch"] == 1
+
+
+@pytest.fixture
+def no_compliance(monkeypatch):
+    monkeypatch.setattr(ChatService, "_compliance_enabled", lambda self: False)
+
+
+async def _session_on_other_conversation(env, prompt):
+    """A pinned conversation B (saved by one session) and a second session on A."""
+    pinner, _, _ = _service(env)
+    conv_b = str(uuid4())
+    await _turn(pinner, uuid4(), conv_b, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    service, calls, sessions = _service(env)
+    session_id, conv_a = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv_a)
+    return service, calls, sessions, session_id, conv_b
+
+
+def _fail(*args, **kwargs):
+    raise RuntimeError("store unavailable")
+
+
+@pytest.mark.asyncio
+async def test_failed_load_never_runs_a_pinned_conversation_on_the_default_prompt(env, monkeypatch, no_compliance):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions, session_id, conv_b = await _session_on_other_conversation(env, prompt)
+    store = env["conversations"]
+    monkeypatch.setattr(store, "get_conversation", _fail)
+    monkeypatch.setattr(store, "get_conversation_metadata", _fail)
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(service, session_id, conv_b)
+    assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+    assert len(calls) == 1  # only the earlier turn on A ran
+    # An explicit choice of another prompt is refused too while the pin is unknown.
+    with pytest.raises(AuthorizationError):
+        await _turn(service, session_id, conv_b, custom_system_prompt="other prompt")
+    assert len(calls) == 1
+    monkeypatch.undo()
+    assert _stored_meta(env, conv_b)["prompt_library"]["version_id"] == v1["id"]
+
+
+@pytest.mark.asyncio
+async def test_failed_load_adopts_the_stored_pin_when_it_can_be_read(env, monkeypatch, no_compliance):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions, session_id, conv_b = await _session_on_other_conversation(env, prompt)
+    monkeypatch.setattr(env["conversations"], "get_conversation", _fail)
+    await _turn(service, session_id, conv_b)
+    assert calls[-1]["custom_system_prompt"] == "v1 body"  # the pinned version, not the default
+    assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY]["version_id"] == v1["id"]
+
+
+@pytest.mark.asyncio
+async def test_failed_load_still_enforces_revoked_access(env, monkeypatch, no_compliance):
+    prompt, _ = await _shared_prompt(env["library"])
+    service, calls, _, session_id, conv_b = await _session_on_other_conversation(env, prompt)
+    env["members"].table["eng"].discard(USER)
+    monkeypatch.setattr(env["conversations"], "get_conversation", _fail)
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(service, session_id, conv_b)
+    assert f"DELETE /api/prompts/pins/{conv_b}" in exc.value.message
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_turns_recover_once_the_store_answers_again(env, monkeypatch, no_compliance):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, _, session_id, conv_b = await _session_on_other_conversation(env, prompt)
+    store = env["conversations"]
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "get_conversation", _fail)
+        patched.setattr(store, "get_conversation_metadata", _fail)
+        with pytest.raises(AuthorizationError):
+            await _turn(service, session_id, conv_b)
+    await _turn(service, session_id, conv_b)
+    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _stored_meta(env, conv_b)["prompt_library"]["version_id"] == v1["id"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reload_of_the_same_conversation_rechecks_a_cleared_pin(env, monkeypatch, no_compliance):
+    """Same conversation, empty history (reload retried), pin cleared meanwhile."""
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions, = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    env["conversations"].clear_prompt_pin(conv, USER)
+    sessions[session_id].history.messages.clear()  # forces the reload attempt
+    monkeypatch.setattr(env["conversations"], "get_conversation", _fail)
+    await _turn(service, session_id, conv)
+    assert calls[-1].get("custom_system_prompt") is None  # the clear is honoured
