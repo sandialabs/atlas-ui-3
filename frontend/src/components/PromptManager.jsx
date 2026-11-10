@@ -164,7 +164,7 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
       <div className="flex items-center justify-end gap-2">
         <button
           onClick={cancelEdit}
-          className="flex items-center gap-1 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors text-sm"
+          className="flex items-center gap-1 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 transition-colors text-sm text-gray-50"
         >
           <X className="w-4 h-4" /> Cancel
         </button>
@@ -172,7 +172,7 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
           onClick={handleSave}
           disabled={!canSave || saving}
           className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
-            canSave && !saving ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+            canSave && !saving ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-600 cursor-not-allowed text-gray-50'
           }`}
         >
           <Check className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}
@@ -194,7 +194,7 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
         {editingId !== 'new' && (
           <button
             onClick={startCreate}
-            className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors text-sm font-medium flex-shrink-0"
+            className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors text-sm font-medium flex-shrink-0 text-white"
           >
             <Plus className="w-4 h-4" /> New Prompt
           </button>
@@ -230,7 +230,7 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-gray-100 truncate">{prompt.title}</span>
                     {activeId === prompt.id && (
-                      <span className="text-xs text-emerald-400 flex items-center gap-1 flex-shrink-0">
+                      <span className="text-xs atlas-fg-success flex items-center gap-1 flex-shrink-0">
                         <Sparkles className="w-3 h-3" /> active
                       </span>
                     )}
@@ -245,8 +245,8 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
                     title={activeId === prompt.id ? 'Deactivate' : 'Use this prompt'}
                     className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
                       activeId === prompt.id
-                        ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
-                        : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+                        ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                        : 'bg-gray-600 hover:bg-gray-700 text-gray-50'
                     }`}
                   >
                     {activeId === prompt.id ? 'Active' : 'Use'}
@@ -254,14 +254,14 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
                   <button
                     onClick={() => startEdit(prompt)}
                     title="Edit"
-                    className="p-1.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+                    className="p-1.5 rounded bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50"
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(prompt)}
                     title="Delete"
-                    className="p-1.5 rounded bg-gray-600 hover:bg-red-600 text-gray-200 transition-colors"
+                    className="p-1.5 rounded bg-gray-600 hover:bg-red-600 transition-colors text-gray-50"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

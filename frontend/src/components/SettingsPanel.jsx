@@ -893,7 +893,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                     <button
                       onClick={globusLogout}
                       disabled={globusLoading}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition-colors text-sm font-medium"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-700 hover:bg-red-800 text-white transition-colors text-sm font-medium"
                     >
                       <LogOut className="w-4 h-4" />
                       Disconnect

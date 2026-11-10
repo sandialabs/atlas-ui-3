@@ -33,6 +33,12 @@ Measurement:
   and modals, Help, Marketplace) and the composer warning rows are mounted
   with canned API responses (contrast-fixture/stubs/fetchFixtures.js) and
   measured after their data loads.
+- Chat-side panels are mounted populated: ToolSelector, PromptSelector,
+  WorkspaceSelector and ContextUsageMeter with their popovers opened, the
+  Tools tab (ToolsPanel) with every server row expanded, GatewayModelPicker
+  (teams, models, and a load error), sidebar "Load more" states, CanvasPanel
+  (markdown and error), ElicitationDialog, TokenInputModal with an error, and
+  the PromptManager, capture-consent and Settings Globus error boxes.
 
 Requires `npm ci`, an existing `npm run build` (flag on), and Chrome/Chromium.
 No app server, network access, screenshots, fonts, or binary downloads.
@@ -56,8 +62,10 @@ LEGACY_IDS = {1: 'mac7', 2: 'win95', 9: 'crt-phosphor'}
 TEXT_MIN = 4.5
 FOCUS_MIN = 3.0
 # Header, sidebar rows, transcript, approvals, agent input, retro controls,
-# composer notices, 14 routed-page/admin regions (5 Telemetry tabs), toasts, Settings.
-MIN_REGIONS = 24
+# composer notices, 14 routed-page/admin regions (5 Telemetry tabs), 14 chat-side
+# panel regions (composer popovers, Tools tab, canvas, dialogs, error boxes),
+# toasts, Settings (plus its Globus error state).
+MIN_REGIONS = 38
 
 SCRIPT = r"""
 window.onload = async () => {
@@ -474,7 +482,7 @@ def run(chrome, timeout, report=None, fixture_js=None):
     regions = sorted(set().union(*(row['regions'] for row in rows)))
     print(f'Chrome component check: {55-len(failures)}/55 themes passed; {measured} text pairs measured '
           f'(rest + hover) on the real Header, Settings, transcript, tool/approval, agent-input, '
-          f'conversation-metadata, composer-notice and routed-page components ({len(regions)} regions); '
+          f'conversation-metadata, composer-notice, chat-side panel and routed-page components ({len(regions)} regions); '
           f'{exempt} disabled-control pairs listed; {failed_pairs} below {TEXT_MIN}:1; '
           f'{unmeasurable} unmeasurable (listed above); focus rings >= {FOCUS_MIN}:1 and 3px; '
           f'status badges theme-invariant')

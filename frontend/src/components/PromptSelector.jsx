@@ -125,7 +125,9 @@ const PromptSelector = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-400 transition-colors max-sm:h-8 max-sm:px-2 max-sm:rounded max-sm:bg-gray-700/70 flex-shrink-0"
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+        className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-100 transition-colors max-sm:h-8 max-sm:px-2 max-sm:rounded max-sm:bg-gray-700/70 flex-shrink-0"
         title={`Select custom prompts (active: ${getButtonText()})`}
       >
         <Sparkles className="w-3 h-3" />
@@ -144,11 +146,11 @@ const PromptSelector = () => {
               (issue #839 review); it is now an uppercase, muted, non-interactive
               label that says what the section is for. */}
           <div className="p-2 border-b border-gray-700 bg-gray-750 cursor-default select-none">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-2">
-              <Sparkles className="w-3 h-3 text-purple-400" />
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 flex items-center gap-2">
+              <Sparkles className="w-3 h-3 atlas-fg-agent" />
               Add Custom Prompts
             </div>
-            <div className="text-xs text-gray-400 mt-1">
+            <div className="text-xs text-gray-300 mt-1">
               Pick one below to customize AI behavior
             </div>
           </div>
@@ -163,17 +165,17 @@ const PromptSelector = () => {
               setIsOpen(false)
             }}
             className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 ${
-              isDefaultActive ? 'bg-blue-900/30' : ''
+              isDefaultActive ? 'atlas-notice-info' : ''
             }`}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-gray-200 flex items-center gap-2">
-                  {isDefaultActive && <span className="text-blue-400">✓</span>}
+                  {isDefaultActive && <span className="atlas-fg-info">✓</span>}
                   <span className="truncate">Default Prompt</span>
-                  {isDefaultActive && <span className="text-xs text-blue-400">(active)</span>}
+                  {isDefaultActive && <span className="text-xs atlas-fg-info">(active)</span>}
                 </div>
-                <div className="text-xs text-gray-400 mt-1">
+                <div className="text-xs text-gray-300 mt-1">
                   Use the standard system prompt without customization
                 </div>
               </div>
@@ -205,22 +207,22 @@ const PromptSelector = () => {
                 key={prompt.key}
                 onClick={() => handlePromptSelect(prompt.key)}
                 className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
-                  isActive ? 'bg-blue-900/30' : ''
+                  isActive ? 'atlas-notice-info' : ''
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-gray-200 flex items-center gap-2">
-                      {isActive && <span className="text-blue-400">✓</span>}
+                      {isActive && <span className="atlas-fg-info">✓</span>}
                       <span className="truncate">{prompt.name}</span>
-                      {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                      {isActive && <span className="text-xs atlas-fg-info">(active)</span>}
                     </div>
                     {prompt.description && (
-                      <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                      <div className="text-xs text-gray-300 mt-1 line-clamp-2">
                         {prompt.description}
                       </div>
                     )}
-                    <div className="text-xs text-gray-500 mt-1">
+                    <div className="text-xs text-gray-300 mt-1">
                       from {prompt.server}
                     </div>
                   </div>
@@ -235,16 +237,16 @@ const PromptSelector = () => {
           {personasError && personas.length === 0 && (
             <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
               <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                <Users className="w-3 h-3 text-amber-400" />
+                <Users className="w-3 h-3 atlas-fg-warning" />
                 Personas
               </div>
-              <div className="text-xs text-red-400 mt-1">
+              <div className="text-xs atlas-fg-danger mt-1">
                 Could not load personas ({personasError})
               </div>
               {fetchPersonas && (
                 <button
                   onClick={fetchPersonas}
-                  className="mt-1 text-xs text-blue-400 hover:text-blue-300 underline"
+                  className="mt-1 text-xs atlas-fg-info hover:underline underline"
                 >
                   Retry
                 </button>
@@ -255,10 +257,10 @@ const PromptSelector = () => {
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
                 <div className="text-xs font-semibold text-gray-300 flex items-center gap-2">
-                  <Users className="w-3 h-3 text-amber-400" />
+                  <Users className="w-3 h-3 atlas-fg-warning" />
                   Personas
                 </div>
-                <div className="text-xs text-gray-400 mt-1">
+                <div className="text-xs text-gray-300 mt-1">
                   Preconfigured prompts provided by your administrator
                 </div>
               </div>
@@ -270,17 +272,17 @@ const PromptSelector = () => {
                     key={key}
                     onClick={() => handlePromptSelect(key)}
                     className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
-                      isActive ? 'bg-blue-900/30' : ''
+                      isActive ? 'atlas-notice-info' : ''
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-gray-200 flex items-center gap-2">
-                          {isActive && <span className="text-blue-400">✓</span>}
+                          {isActive && <span className="atlas-fg-info">✓</span>}
                           <span className="truncate">{p.name}</span>
-                          {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                          {isActive && <span className="text-xs atlas-fg-info">(active)</span>}
                         </div>
-                        <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                        <div className="text-xs text-gray-300 mt-1 line-clamp-2">
                           {p.description || p.preview || personaPreview(p.content)}
                         </div>
                       </div>
@@ -296,20 +298,20 @@ const PromptSelector = () => {
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-2">
-                    <User className="w-3 h-3 text-emerald-400" />
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 flex items-center gap-2">
+                    <User className="w-3 h-3 atlas-fg-success" />
                     My Prompts
                   </div>
                   <button
                     onClick={createUserPrompt}
                     title="Create a new system prompt"
-                    className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-800 text-xs font-medium transition-colors text-white"
                   >
                     <Plus className="w-3 h-3" />
                     New system prompt
                   </button>
                 </div>
-                <div className="text-xs text-gray-400 mt-1">
+                <div className="text-xs text-gray-300 mt-1">
                   {userPrompts.length > 0
                     ? 'Your saved prompts -- use the pencil to edit one'
                     : 'No saved prompts yet'}
@@ -322,7 +324,7 @@ const PromptSelector = () => {
                   <div
                     key={key}
                     className={`flex items-center border-b border-gray-700 last:border-b-0 ${
-                      isActive ? 'bg-blue-900/30' : ''
+                      isActive ? 'atlas-notice-info' : ''
                     }`}
                   >
                     <button
@@ -330,11 +332,11 @@ const PromptSelector = () => {
                       className="flex-1 min-w-0 px-3 py-2 text-left hover:bg-gray-700 transition-colors"
                     >
                       <div className="font-medium text-gray-200 flex items-center gap-2">
-                        {isActive && <span className="text-blue-400">✓</span>}
+                        {isActive && <span className="atlas-fg-info">✓</span>}
                         <span className="truncate">{p.title}</span>
-                        {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                        {isActive && <span className="text-xs atlas-fg-info">(active)</span>}
                       </div>
-                      <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                      <div className="text-xs text-gray-300 mt-1 line-clamp-2">
                         {p.content}
                       </div>
                     </button>
@@ -342,7 +344,7 @@ const PromptSelector = () => {
                       onClick={() => editUserPrompt(p.id)}
                       title={`Edit "${p.title}"`}
                       aria-label={`Edit prompt ${p.title}`}
-                      className="mr-2 p-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors flex-shrink-0"
+                      className="mr-2 p-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors flex-shrink-0 hover:text-gray-50"
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>

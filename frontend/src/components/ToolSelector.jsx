@@ -164,7 +164,7 @@ const ToolSelector = () => {
         onPointerCancel={() => { lastPointerRef.current = null }}
         onClick={handleTriggerClick}
         className={`flex items-center gap-1 text-xs rounded transition-colors flex-shrink-0 max-sm:h-8 max-sm:px-2 max-sm:bg-gray-700/70 ${FOCUS_RING} ${
-          isOpen || selectedCount > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-gray-400 hover:text-blue-400'
+          isOpen || selectedCount > 0 ? 'atlas-fg-info hover:underline' : 'text-gray-400 hover:text-gray-100'
         }`}
         title="Choose which tools the model can use"
         aria-expanded={isOpen}
@@ -228,20 +228,20 @@ const ToolSelector = () => {
                       ? (explicit ? SEARCH_EXPLICIT_REMOVE_TITLE : SEARCH_AUTO_ENABLED_SELECT_TITLE)
                       : `${isOn ? 'Turn off' : 'Turn on'} ${row.name}`}
                     className={`w-full px-3 py-2 text-left flex items-start gap-2 border-b border-gray-700 last:border-b-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400 ${
-                      isOn ? 'bg-blue-900/30 hover:bg-blue-900/40' : 'hover:bg-gray-700'
+                      isOn ? 'atlas-notice-info' : 'hover:bg-gray-700'
                     }`}
                   >
-                    <Wrench aria-hidden="true" className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isOn ? 'text-blue-400' : 'text-gray-500'}`} />
+                    <Wrench aria-hidden="true" className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${isOn ? 'atlas-fg-info' : 'text-gray-400'}`} />
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm text-gray-200 break-words">{row.name}</span>
                       {row.description && (
                         <span className="block text-xs text-gray-400 break-words">{row.description}</span>
                       )}
                       {autoEnabled && (
-                        <span className="block text-xs text-blue-300 break-words">{SEARCH_AUTO_ENABLED_NOTE}</span>
+                        <span className="block text-xs atlas-fg-info break-words">{SEARCH_AUTO_ENABLED_NOTE}</span>
                       )}
                       {autoEnabled && explicit && (
-                        <span className="block text-xs text-blue-300 break-words">{SEARCH_EXPLICIT_NOTE}</span>
+                        <span className="block text-xs atlas-fg-info break-words">{SEARCH_EXPLICIT_NOTE}</span>
                       )}
                     </span>
                     {/* Toggle, not a checkbox: the reviewer asked for tools that
@@ -249,7 +249,7 @@ const ToolSelector = () => {
                     <span
                       aria-hidden="true"
                       className={`mt-0.5 w-8 h-4 rounded-full flex-shrink-0 relative transition-colors ${
-                        isOn ? 'bg-blue-600' : 'bg-gray-600'
+                        isOn ? 'bg-blue-600 text-white' : 'bg-gray-600'
                       }`}
                     >
                       <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isOn ? 'left-4' : 'left-0.5'}`} />

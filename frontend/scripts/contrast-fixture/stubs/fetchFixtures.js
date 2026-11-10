@@ -39,6 +39,19 @@ const ROUTES = [
   [/^\/api\/feedback\/stats/, () => ({ total_feedback: 3, rating_distribution: { positive: 1, neutral: 1, negative: 1 }, average_rating: 0, recent_feedback: 3 })],
   [/^\/api\/feedback/, () => ({ feedback: [], pagination: { total: 0, limit: 100, offset: 0, has_more: false }, statistics: { positive: 0, neutral: 0, negative: 0, total: 0, average: 0 } })],
   [/^\/api\/help/, () => ({ mode: 'local', requested_mode: 'local', content: '# Help\n\n## Quick Start\n\nClick **New Chat** or press `Ctrl+Alt+N` to start. See the [admin guide](https://example.invalid/admin).\n\n- Tools live in **Settings**\n- Files open from the header\n\n```bash\nnpm run build\n```\n' })],
+  [/^\/api\/mcp\/auth\/status/, () => ({ servers: [
+    { server_name: 'calculator', auth_required: false, authenticated: false, auth_type: 'none' },
+    { server_name: 'code_runner', auth_required: true, authenticated: false, auth_type: 'api_key', description: 'Run short Python snippets in a sandbox' },
+    { server_name: 'issue_tracker', auth_required: true, authenticated: false, auth_type: 'oauth', description: 'Search the team issue tracker' },
+  ] })],
+  [/^\/api\/llm\/gateways\/team_gateway\/teams/, () => ({ teams: [{ team_id: 'team-a', label: 'Analytics team' }, { team_id: 'team-b', label: 'Platform team' }] })],
+  [/^\/api\/llm\/gateways\/team_gateway\/models/, () => ({ models: [
+    { name: 'team_gateway::team-a::review-mock', model_id: 'review-mock', label: 'Review mock', supports_tools: true, supports_vision: false },
+    { name: 'team_gateway::team-a::vision-mock', model_id: 'vision-mock', label: 'Vision mock', supports_tools: false, supports_vision: true },
+  ] })],
+  // Error states: the broken gateway's teams and the capture-consent read.
+  [/^\/api\/llm\/gateways\/broken_gateway\/teams/, () => ({ detail: 'Gateway unavailable (502). Try again later.' }), {}, 502],
+  [/^\/api\/capture\/consent/, () => ({ detail: 'unavailable' }), {}, 503],
   [/^\/admin\/?$/, () => ({ message: 'Admin Dashboard', user: 'reviewer@example.com', available_endpoints: ['/admin/logs/viewer', '/admin/mcp/status'] })],
 ]
 
@@ -52,7 +65,7 @@ export function installFixtureFetch() {
       const route = ROUTES.find(([pattern]) => pattern.test(path))
       const body = route ? route[1]() : {}
       return new Response(JSON.stringify(body), {
-        status: 200, headers: { 'Content-Type': 'application/json', ...(route?.[2] || {}) },
+        status: route?.[3] || 200, headers: { 'Content-Type': 'application/json', ...(route?.[2] || {}) },
       })
     } finally {
       pending -= 1

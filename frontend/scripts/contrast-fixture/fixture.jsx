@@ -25,7 +25,7 @@ import SettingsPanel from '../../src/components/SettingsPanel'
 import AgentQuestionPrompt from '../../src/components/AgentQuestionPrompt'
 import { ConversationTreeRow } from '../../src/components/ConversationTreeRow'
 import { RetroWindow, RetroWorkbench, RetroButton } from '../../src/themes/RetroControls'
-import { FixtureChatProvider } from './stubs/ChatContext'
+import { FixtureChatProvider, BASE_CHAT } from './stubs/ChatContext'
 import { installFixtureFetch, fixtureFetchesPending, FIXTURE_FILES } from './stubs/fetchFixtures'
 import ComposerNotice from '../../src/components/ComposerNotice'
 import AgentModeNoToolsBanner from '../../src/components/AgentModeNoToolsBanner'
@@ -42,8 +42,21 @@ import AdminModal from '../../src/components/AdminModal'
 import HelpPage from '../../src/components/HelpPage'
 import MarketplacePanel from '../../src/components/MarketplacePanel'
 import { WifiOff, Wrench, Image } from 'lucide-react'
+import ToolsPanel from '../../src/components/ToolsPanel'
+import PromptSelector from '../../src/components/PromptSelector'
+import WorkspaceSelector from '../../src/components/WorkspaceSelector'
+import ToolSelector from '../../src/components/ToolSelector'
+import GatewayModelPicker from '../../src/components/GatewayModelPicker'
+import ContextUsageMeter from '../../src/components/ContextUsageMeter'
+import ConversationLoadMore from '../../src/components/ConversationLoadMore'
+import CanvasPanel from '../../src/components/CanvasPanel'
+import ElicitationDialog from '../../src/components/ElicitationDialog'
+import TokenInputModal from '../../src/components/TokenInputModal'
+import PromptManager from '../../src/components/PromptManager'
+import CaptureConsentSection from '../../src/components/CaptureConsentSection'
 
 const noop = () => {}
+const BASE_FEATURES = BASE_CHAT.features
 
 const LOGS = ['error', 'warning', 'alert', 'info', 'notice', 'debug', 'trace'].map(level => ({
   role: 'system', type: 'tool_log', log_level: level,
@@ -131,6 +144,55 @@ const MCP_HEALTH = {
   } } },
 }
 
+// Chat-side panels (composer selectors, Tools tab, canvas, prompts) with
+// synthetic servers, prompts, workspaces and usage. Popovers are opened by
+// ready() (data-contrast-open) so their menus are measured, not just triggers.
+const PANEL_CHAT = {
+  features: { tools: true, rag: false, custom_prompts: true, workspaces: true, chat_history: true, retro_themes: true, compliance_levels: false },
+  tools: [
+    { server: 'calculator', description: 'Evaluate arithmetic expressions', short_description: 'Math', author: 'Atlas team', help_email: 'help@example.invalid', tools: ['evaluate', 'convert_units'], tool_count: 2 },
+    { server: 'code_runner', description: 'Run short Python snippets in a sandbox', short_description: 'Run code', author: 'Atlas team', tools: ['run'], tool_count: 1, is_exclusive: true },
+  ],
+  prompts: [
+    { server: 'prompt_library', description: 'Shared prompts', prompts: [{ name: 'summarize', description: 'Summarize a document in five bullets' }, { name: 'review', description: 'Review a pull request' }], prompt_count: 2 },
+  ],
+  selectedTools: new Set(['calculator_evaluate']),
+  selectedPrompts: new Set(['prompt_library_summarize']),
+  activePromptKey: 'prompt_library_summarize',
+  userPrompts: [{ id: 'u1', name: 'Release notes', content: 'Write release notes for the attached changes.' }],
+  personas: [{ id: 'p1', name: 'Careful reviewer', content: 'You review documents for errors and unclear wording.' }],
+  workspaces: [
+    { id: 'w1', name: 'Quarterly report', config: { tools: ['calculator_evaluate'], prompts: [] } },
+    { id: 'w2', name: 'Code review', config: { tools: ['code_runner_run'], prompts: ['prompt_library_review'] } },
+  ],
+  activeWorkspaceId: 'w1',
+  workspacesLoading: false,
+  canvasContent: '# Canvas notes\n\nA **sample** canvas with a [link](https://example.invalid/doc) and code:\n\n```python\ntotal = sum([6, 7])  # comment\nprint(total)\n```\n\n> Quoted note\n\n| Item | Count |\n| --- | --- |\n| Tools | 2 |\n',
+  canvasFiles: [],
+  currentCanvasFileIndex: 0,
+  userPromptsError: 'Could not load your prompts: the server returned 503. Try again shortly.',
+  userPromptsLoading: false,
+  personasError: null,
+}
+const CONTEXT_USAGE = {
+  enabled: true, isCompacting: false, autoCompact: true, setAutoCompact: noop, compactNow: () => false,
+  usage: { estimated_tokens: 5200, context_window: 8192, window_source: 'model_config', estimate_method: 'tokenizer', usable_tokens: 7168, threshold_tokens: 6100, provider_last_prompt_tokens: 4980, reported_calls: 3, cumulative_prompt_tokens: 12400, cumulative_completion_tokens: 2100, checkpoints: 1 },
+}
+const GATEWAY = { name: 'team_gateway', display_name: 'Team gateway', description: 'Models your LiteLLM teams may call', supports_tools: true, supports_vision: false }
+const ELICITATION = {
+  elicitation_id: 'el-1', tool_name: 'report_builder',
+  message: 'The report tool needs a few details before it continues.',
+  response_schema: {
+    type: 'object', required: ['title', 'format'],
+    properties: {
+      title: { type: 'string', description: 'Report title' },
+      pages: { type: 'number', description: 'Maximum pages', default: 4 },
+      format: { type: 'string', enum: ['PDF', 'Markdown'], description: 'Output format' },
+      include_charts: { type: 'boolean', description: 'Add charts' },
+    },
+  },
+}
+
 function ThemeHandle() {
   const { setTheme } = useTheme()
   useEffect(() => {
@@ -139,6 +201,12 @@ function ThemeHandle() {
       // Pages load their (stubbed) data in effects; resolve once every
       // stubbed fetch has settled and React has committed the result.
       async ready() {
+        // Open composer popovers and Tools-tab rows like a user would.
+        for (const region of document.querySelectorAll('[data-contrast-open]')) {
+          const triggers = [...region.querySelectorAll('[aria-expanded="false"]')]
+          const chosen = region.dataset.contrastOpen === 'all' ? triggers : triggers.slice(0, 1)
+          flushSync(() => chosen.forEach(el => el.click()))
+        }
         for (let i = 0; i < 200; i++) {
           await new Promise(resolve => setTimeout(resolve, 25))
           if (fixtureFetchesPending() === 0 && i > 8) return true
@@ -161,8 +229,8 @@ function ToastSamples() {
   return null
 }
 
-function Region({ name, className = '', children }) {
-  return <section data-contrast-region={name} className={className}>{children}</section>
+function Region({ name, className = '', children, ...props }) {
+  return <section data-contrast-region={name} className={className} {...props}>{children}</section>
 }
 
 function Fixture() {
@@ -270,10 +338,48 @@ function Fixture() {
                   <Region name="page-help"><HelpPage /></Region>
                   <Region name="page-marketplace"><MarketplacePanel /></Region>
                 </FixtureChatProvider>
+                {/* Chat-side panels: composer selectors (popovers opened), the
+                    Tools tab, canvas, prompt manager, dialogs and error boxes. */}
+                <FixtureChatProvider value={PANEL_CHAT}>
+                  <div className="atlas-composer-plate p-4 border-t border-gray-700 space-y-56 pb-72">
+                    <Region name="composer-tool-selector" data-contrast-open="first" className="relative pt-80"><ToolSelector /></Region>
+                    <Region name="composer-prompt-selector" data-contrast-open="first" className="relative pt-96"><PromptSelector /></Region>
+                    <Region name="composer-workspace-selector" data-contrast-open="first" className="relative"><WorkspaceSelector placement="down" /></Region>
+                    <Region name="composer-context-meter" data-contrast-open="first" className="relative pt-96"><ContextUsageMeter contextCompaction={CONTEXT_USAGE} /></Region>
+                  </div>
+                  <Region name="model-gateway-picker" className="bg-gray-800 w-96">
+                    <GatewayModelPicker gateway={GATEWAY} currentModel="team_gateway::team-a::review-mock" onSelect={noop} user="reviewer@example.com" />
+                    <GatewayModelPicker gateway={{ ...GATEWAY, name: 'broken_gateway', display_name: 'Broken gateway' }} currentModel="" onSelect={noop} user="reviewer@example.com" />
+                  </Region>
+                  <Region name="sidebar-load-more" className="bg-gray-800 w-72">
+                    <ConversationLoadMore hasMore loading={false} error={null} onLoadMore={noop} />
+                    <ConversationLoadMore hasMore loading error={null} onLoadMore={noop} />
+                    <ConversationLoadMore hasMore loading={false} error="Could not load more conversations." onLoadMore={noop} />
+                  </Region>
+                  <Region name="settings-tools" data-contrast-open="all" className="bg-gray-800">
+                    <ToolsPanel isOpen embedded onClose={noop} />
+                  </Region>
+                  <Region name="settings-prompts" className="bg-gray-800 p-6"><PromptManager /></Region>
+                  <Region name="settings-capture-consent" className="bg-gray-800 p-6"><CaptureConsentSection isOpen /></Region>
+                  <Region name="canvas-panel"><CanvasPanel isOpen onClose={noop} onWidthChange={noop} onToggleSize={noop} onToggleOrientation={noop} /></Region>
+                  <FixtureChatProvider value={{ ...PANEL_CHAT, canvasContent: '', customUIContent: { type: 'error', content: 'Custom UI from report_builder failed to render.' } }}>
+                    <Region name="canvas-panel-error"><CanvasPanel isOpen onClose={noop} onWidthChange={noop} onToggleSize={noop} onToggleOrientation={noop} /></Region>
+                  </FixtureChatProvider>
+                  <Region name="elicitation-dialog"><ElicitationDialog elicitation={ELICITATION} /></Region>
+                  <Region name="token-modal">
+                    <TokenInputModal isOpen serverName="code_runner" onClose={noop} onUpload={noop} isLoading={false} error="That token was rejected by code_runner (401). Check it and try again." />
+                  </Region>
+                </FixtureChatProvider>
                 <Region name="toasts"><ToastProvider><ToastSamples /></ToastProvider></Region>
                 <Region name="settings">
                   <SettingsPanel isOpen onClose={noop} initialTab="general" />
                 </Region>
+                {/* General tab with the Globus section and its error box. */}
+                <FixtureChatProvider value={{ features: { ...BASE_FEATURES, globus_auth: true } }}>
+                  <Region name="settings-globus-error">
+                    <SettingsPanel isOpen onClose={noop} initialTab="general" />
+                  </Region>
+                </FixtureChatProvider>
               </div>
             </FixtureChatProvider>
           </DialogProvider>

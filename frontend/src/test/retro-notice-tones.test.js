@@ -82,4 +82,18 @@ describe('composer warnings, toasts and routed pages', () => {
     expect(source).not.toMatch(/bg-(red|yellow|amber|orange|green|emerald|blue|sky|cyan|purple|pink)-9\d\d\/\d+/)
     expect(source).not.toMatch(/(?<![\w-])text-gray-[67]00\b/)
   })
+
+  // Chat-side panels keep white toggle knobs (bg-white is not text), so only
+  // the text rules apply; the browser check measures each one in all themes.
+  it.each([
+    'ToolsPanel', 'PromptSelector', 'WorkspaceSelector', 'ToolSelector', 'GatewayModelPicker',
+    'ContextUsageMeter', 'ConversationLoadMore', 'CanvasPanel', 'ElicitationDialog',
+    'TokenInputModal', 'PromptManager', 'CaptureConsentSection',
+  ])('%s: themed tone text, opaque notice tints, no raw gray-600/700 text', name => {
+    const source = read(`src/components/${name}.jsx`)
+    expect(source).not.toMatch(/\bdark:/)
+    expect(source).not.toMatch(/(?<![\w:-])text-(red|yellow|amber|orange|green|emerald|blue|sky|cyan|purple|pink)-\d00\b/)
+    expect(source).not.toMatch(/bg-(red|yellow|amber|orange|green|emerald|blue|sky|cyan|purple|pink)-[5-9]\d\d\/\d+/)
+    expect(source).not.toMatch(/(?<![\w-])text-gray-[567]00\b/)
+  })
 })

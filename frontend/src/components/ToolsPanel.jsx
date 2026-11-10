@@ -25,7 +25,7 @@ import { FOCUS_RING } from '../utils/focusRing'
 // aria-pressed, and the hover no longer previews the "on" colour -- that made
 // an off chip look selected under the pointer.
 const selectionChipClass = (selected) => `inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded text-gray-50 transition-colors ${FOCUS_RING} ${
-  selected ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-500'
+  selected ? 'bg-green-700 hover:bg-green-800 text-white' : 'bg-gray-600 hover:bg-gray-700 text-gray-50'
 }`
 
 const SelectionMark = ({ selected }) => (selected
@@ -888,9 +888,9 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
       <div className="space-y-1">
         {Object.entries(properties).map(([paramName, paramDef]) => (
           <div key={paramName} className="text-xs">
-            <span className="font-mono text-blue-300">{paramName}</span>
+            <span className="font-mono atlas-fg-info">{paramName}</span>
             {required.includes(paramName) && (
-              <span className="text-red-400 ml-1">*</span>
+              <span className="atlas-fg-danger ml-1">*</span>
             )}
             <span className="text-gray-400 ml-2">({paramDef.type || DEFAULT_PARAM_TYPE})</span>
             {paramDef.description && (
@@ -914,14 +914,14 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           <div className="flex gap-3">
             <button
               onClick={navigateToMarketplace}
-              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-sm font-medium transition-colors flex items-center justify-center gap-2 text-white"
             >
               <Plus className="w-4 h-4" />
               Add from Marketplace
             </button>
             <button
               onClick={handleClearAll}
-              className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-medium transition-colors flex items-center gap-2 text-white"
               title="Clear all tool and prompt selections"
             >
               <Trash2 className="w-3 h-3" />
@@ -940,8 +940,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
               role={oauthNotice.error ? 'alert' : 'status'}
               className={`flex items-start gap-2 px-3 py-2 rounded text-xs ${
                 oauthNotice.error
-                  ? 'bg-red-600/20 text-red-300'
-                  : 'bg-green-600/20 text-green-300'
+                  ? 'atlas-notice-danger border'
+                  : 'atlas-notice-success border'
               }`}
             >
               <span className="flex-1">
@@ -982,10 +982,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
           {serverList.length === 0 ? (
             <div className="text-gray-400 text-center py-12 px-6">
               <div className="text-lg mb-4">No servers selected</div>
-              <p className="mb-6 text-gray-500">Add MCP servers from the marketplace to enable tools, integrations, and prompts</p>
+              <p className="mb-6 text-gray-400">Add MCP servers from the marketplace to enable tools, integrations, and prompts</p>
               <button
                 onClick={navigateToMarketplace}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors font-medium text-white"
               >
                 Browse Marketplace
               </button>
@@ -1017,7 +1017,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
               {filteredServers.length === 0 ? (
                 <div className="text-gray-400 text-center py-12 px-6">
                   <div className="text-lg mb-4">No results found</div>
-                  <p className="text-gray-500">Try adjusting your search terms</p>
+                  <p className="text-gray-400">Try adjusting your search terms</p>
                 </div>
               ) : (
                 <div className="px-4 pb-4 space-y-3">
@@ -1049,7 +1049,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                           </button>
                           
                           {/* Server Icon */}
-                          <div className="bg-gray-600 rounded p-1.5 flex-shrink-0">
+                          <div className="bg-gray-600 rounded p-1.5 flex-shrink-0 text-gray-50">
                             <Server className="w-3 h-3 text-gray-300" />
                           </div>
                           
@@ -1063,12 +1063,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                 ({totalItems} {totalItems === 1 ? 'item' : 'items'})
                               </span>
                               {server.is_exclusive && (
-                                <span className="px-1.5 py-0.5 bg-orange-600 text-xs rounded text-white flex-shrink-0">
+                                <span className="px-1.5 py-0.5 bg-orange-700 text-xs rounded flex-shrink-0 text-white">
                                   Exclusive
                                 </span>
                               )}
                               {complianceEnabled && classificationsDisplayLabel(server, complianceLevels) && (
-                                <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded text-white flex items-center gap-1 flex-shrink-0">
+                                <span className="px-1.5 py-0.5 bg-blue-600 text-xs rounded flex items-center gap-1 flex-shrink-0 text-white">
                                   <Shield className="w-3 h-3" />
                                   {classificationsDisplayLabel(server, complianceLevels)}
                                 </span>
@@ -1100,10 +1100,10 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                     disabled={connecting}
                                     className={`flex-shrink-0 p-1 rounded ${FOCUS_RING} ${
                                       connecting
-                                        ? 'bg-yellow-600/20 text-yellow-400 cursor-wait'
+                                        ? 'atlas-notice-warning cursor-wait'
                                         : isAuthenticated
-                                        ? 'bg-green-600/20 hover:bg-green-600/30 text-green-400'
-                                        : 'bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400'
+                                        ? 'atlas-notice-success hover:opacity-90'
+                                        : 'atlas-notice-warning hover:opacity-90'
                                     }`}
                                     title={
                                       connecting
@@ -1152,7 +1152,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                         e.stopPropagation()
                                         toggleDescriptionExpansion(server.server)
                                       }}
-                                      className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                      className="text-xs atlas-fg-info hover:underline transition-colors"
                                     >
                                       Show less
                                     </button>
@@ -1163,7 +1163,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                       e.stopPropagation()
                                       toggleDescriptionExpansion(server.server)
                                     }}
-                                    className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                    className="text-xs atlas-fg-info hover:underline transition-colors"
                                   >
                                     Show more details...
                                   </button>
@@ -1172,7 +1172,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                             )}
                             
                             {/* Author and help email info */}
-                            <div className="flex items-center gap-3 mb-2 text-xs text-gray-500">
+                            <div className="flex items-center gap-3 mb-2 text-xs text-gray-400">
                               {server.author && (
                                 <div className="flex items-center gap-1">
                                   <User className="w-3 h-3" />
@@ -1184,7 +1184,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                   <Mail className="w-3 h-3" />
                                   <a 
                                     href={`mailto:${server.help_email}`}
-                                    className="hover:text-blue-400 transition-colors"
+                                    className="hover:text-gray-100 transition-colors"
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     {server.help_email}
@@ -1200,7 +1200,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                     nothing to list until the user connects; say
                                     so rather than showing a blank body. */}
                                 {totalItems === 0 && (
-                                  <p className="text-xs text-gray-500 italic mb-2">
+                                  <p className="text-xs text-gray-400 italic mb-2">
                                     {authState.connectable && !authState.isAuthenticated
                                       ? 'Tools appear after you connect.'
                                       : 'No tools discovered yet.'}
@@ -1254,7 +1254,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                             <button
                                               type="button"
                                               onClick={() => toggleToolExpansion(toolKey)}
-                                              className={`p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${FOCUS_RING}`}
+                                              className={`p-0.5 rounded bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50 ${FOCUS_RING}`}
                                               title={isToolExpanded ? 'Hide tool details' : 'Show tool details'}
                                               aria-label={`${isToolExpanded ? 'Hide' : 'Show'} details for ${tool}`}
                                               aria-expanded={isToolExpanded}
@@ -1264,12 +1264,12 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                           )}
                                         </div>
                                         {autoEnabled && (
-                                          <p className="text-xs text-blue-300">
+                                          <p className="text-xs atlas-fg-info">
                                             {SEARCH_AUTO_ENABLED_NOTE}
                                           </p>
                                         )}
                                         {autoEnabled && explicit && (
-                                          <p className="text-xs text-blue-300">
+                                          <p className="text-xs atlas-fg-info">
                                             {SEARCH_EXPLICIT_NOTE}
                                           </p>
                                         )}
@@ -1329,7 +1329,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                             <button
                                               type="button"
                                               onClick={() => togglePromptExpansion(promptKey)}
-                                              className={`p-0.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${FOCUS_RING}`}
+                                              className={`p-0.5 rounded bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50 ${FOCUS_RING}`}
                                               title={isPromptExpanded ? 'Hide prompt description' : 'Show prompt description'}
                                               aria-label={`${isPromptExpanded ? 'Hide' : 'Show'} description for ${prompt.name}`}
                                               aria-expanded={isPromptExpanded}
@@ -1346,7 +1346,7 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                                                 <p className="font-semibold text-gray-300 mb-1">Description:</p>
                                                 <p className="text-gray-400 whitespace-pre-wrap">{truncatedDescription}</p>
                                                 {isTruncated && (
-                                                  <p className="text-xs text-yellow-400 mt-2 italic">
+                                                  <p className="text-xs atlas-fg-warning mt-2 italic">
                                                     {TRUNCATION_MESSAGE}
                                                   </p>
                                                 )}
@@ -1372,8 +1372,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
                               onClick={() => toggleServerItems(server.server)}
                               className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${FOCUS_RING} ${
                                 isServerAllSelected(server.server)
-                                  ? 'bg-green-600 hover:bg-green-700 text-white'
-                                  : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+                                  ? 'bg-green-700 hover:bg-green-800 text-white'
+                                  : 'bg-gray-600 hover:bg-gray-700 text-gray-50'
                               }`}
                               title={isServerAllSelected(server.server)
                                 ? `Everything from ${server.server} is on. Click to turn it all off`
@@ -1400,8 +1400,8 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
             disabled={embedded && !hasChanges}
             className={`px-4 py-2 rounded-lg transition-colors ${
               embedded && !hasChanges
-                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
+                ? 'bg-gray-600 cursor-not-allowed text-gray-50'
+                : 'bg-gray-600 hover:bg-gray-700 text-gray-50'
             }`}
           >
             {embedded ? 'Discard Changes' : 'Cancel'}
@@ -1464,20 +1464,20 @@ const ToolsPanel = ({ isOpen, onClose, embedded = false, active = true, closeGua
               This will remove your saved token for this server. You'll need to re-enter it to use this server again.
             </p>
             {disconnectError && (
-              <div className="p-3 mb-4 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+              <div className="p-3 mb-4 border rounded-lg text-sm atlas-notice-danger">
                 {disconnectError}
               </div>
             )}
             <div className="flex justify-end gap-3">
               <button
                 onClick={closeDisconnectConfirm}
-                className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+                className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDisconnect}
-                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 transition-colors text-white"
               >
                 Disconnect
               </button>

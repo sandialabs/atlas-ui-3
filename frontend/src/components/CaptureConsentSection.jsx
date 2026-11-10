@@ -68,7 +68,7 @@ const CaptureConsentSection = ({ isOpen }) => {
             aria-pressed={userEnabled}
             aria-label="Toggle fine-tune data capture"
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
-              userEnabled ? 'bg-green-600' : 'bg-gray-600'
+              userEnabled ? 'bg-green-700 text-white' : 'bg-gray-600'
             }`}
           >
             <span
@@ -90,14 +90,14 @@ const CaptureConsentSection = ({ isOpen }) => {
       </p>
 
       {loading && (
-        <p className="text-sm text-gray-500 mt-2 flex items-center gap-2">
+        <p className="text-sm text-gray-400 mt-2 flex items-center gap-2">
           <RefreshCw className="w-3 h-3 animate-spin" />
           Loading your preference...
         </p>
       )}
 
       {consent?.needs_reconsent && systemEnabled && userEnabled && (
-        <p className="text-sm text-yellow-300 mt-2">
+        <p className="text-sm atlas-fg-warning mt-2">
           The data collection terms have changed. Re-confirm by toggling this off
           and on again.
         </p>
@@ -113,7 +113,7 @@ const CaptureConsentSection = ({ isOpen }) => {
         <button
           onClick={handleDelete}
           disabled={deleting}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition-colors text-sm font-medium disabled:opacity-50"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-700 hover:bg-red-800 text-white transition-colors text-sm font-medium disabled:opacity-50"
         >
           {deleting ? (
             <RefreshCw className="w-4 h-4 animate-spin" />
@@ -123,7 +123,7 @@ const CaptureConsentSection = ({ isOpen }) => {
           Delete my captured data
         </button>
         {deleteResult && (
-          <span className="text-sm text-green-400">
+          <span className="text-sm atlas-fg-success">
             Deleted {deleteResult.deleted_records} record(s) across{' '}
             {deleteResult.files_touched} file(s).
           </span>

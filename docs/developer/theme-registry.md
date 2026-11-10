@@ -98,6 +98,14 @@ Two structural rules keep that true on real pages:
   status text uses `atlas-fg-*`, solid coloured buttons use a shade that keeps
   white text at AA (yellow buttons use black text), and text on the gray-600
   tint uses gray-50.
+- Chat-side panels (composer `ToolSelector`, `PromptSelector`,
+  `WorkspaceSelector`, `ContextUsageMeter`; the Tools tab `ToolsPanel`;
+  `GatewayModelPicker`, sidebar "Load more", `CanvasPanel`,
+  `ElicitationDialog`, `TokenInputModal`, `PromptManager`,
+  `CaptureConsentSection`) follow the same rules: selected menu rows and
+  connect/OAuth notices use `.atlas-notice-<tone>` instead of
+  `bg-<hue>-900/30` or `bg-<hue>-600/20`, and secondary text uses gray-400
+  (gray-300 inside menus whose selected row is tinted), never gray-500.
 - Where a theme's windows or header strip are painted in a different key from
   its palette (Memphis and Op Art white windows, Game Boy LCD green, DOS CGA
   gray menubar), the generator emits a window/header "content ramp" that
@@ -131,12 +139,16 @@ theme gallery, plus the composer warning rows (`ComposerNotice`,
 `AgentModeNoToolsBanner`), toasts of every kind, and the routed pages
 `LogViewer`, `FilesPage`, `AllFilesView`, `SessionFilesView`,
 `TelemetryDashboard` (all five tabs), `AdminDashboard` with its cards,
-`AdminModal` (health and MCP-health views), `HelpPage` and `MarketplacePanel`.
+`AdminModal` (health and MCP-health views), `HelpPage` and `MarketplacePanel`,
+and the chat-side panels listed above in their open, populated states (the
+fixture opens each composer popover and expands every Tools-tab server row)
+and error states (gateway load failure, canvas error, token rejection,
+prompt-load, capture-consent and Settings Globus error boxes).
 Only the context providers that need a backend (chat, WebSocket, marketplace,
 Globus) are replaced by static stubs, and `fetch` answers from canned,
 synthetic responses shaped like the real endpoints
 (`contrast-fixture/stubs/fetchFixtures.js`); the page waits until those loads
-settle, and the check fails if any of the 24 regions renders no measurable
+settle, and the check fails if any of the 38 regions renders no measurable
 text. Every visible
 text node is measured at rest and again with its hover styles forced, against
 its composited background: alpha and `opacity` are blended through the
