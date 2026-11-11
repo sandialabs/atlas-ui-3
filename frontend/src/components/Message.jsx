@@ -119,16 +119,27 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // The replay marker, one definition for both the full bubble and the
   // marker-only seed below. The live region stays mounted for the bubble's
   // streaming lifetime and only its contents toggle (see the effect above).
+  //
+  // Two different things can be true of a replayed row (issue #1193). A text
+  // bubble is an answer segment that is genuinely incomplete, and says so. A
+  // seed the run has already moved past (`_stepAdvanced`) is not an answer
+  // at all: the view has since shown newer steps, so "it will refresh when
+  // the response finishes" would call a transcript stale that is visibly
+  // keeping up. It then only says the run is still going -- and ChatArea
+  // drops even that when the agent-run status already does.
+  const runOnlyMarker = Boolean(message._seed && message._stepAdvanced)
   const replayMarker = message._streaming && (
     <div
       className={showReplayMarker ? 'mt-2 text-xs text-gray-400 italic flex items-center gap-1.5' : 'sr-only'}
-      data-testid={showReplayMarker ? 'stream-replay-in-progress' : undefined}
+      data-testid={showReplayMarker ? (runOnlyMarker ? 'stream-replay-run-active' : 'stream-replay-in-progress') : undefined}
       role="status"
     >
       {showReplayMarker && (
         <>
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" aria-hidden="true" />
-          Answer in progress — it will refresh when the response finishes.
+          {runOnlyMarker
+            ? 'Still working — new steps appear here as they finish.'
+            : 'Answer in progress — it will refresh when the response finishes.'}
         </>
       )}
     </div>

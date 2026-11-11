@@ -17,7 +17,7 @@ import Message from '../components/Message'
 import { useChat } from '../contexts/ChatContext'
 import { useWS } from '../contexts/WSContext'
 import { useMessages } from '../hooks/chat/useMessages'
-import { currentTurnHasActiveRow } from '../utils/executionState'
+import { currentTurnHasActiveRow, transcriptProgress } from '../utils/executionState'
 
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({
@@ -126,6 +126,187 @@ describe('replay seed - reducer keeps later text in chronological position', () 
   })
 })
 
+describe('replay seed - notice lifecycle follows the step, not the run (issue #1193)', () => {
+  const toolRow = (n, status) => ({
+    role: 'system',
+    type: 'tool_call',
+    tool_call_id: `call_${n}`,
+    invocation_id: `inv_${n}`,
+    tool_name: 'notes_search',
+    server_name: 'notes',
+    arguments: {},
+    status,
+    content: 'notes_search',
+    timestamp: '2026-11-05T00:00:01Z',
+  })
+  const reopened = (rows = [userRow]) => {
+    const { result } = renderHook(() => useMessages())
+    act(() => { result.current.bulkAdd(rows) })
+    act(() => { result.current.streamToken('', true) })
+    return result
+  }
+  const seedOf = result => result.current.messages.find(m => m._seed)
+
+  it('a fresh seed has not advanced, whatever the loaded transcript already holds', () => {
+    const result = reopened([userRow, toolRow(1, 'completed'), toolRow(2, 'completed')])
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+  })
+
+  it('a tool row that lands after the reopen advances the seed', () => {
+    const result = reopened()
+    act(() => { result.current.addMessage(toolRow(1, 'calling')) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('a tool row that settles after the reopen advances the seed', () => {
+    const result = reopened([userRow, toolRow(1, 'in_progress')])
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+    act(() => { result.current.updateToolResult('call_1', { invocation_id: 'inv_1', status: 'completed', result: 'ok' }) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('a snapshot reconcile or a transcript refresh that adds rows advances the seed', () => {
+    const viaMap = reopened()
+    act(() => { viaMap.current.mapMessages(prev => [...prev, toolRow(1, 'completed')]) })
+    expect(seedOf(viaMap)._stepAdvanced).toBe(true)
+
+    const viaRefresh = reopened()
+    act(() => { viaRefresh.current.refreshAppend([toolRow(1, 'completed')], true) })
+    expect(seedOf(viaRefresh)._stepAdvanced).toBe(true)
+    expect(viaRefresh.current.messages.at(-1)._seed).toBe(true)
+  })
+
+  it('a narration row appended after the reopen advances the seed', () => {
+    const viaAdd = reopened()
+    act(() => { viaAdd.current.addMessage({ role: 'assistant', content: 'Looking through the notebooks first.', type: 'agent_intermediate' }) })
+    expect(seedOf(viaAdd)._stepAdvanced).toBe(true)
+
+    const viaRefresh = reopened([userRow, toolRow(1, 'completed')])
+    act(() => { viaRefresh.current.refreshAppend([{ role: 'assistant', content: 'Now the tags.', type: 'chat' }], true) })
+    expect(seedOf(viaRefresh)._stepAdvanced).toBe(true)
+  })
+
+  it('an approval card swapped for its tool row in one pass advances the seed', () => {
+    const card = { role: 'system', type: 'tool_approval_request', tool_call_id: 'call_1', status: 'pending', content: 'Tool Approval Required' }
+    const result = reopened([userRow, card])
+    // The snapshot reconcile drops the answered card and adds the row together.
+    act(() => { result.current.mapMessages(prev => [...prev.filter(m => m.type !== 'tool_approval_request'), toolRow(1, 'calling')]) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('a card that is only dropped is not a step', () => {
+    const card = { role: 'system', type: 'tool_approval_request', tool_call_id: 'call_1', status: 'pending', content: 'Tool Approval Required' }
+    const result = reopened([userRow, card])
+    act(() => { result.current.mapMessages(prev => prev.filter(m => m.type !== 'tool_approval_request')) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+  })
+
+  it('rows removed before the seed advanced lower the mark, so the next step still retires the notice', () => {
+    const result = reopened([userRow, toolRow(1, 'completed'), toolRow(2, 'completed')])
+    act(() => { result.current.mapMessages(prev => prev.filter(m => m.tool_call_id !== 'call_2')) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+    act(() => { result.current.addMessage(toolRow(3, 'calling')) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('one refresh that delivers a user row together with later tool rows advances the seed', () => {
+    const result = reopened([userRow, toolRow(1, 'completed'), toolRow(2, 'completed')])
+    act(() => {
+      result.current.refreshAppend([{ role: 'user', content: 'also check the archive' }, toolRow(3, 'completed')], true)
+    })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+    expect(result.current.messages.filter(m => m._streaming)).toHaveLength(1)
+  })
+
+  it('a change that is not progress leaves the seed alone', () => {
+    const result = reopened([userRow, toolRow(1, 'in_progress')])
+    act(() => { result.current.updateToolResult('call_1', { invocation_id: 'inv_1', status: 'in_progress', progress: 0.5 }) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+  })
+
+  it('stays advanced: another empty snapshot or a dropped row does not bring the notice back', () => {
+    const result = reopened()
+    act(() => { result.current.addMessage(toolRow(1, 'completed')) })
+    act(() => { result.current.streamToken('', true) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+    act(() => { result.current.mapMessages(prev => prev.filter(m => m.type !== 'tool_call')) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+    expect(result.current.messages.filter(m => m._streaming)).toHaveLength(1)
+  })
+
+  it('a text placeholder is a genuinely incomplete segment and is never marked advanced', () => {
+    const { result } = renderHook(() => useMessages())
+    act(() => { result.current.bulkAdd([userRow]) })
+    act(() => { result.current.streamToken('Half an ans', true) })
+    act(() => { result.current.addMessage(toolRow(1, 'completed')) })
+    const bubble = result.current.messages.find(m => m._streaming)
+    expect(bubble._seed).toBe(false)
+    expect(bubble._replayed).toBe(true)
+    expect(bubble._stepAdvanced).toBeUndefined()
+    expect(bubble.content).toBe('Half an ans')
+  })
+
+  it('a segment that closes leaves a seed that is already advanced', () => {
+    const { result } = renderHook(() => useMessages())
+    act(() => { result.current.bulkAdd([userRow]) })
+    act(() => { result.current.streamToken('Let me look that up', true) })
+    act(() => { result.current.streamToken('', true) })
+    expect(result.current.messages.filter(m => m._streaming)).toHaveLength(1)
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('the next open segment is marked incomplete again, then retired when it closes', () => {
+    const result = reopened()
+    act(() => { result.current.addMessage(toolRow(1, 'completed')) })
+    act(() => { result.current.streamToken('Second thoughts', true) })
+    const bubble = result.current.messages.find(m => m._streaming)
+    expect(bubble._seed).toBe(false)
+    expect(bubble._stepAdvanced).toBeUndefined()
+    act(() => { result.current.streamToken('', true) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+  })
+
+  it('a reload starts over: the new seed is measured against the reloaded transcript', () => {
+    const result = reopened()
+    act(() => { result.current.addMessage(toolRow(1, 'completed')) })
+    expect(seedOf(result)._stepAdvanced).toBe(true)
+    const rows = result.current.messages.filter(m => !m._streaming)
+    act(() => { result.current.resetMessages() })
+    act(() => { result.current.bulkAdd(rows) })
+    act(() => { result.current.streamToken('', true) })
+    expect(seedOf(result)._stepAdvanced).toBe(false)
+  })
+
+  it('holds one advanced seed across 25 tool iterations', () => {
+    const result = reopened()
+    for (let n = 1; n <= 25; n += 1) {
+      act(() => { result.current.addMessage(toolRow(n, 'calling')) })
+      act(() => { result.current.updateToolResult(`call_${n}`, { invocation_id: `inv_${n}`, status: 'completed', result: 'ok' }) })
+      const streaming = result.current.messages.filter(m => m._streaming)
+      expect(streaming).toHaveLength(1)
+      expect(streaming[0]._stepAdvanced).toBe(true)
+      expect(result.current.messages.at(-1)).toBe(streaming[0])
+    }
+    expect(result.current.messages.filter(m => m.type === 'tool_call')).toHaveLength(25)
+  })
+})
+
+describe('transcriptProgress', () => {
+  it('counts settled rows and a terminal tool row twice', () => {
+    expect(transcriptProgress([userRow])).toBe(1)
+    expect(transcriptProgress([userRow, sleepRow('calling')])).toBe(2)
+    expect(transcriptProgress([userRow, sleepRow('completed')])).toBe(3)
+    expect(transcriptProgress([userRow, sleepRow('failed'), seedRow])).toBe(3)
+  })
+
+  it('measures the whole transcript and leaves approval cards out', () => {
+    const card = { role: 'system', type: 'tool_approval_request', status: 'pending' }
+    expect(transcriptProgress([userRow, sleepRow('completed'), { role: 'user', content: 'next' }])).toBe(4)
+    expect(transcriptProgress([userRow, card])).toBe(1)
+    expect(transcriptProgress(null)).toBe(0)
+  })
+})
+
 describe('currentTurnHasActiveRow', () => {
   it('is true for a sleeping, calling or in-progress tool row of the current turn', () => {
     expect(currentTurnHasActiveRow([userRow, sleepRow('sleeping')])).toBe(true)
@@ -160,7 +341,7 @@ describe('currentTurnHasActiveRow', () => {
 })
 
 describe('replay seed - rendering', () => {
-  const chatContext = (messages, settings = {}) => ({
+  const chatContext = (messages, settings = {}, overrides = {}) => ({
     messages,
     isWelcomeVisible: false,
     isThinking: false,
@@ -188,6 +369,7 @@ describe('replay seed - rendering', () => {
     downloadFile: vi.fn(),
     appName: 'ATLAS',
     settings,
+    ...overrides,
   })
 
   beforeEach(() => {
@@ -195,8 +377,8 @@ describe('replay seed - rendering', () => {
     useWS.mockReturnValue({ isConnected: true, connectionStatus: 'Connected', sendMessage: vi.fn() })
   })
 
-  const renderChat = (messages, settings) => {
-    useChat.mockReturnValue(chatContext(messages, settings))
+  const renderChat = (messages, settings, overrides) => {
+    useChat.mockReturnValue(chatContext(messages, settings, overrides))
     return render(
       <BrowserRouter>
         <ChatArea />
@@ -261,6 +443,43 @@ describe('replay seed - rendering', () => {
     const sleep = screen.getAllByText(/atlas_sleep/)[0]
     const marker = await screen.findByTestId('stream-replay-in-progress')
     expect(sleep.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // Issue #1193: once the view has shown a newer step, the seed no longer
+  // marks an unfinished answer.
+  const advancedSeed = { ...seedRow, _stepAdvanced: true }
+
+  it('an advanced seed is not drawn while the agent-run status shows the run', async () => {
+    renderChat([userRow, sleepRow('completed'), advancedSeed], {}, { isAgentRunning: true, currentAgentStep: 3 })
+
+    expect(screen.queryByTestId('stream-replay-seed')).not.toBeInTheDocument()
+    expect(screen.queryByText(/answer in progress/i)).not.toBeInTheDocument()
+    // The run itself stays visible until it completes.
+    expect(screen.getByTestId('agent-run-status')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-busy-indicator')).toBeInTheDocument()
+  })
+
+  it('a seed that has not advanced still shows the notice during an agent run', async () => {
+    renderChat([userRow, sleepRow('completed'), seedRow], {}, { isAgentRunning: true })
+
+    expect(await screen.findByTestId('stream-replay-in-progress')).toBeInTheDocument()
+  })
+
+  it('an advanced seed with no other run indicator says the run is going, not that the view is stale', async () => {
+    renderChat([userRow, sleepRow('completed'), advancedSeed])
+
+    const marker = await screen.findByTestId('stream-replay-run-active')
+    expect(marker).toHaveTextContent(/still working/i)
+    expect(screen.queryByText(/answer in progress/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/refresh when the response finishes/i)).not.toBeInTheDocument()
+  })
+
+  it('a replayed text bubble keeps the incomplete-answer notice during an agent run', async () => {
+    const partial = { role: 'assistant', content: 'Half an ans', timestamp: '2026-11-05T00:00:03Z', _streaming: true, _replayed: true, _seed: false }
+    renderChat([userRow, sleepRow('completed'), partial], {}, { isAgentRunning: true })
+
+    expect(screen.getByText('Half an ans')).toBeInTheDocument()
+    expect(await screen.findByTestId('stream-replay-in-progress')).toHaveTextContent(/answer in progress/i)
   })
 
   it('a standalone seed Message renders no bubble chrome', () => {

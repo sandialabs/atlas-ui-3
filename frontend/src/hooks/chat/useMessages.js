@@ -1,5 +1,5 @@
 import { useReducer, useCallback } from 'react'
-import { isOpenLegacyRow } from '../../utils/executionState'
+import { transcriptProgress, isOpenLegacyRow } from '../../utils/executionState'
 
 // The marker-only seed (issue #957) stands for "the run is still going"; it
 // has no text, so it belongs after every row of its turn. Rows that arrive
@@ -14,7 +14,38 @@ function reseatSeed(state) {
   return [...state.slice(0, idx), ...after, state[idx]]
 }
 
+// The seed's "answer in progress" notice describes the snapshot the view was
+// opened on. Once the turn has moved past that snapshot -- a tool row landed
+// or settled, a narration row was appended -- the notice is obsolete: the run
+// is still going, but nothing on screen is an unfinished answer (issue #1193).
+// `_stepAdvanced` records that on the seed itself, so it holds on every path
+// that changes the transcript (live frames, the mid-run poll, a snapshot
+// reconcile) without each of them having to say so. It is sticky: a row that
+// is later dropped (a stale approval card) does not bring the notice back.
+//
+// The measure can also fall before the seed has advanced: the conversation
+// was rewound, or a reconcile dropped rows. The baseline follows it down, so
+// the next row still counts as a step instead of having to climb back past
+// a mark the transcript no longer reaches.
+function markSeedAdvanced(state) {
+  const idx = state.findLastIndex(m => m._seed)
+  if (idx < 0 || state[idx]._stepAdvanced) return state
+  const progress = transcriptProgress(state)
+  const baseline = state[idx]._seedProgress ?? 0
+  if (progress === baseline) return state
+  const updated = [...state]
+  updated[idx] = progress > baseline
+    ? { ...state[idx], _stepAdvanced: true }
+    : { ...state[idx], _seedProgress: progress }
+  return updated
+}
+
 function messagesReducer(state, action) {
+  const next = reduceMessages(state, action)
+  return next === state || !Array.isArray(next) ? next : markSeedAdvanced(next)
+}
+
+function reduceMessages(state, action) {
   switch (action.type) {
     case 'ADD':
       return reseatSeed([...state, action.message])
@@ -57,6 +88,11 @@ function messagesReducer(state, action) {
           // branch below skips it and the first real token replaces it.
           _seed: !action.token,
         }
+        if (replayed._seed) {
+          // Where the transcript stood when this seed was made; see markSeedAdvanced.
+          replayed._seedProgress = transcriptProgress(state)
+          replayed._stepAdvanced = false
+        }
         // First target a placeholder (the seed or an earlier replay): the
         // replay is a newer snapshot of the same segment and defines it.
         const current = state.findLastIndex(m => m._streaming && m._replayed)
@@ -65,11 +101,20 @@ function messagesReducer(state, action) {
         // while the run is between segments. Filling it in place would put
         // the next segment's text above those rows, so it moves to the end.
         if (current >= 0 && state[current]._seed) {
-          return [...state.filter((_, i) => i !== current), replayed]
+          // A seed refreshed with another empty snapshot is the same seed: it
+          // keeps the progress it was measured against, or every poll would
+          // bring an obsolete notice back.
+          const carried = replayed._seed
+            ? { _seedProgress: state[current]._seedProgress, _stepAdvanced: state[current]._stepAdvanced }
+            : null
+          return [...state.filter((_, i) => i !== current), { ...replayed, ...carried }]
         }
         if (current >= 0) {
           const updated = [...state]
-          updated[current] = { ...state[current], ...replayed }
+          // A text placeholder emptied by a newer snapshot: the segment it
+          // held has closed and the run has moved on to its next step, so
+          // the seed that takes its place starts out advanced.
+          updated[current] = { ...state[current], ...replayed, ...(replayed._seed ? { _stepAdvanced: true } : null) }
           return updated
         }
         // A live token can land before the replay frame and flip the bubble

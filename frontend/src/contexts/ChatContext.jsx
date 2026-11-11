@@ -79,7 +79,8 @@ const fetchConversationRecord = async (id, { signal } = {}) => {
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
 // model's tool output. The renderer's own flags all start with an underscore
-// (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`),
+// (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`,
+// `_seedProgress`, `_stepAdvanced`),
 // and a persisted key of that shape would let stored content hide, reorder or
 // drop rows in the view. Strip them on the way in; nothing legitimately
 // persists them.
@@ -1614,9 +1615,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// the reply starts at its first word, not the token that happened to
 		// be current when the user came back. The restore below replays the
 		// same segment again (a newer snapshot), which replaces this seed, and
-		// the live stream continues from there. Runs until the turn ends, so
-		// the bubble keeps its "in progress" marker (Message.jsx) until the
-		// reload that replaces it with the stored transcript.
+		// the live stream continues from there. The placeholder itself lasts
+		// until the turn ends -- the mid-run poll is gated on it and fills it
+		// with each later segment -- but its "in progress" notice does not
+		// (issue #1193): that describes one unfinished answer segment, not the
+		// run. A text bubble keeps it while its segment is open; the reducer
+		// marks an empty seed `_stepAdvanced` as soon as the transcript moves
+		// past the snapshot loaded here, and the notice goes with it.
 		if (conversationData.streaming_text) {
 			streamToken(conversationData.streaming_text, true)
 		} else if (conversationData.in_flight === true) {
@@ -1624,7 +1629,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// tools, parked on an approval). The transcript still needs a sign
 			// of life: an empty bubble carrying the marker, which the next
 			// segment's first token fills in this run's own tab, and the
-			// run-end reload replaces everywhere.
+			// run-end reload replaces everywhere. The marker is for this
+			// first view only; the next step the view shows retires it.
 			streamToken('', true)
 		}
 
@@ -1910,6 +1916,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// A live pass keeps the open bubble showing the segment the run is
 		// streaming now, or the marker-only seed while it is between segments.
+		// A segment that has closed empties its bubble into a seed that is
+		// already past its notice (useMessages.js, issue #1193): the run being
+		// in flight is not the same as this answer segment being incomplete.
 		// It runs only here -- after the active-conversation guard above and a
 		// successful alignment -- because a stale poll that resolves after the
 		// user switched conversations (or a diverged record) must not touch the
