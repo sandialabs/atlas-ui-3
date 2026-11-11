@@ -197,7 +197,7 @@ frontend/src/
 
 ## UI Design Principles
 
-These principles will apply to any change in the frontend, no matter who writes it. They serve as a guide for new interface work, where rewriting existing components is not required.
+These principles apply to all new or changed frontend work. You do not need to rewrite existing components just to follow them.
 
 ### Consistent Interaction Patterns and Progressive Disclosure
 
@@ -207,7 +207,7 @@ The same type of interaction should work the same way throughout ATLAS. If a use
 - Keep the main interface simple and show additional details only when the user asks for them.
 - If a menu item needs more information, use the same information affordance everywhere, such as an `(i)` icon.
 - Show additional information the same way for tools, models, personas, prompts, and any other selectable item.
-- Do not add `(i)` icons when they only make the screen more cluttered.
+- Add an `(i)` icon only if the description is longer than one line. Short, obvious items do not need one.
 
 For example: if the tools panel or menu shows a description behind an `(i)` icon, the model selector and the prompt selector should do the same. One should not use a floating box while another shows a paragraph on the screen.
 
