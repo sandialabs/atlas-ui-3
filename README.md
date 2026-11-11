@@ -218,6 +218,8 @@ podman run -p 127.0.0.1:8000:8000 \
 
 Proxy-secret enforcement is on by default, so reach the UI through an authenticating reverse proxy that injects `X-Proxy-Secret` and a verified identity header. The `HEALTHCHECK` only probes `/api/heartbeat`; it does not test authentication. The container seeds `/app/config` from package defaults at build time; mount your local `config/` folder to override `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
 
+A distroless, shell-less variant is available as `Dockerfile.hardened` (opt-in stdio MCP servers via `--build-arg ATLAS_STDIO_MCP_SERVERS`); see [docs/admin/hardened-image.md](./docs/admin/hardened-image.md).
+
 ### Runtime-only Image (compatibility entry point)
 
 `Dockerfile.runtimeonly` is a thin shim that reuses the canonical image rather than maintaining a second recipe. It defaults to the published tag, so pass `--build-arg ATLAS_RUNTIME_IMAGE` only to point at a locally built image:
