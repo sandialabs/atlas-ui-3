@@ -12,7 +12,7 @@ Atlas UI 3 is an open-source AI agent platform for secure enterprise and enginee
 
 It is designed for regulated and security-conscious organizations that need more than a chatbot: configurable model access, delegated authentication, group-based authorization, tool approval controls, data classification controls, RAG, auditable workflows, and containerized deployment options to help teams understand, govern, and operate the full AI application stack.
 
-![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
+![Atlas agent writing a half-page report with a PDF tool and opening it in the canvas](docs/readme_img/atlas-demo.gif)
 
 ## About the Project
 
