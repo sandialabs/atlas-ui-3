@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-11-08
+Last updated: 2026-11-10
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -194,6 +194,37 @@ frontend/src/
 **RAG+Tools**: When both RAG and tools are active, RAG `is_completion=True` responses must NOT short-circuit the LLM call; inject as context so tools remain available.
 
 **RAG Activation vs Selection**: Data sources are only sent to backend when RAG is explicitly activated (`ragEnabled` toggle or one or more selected sources). Selecting sources only marks availability.
+
+## UI Design Principles
+
+These principles apply to all new or changed frontend work. You do not need to rewrite existing components just to follow them.
+
+### Consistent Interaction Patterns and Progressive Disclosure
+
+The same type of interaction should work the same way throughout ATLAS. If a user learns how something works in one place, they should be able to apply that knowledge of how it works to the rest of the application.
+
+- Use the same pattern for menus, selectors, popovers, dialogs and information panels.
+- Keep the main interface simple and show additional details only when the user asks for them.
+- If a menu item needs more information, use the same information affordance everywhere, such as an `(i)` icon.
+- Show additional information the same way for tools, models, personas, prompts, and any other selectable item.
+- Add an `(i)` icon only if the description is longer than one line. Short, obvious items do not need one.
+
+For example: if the tools panel or menu shows a description behind an `(i)` icon, the model selector and the prompt selector should do the same. One should not use a floating box while another shows a paragraph on the screen.
+
+Principle: Consistency is more important than optimizing each screen separately. Therefore, extra complexity should appear when it is needed, not for all users all the time.
+
+### One Concept, One Interaction
+
+When the same concept appears in several places, it should use the same interaction and, ideally, the same shared component.
+
+- Before building something new, check `frontend/src/components/` and `frontend/src/hooks/` in case something already does the job.
+- Keep selection, search, filtering, disabled states, keyboard navigation, and access to additional information the same across the application.
+- Create a new interaction pattern only when the existing ones cannot reasonably cover the need.
+- If you make an intentional exception, explain it in the PR description and in a comment next to the component.
+
+Examples: tool selectors should behave the same wherever the user chooses tools. Entering per-user LLM keys already reuses `TokenInputModal` instead of a separate dialog. Periodic checks already go through `usePollingWithBackoff` instead of a different timer in each feature.
+
+Principle: Learn an interaction once and use it everywhere.
 
 ## Configuration
 
