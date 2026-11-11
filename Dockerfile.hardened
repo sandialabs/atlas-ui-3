@@ -1,0 +1,184 @@
+# Hardened, distroless Atlas image on Chainguard. Separate recipe beside the
+# canonical Dockerfile; see docs/admin/hardened-image.md.
+#
+# ---------------------------------------------------------------------------
+# BUILD ARGUMENTS
+# ---------------------------------------------------------------------------
+# ATLAS_STDIO_MCP_SERVERS
+#   Space-separated catalog names (directories under atlas/mcp/) of stdio MCP
+#   servers to ship, for example "calculator filesystem". Default: empty.
+#   With the default, atlas/mcp/ is absent from the image and the image cannot
+#   spawn any stdio MCP server (there is no shell either). Listed servers get
+#   only their own directory, atlas/mcp/common/ when one of them imports it,
+#   and the Python extras they need (pptx_generator -> "pptx"; basictable,
+#   code-executor, csv_reporter, duckduckgo, pdfbasic -> "mcp-demos"; the
+#   others need nothing beyond the core dependencies).
+#     docker build --build-arg ATLAS_STDIO_MCP_SERVERS="calculator" \
+#       -f Dockerfile.hardened -t atlas-hardened .
+# ATLAS_PYTHON_MINOR
+#   Python minor version installed (as the Wolfi package python-<minor>) into
+#   BOTH the builder and the final rootfs. The build fails if either
+#   interpreter differs, so the venv cannot be built for one minor and run on
+#   another (see PR #987). Keep it at a minor that every wheel in uv.lock
+#   supports: cgr.dev/chainguard/python:latest is currently 3.15, for which
+#   many locked dependencies (pydantic-core, duckdb, numpy, ...) publish no
+#   wheels, so this recipe assembles Python 3.14 from the Wolfi package
+#   repository instead of using that image.
+# VITE_APP_NAME, VITE_FEATURE_*, VITE_WELCOME_MESSAGE, GIT_HASH, APP_VERSION
+#   Same meaning as in the canonical Dockerfile.
+#
+# KEEP IN SYNC with Dockerfile: the frontend-build stage and the dependency
+# install in python-build are copies of the canonical logic.
+#
+# Digest bump: pull cgr.dev/chainguard/wolfi-base:latest, take the index digest
+# (podman image inspect --format '{{.RepoDigests}}') and update both wolfi-base
+# FROM lines. The Wolfi apk repository is rolling, so package versions are not
+# pinned by that digest; see docs/admin/hardened-image.md.
+# ---------------------------------------------------------------------------
+ARG ATLAS_STDIO_MCP_SERVERS=""
+ARG ATLAS_PYTHON_MINOR="3.14"
+
+FROM docker.io/library/node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+ENV NPM_CONFIG_CACHE=/app/.npm
+RUN npm ci --include=dev
+COPY frontend/ ./
+ARG VITE_APP_NAME="ATLAS"
+ENV VITE_APP_NAME=${VITE_APP_NAME}
+ARG VITE_FEATURE_POWERED_BY_ATLAS="false"
+ENV VITE_FEATURE_POWERED_BY_ATLAS=${VITE_FEATURE_POWERED_BY_ATLAS}
+ARG VITE_FEATURE_ANIMATED_LOGO="true"
+ENV VITE_FEATURE_ANIMATED_LOGO=${VITE_FEATURE_ANIMATED_LOGO}
+ARG VITE_FEATURE_RAG_CITATIONS="true"
+ENV VITE_FEATURE_RAG_CITATIONS=${VITE_FEATURE_RAG_CITATIONS}
+ARG VITE_WELCOME_MESSAGE=""
+ENV VITE_WELCOME_MESSAGE=${VITE_WELCOME_MESSAGE}
+ARG GIT_HASH="unknown"
+ARG APP_VERSION="unknown"
+ENV GIT_HASH=${GIT_HASH} APP_VERSION=${APP_VERSION}
+RUN npm run build
+
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+
+# Builder: Wolfi base with the same python-<minor> package as the final rootfs.
+FROM cgr.dev/chainguard/wolfi-base@sha256:94fa13e26d449f7d78dbcd02d12ea37a0da80d24fcc3e1f17b95d515dec607a7 AS python-build
+USER root
+ARG ATLAS_PYTHON_MINOR
+ARG ATLAS_STDIO_MCP_SERVERS
+RUN apk add --no-cache python-${ATLAS_PYTHON_MINOR}
+# Exec-form check (no shell): the builder interpreter must be the pinned minor.
+RUN ["/usr/bin/python3", "-I", "-c", "import os, sys; want = os.environ['ATLAS_PYTHON_MINOR']; got = '%d.%d' % sys.version_info[:2]; assert got == want, 'builder python %s != pinned %s' % (got, want)"]
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON=/usr/bin/python3 UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/app/.venv
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+COPY atlas/ ./atlas/
+COPY .env.example ./atlas/.env.example
+COPY prompts/ ./prompts/
+COPY --from=frontend-build /app/frontend/dist /app/atlas/static
+RUN find /app/atlas -type d \( -name tests -o -name __pycache__ \) -prune -exec rm -rf '{}' + && \
+    find /app/atlas/mcp -type f -name 'test_*.py' -delete
+# Keep only the opt-in stdio MCP servers, then install. The package is built
+# after pruning, so the installed copy matches /app/atlas.
+RUN set -eu; \
+    mv /app/atlas/mcp /tmp/mcp-all; \
+    extras="--extra migrations"; \
+    if [ -n "${ATLAS_STDIO_MCP_SERVERS}" ]; then \
+      mkdir /app/atlas/mcp; \
+      cp /tmp/mcp-all/__init__.py /app/atlas/mcp/ 2>/dev/null || true; \
+      need_common=0; \
+      for s in ${ATLAS_STDIO_MCP_SERVERS}; do \
+        case "$s" in *[!A-Za-z0-9_-]*|common) echo "invalid stdio MCP server name: $s" >&2; exit 1;; esac; \
+        [ -d "/tmp/mcp-all/$s" ] || { echo "unknown stdio MCP server: $s" >&2; exit 1; }; \
+        cp -a "/tmp/mcp-all/$s" "/app/atlas/mcp/$s"; \
+        grep -rqE 'atlas\.mcp\.common|from common' "/tmp/mcp-all/$s" && need_common=1; \
+        case "$s" in \
+          pptx_generator) extras="$extras --extra pptx";; \
+          basictable|code-executor|csv_reporter|duckduckgo|pdfbasic) extras="$extras --extra mcp-demos";; \
+        esac; \
+      done; \
+      if [ "$need_common" = 1 ]; then cp -a /tmp/mcp-all/common /app/atlas/mcp/common; fi; \
+    fi; \
+    echo "$extras" > /tmp/uv-extras; \
+    rm -rf /tmp/mcp-all
+# Use the lock and a real package, never a stub or an editable installation.
+RUN uv sync --frozen --no-dev $(cat /tmp/uv-extras) --no-editable
+RUN mkdir -p /app/config && \
+    find /app/atlas/config -maxdepth 1 -type f \
+      \( -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name '*.md' \) \
+      -exec cp '{}' /app/config/ \;
+# Writable directories. The final image has no shell, so they are prepared
+# here and copied with --chown.
+RUN mkdir -p /skel/logs /skel/runtime/logs /skel/runtime/feedback /skel/runtime/uploads /skel/data
+
+# Rootfs: a minimal Wolfi filesystem (baselayout, CA bundle, libstdc++, tzdata,
+# python-<minor>) installed with apk into a directory. apk, busybox and a shell
+# are never installed into it. The apk package database stays so scanners can
+# see the package inventory.
+FROM cgr.dev/chainguard/wolfi-base@sha256:94fa13e26d449f7d78dbcd02d12ea37a0da80d24fcc3e1f17b95d515dec607a7 AS rootfs
+USER root
+ARG ATLAS_PYTHON_MINOR
+# apk exits non-zero because its ldconfig trigger needs a shell inside the new
+# root; the files are installed regardless, so the checks below decide.
+RUN apk add --no-cache --root /rootfs --initdb --keys-dir /etc/apk/keys \
+      --repositories-file /etc/apk/repositories \
+      wolfi-baselayout ca-certificates-bundle libstdc++ tzdata python-${ATLAS_PYTHON_MINOR} || true; \
+    test -x /rootfs/usr/bin/python${ATLAS_PYTHON_MINOR}; \
+    rm -rf /rootfs/usr/lib/python${ATLAS_PYTHON_MINOR}/ensurepip \
+      /rootfs/usr/lib/python${ATLAS_PYTHON_MINOR}/site-packages/pip* \
+      /rootfs/usr/bin/pip* /rootfs/usr/bin/pydoc* /rootfs/usr/bin/lz* /rootfs/usr/bin/xz* \
+      /rootfs/usr/bin/unlzma /rootfs/usr/bin/gdbm* /rootfs/usr/bin/tic /rootfs/usr/bin/toe \
+      /rootfs/usr/bin/tput /rootfs/usr/bin/tset /rootfs/usr/bin/tabs /rootfs/usr/bin/reset \
+      /rootfs/usr/bin/clear /rootfs/usr/bin/infocmp /rootfs/usr/bin/captoinfo /rootfs/usr/bin/infotocap; \
+    echo 'atlas:x:10001:10001:atlas:/home/atlas:/sbin/nologin' >> /rootfs/etc/passwd; \
+    echo 'atlas:x:10001:' >> /rootfs/etc/group; \
+    mkdir -p /rootfs/home/atlas /rootfs/tmp && chmod 1777 /rootfs/tmp; \
+    for b in sh bash busybox apk; do \
+      if [ -e /rootfs/bin/$b ] || [ -e /rootfs/usr/bin/$b ] || [ -e /rootfs/sbin/$b ]; then echo "$b present in rootfs" >&2; exit 1; fi; \
+    done
+
+FROM scratch AS runtime
+ARG ATLAS_PYTHON_MINOR
+COPY --from=rootfs /rootfs/ /
+COPY --from=rootfs --chown=10001:10001 /rootfs/home/atlas /home/atlas
+COPY --from=python-build /app/.venv /app/.venv
+COPY --from=python-build /app/atlas /app/atlas
+COPY --from=python-build /app/prompts /app/prompts
+# Schema migrations: each pod's init container runs
+# `python -m atlas.modules.chat_history.schema_migration`.
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic/
+COPY --from=python-build --chown=10001:10001 /app/config /app/config
+COPY --from=python-build --chown=10001:10001 /skel/logs /app/logs
+COPY --from=python-build --chown=10001:10001 /skel/runtime /app/runtime
+COPY --from=python-build --chown=10001:10001 /skel/data /data
+# Exec-form guards (no shell needed). The runtime interpreter must be the
+# pinned minor and must match the minor the venv was built with; native
+# extensions must import.
+RUN ["/usr/bin/python3", "-I", "-c", "import os, sys; want = os.environ['ATLAS_PYTHON_MINOR']; got = '%d.%d' % sys.version_info[:2]; assert got == want, 'runtime python %s != pinned %s' % (got, want)"]
+RUN ["/app/.venv/bin/python", "-I", "-c", "import sys, pydantic_core, duckdb, psycopg2; cfg = dict(l.split(' = ', 1) for l in open('/app/.venv/pyvenv.cfg').read().splitlines() if ' = ' in l); assert cfg['version_info'].startswith('%d.%d.' % sys.version_info[:2]), 'venv built for %s, runtime is %d.%d' % (cfg['version_info'], sys.version_info[0], sys.version_info[1])"]
+ARG GIT_HASH="unknown"
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:/usr/local/bin:/usr/bin:/bin" \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    NODE_ENV=production \
+    APP_CONFIG_DIR=/app/config \
+    APP_LOG_DIR=/app/logs \
+    RUNTIME_LOG_DIR=/app/runtime/logs \
+    RUNTIME_FEEDBACK_DIR=/app/runtime/feedback \
+    CHAT_HISTORY_DB_URL=duckdb:////data/chat_history.db \
+    AGENT_PORTAL_DB_URL=duckdb:////data/agent_portal.db \
+    GIT_HASH=${GIT_HASH} \
+    GIT_COMMIT=${GIT_HASH} \
+    ATLAS_HOST=0.0.0.0 \
+    PORT=8000
+USER 10001:10001
+WORKDIR /app/atlas
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/api/heartbeat', timeout=4).close()"]
+CMD ["python", "main.py"]
