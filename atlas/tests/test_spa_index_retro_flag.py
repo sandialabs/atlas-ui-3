@@ -58,7 +58,9 @@ def test_theme_bootstrap_script_is_served():
         import pytest
 
         pytest.skip("no frontend build to serve")
-    response = TestClient(main.app).get("/theme-bootstrap.js")
+    # Like index.html and /assets, the script sits behind AuthMiddleware in
+    # production mode (the auth proxy injects the header on every request).
+    response = TestClient(main.app).get("/theme-bootstrap.js", headers={"X-User-Email": "test@test.com"})
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "data-retro-runtime" in response.text
