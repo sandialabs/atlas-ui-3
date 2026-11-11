@@ -263,7 +263,7 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
     assert "build-and-test" not in required_checks
 
 
-def test_hardened_image_job_validates_and_scans_report_only():
+def test_pr1200_hardened_image_job_validates_and_scans_report_only():
     ci = _load("ci.yml")
     job = ci["jobs"]["hardened-image"]
     builds = [s for s in job["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]
@@ -271,7 +271,7 @@ def test_hardened_image_job_validates_and_scans_report_only():
     assert all(b["with"].get("load") is True for b in builds)
     assert any("ATLAS_STDIO_MCP_SERVERS=calculator" in b["with"]["build-args"] for b in builds)
     runs = " ".join(s.get("run", "") for s in job["steps"])
-    assert "test_hardened_image.sh" in runs
+    assert "test_pr1200_hardened_image.sh" in runs
     trivies = [s for s in job["steps"] if s.get("uses", "").startswith("aquasecurity/trivy-action@")]
     assert {t["with"]["vuln-type"] for t in trivies} == {"os", "library"}
     # Report-only: scan output stays visible but never fails the job.

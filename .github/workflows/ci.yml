@@ -265,7 +265,7 @@ jobs:
         cache-to: type=gha,scope=atlas-hardened,mode=max
 
     - name: Validate hardened image
-      run: ATLAS_TEST_IMAGE=hardened-image:latest bash test/pr-validation/test_hardened_image.sh
+      run: ATLAS_TEST_IMAGE=hardened-image:latest bash test/pr-validation/test_pr1200_hardened_image.sh
 
     - name: Build hardened image with an opt-in stdio MCP server
       uses: docker/build-push-action@v7
@@ -285,7 +285,7 @@ jobs:
       run: |
         ATLAS_TEST_IMAGE=hardened-image:calculator \
         ATLAS_EXPECT_STDIO_MCP=calculator \
-        bash test/pr-validation/test_hardened_image.sh
+        bash test/pr-validation/test_pr1200_hardened_image.sh
 
     - name: Trivy scan, OS packages (report only)
       uses: aquasecurity/trivy-action@master

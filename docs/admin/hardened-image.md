@@ -55,10 +55,10 @@ image considerably). All other servers need only the core dependencies. Keep
 podman build --format docker -f Dockerfile.hardened -t atlas-hardened:local .
 # Runtime surface, read-only code, healthcheck, proxy-secret enforcement
 CONTAINER_ENGINE=podman ATLAS_TEST_IMAGE=atlas-hardened:local \
-  bash test/pr-validation/test_hardened_image.sh
+  bash test/pr-validation/test_pr1200_hardened_image.sh
 # With opt-in servers, tell the script what to expect
 ATLAS_EXPECT_STDIO_MCP="calculator" ATLAS_TEST_IMAGE=atlas-hardened:calc \
-  bash test/pr-validation/test_hardened_image.sh
+  bash test/pr-validation/test_pr1200_hardened_image.sh
 # Vulnerabilities
 trivy image --severity CRITICAL,HIGH --ignore-unfixed atlas-hardened:local
 ```
