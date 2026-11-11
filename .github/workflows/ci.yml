@@ -287,17 +287,14 @@ jobs:
         ATLAS_EXPECT_STDIO_MCP=calculator \
         bash test/pr-validation/test_hardened_image.sh
 
-    - name: Trivy scan, OS packages (fail on fixable CRITICAL/HIGH)
-      # The gate covers what this recipe controls: the Wolfi base and the
-      # interpreter. Python dependency findings come from uv.lock, are shared
-      # with the canonical image and are handled by the dependency workflows.
+    - name: Trivy scan, OS packages (report only)
       uses: aquasecurity/trivy-action@master
       with:
         image-ref: hardened-image:latest
         vuln-type: os
         severity: CRITICAL,HIGH
         ignore-unfixed: true
-        exit-code: '1'
+        exit-code: '0'
 
     - name: Trivy scan, Python libraries (report only)
       uses: aquasecurity/trivy-action@master

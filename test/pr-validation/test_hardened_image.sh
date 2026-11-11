@@ -18,7 +18,7 @@ import sys
 from importlib.metadata import distribution
 from pathlib import Path
 
-assert os.getuid() == 65532, os.getuid()
+assert os.getuid() == 10001 and os.getgid() == 10001, (os.getuid(), os.getgid())
 for executable in ("sh", "bash", "busybox", "apk", "sudo", "node", "npm", "npx",
                    "pip", "pip3", "uv", "uvx", "gcc", "curl", "wget"):
     assert shutil.which(executable) is None, executable

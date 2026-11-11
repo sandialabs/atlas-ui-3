@@ -131,9 +131,9 @@ RUN apk add --no-cache --root /rootfs --initdb --keys-dir /etc/apk/keys \
       /rootfs/usr/bin/unlzma /rootfs/usr/bin/gdbm* /rootfs/usr/bin/tic /rootfs/usr/bin/toe \
       /rootfs/usr/bin/tput /rootfs/usr/bin/tset /rootfs/usr/bin/tabs /rootfs/usr/bin/reset \
       /rootfs/usr/bin/clear /rootfs/usr/bin/infocmp /rootfs/usr/bin/captoinfo /rootfs/usr/bin/infotocap; \
-    grep -q '^nonroot:' /rootfs/etc/passwd || echo 'nonroot:x:65532:65532:nonroot:/home/nonroot:/sbin/nologin' >> /rootfs/etc/passwd; \
-    grep -q '^nonroot:' /rootfs/etc/group || echo 'nonroot:x:65532:' >> /rootfs/etc/group; \
-    mkdir -p /rootfs/home/nonroot /rootfs/tmp && chmod 1777 /rootfs/tmp; \
+    echo 'atlas:x:10001:10001:atlas:/home/atlas:/sbin/nologin' >> /rootfs/etc/passwd; \
+    echo 'atlas:x:10001:' >> /rootfs/etc/group; \
+    mkdir -p /rootfs/home/atlas /rootfs/tmp && chmod 1777 /rootfs/tmp; \
     for b in sh bash busybox apk; do \
       if [ -e /rootfs/bin/$b ] || [ -e /rootfs/usr/bin/$b ] || [ -e /rootfs/sbin/$b ]; then echo "$b present in rootfs" >&2; exit 1; fi; \
     done
@@ -141,7 +141,7 @@ RUN apk add --no-cache --root /rootfs --initdb --keys-dir /etc/apk/keys \
 FROM scratch AS runtime
 ARG ATLAS_PYTHON_MINOR
 COPY --from=rootfs /rootfs/ /
-COPY --from=rootfs --chown=65532:65532 /rootfs/home/nonroot /home/nonroot
+COPY --from=rootfs --chown=10001:10001 /rootfs/home/atlas /home/atlas
 COPY --from=python-build /app/.venv /app/.venv
 COPY --from=python-build /app/atlas /app/atlas
 COPY --from=python-build /app/prompts /app/prompts
@@ -149,10 +149,10 @@ COPY --from=python-build /app/prompts /app/prompts
 # `python -m atlas.modules.chat_history.schema_migration`.
 COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic/
-COPY --from=python-build --chown=65532:65532 /app/config /app/config
-COPY --from=python-build --chown=65532:65532 /skel/logs /app/logs
-COPY --from=python-build --chown=65532:65532 /skel/runtime /app/runtime
-COPY --from=python-build --chown=65532:65532 /skel/data /data
+COPY --from=python-build --chown=10001:10001 /app/config /app/config
+COPY --from=python-build --chown=10001:10001 /skel/logs /app/logs
+COPY --from=python-build --chown=10001:10001 /skel/runtime /app/runtime
+COPY --from=python-build --chown=10001:10001 /skel/data /data
 # Exec-form guards (no shell needed). The runtime interpreter must be the
 # pinned minor and must match the minor the venv was built with; native
 # extensions must import.
@@ -176,7 +176,7 @@ ENV VIRTUAL_ENV=/app/.venv \
     GIT_COMMIT=${GIT_HASH} \
     ATLAS_HOST=0.0.0.0 \
     PORT=8000
-USER 65532:65532
+USER 10001:10001
 WORKDIR /app/atlas
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

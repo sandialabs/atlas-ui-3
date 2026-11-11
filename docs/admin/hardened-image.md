@@ -11,7 +11,7 @@ can live with the limitations below.
 
 - A `FROM scratch` runtime assembled from Chainguard Wolfi packages
   (`wolfi-baselayout`, CA bundle, `libstdc++`, `tzdata`, `python-3.14`).
-- Runs as UID/GID `65532:65532` (`nonroot`). The canonical image uses `10001`.
+- Runs as UID/GID `10001:10001` (user `atlas`), the same as the canonical image, so volumes and PVCs carry over between the two images.
 - Same `EXPOSE 8000`, exec-form `HEALTHCHECK` and `CMD ["python", "main.py"]`
   as the canonical image, same environment variables and paths
   (`/app/config`, `/app/logs`, `/app/runtime`, `/data`).
@@ -63,8 +63,9 @@ ATLAS_EXPECT_STDIO_MCP="calculator" ATLAS_TEST_IMAGE=atlas-hardened:calc \
 trivy image --severity CRITICAL,HIGH --ignore-unfixed atlas-hardened:local
 ```
 
-CI runs the same steps in the `hardened-image` job and fails on fixable
-CRITICAL/HIGH findings.
+CI runs the same steps in the `hardened-image` job. Its Trivy scans (OS and
+Python libraries) are report-only: the output is visible in the job log but
+never fails it.
 
 ## Base images, Python version and digests
 
@@ -75,7 +76,16 @@ CRITICAL/HIGH findings.
   with the running interpreter and imports native extensions.
 - The `cgr.dev/chainguard/python:latest` image is not used: `latest` is the only
   free tag and tracks the newest Python (3.15 at the time of writing), for which
-  many locked dependencies publish no wheels. Wolfi still ships `python-3.14`.
+  many locked dependencies (pydantic-core, duckdb, numpy, psycopg2-binary, ...)
+  publish no wheels. Versioned tags (for example `python:3.14`) require a
+  Chainguard subscription. Wolfi still ships `python-3.14`, so this recipe
+  assembles it with apk.
+- To switch later (a subscription with a versioned tag, or `uv.lock` gaining
+  3.15 wheels): replace the builder with `python:<minor>-dev` and the final
+  rootfs/`scratch` stage with `python:<minor>`, pin both by digest, set
+  `ATLAS_PYTHON_MINOR` to that minor, reset `ENTRYPOINT []` (the image's
+  entrypoint is the interpreter) and move the `10001` user and the `--chown`
+  directories over to the new base. Keep the exec-form version checks.
 - The `wolfi-base` image is pinned by digest. To bump: pull
   `cgr.dev/chainguard/wolfi-base:latest`, copy the index digest from
   `podman image inspect --format '{{.RepoDigests}}'` into both `FROM` lines,
@@ -88,9 +98,6 @@ CRITICAL/HIGH findings.
 - The Wolfi apk repository is rolling: the base digest pins the tooling, but
   `apk add` fetches current package versions at build time. Rebuilds pick up
   fixes (good for CVEs) but are not bit-for-bit reproducible.
-- UID `65532` differs from the canonical `10001`. Existing volumes or PVCs
-  written by the canonical image need their ownership changed (or
-  `fsGroup: 65532`) before switching images.
 - Not published yet. Build it yourself from the repository until a `:hardened`
   tag exists.
 - Hooks and agent-portal commands that need a shell are unsupported.

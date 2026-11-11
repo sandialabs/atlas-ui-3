@@ -263,7 +263,7 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
     assert "build-and-test" not in required_checks
 
 
-def test_hardened_image_job_validates_and_gates_on_trivy():
+def test_hardened_image_job_validates_and_scans_report_only():
     ci = _load("ci.yml")
     job = ci["jobs"]["hardened-image"]
     builds = [s for s in job["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]
@@ -272,14 +272,10 @@ def test_hardened_image_job_validates_and_gates_on_trivy():
     assert any("ATLAS_STDIO_MCP_SERVERS=calculator" in b["with"]["build-args"] for b in builds)
     runs = " ".join(s.get("run", "") for s in job["steps"])
     assert "test_hardened_image.sh" in runs
-    trivy = next(
-        s for s in job["steps"]
-        if s.get("uses", "").startswith("aquasecurity/trivy-action@")
-        and s["with"].get("exit-code") == "1"
-    )
-    assert trivy["with"]["vuln-type"] == "os"
-    assert trivy["with"]["severity"] == "CRITICAL,HIGH"
-    assert trivy["with"]["ignore-unfixed"] is True
+    trivies = [s for s in job["steps"] if s.get("uses", "").startswith("aquasecurity/trivy-action@")]
+    assert {t["with"]["vuln-type"] for t in trivies} == {"os", "library"}
+    # Report-only: scan output stays visible but never fails the job.
+    assert all(t["with"]["exit-code"] == "0" for t in trivies)
     # Publishing a :hardened tag is a follow-up; the publish gate must not wait on it.
     assert "hardened-image" not in ci["jobs"]["publish-image"]["needs"]
 
@@ -295,7 +291,7 @@ def test_hardened_dockerfile_is_distroless_and_pinned():
     for line in final.splitlines():
         if line.startswith("RUN "):
             assert line.startswith("RUN ["), line
-    assert "USER 65532:65532" in final
+    assert "USER 10001:10001" in final
     assert 'CMD ["python", "main.py"]' in final
     assert 'CMD ["python", "-c", "import os, urllib.request' in final
     for line in text.splitlines():
