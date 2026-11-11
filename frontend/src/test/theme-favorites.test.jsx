@@ -87,4 +87,16 @@ describe('the complete theme catalog favorites and selection recovery', () => {
     localStorage.setItem(FAVORITES_STORAGE_KEY, '{not-json')
     expect(readThemeFavorites()).toEqual([])
   })
+  it('restores known retro favorites after the catalog is re-enabled', () => {
+    const saved = ['win95', 'mac7', 'dark']
+    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(saved))
+    render(<Gallery />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Favorites only (3)' }))
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
+    expect(screen.getByRole('radio', { name: 'Windows 95' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Mac System 7' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Dark' })).toBeInTheDocument()
+    expect(readThemeFavorites()).toEqual(saved)
+  })
+
 })

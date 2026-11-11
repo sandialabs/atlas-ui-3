@@ -1,4 +1,4 @@
-import { getRegisteredTheme } from './themeRegistry'
+import { isKnownThemeId } from './themeRegistry'
 
 // This is local preference state, not downloadable themes or code.
 export const FAVORITES_STORAGE_KEY = 'atlas-theme-favorites'
@@ -7,9 +7,10 @@ export function readThemeFavorites() {
   try {
     const stored = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || '[]')
     if (!Array.isArray(stored)) return []
-    // The allowlist keeps old or tampered settings from injecting theme IDs.
+    // The complete known-ID allowlist survives builds that exclude retro themes.
+    // Unknown or tampered IDs never become favorite theme identifiers.
     return [...new Set(stored.filter(id =>
-      typeof id === 'string' && getRegisteredTheme(id) !== null))]
+      typeof id === 'string' && isKnownThemeId(id)))]
   } catch {
     return []
   }

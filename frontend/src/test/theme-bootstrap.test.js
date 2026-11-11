@@ -11,13 +11,15 @@ const bootstrap = readFileSync('public/theme-bootstrap.js', 'utf8')
  * is the /api/config cache useChatConfig keeps in localStorage.
  */
 function firstPaint(saved, {
-  blocked = false, retroBuild = 'true', cachedConfig = null, runtime = null, cssVersion = null,
+  blocked = false, retroBuild = 'true', cachedConfig = null, cachedConfigRaw = undefined,
+  runtime = null, cssVersion = null,
   readyState = 'loading', written = [], appended = [],
 } = {}) {
   const attributes = {}
   const storage = {
     'atlas-theme': saved,
-    'chatui-config-cache': cachedConfig === null ? null : JSON.stringify(cachedConfig),
+    'chatui-config-cache': cachedConfigRaw === undefined
+      ? (cachedConfig === null ? null : JSON.stringify(cachedConfig)) : cachedConfigRaw,
   }
   runInNewContext(bootstrap, {
     localStorage: {
@@ -106,6 +108,18 @@ describe('first paint with retro themes turned off (issue #1119)', () => {
     expect(firstPaint('win95', { retroBuild: 'false', runtime: 'true' }))
       .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
   })
+  it('stamped flag wins even with malformed cached JSON and saved retro CSS', () => {
+    const written = []
+    const appended = []
+    expect(firstPaint('win95', {
+      runtime: 'false', cachedConfigRaw: '{broken', cssVersion: 'v1', written, appended,
+    })).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
+    expect(written).toEqual([])
+    expect(appended).toEqual([])
+    expect(firstPaint('win95', { runtime: 'true', cachedConfigRaw: '{broken' }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'win95' })
+  })
+
   it('a corrupt config cache does not break first paint', () => {
     const attributes = {}
     runInNewContext(bootstrap, {

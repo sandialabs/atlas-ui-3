@@ -15,17 +15,20 @@
 (function () {
   var modes = {"dark":"dark","light":"light","mac7":"light","win95":"light","windows-xp-luna":"light","aqua-osx":"light","amiga-workbench":"light","nextstep":"light","beos":"light","teletext":"dark","crt-phosphor":"dark","dos-cga":"dark","8bit-arcade":"dark","frutiger-aero":"light","winamp-skin":"dark","geocities-web10":"dark","cassette-futurism":"dark","vaporwave":"dark","memphis":"dark","ps1-tech":"light","os2-warp":"light","macos9-platinum":"dark","web20-glossy":"light","gameboy-dmg":"dark","braun-rams":"light","tron-vector":"dark","vhs-tracking":"dark","risograph":"light","ibm-3270":"dark","nethack-ascii":"dark","templeos":"dark","bbs-ansi":"dark","midnight-commander":"dark","matrix-rain":"dark","btop-meters":"dark","c64-basic":"dark","flat-2013":"light","glassmorphism":"light","neumorphism":"light","blueprint-cad":"dark","claymorphism":"light","brutalist-web":"light","swiss-intl":"light","bauhaus":"light","pop-art-lichtenstein":"light","op-art":"dark","hypnagogic":"light","monochrome-zen":"light","default-browser":"light","wireframe-sketch":"light","glitch-databend":"dark","y2k-chrome":"light","duotone-poster":"light","grid-paper":"light","maximalist-banners":"light"};
   var script = document.currentScript;
+  var runtime = script && script.getAttribute('data-retro-runtime');
   var retro = !!script && script.getAttribute('data-retro-themes') === 'true';
+  if (runtime === 'false') retro = false;
   var id = 'dark';
   try {
     var saved = localStorage.getItem('atlas-theme');
     if (Object.prototype.hasOwnProperty.call(modes, saved)) id = saved;
-    var cached = JSON.parse(localStorage.getItem('chatui-config-cache') || 'null');
-    var runtime = script && script.getAttribute('data-retro-runtime');
-    if (runtime === 'false') retro = false;
-    else if (runtime !== 'true' && cached && cached.features &&
-             cached.features.retro_themes === false) retro = false;
   } catch { /* Storage can be unavailable in privacy modes. */ }
+  if (retro && runtime !== 'true') {
+    try {
+      var cached = JSON.parse(localStorage.getItem('chatui-config-cache') || 'null');
+      if (cached && cached.features && cached.features.retro_themes === false) retro = false;
+    } catch { /* Invalid or inaccessible cache cannot override the stamped flag. */ }
+  }
   if (!retro && id !== 'dark' && id !== 'light') id = modes[id];
   document.documentElement.setAttribute('data-theme', modes[id]);
   document.documentElement.setAttribute('data-atlas-theme', id);

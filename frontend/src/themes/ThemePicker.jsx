@@ -9,6 +9,7 @@ export default function ThemePicker() {
   const { theme, setTheme, themeDefinition } = useTheme()
   const [filter, setFilter] = useState('')
   const [category, setCategory] = useState('all')
+  // Keep known favorites even when this build hides retro IDs from THEME_REGISTRY.
   const [favorites, setFavorites] = useState(readThemeFavorites)
   const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [focusSelected, setFocusSelected] = useState(false)
