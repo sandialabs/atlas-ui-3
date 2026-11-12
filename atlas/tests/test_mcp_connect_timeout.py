@@ -24,7 +24,7 @@ def manager_for(server_name):
 def never_connecting_client():
     client = AsyncMock()
 
-    async def hang():
+    async def hang(*_args):
         await asyncio.Event().wait()
 
     client.__aenter__.side_effect = hang
@@ -51,7 +51,8 @@ async def test_connected_client_enters_and_exits_once():
         client.__aexit__.assert_not_awaited()
 
     client.__aenter__.assert_awaited_once()
-    client.__aexit__.assert_awaited_once_with(None, None, None)
+    client.__aexit__.assert_awaited_once()
+    assert client.__aexit__.await_args.args[-3:] == (None, None, None)
 
 
 @pytest.mark.asyncio
@@ -63,7 +64,7 @@ async def test_connected_client_exits_and_propagates_block_errors():
             raise ValueError("boom")
 
     client.__aexit__.assert_awaited_once()
-    assert client.__aexit__.await_args.args[0] is ValueError
+    assert ValueError in client.__aexit__.await_args.args
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@ before it served a single request.
 gets a ``TimeoutError`` instead of an indefinite wait.
 """
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncIterator
 
 
@@ -29,16 +29,12 @@ async def connected_client(client: Any, timeout: float) -> AsyncIterator[Any]:
     Raises:
         TimeoutError: the client did not connect in time.
     """
-    try:
-        await asyncio.wait_for(client.__aenter__(), timeout=timeout)
-    except asyncio.TimeoutError:
-        raise TimeoutError(
-            f"Timeout connecting to MCP server: no session after {timeout} seconds"
-        ) from None
-    try:
+    async with AsyncExitStack() as stack:
+        try:
+            # The stack registers the client's exit only once it has entered.
+            await asyncio.wait_for(stack.enter_async_context(client), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"Timeout connecting to MCP server: no session after {timeout} seconds"
+            ) from None
         yield client
-    except BaseException as exc:
-        if not await client.__aexit__(type(exc), exc, exc.__traceback__):
-            raise
-    else:
-        await client.__aexit__(None, None, None)
