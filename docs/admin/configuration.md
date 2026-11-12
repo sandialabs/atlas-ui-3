@@ -66,7 +66,7 @@ MCP_DISCOVERY_TIMEOUT=30
 MCP_CALL_TIMEOUT=120
 ```
 
-`MCP_DISCOVERY_TIMEOUT` also bounds the connection attempt itself during startup discovery. A server that never completes the MCP handshake (for example a stdio process that exits or stays silent after it is spawned) is recorded as failed with `Timeout connecting to MCP server` after that many seconds, and startup continues with the other servers instead of waiting indefinitely.
+`MCP_DISCOVERY_TIMEOUT` also bounds the connection attempt itself during startup discovery. A server that never completes the MCP handshake (for example a stdio process that exits or stays silent after it is spawned) is recorded as failed with `Timeout connecting to MCP server` after that many seconds, and startup continues with the other servers instead of waiting indefinitely. Tools and prompts are discovered in two passes and servers are handled in parallel within each pass, so one server that never connects delays startup by about twice `MCP_DISCOVERY_TIMEOUT`. The upper bound is four times that value, for a server that connects just inside the deadline and then never answers `list_tools` / `list_prompts`.
 
 When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background task that periodically retries connections for servers that previously failed to initialize.
 

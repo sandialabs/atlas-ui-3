@@ -248,6 +248,10 @@ class DiscoveryMixin:
                     logger.error("    → SSL/HTTPS error detected")
                     logger.error("    → On Windows, ensure SSL certificates are properly configured")
                     logger.error("    → Try setting REQUESTS_CA_BUNDLE or SSL_CERT_FILE environment variables")
+            elif "timeout connecting" in error_lower:
+                logger.error(f"DEBUG: Timeout connecting to '{safe_server_name}' for tool discovery")
+                logger.error("    → Server did not complete the MCP handshake within MCP_DISCOVERY_TIMEOUT")
+                logger.error("    → For a stdio server, check that its command starts and stays running")
             elif "timeout" in error_lower:
                 logger.error(f"DEBUG: Timeout during tool discovery for '{safe_server_name}'")
                 logger.error("    → Server is slow to respond to list_tools() request")
@@ -393,6 +397,9 @@ class DiscoveryMixin:
                 if "ssl" in error_lower or "certificate" in error_lower or "https" in error_lower:
                     logger.error("    → SSL/HTTPS error detected")
                     logger.error("    → On Windows, ensure SSL certificates are properly configured")
+            elif "timeout connecting" in error_lower:
+                logger.error(f"DEBUG: Timeout connecting to '{safe_server_name}' for prompt discovery")
+                logger.error("    → Server did not complete the MCP handshake within MCP_DISCOVERY_TIMEOUT")
             elif "timeout" in error_lower:
                 logger.error(f"DEBUG: Timeout during prompt discovery for '{safe_server_name}'")
                 logger.error("    → Server is slow to respond to list_prompts() request")
