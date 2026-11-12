@@ -145,13 +145,13 @@ const FilesPage = () => {
   const getSourceBadge = (source, sourceType) => {
     if (source === 'tool') {
       return (
-        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+        <span className="px-2 py-1 text-xs rounded-full atlas-notice-info">
           Generated{sourceType ? ` by ${sourceType}` : ''}
         </span>
       )
     }
     return (
-      <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">
+      <span className="px-2 py-1 text-xs rounded-full atlas-notice-success">
         Uploaded
       </span>
     )
@@ -192,23 +192,23 @@ const FilesPage = () => {
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-full">
-        <div className="text-lg text-red-600">Error: {error}</div>
+        <div className="text-lg atlas-fg-danger">Error: {error}</div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-full bg-gray-50">
+    <div className="min-h-full bg-gray-900">
       {/* Header */}
-      <div className="bg-white shadow">
+      <div className="bg-gray-800 shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-4">
-              <Link to="/" className="flex items-center space-x-2 text-gray-600 hover:text-gray-900">
+              <Link to="/" className="flex items-center space-x-2 text-gray-300 hover:text-gray-100">
                 <ArrowLeft className="w-5 h-5" />
                 <span>Back to Chat</span>
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900">File Manager</h1>
+              <h1 className="text-2xl font-bold text-gray-100">File Manager</h1>
             </div>
           </div>
         </div>
@@ -217,26 +217,26 @@ const FilesPage = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm font-medium text-gray-500">Total Files</div>
-            <div className="text-2xl font-bold text-gray-900">{stats.total_files || 0}</div>
+          <div className="bg-gray-800 rounded-lg shadow p-6">
+            <div className="text-sm font-medium text-gray-400">Total Files</div>
+            <div className="text-2xl font-bold text-gray-100">{stats.total_files || 0}</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm font-medium text-gray-500">Total Size</div>
-            <div className="text-2xl font-bold text-gray-900">{formatFileSize(stats.total_size || 0)}</div>
+          <div className="bg-gray-800 rounded-lg shadow p-6">
+            <div className="text-sm font-medium text-gray-400">Total Size</div>
+            <div className="text-2xl font-bold text-gray-100">{formatFileSize(stats.total_size || 0)}</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm font-medium text-gray-500">Uploaded</div>
-            <div className="text-2xl font-bold text-gray-900">{stats.upload_count || 0}</div>
+          <div className="bg-gray-800 rounded-lg shadow p-6">
+            <div className="text-sm font-medium text-gray-400">Uploaded</div>
+            <div className="text-2xl font-bold text-gray-100">{stats.upload_count || 0}</div>
           </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="text-sm font-medium text-gray-500">Generated</div>
-            <div className="text-2xl font-bold text-gray-900">{stats.generated_count || 0}</div>
+          <div className="bg-gray-800 rounded-lg shadow p-6">
+            <div className="text-sm font-medium text-gray-400">Generated</div>
+            <div className="text-2xl font-bold text-gray-100">{stats.generated_count || 0}</div>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-lg shadow mb-6 p-6">
+        <div className="bg-gray-800 rounded-lg shadow mb-6 p-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <div className="relative">
@@ -244,14 +244,14 @@ const FilesPage = () => {
                 <input
                   type="text"
                   placeholder="Search files..."
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-10 pr-4 py-2 bg-gray-700 text-gray-100 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
             </div>
             <select
-              className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="px-3 py-2 bg-gray-700 text-gray-100 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
             >
@@ -263,7 +263,7 @@ const FilesPage = () => {
               <option value="other">Other</option>
             </select>
             <select
-              className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="px-3 py-2 bg-gray-700 text-gray-100 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={selectedSource}
               onChange={(e) => setSelectedSource(e.target.value)}
             >
@@ -275,19 +275,19 @@ const FilesPage = () => {
         </div>
 
         {/* Files List */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">
+        <div className="bg-gray-800 rounded-lg shadow">
+          <div className="px-6 py-4 border-b border-gray-700">
+            <h2 className="text-lg font-medium text-gray-100">
               Files ({filteredFiles.length})
             </h2>
           </div>
           
-          <div className="divide-y divide-gray-200">
+          <div className="divide-y divide-gray-700">
             {filteredFiles.length === 0 ? (
               <div className="px-6 py-12 text-center">
                 <File className="mx-auto h-12 w-12 text-gray-400" />
-                <h3 className="mt-4 text-sm font-medium text-gray-900">No files found</h3>
-                <p className="mt-2 text-sm text-gray-500">
+                <h3 className="mt-4 text-sm font-medium text-gray-100">No files found</h3>
+                <p className="mt-2 text-sm text-gray-400">
                   {searchQuery || selectedCategory !== 'all' || selectedSource !== 'all'
                     ? 'Try adjusting your filters'
                     : 'Upload some files to get started'}
@@ -295,19 +295,19 @@ const FilesPage = () => {
               </div>
             ) : (
               filteredFiles.map((file) => (
-                <div key={file.key} className="px-6 py-4 hover:bg-gray-50">
+                <div key={file.key} className="px-6 py-4 hover:bg-gray-700">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
                       <div className="flex-shrink-0">
                         {getFileIcon(file.type)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
+                        <p className="text-sm font-medium text-gray-100 truncate">
                           {file.filename}
                         </p>
                         <div className="flex items-center space-x-2 mt-1">
                           {getSourceBadge(file.source, file.source_tool)}
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-gray-400">
                             {formatFileSize(file.size)} • {formatDate(file.last_modified)}
                           </span>
                         </div>
@@ -317,14 +317,14 @@ const FilesPage = () => {
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => copyFileReference(file.filename)}
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                        className="p-2 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded-md transition-colors"
                         title="Copy @file reference"
                       >
                         <Tag className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => downloadFile(file.key, file.filename)}
-                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors"
+                        className="p-2 text-gray-400 hover:text-green-400 hover:bg-gray-700 rounded-md transition-colors"
                         title="Download file"
                       >
                         <Download className="w-4 h-4" />
@@ -335,7 +335,7 @@ const FilesPage = () => {
                             deleteFile(file.key)
                           }
                         }}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded-md transition-colors"
                         title="Delete file"
                       >
                         <Trash2 className="w-4 h-4" />

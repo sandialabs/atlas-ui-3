@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>26 Risograph Print</title>
+<style>
+  :root {
+    --paper: #f3efe4;
+    --paper-dark: #e6dfcb;
+    --fluoro-pink: #ff4fa5;
+    --fluoro-pink-light: #ffb8db;
+    --riso-blue: #0078b4;
+    --riso-blue-light: #6ca8d4;
+    --riso-yellow: #f6d800;
+    --riso-green: #00a03c;
+    --ink: #1a1a1a;
+    --font: "Helvetica Neue", "Akzidenz-Grotesk", "Arial", sans-serif;
+    --font-serif: "Times New Roman", "Garamond", serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    background-image:
+      radial-gradient(circle, rgba(0,0,0,0.04) 0.5px, transparent 1px),
+      radial-gradient(circle, rgba(0,0,0,0.03) 0.5px, transparent 1px);
+    background-size: 3px 3px, 5px 5px;
+    background-position: 0 0, 1px 2px;
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 60px;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(0,0,0,0.06) 0.6px, transparent 1.2px);
+    background-size: 2px 2px;
+    pointer-events: none;
+    mix-blend-mode: multiply;
+    z-index: 100;
+    opacity: 0.6;
+  }
+  .page { max-width: 780px; margin: 0 auto; position: relative; }
+  .masthead {
+    border-top: 8px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    padding: 14px 0 8px;
+    margin-bottom: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  h1 {
+    font-family: var(--font);
+    font-size: 96px;
+    font-weight: 900;
+    line-height: 0.85;
+    letter-spacing: -4px;
+    margin-bottom: 14px;
+    text-transform: uppercase;
+    position: relative;
+  }
+  h1 .pink {
+    color: var(--fluoro-pink);
+    position: relative;
+    display: inline-block;
+  }
+  h1 .pink::before {
+    content: attr(data-text);
+    position: absolute;
+    top: 3px; left: 3px;
+    color: var(--riso-blue);
+    mix-blend-mode: multiply;
+    opacity: 0.7;
+    z-index: -1;
+  }
+  h1 .blue {
+    color: var(--riso-blue);
+    position: relative;
+    display: inline-block;
+  }
+  h1 .blue::before {
+    content: attr(data-text);
+    position: absolute;
+    top: -3px; left: -3px;
+    color: var(--fluoro-pink);
+    mix-blend-mode: multiply;
+    opacity: 0.7;
+    z-index: -1;
+  }
+  .subhead {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 22px;
+    color: var(--ink);
+    margin-bottom: 26px;
+    max-width: 560px;
+    line-height: 1.3;
+  }
+  h2 {
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin: 32px 0 10px;
+    padding: 3px 8px;
+    background: var(--fluoro-pink);
+    color: var(--paper);
+    display: inline-block;
+    transform: skewX(-6deg);
+  }
+  h2.blue { background: var(--riso-blue); }
+  h2.yellow { background: var(--riso-yellow); color: var(--ink); }
+  p { margin-bottom: 10px; max-width: 560px; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 14px 0;
+  }
+  .poster {
+    background: var(--fluoro-pink);
+    background-image:
+      radial-gradient(circle at 30% 30%, var(--riso-blue) 0 60px, transparent 61px),
+      radial-gradient(circle at 75% 70%, var(--riso-yellow) 0 45px, transparent 46px),
+      repeating-linear-gradient(45deg, transparent 0 6px, rgba(26,26,26,0.15) 6px 7px);
+    mix-blend-mode: multiply;
+    aspect-ratio: 3 / 4;
+    padding: 20px;
+    color: var(--ink);
+    position: relative;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  .poster .big {
+    font-size: 48px;
+    line-height: 0.9;
+    letter-spacing: -2px;
+    margin-top: 100px;
+  }
+  .poster .meta {
+    position: absolute;
+    bottom: 20px;
+    font-size: 11px;
+    letter-spacing: 2px;
+  }
+  .poster-2 {
+    background: var(--riso-blue);
+    background-image:
+      radial-gradient(circle at 60% 40%, var(--fluoro-pink) 0 80px, transparent 81px),
+      repeating-linear-gradient(to right, transparent 0 3px, rgba(0,0,0,0.1) 3px 6px);
+    mix-blend-mode: multiply;
+    aspect-ratio: 3 / 4;
+    padding: 20px;
+    color: var(--paper);
+    position: relative;
+  }
+  .poster-2 .big {
+    font-size: 56px;
+    line-height: 0.9;
+    letter-spacing: -2px;
+    font-weight: 900;
+    text-transform: uppercase;
+    margin-top: 120px;
+  }
+  .poster-2 .meta {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .btn {
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    background: var(--fluoro-pink);
+    color: var(--ink);
+    border: 2px solid var(--ink);
+    padding: 10px 22px;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 var(--riso-blue);
+    position: relative;
+  }
+  .btn:hover { transform: translate(-2px,-2px); box-shadow: 6px 6px 0 var(--riso-blue); }
+  .btn-blue { background: var(--riso-blue); color: var(--paper); box-shadow: 4px 4px 0 var(--fluoro-pink); }
+  .btn-blue:hover { box-shadow: 6px 6px 0 var(--fluoro-pink); }
+  .btn-yellow { background: var(--riso-yellow); box-shadow: 4px 4px 0 var(--ink); }
+  .btn-outline { background: var(--paper); box-shadow: 4px 4px 0 var(--ink); }
+  .input {
+    font-family: var(--font);
+    font-size: 15px;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    padding: 10px 14px;
+    width: 340px;
+    font-weight: 500;
+    box-shadow: 4px 4px 0 var(--fluoro-pink);
+  }
+  .input:focus { outline: none; box-shadow: 4px 4px 0 var(--riso-blue); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+  .swatch {
+    width: 68px; height: 68px;
+    border: 2px solid var(--ink);
+    display: inline-block;
+    box-shadow: 4px 4px 0 var(--ink);
+    mix-blend-mode: multiply;
+  }
+  .misprint {
+    position: relative;
+    display: inline-block;
+    font-weight: 900;
+    font-size: 36px;
+    color: var(--ink);
+    text-transform: uppercase;
+  }
+  .misprint::before {
+    content: attr(data-text);
+    position: absolute;
+    top: 2px; left: -4px;
+    color: var(--fluoro-pink);
+    z-index: -1;
+    mix-blend-mode: multiply;
+  }
+  .misprint::after {
+    content: attr(data-text);
+    position: absolute;
+    top: -2px; left: 3px;
+    color: var(--riso-blue);
+    z-index: -1;
+    mix-blend-mode: multiply;
+  }
+  .dots-band {
+    height: 24px;
+    background-image: radial-gradient(circle, var(--riso-blue) 4px, transparent 5px);
+    background-size: 12px 12px;
+    margin: 20px 0;
+    mix-blend-mode: multiply;
+  }
+  .zine-meta {
+    font-family: var(--font-serif);
+    font-size: 12px;
+    color: var(--ink);
+    margin-top: 30px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ink);
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="masthead">
+    <span>ISSUE 03 · SPRING</span>
+    <span>Printed on RISO SF5230 · 2 passes</span>
+    <span>ED. 200</span>
+  </div>
+
+  <h1><span class="pink" data-text="MIS">MIS</span><span class="blue" data-text="PRINT">PRINT</span></h1>
+  <div class="subhead">Two-color risograph. Fluoro pink meets federal blue. Registration drifts on purpose. Halftone grain forever.</div>
+
+  <div class="grid-2">
+    <div class="poster">
+      <div class="big">Soup<br>Night</div>
+      <div class="meta">THU 7PM · BYO BOWL</div>
+    </div>
+    <div class="poster-2">
+      <div class="meta">VOL 12</div>
+      <div class="big">Zine<br>Fair<br>'24</div>
+    </div>
+  </div>
+
+  <h2>Input</h2>
+  <div class="row"><input class="input" value="your-email@riso.zine"></div>
+
+  <h2 class="blue">Controls</h2>
+  <div class="row">
+    <button class="btn">Subscribe</button>
+    <button class="btn btn-blue">Print Run</button>
+    <button class="btn btn-yellow">Archive</button>
+    <button class="btn btn-outline">Dismiss</button>
+  </div>
+
+  <div class="dots-band"></div>
+
+  <h2 class="yellow">Typography</h2>
+  <p>Headlines huge. Grain everywhere. Misregister is a feature.</p>
+  <div class="misprint" data-text="OFF REGISTER">OFF REGISTER</div>
+
+  <h2>Palette (multiply)</h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--fluoro-pink)"></span>
+    <span class="swatch" style="background:var(--riso-blue)"></span>
+    <span class="swatch" style="background:var(--riso-yellow)"></span>
+    <span class="swatch" style="background:var(--riso-green)"></span>
+    <span class="swatch" style="background:var(--paper)"></span>
+    <span class="swatch" style="background:var(--ink)"></span>
+  </div>
+
+  <div class="zine-meta">
+    <span>Printed in Brooklyn</span>
+    <span>© The misprint collective</span>
+    <span>No. 003 / 200</span>
+  </div>
+</div>
+</body>
+</html>

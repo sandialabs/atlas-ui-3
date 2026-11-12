@@ -1,0 +1,14 @@
+/* Glitch / Databend — design tokens
+   Extracted from styles/49-glitch-databend/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0a0a0a;
+  --ink: #f0f0f0;
+  --red: #ff004d;
+  --cyan: #00f4ff;
+  --green: #00ff8c;
+  --yellow: #ffe600;
+  --magenta: #ff00ae;
+  --font: "Space Mono", "JetBrains Mono", "IBM Plex Mono", "Courier New", monospace;
+  --font-heading: "Space Grotesk", "Helvetica Neue", Impact, sans-serif;
+}

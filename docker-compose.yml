@@ -122,6 +122,8 @@ services:
       # External agent-runs REST API (#1105); also set AGENT_RUNS_API_KEY to enable
       - FEATURE_AGENT_RUNS_API_ENABLED=false
       - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
+      # Retro Design System theme gallery (#1119); bundle needs VITE_FEATURE_RETRO_THEMES
+      - FEATURE_RETRO_THEMES_ENABLED=false
       - FEATURE_FINETUNE_CAPTURE_ENABLED=false
       
       # Tool approval configuration

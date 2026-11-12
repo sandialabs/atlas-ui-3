@@ -92,9 +92,9 @@ const FeedbackButton = () => {
 
   const getRatingColor = (rating) => {
     switch (rating) {
-      case -1: return 'text-red-400 bg-red-900/20 border-red-500'
-      case 0: return 'text-yellow-400 bg-yellow-900/20 border-yellow-500'
-      case 1: return 'text-green-400 bg-green-900/20 border-green-500'
+      case -1: return 'atlas-notice-danger'
+      case 0: return 'atlas-notice-warning'
+      case 1: return 'atlas-notice-success'
       default: return 'text-gray-400 bg-gray-700 border-gray-600'
     }
   }
@@ -257,4 +257,4 @@ const FeedbackButton = () => {
   )
 }
 
-export default FeedbackButton
+export default FeedbackButton

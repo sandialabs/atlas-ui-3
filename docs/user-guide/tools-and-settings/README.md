@@ -20,7 +20,7 @@ picker's tool-support icon -- so the header button no longer reads as
 | Tools & Integrations | The former tools panel: installed MCP servers, tool and prompt selection, marketplace link | `FEATURE_TOOLS_ENABLED` |
 | Data Sources | Data sources available to search | `FEATURE_RAG_ENABLED` |
 | Prompts | Your custom prompt library ([details](../custom-prompts/README.md)) | `FEATURE_CUSTOM_PROMPTS_ENABLED` |
-| General | LLM temperature, agent iterations, tool approval, compact messages, debug, Globus, and the light/dark toggle | always |
+| General | LLM temperature, agent iterations, tool approval, compact messages, debug, Globus, and the theme gallery | always |
 | User Info | Reserved stub (issue #595) | always |
 | Admin | The most-used admin controls, plus a link to the full dashboard | user is in an admin group |
 
@@ -36,9 +36,48 @@ selections still raises the save/discard prompt.
 ## Light and dark mode
 
 The theme toggle moved off the top bar into **General → Appearance**. The
-choice is still saved per browser.
+choice is still saved per browser. The Light/Dark shortcut replaces a selected
+retro preset with the opposite classic Light or Dark theme; it does not keep
+the retro preset and only change its base mode.
 
 ![General tab with the Appearance toggle](screenshots/836-03-general-tab.png)
+
+## Theme gallery
+
+When your administrator has turned retro themes on, **General** also shows a
+**Theme gallery** below Appearance with the 53 Retro Design System themes plus
+the classic Light and Dark. Picking a theme applies it immediately and it is
+saved per browser.
+
+- **Find a theme** searches names, eras, and tags (for example `windows`,
+  `terminal`, or `1995`). **Design category** narrows the list to one era.
+- **Favorite current theme** stars the theme you are using; **Remove current
+  from favorites** un-stars it. Favorites are saved per browser.
+- **Favorites only (N)** limits the gallery to your starred themes.
+- When a search, category, or the favorites filter hides the theme you are
+  using, a **Show selected theme** button appears. It clears the filters and
+  moves keyboard focus to that theme's radio button. **Clear theme filter**
+  resets the search, category, and favorites filter without moving focus.
+- **Showing X of Y themes** under the filters is announced to screen readers
+  as the list changes.
+
+Every theme keeps message, tool, approval, and log text at WCAG AA contrast
+(4.5:1), and classification and security badges look the same in every theme.
+
+### When the gallery is missing
+
+Retro themes are controlled by two administrator flags (see
+[Configuration](../../admin/configuration.md#retro-themes)):
+
+- `VITE_FEATURE_RETRO_THEMES` (build time, default on) decides whether the
+  catalog is compiled into the app at all.
+- `FEATURE_RETRO_THEMES_ENABLED` (run time, default off) decides whether it is
+  offered.
+
+When either is off, General shows only the Light/Dark toggle. If you had picked
+a retro theme earlier, Atlas shows its base Light or Dark mode instead, from the
+first paint, and keeps your choice: it comes back if the administrator turns
+the themes on again.
 
 ## Agent mode
 

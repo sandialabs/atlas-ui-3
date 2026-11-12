@@ -14,6 +14,8 @@ import { useFocusTrap } from '../utils/focusTrap'
 import { describeAutoApprove } from '../utils/toolApproval'
 import { FOCUS_RING } from '../utils/focusRing'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
+import ThemePicker from '../themes/ThemePicker'
+import { RetroButton, RetroWindow } from '../themes/RetroControls'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -53,7 +55,8 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
   // config fetch), but unmounting it on a tab switch throws away the save-result
   // notifications its cards raise.
   const [adminTabVisited, setAdminTabVisited] = useState(false)
-  const { theme, toggleTheme } = useTheme()
+  const { toggleTheme, themeDefinition, retroThemesAvailable } = useTheme()
+  const darkBaseTheme = themeDefinition.mode === 'dark'
   // Default settings
   const defaultSettings = {
     llmTemperature: 0.7,
@@ -392,7 +395,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      className="atlas-theme-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
       onClick={requestClose}
     >
       <div
@@ -400,18 +403,23 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
         role="dialog"
         aria-modal="true"
         aria-label="Tools and Settings"
-        className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full h-[85vh] mx-4 flex flex-col"
+        className="bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full h-[85vh] mx-4 flex flex-col atlas-theme-chrome"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 flex-shrink-0 atlas-theme-titlebar">
+          <span className="atlas-retro-traffic" aria-hidden="true">
+            <span className="atlas-retro-traffic-dot atlas-retro-traffic-close" />
+            <span className="atlas-retro-traffic-dot atlas-retro-traffic-min" />
+            <span className="atlas-retro-traffic-dot atlas-retro-traffic-max" />
+          </span>
           <h2 className="text-xl font-semibold text-gray-100 flex items-center gap-2">
             <ToolsSettingsIcon className="text-blue-400" />
             Tools and Settings
           </h2>
           <button
             onClick={requestClose}
-            className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
+            className="atlas-theme-close p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors"
             aria-label="Close tools and settings"
           >
             <X className="w-6 h-6" />
@@ -553,24 +561,26 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
           className="flex-1 overflow-y-auto custom-scrollbar min-h-0 p-6 space-y-6"
         >
           {/* Appearance -- moved off the top bar in issue #836 */}
-          <div className="bg-gray-700 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-50 font-medium">Appearance</label>
-              <button
-                onClick={toggleTheme}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-100 transition-colors text-sm font-medium"
-                title={reduceHelpText ? undefined : (theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode')}
-              >
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                {theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              </button>
-            </div>
+          <RetroWindow title="Appearance">
+            <RetroButton
+              onClick={toggleTheme}
+              className="inline-flex items-center gap-2 text-sm"
+              title={reduceHelpText ? undefined : (darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode')}
+            >
+              {darkBaseTheme ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {darkBaseTheme ? 'Switch to light mode' : 'Switch to dark mode'}
+            </RetroButton>
             {!reduceHelpText && (
-              <p className="text-sm text-gray-400">
-                Currently using {theme === 'dark' ? 'dark' : 'light'} mode.
+              <p className="mt-2 text-sm">
+                Currently using {themeDefinition.name} theme.
               </p>
             )}
-          </div>
+          </RetroWindow>
+
+          {/* The retro gallery is gated twice (issue #1119): the
+              VITE_FEATURE_RETRO_THEMES build flag and the run-time
+              FEATURE_RETRO_THEMES_ENABLED setting. Light/Dark stay above. */}
+          {retroThemesAvailable && <ThemePicker />}
 
           {/* LLM Temperature Setting */}
           <div className="space-y-3">
@@ -845,7 +855,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               </p>
 
               {globusError && (
-                <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm mb-3">
+                <div className="p-3 atlas-notice-danger border rounded-lg text-sm mb-3">
                   {globusError}
                 </div>
               )}
@@ -883,7 +893,7 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
                     <button
                       onClick={globusLogout}
                       disabled={globusLoading}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition-colors text-sm font-medium"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-700 hover:bg-red-800 text-white transition-colors text-sm font-medium"
                     >
                       <LogOut className="w-4 h-4" />
                       Disconnect
@@ -913,33 +923,27 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
 
         {/* Footer Actions (General settings only) */}
         {activeTab === 'general' && (
-        <div className="flex items-center justify-between p-6 border-t border-gray-700 flex-shrink-0">
-          <button
+        <div className="atlas-theme-footer flex items-center justify-between p-6 border-t border-gray-700 flex-shrink-0">
+          <RetroButton
             onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+            className="flex items-center gap-2"
           >
             <RotateCcw className="w-4 h-4" />
             Reset to Defaults
-          </button>
+          </RetroButton>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleCancel}
-              className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
-            >
+            <RetroButton onClick={handleCancel}>
               Cancel
-            </button>
-            <button
+            </RetroButton>
+            <RetroButton
+              variant="primary"
               onClick={handleSave}
               disabled={!hasChanges}
-              className={`px-4 py-2 rounded-lg transition-colors font-medium ${
-                hasChanges
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                  : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-              }`}
+              title={hasChanges ? undefined : 'No unsaved changes'}
             >
               Save Changes
-            </button>
+            </RetroButton>
           </div>
         </div>
         )}

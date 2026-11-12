@@ -1,0 +1,14 @@
+/* NeXTSTEP — design tokens
+   Extracted from styles/06-nextstep/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #555561;
+  --chrome: #a8a8b0;
+  --chrome-dark: #606068;
+  --chrome-darker: #2c2c30;
+  --chrome-light: #d0d0d4;
+  --chrome-lighter: #f0f0f4;
+  --accent: #3c3c40;
+  --ink: #000;
+  --font: "Helvetica Neue", "Helvetica", "Liberation Sans", sans-serif;
+}

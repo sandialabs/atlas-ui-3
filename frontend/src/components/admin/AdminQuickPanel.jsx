@@ -61,7 +61,7 @@ const AdminQuickPanel = ({ isOpen, onNavigate }) => {
         </div>
         <button
           onClick={goToDashboard}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors text-sm font-medium flex-shrink-0"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors text-sm font-medium flex-shrink-0 text-white"
         >
           <ExternalLink className="w-4 h-4" />
           Full Admin Page

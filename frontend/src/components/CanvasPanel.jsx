@@ -373,7 +373,7 @@ const CanvasPanel = ({
       if (fileError) {
         return (
           <div className="p-4">
-            <div className="text-red-400 text-center">
+            <div className="atlas-fg-danger text-center">
               Error loading file: {fileError}
             </div>
           </div>
@@ -480,7 +480,7 @@ const CanvasPanel = ({
     if (customUIContent && customUIContent.type === 'error') {
       return (
         <div className="p-4">
-          <div className="text-red-400 text-center">
+          <div className="atlas-fg-danger text-center">
             {customUIContent.content}
           </div>
         </div>
@@ -588,9 +588,9 @@ const CanvasPanel = ({
               disabled={!canCopyCanvasContent()}
               className={`p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 copyState === 'copied'
-                  ? 'bg-green-600 hover:bg-green-700'
+                  ? 'bg-green-700 hover:bg-green-800 text-white'
                   : copyState === 'failed'
-                    ? 'bg-red-600 hover:bg-red-700'
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
                     : 'bg-gray-700 hover:bg-gray-600'
               }`}
               title={copyButtonLabel}

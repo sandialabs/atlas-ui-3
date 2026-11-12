@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>28 NetHack ASCII</title>
+<style>
+  :root {
+    --bg: #000000;
+    --wall: #a0a0a0;
+    --floor: #707070;
+    --player: #ffff00;
+    --monster-red: #ff4040;
+    --monster-green: #40ff40;
+    --monster-blue: #6080ff;
+    --monster-magenta: #ff40ff;
+    --item-cyan: #40e4e4;
+    --gold: #ffd700;
+    --door: #a05020;
+    --stairs: #c0c0c0;
+    --ink: #e4e4e4;
+    --dim: #606060;
+    --font: "Px437 IBM VGA", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 18px;
+    padding: 30px;
+    min-height: 100vh;
+    line-height: 1.1;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent 0 2px, rgba(255,255,255,0.03) 2px 3px);
+    pointer-events: none;
+  }
+  .game {
+    max-width: 900px;
+    margin: 0 auto;
+    background: var(--bg);
+    padding: 10px;
+    border: 1px solid #222;
+  }
+  .topline {
+    color: var(--ink);
+    margin-bottom: 6px;
+    min-height: 22px;
+  }
+  .msg { color: var(--ink); }
+  .msg-more { color: var(--monster-green); }
+  pre {
+    font-family: var(--font);
+    font-size: 20px;
+    line-height: 1.1;
+    white-space: pre;
+    letter-spacing: 1px;
+  }
+  .wall { color: var(--wall); }
+  .floor { color: var(--floor); }
+  .player { color: var(--player); font-weight: bold; }
+  .player-blink {
+    display: inline-block;
+    color: var(--player);
+    font-weight: bold;
+    animation: blink 0.8s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0.5; } }
+  .mr { color: var(--monster-red); }
+  .mg { color: var(--monster-green); }
+  .mb { color: var(--monster-blue); }
+  .mm { color: var(--monster-magenta); }
+  .item { color: var(--item-cyan); }
+  .gold { color: var(--gold); }
+  .door { color: var(--door); }
+  .stairs { color: var(--stairs); font-weight: bold; }
+  .dim { color: var(--dim); }
+  .status {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--dim);
+    color: var(--ink);
+    font-size: 17px;
+  }
+  .status .label { color: var(--monster-green); }
+  .status .val { color: var(--ink); }
+  .status .hp-low { color: var(--monster-red); font-weight: bold; }
+  .divider { color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="game">
+  <div class="topline">
+    <span class="msg">You see here a tengu corpse. </span><span class="msg-more">--More--</span>
+  </div>
+<pre>
+<span class="wall">-------------</span>                             <span class="wall">------------</span>
+<span class="wall">|</span><span class="floor">............</span><span class="wall">|</span>           <span class="wall">----</span>            <span class="wall">|</span><span class="floor">..........</span><span class="wall">|</span>
+<span class="wall">|</span><span class="floor">..</span><span class="item">(</span><span class="floor">.........</span><span class="wall">|</span>           <span class="wall">|</span><span class="floor">..</span><span class="wall">|</span>            <span class="wall">|</span><span class="floor">.</span><span class="mr">D</span><span class="floor">........</span><span class="wall">|</span>
+<span class="wall">|</span><span class="floor">............</span><span class="door">+</span><span class="dim">---</span><span class="floor">......</span><span class="dim">----</span><span class="door">+</span><span class="floor">..</span><span class="wall">|</span>            <span class="wall">|</span><span class="floor">..........</span><span class="wall">|</span>
+<span class="wall">|</span><span class="floor">...</span><span class="mg">F</span><span class="floor">........</span><span class="wall">|</span>   <span class="dim">............</span>   <span class="wall">|</span>            <span class="wall">|</span><span class="floor">...</span><span class="gold">$</span><span class="floor">......</span><span class="wall">|</span>
+<span class="wall">|</span><span class="floor">...........</span><span class="wall">-</span>    <span class="dim">............</span>   <span class="wall">|</span>            <span class="wall">|</span><span class="floor">..........</span><span class="wall">|</span>
+<span class="wall">-------------</span>     <span class="dim">............</span>   <span class="wall">-</span><span class="door">+</span><span class="dim">----</span><span class="wall">---</span>    <span class="wall">|</span><span class="floor">...</span><span class="item">[</span><span class="floor">......</span><span class="wall">|</span>
+                    <span class="dim">............</span>    <span class="floor">............</span>    <span class="wall">|</span><span class="floor">..........</span><span class="wall">|</span>
+     <span class="wall">----------</span>     <span class="dim">-----</span><span class="door">+</span><span class="dim">----</span><span class="wall">-</span>      <span class="floor">..</span><span class="player-blink">@</span><span class="floor">..</span><span class="mb">K</span><span class="floor">.....</span><span class="wall">-----</span>----
+     <span class="wall">|</span><span class="floor">........</span><span class="wall">|</span>                         <span class="floor">............</span>
+     <span class="wall">|</span><span class="floor">..</span><span class="stairs">&gt;</span><span class="floor">.....</span><span class="wall">|</span>     <span class="wall">----------</span>          <span class="floor">............</span>
+     <span class="wall">|</span><span class="floor">........</span><span class="wall">|</span>     <span class="wall">|</span><span class="floor">.</span><span class="mm">N</span><span class="floor">......</span><span class="wall">|</span>          <span class="wall">------</span><span class="door">+</span><span class="wall">-----</span>
+     <span class="wall">|</span><span class="floor">..</span><span class="item">!</span><span class="floor">.....</span><span class="wall">|</span>     <span class="wall">|</span><span class="floor">........</span><span class="wall">|</span>
+     <span class="wall">|</span><span class="floor">........</span><span class="door">+</span><span class="dim">---------</span><span class="door">+</span><span class="floor">........</span><span class="wall">|</span>
+     <span class="wall">----------</span>         <span class="wall">|</span><span class="floor">...</span><span class="item">?</span><span class="floor">....</span><span class="wall">|</span>
+                         <span class="wall">|</span><span class="floor">........</span><span class="wall">|</span>
+                         <span class="wall">----------</span>
+</pre>
+
+<div class="status">
+<span class="val">Caveperson the Plunderer           </span><span class="divider"> | </span>
+<span class="label">St:</span><span class="val">18</span> <span class="label">Dx:</span><span class="val">14</span> <span class="label">Co:</span><span class="val">16</span> <span class="label">In:</span><span class="val">7</span> <span class="label">Wi:</span><span class="val">9</span> <span class="label">Ch:</span><span class="val">8</span>  <span class="val">Neutral</span><br>
+<span class="val">Dlvl:</span><span class="val">4</span> <span class="gold">$:47</span> <span class="label">HP:</span><span class="hp-low">12(24)</span> <span class="label">Pw:</span><span class="val">3(3)</span> <span class="label">AC:</span><span class="val">6</span> <span class="label">Exp:</span><span class="val">1847/3</span> <span class="label">T:</span><span class="val">1203</span> <span class="mr">Hungry</span>
+</div>
+
+<div class="status" style="font-size:15px; color:var(--dim);">
+<span class="dim">[</span><span class="player-blink">@</span><span class="dim"> you] [</span><span class="mr">D</span><span class="dim"> red dragon] [</span><span class="mm">N</span><span class="dim"> naga] [</span><span class="mb">K</span><span class="dim"> kobold] [</span><span class="mg">F</span><span class="dim"> lichen] [</span><span class="item">(</span><span class="dim"> weapon] [</span><span class="item">[</span><span class="dim"> armor] [</span><span class="item">!</span><span class="dim"> potion] [</span><span class="item">?</span><span class="dim"> scroll] [</span><span class="gold">$</span><span class="dim"> gold] [</span><span class="stairs">&gt;</span><span class="dim"> stairs down]</span>
+</div>
+</div>
+</body>
+</html>

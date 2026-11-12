@@ -99,9 +99,9 @@ const HelpPage = () => {
           )}
 
           {error && (
-            <div className="bg-red-900/20 border border-red-700 rounded-lg p-6 text-center text-red-400">
+            <div className="atlas-notice-danger border rounded-lg p-6 text-center">
               <div className="flex items-center justify-center gap-2">
-                <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white text-xs">!</div>
+                <div className="w-5 h-5 bg-red-600 rounded-full flex items-center justify-center text-xs text-white">!</div>
                 Error loading help content: {error}
               </div>
             </div>
@@ -110,7 +110,7 @@ const HelpPage = () => {
           {/* A misconfiguration is worth saying out loud: the operator asked
               for hosted documentation and ATLAS is showing something else. */}
           {!loading && !error && configError && (
-            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mb-6 text-yellow-300">
+            <div className="atlas-notice-warning border rounded-lg p-4 mb-6">
               <div className="font-medium mb-1">Help configuration problem</div>
               <div className="text-sm">{configError}</div>
             </div>
@@ -139,7 +139,7 @@ const HelpPage = () => {
                   href={linkUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors text-white"
                 >
                   <ExternalLink className="w-4 h-4" />
                   Open the documentation

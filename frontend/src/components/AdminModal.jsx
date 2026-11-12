@@ -60,13 +60,13 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
               </label>
               <button
                 onClick={onDownload}
-                className="flex items-center gap-2 px-3 py-1 bg-cyan-600 hover:bg-cyan-700 rounded text-sm transition-colors"
+                className="flex items-center gap-2 px-3 py-1 bg-cyan-700 hover:bg-cyan-800 rounded text-sm transition-colors text-white"
               >
                 <Download className="w-4 h-4" />
                 Download Full Log
               </button>
             </div>
-            <div ref={logContainerRef} className="bg-black text-green-400 p-4 rounded-lg font-mono text-sm overflow-y-auto whitespace-pre-wrap" style={{height: 'calc(100vh - 200px)'}}>
+            <div ref={logContainerRef} className="bg-black atlas-fg-success p-4 rounded-lg font-mono text-sm overflow-y-auto whitespace-pre-wrap" style={{height: 'calc(100vh - 200px)'}}>
               {data.content.content}
             </div>
             <p className="text-sm text-gray-400">
@@ -81,9 +81,9 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
             <div className="p-4 bg-gray-700 rounded-lg">
               <p className="text-sm font-medium">
                 Overall Status: <span className={`ml-2 px-2 py-1 rounded text-xs ${
-                  data.content.overallStatus === 'healthy' ? 'bg-green-900 text-green-400' :
-                  data.content.overallStatus === 'warning' ? 'bg-yellow-900 text-yellow-400' :
-                  'bg-red-900 text-red-400'
+                  data.content.overallStatus === 'healthy' ? 'atlas-notice-success' :
+                  data.content.overallStatus === 'warning' ? 'atlas-notice-warning' :
+                  'atlas-notice-danger'
                 }`}>
                   {data.content.overallStatus}
                 </span>
@@ -95,9 +95,9 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                   <div className="flex items-center justify-between">
                     <strong>{component.component}</strong>
                     <span className={`px-2 py-1 rounded text-xs ${
-                      component.status === 'healthy' ? 'bg-green-900 text-green-400' :
-                      component.status === 'warning' ? 'bg-yellow-900 text-yellow-400' :
-                      'bg-red-900 text-red-400'
+                      component.status === 'healthy' ? 'atlas-notice-success' :
+                      component.status === 'warning' ? 'atlas-notice-warning' :
+                      'atlas-notice-danger'
                     }`}>
                       {component.status}
                     </span>
@@ -119,7 +119,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
           <div className="space-y-4">
             <div className="p-4 bg-gray-700 rounded-lg space-y-2">
               <p><strong>Overall Status:</strong> <span className={`ml-2 px-2 py-1 rounded text-xs ${
-                summary.overall_status === 'healthy' ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'
+                summary.overall_status === 'healthy' ? 'atlas-notice-success' : 'atlas-notice-danger'
               }`}>{summary.overall_status}</span></p>
               <p><strong>Servers:</strong> {summary.healthy_count}/{summary.total_count} healthy</p>
               <p><strong>Last Check:</strong> {summary.last_check ? new Date(summary.last_check * 1000).toLocaleString() : 'Never'}</p>
@@ -132,7 +132,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                     <div className="flex items-center justify-between mb-2">
                       <strong>{serverName}</strong>
                       <span className={`px-2 py-1 rounded text-xs ${
-                        serverInfo.status === 'healthy' ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'
+                        serverInfo.status === 'healthy' ? 'atlas-notice-success' : 'atlas-notice-danger'
                       }`}>
                         {serverInfo.status}
                       </span>
@@ -172,11 +172,11 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
 
         const getLevelColor = (level) => {
           switch (level) {
-            case 'DEBUG': return 'bg-gray-600 text-gray-300'
-            case 'INFO': return 'bg-green-600 text-green-100'
-            case 'WARN': return 'bg-yellow-600 text-yellow-100'
-            case 'ERROR': return 'bg-red-600 text-red-100'
-            case 'CRITICAL': return 'bg-red-800 text-red-100'
+            case 'DEBUG': return 'bg-gray-600 text-gray-50'
+            case 'INFO': return 'bg-green-700 text-white'
+            case 'WARN': return 'bg-yellow-600 text-black'
+            case 'ERROR': return 'bg-red-600 text-white'
+            case 'CRITICAL': return 'bg-red-800 text-white'
             default: return 'bg-gray-500 text-gray-100'
           }
         }
@@ -234,28 +234,28 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                           <span className="text-sm font-mono text-gray-400">
                             {formatTimestamp(entry.timestamp)}
                           </span>
-                          <span className="text-sm font-medium text-blue-400">
+                          <span className="text-sm font-medium atlas-fg-info">
                             {entry.module}
                           </span>
                           {entry.function && (
-                            <span className="text-sm font-mono text-gray-500">
+                            <span className="text-sm font-mono text-gray-400">
                               {entry.function}()
                             </span>
                           )}
                         </div>
                         <div className="text-sm text-gray-200 break-words">
                           {entry.parse_error ? (
-                            <span className="text-red-400">Parse Error: {entry.raw_line}</span>
+                            <span className="atlas-fg-danger">Parse Error: {entry.raw_line}</span>
                           ) : (
                             entry.message
                           )}
                         </div>
                         {entry.trace_id && (
                           <div className="mt-2 flex items-center gap-2">
-                            <span className="text-xs text-gray-500">Trace:</span>
+                            <span className="text-xs text-gray-400">Trace:</span>
                             <button
                               onClick={() => copyToClipboard(entry.trace_id)}
-                              className="text-xs font-mono bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded transition-colors"
+                              className="text-xs font-mono bg-gray-600 hover:bg-gray-700 px-2 py-1 rounded transition-colors text-gray-50"
                               title="Click to copy full trace ID"
                             >
                               {entry.trace_id.substring(0, 8)}...
@@ -265,13 +265,13 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                         {Object.keys(entry.extras || {}).length > 0 && (
                           <div className="mt-2">
                             <details className="text-xs">
-                              <summary className="text-gray-500 cursor-pointer hover:text-gray-400">
+                              <summary className="text-gray-400 cursor-pointer hover:text-gray-400">
                                 Extra Fields ({Object.keys(entry.extras).length})
                               </summary>
                               <div className="mt-1 bg-gray-800 p-2 rounded text-gray-400 font-mono">
                                 {Object.entries(entry.extras).map(([key, value]) => (
                                   <div key={key}>
-                                    <span className="text-blue-400">{key.replace('extra_', '')}:</span> {JSON.stringify(value)}
+                                    <span className="atlas-fg-info">{key.replace('extra_', '')}:</span> {JSON.stringify(value)}
                                   </div>
                                 ))}
                               </div>
@@ -294,9 +294,9 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
         
         const getRatingIcon = (rating) => {
           switch (rating) {
-            case 1: return <ThumbsUp className="w-4 h-4 text-green-400" />
-            case 0: return <Minus className="w-4 h-4 text-yellow-400" />
-            case -1: return <ThumbsDown className="w-4 h-4 text-red-400" />
+            case 1: return <ThumbsUp className="w-4 h-4 atlas-fg-success" />
+            case 0: return <Minus className="w-4 h-4 atlas-fg-warning" />
+            case -1: return <ThumbsDown className="w-4 h-4 atlas-fg-danger" />
             default: return null
           }
         }
@@ -318,28 +318,28 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-green-400 mb-1">
+                    <div className="flex items-center justify-center gap-1 atlas-fg-success mb-1">
                       <ThumbsUp className="w-4 h-4" />
                       <span className="font-medium">{stats.positive || 0}</span>
                     </div>
                     <div className="text-gray-400">Positive</div>
                   </div>
                   <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-yellow-400 mb-1">
+                    <div className="flex items-center justify-center gap-1 atlas-fg-warning mb-1">
                       <Minus className="w-4 h-4" />
                       <span className="font-medium">{stats.neutral || 0}</span>
                     </div>
                     <div className="text-gray-400">Neutral</div>
                   </div>
                   <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-red-400 mb-1">
+                    <div className="flex items-center justify-center gap-1 atlas-fg-danger mb-1">
                       <ThumbsDown className="w-4 h-4" />
                       <span className="font-medium">{stats.negative || 0}</span>
                     </div>
                     <div className="text-gray-400">Negative</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-lg font-medium text-blue-400 mb-1">{stats.total || 0}</div>
+                    <div className="text-lg font-medium atlas-fg-info mb-1">{stats.total || 0}</div>
                     <div className="text-gray-400">Total</div>
                   </div>
                 </div>
@@ -378,7 +378,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                       )}
                       {item.conversation_history && (
                         <details className="mt-2">
-                          <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">
+                          <summary className="text-xs atlas-fg-info cursor-pointer hover:underline">
                             Conversation history attached
                           </summary>
                           <pre className="text-xs text-gray-300 bg-gray-900 p-2 rounded mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap">
@@ -386,7 +386,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                           </pre>
                         </details>
                       )}
-                      <div className="text-xs text-gray-500 mt-2">
+                      <div className="text-xs text-gray-400 mt-2">
                         ID: {item.id}
                       </div>
                     </div>
@@ -410,7 +410,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
     <div role="dialog" aria-modal="true" className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto ${
       data.content?.type === 'logs' ? 'p-0' : 'p-4'
     }`}>
-      <div className={`bg-gray-800 rounded-lg w-full overflow-y-auto my-8 ${
+      <div className={`bg-gray-800 text-gray-100 rounded-lg w-full overflow-y-auto my-8 ${
         data.content?.type === 'logs'
           ? 'max-w-none max-h-none h-full m-0 rounded-none'
           : data.contentCategory === 'mcp-config'
@@ -427,14 +427,14 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
               <>
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors"
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors text-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 text-white"
                 >
                   <Save className="w-4 h-4" />
                   {saving ? 'Saving...' : 'Save'}
@@ -442,7 +442,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
                 <button
                   onClick={handleSaveAndClose}
                   disabled={saving}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors disabled:opacity-50"
+                  className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 rounded-lg transition-colors disabled:opacity-50 text-white"
                 >
                   <Check className="w-4 h-4" />
                   Done
@@ -452,7 +452,7 @@ const AdminModal = ({ data, onClose, onSave, onDownload, addNotification }) => {
             {data.content?.readonly && (
               <button
                 onClick={onClose}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 rounded-lg transition-colors text-white"
               >
                 <Check className="w-4 h-4" />
                 Done

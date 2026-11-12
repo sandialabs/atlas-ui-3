@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>05 Amiga Workbench</title>
+<style>
+  :root {
+    --wb-blue: #0055aa;
+    --wb-orange: #ff8800;
+    --wb-white: #ffffff;
+    --wb-black: #000000;
+    --wb-gray: #a0a0a0;
+    --ink: #000;
+    --font: "Topaz", "Courier New", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  @font-face {
+    font-family: "TopazFallback";
+    src: local("Courier New");
+  }
+  body {
+    background: var(--wb-blue);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 0;
+    min-height: 100vh;
+    image-rendering: pixelated;
+  }
+  .titlebar-screen {
+    background: var(--wb-white);
+    color: var(--wb-black);
+    padding: 2px 8px;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--wb-black);
+    font-weight: bold;
+  }
+  .desktop { padding: 20px; }
+  .window {
+    background: var(--wb-white);
+    border: 2px solid var(--wb-black);
+    box-shadow: 4px 4px 0 var(--wb-black);
+    margin-bottom: 24px;
+    max-width: 640px;
+  }
+  .titlebar {
+    background: repeating-linear-gradient(to right, var(--wb-black) 0 2px, var(--wb-white) 2px 4px);
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .titlebar-inner {
+    background: var(--wb-white);
+    padding: 2px 12px;
+    font-weight: bold;
+    color: var(--wb-black);
+  }
+  .gadget {
+    background: var(--wb-white);
+    border: 2px solid var(--wb-black);
+    width: 22px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+  }
+  .content { padding: 14px; background: var(--wb-white); }
+  h1 { font-family: var(--font); font-size: 22px; margin-bottom: 8px; color: var(--wb-black); }
+  h2 { font-family: var(--font); font-size: 14px; margin: 14px 0 6px; background: var(--wb-black); color: var(--wb-white); padding: 2px 6px; display: inline-block; }
+  p { line-height: 1.5; margin-bottom: 8px; }
+  .btn {
+    font-family: var(--font);
+    font-size: 13px;
+    background: var(--wb-white);
+    border: 2px solid var(--wb-black);
+    padding: 4px 16px;
+    cursor: pointer;
+    box-shadow: 3px 3px 0 var(--wb-black);
+    font-weight: bold;
+  }
+  .btn:active { box-shadow: 1px 1px 0 var(--wb-black); transform: translate(2px, 2px); }
+  .btn-orange { background: var(--wb-orange); color: var(--wb-white); }
+  .btn-blue { background: var(--wb-blue); color: var(--wb-white); }
+  .input {
+    font-family: var(--font);
+    font-size: 13px;
+    background: var(--wb-white);
+    border: 2px solid var(--wb-black);
+    padding: 3px 6px;
+    width: 100%;
+  }
+  .swatch { width: 70px; height: 50px; border: 2px solid var(--wb-black); display: inline-block; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .disk-icon {
+    width: 72px;
+    background: var(--wb-white);
+    border: 2px solid var(--wb-black);
+    text-align: center;
+    padding: 6px 4px;
+  }
+  .disk-icon .glyph {
+    display: block;
+    width: 40px;
+    height: 40px;
+    background: var(--wb-black);
+    margin: 0 auto 4px;
+    position: relative;
+  }
+  .disk-icon .glyph::after { content: ""; position: absolute; inset: 6px; background: var(--wb-white); }
+  .disk-icon.selected { background: var(--wb-black); color: var(--wb-white); }
+  .disk-icon.selected .glyph { background: var(--wb-white); }
+  .disk-icon.selected .glyph::after { background: var(--wb-black); }
+  .scroll-track {
+    width: 16px;
+    background: var(--wb-blue);
+    border: 2px solid var(--wb-black);
+    height: 120px;
+    display: inline-block;
+    vertical-align: top;
+    position: relative;
+  }
+  .scroll-thumb { position: absolute; top: 0; left: 0; right: 0; height: 40px; background: var(--wb-white); border-bottom: 2px solid var(--wb-black); }
+  .alert {
+    border: 4px solid var(--wb-white);
+    background: var(--wb-black);
+    color: var(--wb-white);
+    padding: 16px;
+    margin: 16px 0;
+    max-width: 420px;
+    text-align: center;
+    font-weight: bold;
+  }
+  .alert-title { color: var(--wb-orange); margin-bottom: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="titlebar-screen">
+  <span>Workbench 1.3</span>
+  <span>1,462,208 graphics mem — 8,388,608 other mem</span>
+</div>
+
+<div class="desktop">
+  <div class="window">
+    <div class="titlebar">
+      <div class="gadget">×</div>
+      <div class="titlebar-inner">Workbench</div>
+      <div style="flex:1"></div>
+      <div class="gadget">↕</div>
+    </div>
+    <div class="content">
+      <h1>AMIGA WORKBENCH</h1>
+      <p>Four-color glory: orange, blue, black, white. Topaz 8x8 bitmap font. Hard drop shadows. Striped title bars.</p>
+
+      <h2>DISKS</h2>
+      <div class="row">
+        <div class="disk-icon"><span class="glyph"></span>Workbench1.3</div>
+        <div class="disk-icon selected"><span class="glyph"></span>DF0:</div>
+        <div class="disk-icon"><span class="glyph"></span>RAM Disk</div>
+      </div>
+
+      <h2>COLORS</h2>
+      <div class="row">
+        <span class="swatch" style="background:var(--wb-blue)"></span>
+        <span class="swatch" style="background:var(--wb-orange)"></span>
+        <span class="swatch" style="background:var(--wb-white)"></span>
+        <span class="swatch" style="background:var(--wb-black)"></span>
+      </div>
+
+      <h2>INPUT</h2>
+      <div class="row"><input class="input" value="DF0:Utilities/" ></div>
+
+      <h2>GADGETS</h2>
+      <div class="row">
+        <button class="btn btn-orange">OK</button>
+        <button class="btn">CANCEL</button>
+        <button class="btn btn-blue">RETRY</button>
+        <div class="scroll-track"><div class="scroll-thumb"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert">
+    <div class="alert-title">Software Failure. Press left mouse button to continue.</div>
+    <div>Guru Meditation #00000003.48454C50</div>
+  </div>
+</div>
+</body>
+</html>

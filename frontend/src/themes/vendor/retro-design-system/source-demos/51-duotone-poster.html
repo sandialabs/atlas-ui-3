@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>51 Duotone Poster</title>
+<style>
+  :root {
+    --paper: #f4ead3;
+    --spot-1: #ff3a38;
+    --spot-2: #1a1a3a;
+    --font: "Futura", "Helvetica Neue", "Akzidenz-Grotesk", sans-serif;
+    --font-display: "Futura", "Impact", "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--spot-2);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+    line-height: 1.4;
+  }
+  .page { max-width: 780px; margin: 0 auto; }
+  .hdr { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; padding-bottom: 8px; border-bottom: 2px solid var(--spot-2); margin-bottom: 30px; }
+  h1 {
+    font-family: var(--font-display);
+    font-size: 140px;
+    font-weight: 900;
+    letter-spacing: -6px;
+    line-height: 0.85;
+    text-transform: uppercase;
+    color: var(--spot-1);
+    margin-bottom: 8px;
+  }
+  h1 .shift { color: var(--spot-2); }
+  .sub { font-size: 20px; letter-spacing: 4px; text-transform: uppercase; font-weight: 700; margin-bottom: 30px; color: var(--spot-2); }
+  h2 { font-size: 11px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; margin: 24px 0 10px; color: var(--spot-1); }
+  p { line-height: 1.6; margin-bottom: 8px; max-width: 520px; }
+  .poster-img {
+    height: 380px;
+    background:
+      radial-gradient(ellipse at 30% 30%, var(--spot-1) 0 30%, transparent 45%),
+      radial-gradient(circle at 70% 70%, var(--spot-2) 0 25%, transparent 40%),
+      repeating-radial-gradient(circle at 30% 30%, transparent 0 3px, var(--spot-2) 3px 4px, transparent 4px 20px),
+      repeating-linear-gradient(to right, transparent 0 3px, rgba(255,58,56,0.3) 3px 4px);
+    background-color: var(--paper);
+    background-blend-mode: multiply;
+    position: relative;
+    margin: 20px 0;
+    border: 2px solid var(--spot-2);
+  }
+  .poster-img::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, var(--spot-2) 0.8px, transparent 1.2px);
+    background-size: 4px 4px;
+    opacity: 0.4;
+    mix-blend-mode: multiply;
+  }
+  .poster-img::after {
+    content: "";
+    position: absolute;
+    top: 40px; right: 40px;
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    background: var(--spot-1);
+    box-shadow: 0 0 40px rgba(255,58,56,0.4);
+  }
+  .poster-caption { position: absolute; bottom: 16px; left: 16px; right: 16px; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--paper); font-weight: 700; display: flex; justify-content: space-between; z-index: 1; }
+  .btn { font-family: var(--font); font-weight: 700; font-size: 13px; letter-spacing: 3px; text-transform: uppercase; background: var(--spot-1); color: var(--paper); border: none; padding: 12px 24px; cursor: pointer; }
+  .btn:hover { background: var(--spot-2); }
+  .btn-outline { background: transparent; color: var(--spot-2); border: 2px solid var(--spot-2); padding: 10px 22px; }
+  .btn-outline:hover { background: var(--spot-2); color: var(--paper); }
+  .input { font-family: var(--font); font-size: 15px; background: transparent; border: none; border-bottom: 2px solid var(--spot-2); padding: 8px 0; width: 320px; letter-spacing: 2px; font-weight: 500; }
+  .input:focus { outline: none; border-bottom-color: var(--spot-1); color: var(--spot-1); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 70px; height: 70px; border: 2px solid var(--spot-2); display: inline-block; position: relative; }
+  .swatch::after { content: attr(data-pantone); position: absolute; bottom: -16px; left: 0; font-size: 9px; letter-spacing: 1px; font-weight: 700; color: var(--spot-2); white-space: nowrap; }
+  .pantone-chip {
+    display: flex;
+    align-items: stretch;
+    border: 2px solid var(--spot-2);
+    margin: 10px 0;
+    max-width: 320px;
+  }
+  .pantone-chip .color { flex: 0 0 80px; }
+  .pantone-chip .meta { padding: 10px 14px; background: var(--paper); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  .pantone-chip .name { font-weight: 700; font-size: 13px; letter-spacing: 3px; }
+  .divider { height: 40px; background: var(--spot-1); margin: 20px 0; }
+  .big-number { font-size: 180px; font-weight: 900; color: var(--spot-2); line-height: 0.8; letter-spacing: -10px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hdr">
+    <span>№ 51 · Duotone</span>
+    <span>Two Pantones · One Story</span>
+    <span>Spring / 2026</span>
+  </div>
+
+  <h1>Stop <span class="shift">the</span><br>presses.</h1>
+  <div class="sub">Issue 51 — Spring 2026 — Duotone</div>
+
+  <p>Two Pantone spot colors. One halftone dot pattern. Everything else is absence. The poster printed on uncoated stock, smelling faintly of soy ink.</p>
+
+  <div class="poster-img">
+    <div class="poster-caption">
+      <span>Silkscreen · 18×24</span>
+      <span>Ed. 1 / 100</span>
+    </div>
+  </div>
+
+  <h2>Input</h2>
+  <div class="row"><input class="input" value="Submit to editorial"></div>
+
+  <h2>Controls</h2>
+  <div class="row">
+    <button class="btn">Subscribe</button>
+    <button class="btn btn-outline">Archive</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <h2>Pantone chips</h2>
+  <div class="pantone-chip">
+    <div class="color" style="background:var(--spot-1)"></div>
+    <div class="meta"><div class="name">Pantone 179 C</div><div>Fluorescent Red · Uncoated</div></div>
+  </div>
+  <div class="pantone-chip">
+    <div class="color" style="background:var(--spot-2)"></div>
+    <div class="meta"><div class="name">Pantone 5395 C</div><div>Deep Navy · Matte</div></div>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:40px; border-top:2px solid var(--spot-2); padding-top:10px;">
+    <span class="big-number">51</span>
+    <div style="text-align:right; font-size:11px; letter-spacing:3px; text-transform:uppercase;">
+      <div style="font-weight:700;">Printed in Risograph</div>
+      <div>2 passes · spot</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

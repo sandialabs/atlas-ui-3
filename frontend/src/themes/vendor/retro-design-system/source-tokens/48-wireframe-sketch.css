@@ -1,0 +1,12 @@
+/* Wireframe / Balsamiq Sketch — design tokens
+   Extracted from styles/48-wireframe-sketch/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #fbfaf4;
+  --ink: #2a2a2a;
+  --light: #b0b0b0;
+  --muted: #8a8a8a;
+  --hi: #d4d1c4;
+  --font-hand: "Kalam", "Comic Sans MS", "Marker Felt", cursive;
+  --font: "Kalam", "Comic Sans MS", cursive;
+}

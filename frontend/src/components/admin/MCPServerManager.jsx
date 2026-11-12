@@ -128,9 +128,9 @@ const MCPServerManager = ({ addNotification }) => {
 
   const getComplianceLevelColor = (level) => {
     switch (level?.toLowerCase()) {
-      case 'public': return 'text-green-400 bg-green-900/20'
-      case 'soc2': return 'text-yellow-400 bg-yellow-900/20'
-      case 'restricted': return 'text-red-400 bg-red-900/20'
+      case 'public': return 'atlas-notice-success'
+      case 'soc2': return 'atlas-notice-warning'
+      case 'restricted': return 'atlas-notice-danger'
       default: return 'text-gray-400 bg-gray-800'
     }
   }
@@ -141,9 +141,9 @@ const MCPServerManager = ({ addNotification }) => {
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'active': return <CheckCircle className="w-4 h-4 text-green-400" />
+      case 'active': return <CheckCircle className="w-4 h-4 atlas-fg-success" />
       case 'available': return <XCircle className="w-4 h-4 text-gray-400" />
-      default: return <AlertCircle className="w-4 h-4 text-yellow-400" />
+      default: return <AlertCircle className="w-4 h-4 atlas-fg-warning" />
     }
   }
 
@@ -151,11 +151,11 @@ const MCPServerManager = ({ addNotification }) => {
     return (
       <div className="bg-gray-800 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
-          <Server className="w-6 h-6 text-blue-400" />
+          <Server className="w-6 h-6 atlas-fg-info" />
           <h2 className="text-lg font-semibold">MCP Server Manager</h2>
         </div>
         <div className="flex items-center justify-center py-8">
-          <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
+          <RefreshCw className="w-6 h-6 animate-spin atlas-fg-info" />
           <span className="ml-2 text-gray-400">Loading servers...</span>
         </div>
       </div>
@@ -184,7 +184,7 @@ const MCPServerManager = ({ addNotification }) => {
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <Server className="w-6 h-6 text-blue-400" />
+          <Server className="w-6 h-6 atlas-fg-info" />
           <h2 className="text-lg font-semibold">MCP Server Manager</h2>
         </div>
         <button
@@ -230,7 +230,7 @@ const MCPServerManager = ({ addNotification }) => {
               key={serverName}
               className={`border rounded-lg p-4 transition-colors ${
                 isActive 
-                  ? 'border-green-600 bg-green-900/10' 
+                  ? 'atlas-notice-success' 
                   : 'border-gray-600 bg-gray-700/50'
               }`}
             >
@@ -268,7 +268,7 @@ const MCPServerManager = ({ addNotification }) => {
                     </p>
                   )}
                   
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <div className="flex items-center gap-4 text-xs text-gray-400">
                     {serverInfo?.author && (
                       <span>Author: {serverInfo.author}</span>
                     )}
@@ -283,7 +283,7 @@ const MCPServerManager = ({ addNotification }) => {
                     <button
                       onClick={() => removeServer(serverName)}
                       disabled={currentAction === 'removing'}
-                      className="flex items-center gap-1 px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:opacity-60 text-white rounded text-sm transition-colors"
+                      className="flex items-center gap-1 px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-900 disabled:opacity-60 rounded text-sm transition-colors text-white"
                     >
                       {currentAction === 'removing' ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
@@ -296,7 +296,7 @@ const MCPServerManager = ({ addNotification }) => {
                     <button
                       onClick={() => addServer(serverName)}
                       disabled={currentAction === 'adding'}
-                      className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-700 disabled:bg-green-900 disabled:opacity-60 text-white rounded text-sm transition-colors"
+                      className="flex items-center gap-1 px-3 py-1 bg-green-700 hover:bg-green-800 disabled:bg-green-900 disabled:opacity-60 rounded text-sm transition-colors text-white"
                     >
                       {currentAction === 'adding' ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
@@ -313,7 +313,7 @@ const MCPServerManager = ({ addNotification }) => {
         })}
         
         {filteredServerNames.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-gray-400">
             <Server className="w-12 h-12 mx-auto mb-2 opacity-50" />
             {searchQuery ? (
               <>

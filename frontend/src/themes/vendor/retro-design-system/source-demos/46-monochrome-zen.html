@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>46 Monochrome Zen</title>
+<style>
+  :root {
+    --paper: #fafaf7;
+    --ink: #0a0a0a;
+    --rule: rgba(10,10,10,0.15);
+    --font: "Söhne", "Inter", "Helvetica Neue", sans-serif;
+    --font-serif: "Lyon", "Times New Roman", Garamond, serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font);
+    font-weight: 300;
+    font-size: 17px;
+    padding: 120px 40px 100px;
+    min-height: 100vh;
+    line-height: 1.7;
+  }
+  .page { max-width: 620px; margin: 0 auto; }
+  .hdr { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink); opacity: 0.5; margin-bottom: 180px; }
+  h1 { font-family: var(--font-serif); font-size: 72px; font-weight: 400; letter-spacing: -1.5px; line-height: 1; margin-bottom: 40px; }
+  h1 em { font-style: italic; }
+  .sub { font-size: 20px; font-weight: 300; color: var(--ink); opacity: 0.6; line-height: 1.5; margin-bottom: 200px; max-width: 480px; }
+  h2 { font-size: 11px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; margin: 140px 0 24px; opacity: 0.5; }
+  p { font-weight: 300; line-height: 1.75; margin-bottom: 24px; max-width: 520px; }
+  p em { font-family: var(--font-serif); font-style: italic; }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 120px 0; }
+  .btn {
+    font-family: var(--font);
+    font-weight: 400;
+    font-size: 15px;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    border-bottom: 1px solid var(--ink);
+    padding: 4px 0;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+  }
+  .btn:hover { opacity: 0.6; }
+  .input {
+    font-family: var(--font);
+    font-weight: 300;
+    font-size: 18px;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    border-bottom: 1px solid var(--rule);
+    padding: 10px 0;
+    width: 100%;
+  }
+  .input:focus { outline: none; border-bottom-color: var(--ink); }
+  .row { display: flex; gap: 40px; flex-wrap: wrap; align-items: center; margin: 20px 0; }
+  .pagination {
+    margin-top: 140px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--ink);
+    opacity: 0.6;
+    letter-spacing: 1px;
+  }
+  .dot { display: inline-block; width: 4px; height: 4px; background: var(--ink); border-radius: 50%; margin: 0 6px; vertical-align: middle; }
+  blockquote {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: 28px;
+    line-height: 1.3;
+    font-weight: 400;
+    margin: 60px 0;
+    color: var(--ink);
+    opacity: 0.9;
+  }
+  blockquote::before { content: "“"; font-size: 72px; line-height: 0; vertical-align: -30px; color: var(--ink); opacity: 0.2; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hdr">
+    <span>Essay № 46</span>
+    <span>April <span class="dot"></span> 2026</span>
+    <span>8 min</span>
+  </div>
+
+  <h1>On <em>silence</em>,<br>in interfaces.</h1>
+  <div class="sub">One color. One font. A single line. Space is the most persuasive design element.</div>
+
+  <p>Every pixel you place is a commitment to <em>make the reader notice.</em> Every pixel you withhold is an act of trust. This page trusts you.</p>
+
+  <blockquote>When a thousand things distract, one thing remembered is the loudest.</blockquote>
+
+  <p>The monochrome page is not austere. It is generous. It hands the reader back their attention, undivided. Nothing blinks. Nothing slides. Nothing insists. The type does the arguing; the page holds still.</p>
+
+  <hr>
+
+  <h2>Subscribe</h2>
+  <div class="row" style="width:100%;">
+    <input class="input" placeholder="email address" value="reader@example.com">
+  </div>
+  <div class="row">
+    <button class="btn">Subscribe →</button>
+    <button class="btn">Read archive</button>
+  </div>
+
+  <div class="pagination">
+    <span>← Previous essay</span>
+    <span>№ 46 / 108</span>
+    <span>Next essay →</span>
+  </div>
+</div>
+</body>
+</html>

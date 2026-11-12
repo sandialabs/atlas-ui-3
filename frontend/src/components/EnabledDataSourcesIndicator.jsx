@@ -40,7 +40,7 @@ const EnabledDataSourcesIndicator = () => {
       <button
         type="button"
         onClick={() => openSettingsPanel({ tab: 'dataSources' })}
-        className="flex-shrink-0 flex items-center gap-1 hover:text-blue-400 transition-colors"
+        className="flex-shrink-0 flex items-center gap-1 hover:text-gray-100 transition-colors"
         title="Open the data sources picker in Tools and Settings"
         aria-label="Data Sources"
       >
@@ -55,7 +55,7 @@ const EnabledDataSourcesIndicator = () => {
         {shown.map(item => (
           <span
             key={item.key}
-            className="flex-shrink-0 px-2 py-1 rounded-full flex items-center gap-1 bg-blue-900/40 border border-blue-700 text-blue-200"
+            className="flex-shrink-0 px-2 py-1 rounded-full flex items-center gap-1 atlas-notice-info border"
           >
             <span className="max-w-40 truncate" title={item.label}>{item.label}</span>
             <button
@@ -74,7 +74,7 @@ const EnabledDataSourcesIndicator = () => {
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex-shrink-0 px-2 py-1 rounded-full flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+          className="flex-shrink-0 px-2 py-1 rounded-full flex items-center gap-1 bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50"
           title={isExpanded ? 'Show less' : `Show ${selected.length - COMPACT_THRESHOLD} more`}
         >
           {isExpanded ? (

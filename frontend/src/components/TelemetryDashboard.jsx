@@ -51,7 +51,7 @@ function Stat({ label, value, hint }) {
     <div className="bg-gray-700/40 rounded-lg p-4">
       <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">{label}</div>
       <div className="text-2xl font-semibold text-gray-100">{value}</div>
-      {hint && <div className="text-xs text-gray-500 mt-1">{hint}</div>}
+      {hint && <div className="text-xs text-gray-400 mt-1">{hint}</div>}
     </div>
   )
 }
@@ -59,7 +59,7 @@ function Stat({ label, value, hint }) {
 function ErrorBanner({ message }) {
   if (!message) return null
   return (
-    <div className="flex items-start gap-2 bg-red-900/30 border border-red-600/40 text-red-200 rounded-lg p-3 mb-4">
+    <div className="flex items-start gap-2 atlas-notice-danger border rounded-lg p-3 mb-4">
       <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
       <div className="text-sm">{message}</div>
     </div>
@@ -187,7 +187,7 @@ function ToolsView({ range }) {
             </thead>
             <tbody>
               {data.tools.length === 0 && (
-                <tr><td className="p-3 text-gray-500" colSpan={7}>No tool calls in range.</td></tr>
+                <tr><td className="p-3 text-gray-400" colSpan={7}>No tool calls in range.</td></tr>
               )}
               {data.tools.map((t) => {
                 const isOpen = expandedTool === t.tool_name
@@ -202,7 +202,7 @@ function ToolsView({ range }) {
                         {t.tool_name}
                       </td>
                       <td className="p-2 text-right">{fmtNumber(t.call_count)}</td>
-                      <td className={`p-2 text-right ${t.success_rate != null && t.success_rate < 0.9 ? 'text-yellow-300' : ''}`}>
+                      <td className={`p-2 text-right ${t.success_rate != null && t.success_rate < 0.9 ? 'atlas-fg-warning' : ''}`}>
                         {fmtPct(t.success_rate)}
                       </td>
                       <td className="p-2 text-right">{fmtNumber(t.failure_count)}</td>
@@ -217,15 +217,15 @@ function ToolsView({ range }) {
                     {isOpen && (
                       <tr className="bg-gray-900/40">
                         <td colSpan={7} className="p-3">
-                          {failures == null && <div className="text-gray-500">Loading failures…</div>}
-                          {failures != null && failures.length === 0 && <div className="text-gray-500">No failures in range.</div>}
+                          {failures == null && <div className="text-gray-400">Loading failures…</div>}
+                          {failures != null && failures.length === 0 && <div className="text-gray-400">No failures in range.</div>}
                           {failures != null && failures.length > 0 && (
                             <ul className="space-y-1 text-xs text-gray-300">
                               {failures.map((f) => (
                                 <li key={f.span_id} className="font-mono">
-                                  <span className="text-gray-500">{fmtRelTime(f.start_time_ns)}</span>
+                                  <span className="text-gray-400">{fmtRelTime(f.start_time_ns)}</span>
                                   {' · '}
-                                  <span className="text-red-300">{f.error_type || 'error'}</span>
+                                  <span className="atlas-fg-danger">{f.error_type || 'error'}</span>
                                   {f.duration_ms != null && <> · {fmtMs(f.duration_ms)}</>}
                                   {f.error_message && (
                                     <div className="text-gray-400 pl-4 whitespace-pre-wrap break-words">{f.error_message}</div>
@@ -294,7 +294,7 @@ function LLMView({ range }) {
             </thead>
             <tbody>
               {data.models.length === 0 && (
-                <tr><td colSpan={9} className="p-3 text-gray-500">No LLM calls in range.</td></tr>
+                <tr><td colSpan={9} className="p-3 text-gray-400">No LLM calls in range.</td></tr>
               )}
               {data.models.map((m) => (
                 <tr key={m.model} className="border-b border-gray-800 hover:bg-gray-700/30">
@@ -305,10 +305,10 @@ function LLMView({ range }) {
                   <td className="p-2 text-right">{fmtMs(m.latency_p99_ms)}</td>
                   <td className="p-2 text-right">{fmtNumber(m.input_tokens_total)}</td>
                   <td className="p-2 text-right">{fmtNumber(m.output_tokens_total)}</td>
-                  <td className={`p-2 text-right ${m.retry_rate != null && m.retry_rate > 0.1 ? 'text-yellow-300' : ''}`}>
+                  <td className={`p-2 text-right ${m.retry_rate != null && m.retry_rate > 0.1 ? 'atlas-fg-warning' : ''}`}>
                     {fmtPct(m.retry_rate)}
                   </td>
-                  <td className={`p-2 text-right ${m.error_count > 0 ? 'text-red-300' : ''}`}>
+                  <td className={`p-2 text-right ${m.error_count > 0 ? 'atlas-fg-danger' : ''}`}>
                     {fmtNumber(m.error_count)}
                   </td>
                 </tr>
@@ -366,7 +366,7 @@ function RagView({ range }) {
             </thead>
             <tbody>
               {data.sources.length === 0 && (
-                <tr><td colSpan={8} className="p-3 text-gray-500">No RAG queries in range.</td></tr>
+                <tr><td colSpan={8} className="p-3 text-gray-400">No RAG queries in range.</td></tr>
               )}
               {data.sources.map((s) => (
                 <tr key={s.data_source} className="border-b border-gray-800 hover:bg-gray-700/30">
@@ -447,7 +447,7 @@ function SessionView({ range }) {
         />
         <button
           onClick={search}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm text-white"
         >
           Search
         </button>
@@ -467,9 +467,9 @@ function SessionView({ range }) {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-gray-300">{t.turn_id}</span>
-                    <span className="text-gray-500">{fmtRelTime(t.start_time_ns)}</span>
+                    <span className="text-gray-400">{fmtRelTime(t.start_time_ns)}</span>
                   </div>
-                  <div className="text-gray-500 mt-1">
+                  <div className="text-gray-400 mt-1">
                     model={t.model || '—'} · session={t.session_id || '—'}
                   </div>
                 </button>
@@ -516,8 +516,8 @@ function WaterfallView({ turn }) {
                 </div>
                 <span className="w-20 text-right text-gray-400 font-mono">{fmtMs(span.duration_ms)}</span>
               </div>
-              <details className="ml-10 text-gray-500">
-                <summary className="cursor-pointer text-gray-600 hover:text-gray-400">attributes</summary>
+              <details className="ml-10 text-gray-400">
+                <summary className="cursor-pointer atlas-text-gray-600 hover:text-gray-400">attributes</summary>
                 <pre className="text-xs overflow-x-auto bg-gray-900 p-2 rounded mt-1 font-mono">
                   {JSON.stringify(span.attributes, null, 2)}
                 </pre>
@@ -534,10 +534,11 @@ function WaterfallView({ turn }) {
 // Page shell
 // --------------------------------------------------------------------------
 
-const TelemetryDashboard = () => {
+// initialTab lets the contrast fixture mount each tab; the route uses the default.
+const TelemetryDashboard = ({ initialTab = 'overview' } = {}) => {
   const navigate = useNavigate()
   const [range, setRange] = useState('24h')
-  const [tab, setTab] = useState('overview')
+  const [tab, setTab] = useState(initialTab)
   const [status, setStatus] = useState(null)
   const [authError, setAuthError] = useState(null)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -559,7 +560,7 @@ const TelemetryDashboard = () => {
     return (
       <div className="min-h-full bg-gray-900 text-gray-200 flex items-center justify-center p-6">
         <div className="max-w-md text-center">
-          <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-red-400" />
+          <AlertTriangle className="w-10 h-10 mx-auto mb-3 atlas-fg-danger" />
           <h1 className="text-xl font-semibold mb-2">Admin access required</h1>
           <p className="text-gray-400 mb-4">You need admin privileges to view telemetry.</p>
           <button
@@ -587,7 +588,7 @@ const TelemetryDashboard = () => {
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-2">
             <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Activity className="w-6 h-6 text-emerald-400" /> Telemetry
+              <Activity className="w-6 h-6 atlas-fg-success" /> Telemetry
             </h1>
             <button
               onClick={() => navigate('/admin')}
@@ -601,7 +602,7 @@ const TelemetryDashboard = () => {
             Read-only view of OpenTelemetry spans. No raw prompts, tool outputs, or RAG document text are rendered.
           </p>
           {status && status.backend && (
-            <p className="text-gray-500 text-xs mt-2 font-mono">
+            <p className="text-gray-400 text-xs mt-2 font-mono">
               backend={status.backend}
               {status.path && <> · path={status.path}</>}
               {status.size_bytes != null && <> · {fmtNumber(status.size_bytes)} bytes</>}
@@ -625,7 +626,7 @@ const TelemetryDashboard = () => {
                   key={t.id}
                   onClick={() => setTab(t.id)}
                   className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    tab === t.id ? 'bg-emerald-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                    tab === t.id ? 'bg-emerald-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-gray-50'
                   }`}
                 >
                   <TabIcon className="w-4 h-4" />

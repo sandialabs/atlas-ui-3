@@ -117,6 +117,7 @@ def test_docker_compose_has_required_env_vars():
         'VITE_FEATURE_POWERED_BY_ATLAS',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_ANIMATED_LOGO',  # Build-time arg, not runtime env var in docker-compose
         'VITE_FEATURE_RAG_CITATIONS',  # Build-time arg, not runtime env var in docker-compose
+        'VITE_FEATURE_RETRO_THEMES',  # Build-time arg, not runtime env var in docker-compose
         'DEBUG_MODE',  # Never enable authentication bypass in the Compose stack
         'AGENT_LOOP_STRATEGY',  # Removed strategy selector; native agent loop is always used
         # Note: The following are in .env.example as commented out, not as active vars,

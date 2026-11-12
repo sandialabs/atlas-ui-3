@@ -1,0 +1,17 @@
+/* Winamp Skin — design tokens
+   Extracted from styles/13-winamp-skin/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --chrome: #3c3c3c;
+  --chrome-light: #5a5a5a;
+  --chrome-lighter: #8a8a8a;
+  --chrome-dark: #1a1a1a;
+  --chrome-darker: #000;
+  --lcd-bg: #000;
+  --lcd: #00ff33;
+  --lcd-dim: #004d11;
+  --accent: #ffb400;
+  --accent-red: #ff3b3b;
+  --font: "Helvetica Neue", Arial, sans-serif;
+  --font-lcd: "VT323", "DS-Digital", monospace;
+}

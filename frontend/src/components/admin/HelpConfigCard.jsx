@@ -91,12 +91,12 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center gap-3 mb-4">
-        <FileText className="w-6 h-6 text-yellow-400" />
+        <FileText className="w-6 h-6 atlas-fg-warning" />
         <h2 className="text-lg font-semibold">Help Content</h2>
       </div>
       <p className="text-gray-400 mb-4">Edit the Markdown rendered on the Help page. Content is re-read from disk on every request.</p>
 
-      <div className="px-3 py-1 rounded text-sm font-medium mb-4 text-green-400 bg-green-900/20">
+      <div className="px-3 py-1 rounded text-sm font-medium mb-4 atlas-notice-success">
         Ready
       </div>
 
@@ -111,14 +111,14 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
       )}
 
       {configError && (
-        <div className="mb-3 px-3 py-2 bg-yellow-900/20 border border-yellow-700 rounded text-xs text-yellow-300">
+        <div className="mb-3 px-3 py-2 border rounded text-xs atlas-notice-warning">
           <div className="font-medium mb-1">Help configuration problem</div>
           <div>{configError}</div>
         </div>
       )}
 
       {externalSourceIsLive && (
-        <div className="mb-4 px-3 py-2 bg-yellow-900/20 border border-yellow-700 rounded text-xs text-yellow-300">
+        <div className="mb-4 px-3 py-2 border rounded text-xs atlas-notice-warning">
           {displayMode === 'remote_markdown' ? (
             <>
               The Help page is showing the hosted documentation. This file is
@@ -160,7 +160,7 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
           className={`w-full px-4 py-2 rounded-lg transition-colors ${
             loading
               ? 'bg-gray-600 cursor-not-allowed opacity-50'
-              : 'bg-yellow-600 hover:bg-yellow-700 cursor-pointer'
+              : 'bg-yellow-600 hover:bg-yellow-500 cursor-pointer text-black'
           }`}
         >
           Edit Help Content
@@ -171,7 +171,7 @@ const HelpConfigCard = ({ openModal, addNotification }) => {
           className={`w-full px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${
             loading || reloading
               ? 'bg-gray-600 cursor-not-allowed opacity-50'
-              : 'bg-gray-600 hover:bg-gray-500 cursor-pointer'
+              : 'bg-gray-600 hover:bg-gray-700 cursor-pointer text-gray-50'
           }`}
         >
           <RefreshCw className={`w-4 h-4 ${reloading ? 'animate-spin' : ''}`} />

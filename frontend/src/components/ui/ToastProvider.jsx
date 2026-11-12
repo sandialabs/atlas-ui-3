@@ -56,12 +56,14 @@ export function ToastProvider({ children }) {
 
 function ToastItem({ toast, onDismiss }) {
   const { kind, message, action } = toast
+  // Opaque generated tints (index.css .atlas-notice-*) so the text reaches
+  // AA in every theme, whatever the toast happens to float over.
   const palette =
     kind === 'success'
-      ? 'bg-green-900/90 border-green-600 text-green-100'
+      ? 'atlas-notice-success'
       : kind === 'error'
-      ? 'bg-red-900/90 border-red-600 text-red-100'
-      : 'bg-gray-800/95 border-gray-600 text-gray-100'
+      ? 'atlas-notice-danger'
+      : 'bg-gray-800 border-gray-600 text-gray-100'
   const Icon = kind === 'success' ? CheckCircle2 : kind === 'error' ? AlertTriangle : Info
   return (
     <div
@@ -81,7 +83,7 @@ function ToastItem({ toast, onDismiss }) {
               onDismiss()
             }
           }}
-          className="ml-1 px-3 min-h-[40px] rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100 flex-shrink-0"
+          className="ml-1 px-3 min-h-[40px] rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100 hover:text-gray-50 flex-shrink-0"
         >
           {action.label}
         </button>
@@ -89,7 +91,7 @@ function ToastItem({ toast, onDismiss }) {
       <button
         type="button"
         onClick={onDismiss}
-        className="ml-1 -m-1 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center text-gray-400 hover:text-gray-200"
+        className="ml-1 -m-1 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center opacity-90 hover:opacity-100"
         aria-label="Dismiss notification"
       >
         <X className="w-4 h-4" />

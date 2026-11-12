@@ -46,14 +46,14 @@ function signInHref(signInUrl) {
 }
 
 const LoadError = ({ prefix, error }) => (
-  <p className="text-xs text-red-400" role="alert">
+  <p className="text-xs atlas-fg-danger" role="alert">
     {prefix}: {error.message}
     {error.signInUrl && (
       <>
         {' '}
         <a
           href={signInHref(error.signInUrl)}
-          className="underline font-medium hover:text-red-300"
+          className="underline font-medium hover:decoration-2"
           data-testid="gateway-signin-link"
         >
           Sign in again
@@ -134,12 +134,12 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
   return (
     <div className="border-t border-gray-600 px-3 py-2 space-y-2" data-testid={`gateway-${gateway.name}`}>
       <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
-        <Users className="w-3.5 h-3.5 text-purple-400" />
+        <Users className="w-3.5 h-3.5 atlas-fg-agent" />
         <span className="truncate">{gateway.display_name || gateway.name}</span>
         <button
           type="button"
           onClick={() => { setTeams(null); setRefreshCount(n => n + 1) }}
-          className="ml-auto p-0.5 text-gray-500 hover:text-gray-300"
+          className="ml-auto p-0.5 text-gray-400 hover:text-gray-300"
           title="Refresh teams and models"
           aria-label="Refresh teams and models"
         >
@@ -147,12 +147,12 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
         </button>
       </div>
       {(currentTeamGone || currentModelGone) && (
-        <p className="text-xs text-amber-400" role="status">
+        <p className="text-xs atlas-fg-warning" role="status">
           Your selected {currentTeamGone ? 'team' : 'model'} is no longer available to you. Choose another.
         </p>
       )}
       {gateway.description && (
-        <p className="text-[11px] text-gray-500">{gateway.description}</p>
+        <p className="text-[11px] text-gray-400">{gateway.description}</p>
       )}
 
       {teamsError ? (
@@ -207,7 +207,7 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                     type="button"
                     onClick={() => handleModelSelect(model)}
                     className={`group w-full text-left px-2 py-1.5 text-sm block border-b border-gray-700 last:border-b-0 hover:bg-gray-700 ${
-                      selected ? 'text-blue-300' : 'text-gray-200'
+                      selected ? 'atlas-fg-info' : 'text-gray-200'
                     }`}
                     aria-pressed={selected}
                     title={model.model_id}

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>22 Game Boy DMG</title>
+<style>
+  :root {
+    --shell: #b8b0a4;
+    --shell-dark: #8a8478;
+    --shell-shadow: #6a6458;
+    --screen-bezel: #2a3028;
+    --lcd-0: #0f380f;
+    --lcd-1: #306230;
+    --lcd-2: #8bac0f;
+    --lcd-3: #9bbc0f;
+    --red-led: #d42020;
+    --btn-purple: #6a1b7a;
+    --font-pixel: "Press Start 2P", "VT323", "Courier New", monospace;
+    --font-lcd: "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; image-rendering: pixelated; }
+  body {
+    background: #1a1a22;
+    background-image:
+      radial-gradient(circle at 50% 30%, #2a2a32 0%, #0a0a10 100%);
+    color: var(--lcd-0);
+    font-family: var(--font-lcd);
+    font-size: 18px;
+    padding: 30px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+  .gameboy {
+    background: var(--shell);
+    width: 420px;
+    padding: 24px 24px 60px;
+    border-radius: 10px 10px 10px 60px;
+    box-shadow:
+      inset 0 -3px 0 var(--shell-shadow),
+      inset 0 3px 0 #d4cab8,
+      5px 5px 20px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  .screen-bezel {
+    background: var(--screen-bezel);
+    padding: 40px 28px 24px;
+    border-radius: 10px 10px 40px 10px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+    position: relative;
+    margin-bottom: 20px;
+  }
+  .screen-bezel::before {
+    content: "● DOT MATRIX WITH STEREO SOUND";
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--shell);
+    font-family: var(--font-pixel);
+    font-size: 9px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  .power-led {
+    position: absolute;
+    top: 52%;
+    left: 12px;
+    transform: translateY(-50%);
+    text-align: center;
+  }
+  .power-led::before {
+    content: "";
+    display: block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red-led);
+    box-shadow: 0 0 6px var(--red-led), inset -1px -1px 2px rgba(0,0,0,0.4);
+    margin: 0 auto 4px;
+  }
+  .power-led-label {
+    color: var(--screen-bezel);
+    font-family: var(--font-pixel);
+    font-size: 7px;
+  }
+  .lcd {
+    background: var(--lcd-3);
+    aspect-ratio: 10 / 9;
+    padding: 14px;
+    color: var(--lcd-0);
+    box-shadow: inset 0 0 0 2px var(--lcd-2);
+    position: relative;
+    overflow: hidden;
+    image-rendering: pixelated;
+  }
+  .lcd::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(to right, transparent 0 2px, rgba(15,56,15,0.08) 2px 3px),
+      repeating-linear-gradient(to bottom, transparent 0 2px, rgba(15,56,15,0.08) 2px 3px);
+    pointer-events: none;
+  }
+  .lcd h1 {
+    font-family: var(--font-pixel);
+    font-size: 14px;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    color: var(--lcd-0);
+    text-shadow: 1px 1px 0 var(--lcd-2);
+  }
+  .lcd .menu { font-family: var(--font-pixel); font-size: 10px; line-height: 1.8; }
+  .lcd .menu .sel { color: var(--lcd-3); background: var(--lcd-0); padding: 0 4px; }
+  .lcd .hp-bar { display: flex; gap: 2px; margin: 8px 0; }
+  .lcd .hp-bar div { width: 10px; height: 8px; background: var(--lcd-0); }
+  .lcd .hp-bar div.empty { background: transparent; border: 1px solid var(--lcd-1); }
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    align-items: center;
+  }
+  .dpad {
+    position: relative;
+    width: 90px; height: 90px;
+    justify-self: center;
+  }
+  .dpad-bar {
+    position: absolute;
+    background: #1a1a1a;
+    border-radius: 4px;
+    box-shadow: inset 0 -2px 0 rgba(255,255,255,0.1);
+  }
+  .dpad-bar.h { top: 33px; left: 0; width: 90px; height: 26px; }
+  .dpad-bar.v { top: 0; left: 33px; width: 26px; height: 90px; }
+  .ab-buttons {
+    display: flex;
+    gap: 14px;
+    transform: rotate(-25deg);
+    justify-self: center;
+  }
+  .ab {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #b02050, var(--btn-purple));
+    color: #fff;
+    font-family: var(--font-pixel);
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+    cursor: pointer;
+  }
+  .start-select {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 14px;
+    transform: rotate(-25deg);
+  }
+  .ss-btn {
+    width: 40px; height: 10px;
+    background: #666;
+    border-radius: 5px;
+    box-shadow: inset 0 -1px 0 rgba(0,0,0,0.4);
+  }
+  .ss-label {
+    position: absolute;
+    font-family: var(--font-pixel);
+    font-size: 7px;
+    color: var(--shell-shadow);
+  }
+  .logo-bar {
+    font-family: serif;
+    font-style: italic;
+    font-weight: bold;
+    color: var(--shell-shadow);
+    font-size: 14px;
+    text-align: center;
+    letter-spacing: -1px;
+    margin-top: 14px;
+  }
+  .logo-bar span { letter-spacing: 6px; font-family: var(--font-pixel); font-size: 10px; font-style: normal; font-weight: normal; }
+  .swatches { display: flex; gap: 8px; margin-top: 10px; }
+  .sw { width: 40px; height: 40px; border: 2px solid var(--screen-bezel); }
+</style>
+</head>
+<body>
+<div class="gameboy">
+  <div class="screen-bezel">
+    <div class="power-led">
+      <span class="power-led-label">BATTERY</span>
+    </div>
+    <div class="lcd">
+      <h1>POKeMON RED</h1>
+      <div class="menu">
+        &gt; <span class="sel">CONTINUE</span><br>
+        &nbsp;&nbsp;NEW GAME<br>
+        &nbsp;&nbsp;OPTION
+      </div>
+      <div class="hp-bar">
+        <div></div><div></div><div></div><div></div><div></div><div></div><div class="empty"></div><div class="empty"></div>
+      </div>
+      <div class="menu" style="margin-top:10px;">HP: 42/58<br>LV.12 RED</div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="dpad">
+      <div class="dpad-bar h"></div>
+      <div class="dpad-bar v"></div>
+    </div>
+    <div class="ab-buttons">
+      <div class="ab">B</div>
+      <div class="ab">A</div>
+    </div>
+    <div class="start-select">
+      <div style="text-align:center;"><div class="ss-btn"></div><div style="font-family:var(--font-pixel);font-size:7px;color:var(--shell-shadow);margin-top:2px;">SELECT</div></div>
+      <div style="text-align:center;"><div class="ss-btn"></div><div style="font-family:var(--font-pixel);font-size:7px;color:var(--shell-shadow);margin-top:2px;">START</div></div>
+    </div>
+  </div>
+  <div class="logo-bar">Nintendo <span>GAME BOY</span>™</div>
+</div>
+
+<div style="background:var(--shell);padding:14px;border-radius:4px;color:var(--screen-bezel);font-family:var(--font-pixel);font-size:10px;">
+  4-SHADE PALETTE:
+  <div class="swatches">
+    <div class="sw" style="background:var(--lcd-0)"></div>
+    <div class="sw" style="background:var(--lcd-1)"></div>
+    <div class="sw" style="background:var(--lcd-2)"></div>
+    <div class="sw" style="background:var(--lcd-3)"></div>
+  </div>
+</div>
+</body>
+</html>

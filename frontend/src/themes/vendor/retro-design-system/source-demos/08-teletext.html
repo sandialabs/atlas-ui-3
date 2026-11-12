@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>08 Teletext / Ceefax</title>
+<style>
+  :root {
+    --tt-black: #000000;
+    --tt-red: #ff0000;
+    --tt-green: #00ff00;
+    --tt-yellow: #ffff00;
+    --tt-blue: #0000ff;
+    --tt-magenta: #ff00ff;
+    --tt-cyan: #00ffff;
+    --tt-white: #ffffff;
+    --font: "VT323", "Courier New", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #1a1a1a;
+    color: var(--tt-white);
+    font-family: var(--font);
+    font-size: 22px;
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+    image-rendering: pixelated;
+  }
+  .screen {
+    background: var(--tt-black);
+    width: 760px;
+    max-width: 100%;
+    padding: 10px 20px;
+    border: 12px solid #222;
+    border-radius: 20px;
+    box-shadow: inset 0 0 60px rgba(0,0,0,0.6), 0 0 40px rgba(0,255,0,0.1);
+    font-family: var(--font);
+    line-height: 1.15;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    position: relative;
+  }
+  .screen::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.25) 2px 3px);
+    pointer-events: none;
+    border-radius: 12px;
+  }
+  .row { display: flex; justify-content: space-between; }
+  .red { color: var(--tt-red); }
+  .green { color: var(--tt-green); }
+  .yellow { color: var(--tt-yellow); }
+  .blue { color: var(--tt-blue); }
+  .magenta { color: var(--tt-magenta); }
+  .cyan { color: var(--tt-cyan); }
+  .white { color: var(--tt-white); }
+  .bg-red { background: var(--tt-red); color: var(--tt-black); padding: 0 6px; }
+  .bg-blue { background: var(--tt-blue); padding: 0 6px; }
+  .bg-yellow { background: var(--tt-yellow); color: var(--tt-black); padding: 0 6px; }
+  .bg-green { background: var(--tt-green); color: var(--tt-black); padding: 0 6px; }
+  .bg-cyan { background: var(--tt-cyan); color: var(--tt-black); padding: 0 6px; }
+  .bg-magenta { background: var(--tt-magenta); color: var(--tt-white); padding: 0 6px; }
+  .double { font-size: 44px; line-height: 1; letter-spacing: 2px; font-weight: bold; }
+  .block {
+    display: grid;
+    grid-template-columns: repeat(40, 1ch);
+    font-size: 20px;
+    line-height: 1;
+  }
+  .mosaic {
+    display: inline-block;
+    width: 1ch; height: 1.15em;
+    vertical-align: top;
+    background:
+      linear-gradient(to right, currentColor 50%, transparent 50%) 0 0/1ch 50% no-repeat,
+      linear-gradient(to left, currentColor 50%, transparent 50%) 0 50%/1ch 50% no-repeat;
+  }
+  .header, .footer { display: flex; justify-content: space-between; }
+  .divider { border-bottom: 2px dashed var(--tt-yellow); margin: 4px 0; }
+  .nav-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 10px; }
+  .nav-strip span { text-align: center; padding: 2px 4px; font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="row">
+    <span class="cyan">P100 CEEFAX 100</span>
+    <span class="white">Mon 22 Apr <span class="yellow">12:00/34</span></span>
+  </div>
+  <div class="divider"></div>
+
+  <div class="double bg-red">&nbsp;CEEFAX&nbsp;</div>
+  <div class="double green">&nbsp;THE HEADLINES&nbsp;</div>
+
+  <div style="margin:14px 0;">
+    <div class="yellow">▸ NEWS.....................101</div>
+    <div class="cyan">▸ HEADLINES................102</div>
+    <div class="green">▸ SPORT....................300</div>
+    <div class="magenta">▸ WEATHER..................400</div>
+    <div class="white">▸ FINANCE..................200</div>
+    <div class="red">▸ TV GUIDE.................600</div>
+  </div>
+
+  <div style="margin-top:20px;">
+    <div class="bg-blue">&nbsp;WEATHER&nbsp;</div>
+    <div class="yellow">LONDON........RAIN.....8°C</div>
+    <div class="cyan">EDINBURGH.....CLOUD....6°C</div>
+    <div class="green">CARDIFF.......SUN......9°C</div>
+  </div>
+
+  <div style="margin-top:20px;">
+    <div class="bg-yellow">&nbsp;BLOCK MOSAICS&nbsp;</div>
+    <div class="red" style="font-size:28px; letter-spacing: 0;">
+      ▀▄▀▄▀▄▀▄ <span class="green">▀▄▀▄▀▄▀▄</span> <span class="cyan">▀▄▀▄▀▄▀▄</span>
+    </div>
+    <div class="magenta" style="font-size:28px; letter-spacing: 0;">
+      █▓▒░ <span class="yellow">█▓▒░</span> <span class="cyan">█▓▒░</span> <span class="white">█▓▒░</span>
+    </div>
+  </div>
+
+  <div class="nav-strip">
+    <span class="bg-red">RED</span>
+    <span class="bg-green">GREEN</span>
+    <span class="bg-yellow">YELLOW</span>
+    <span class="bg-cyan">CYAN</span>
+  </div>
+
+  <div class="row" style="margin-top:10px">
+    <span class="cyan">0 HOME</span><span class="white">LOADING 100...</span>
+  </div>
+</div>
+</body>
+</html>

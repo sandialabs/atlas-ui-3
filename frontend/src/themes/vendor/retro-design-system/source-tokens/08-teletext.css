@@ -1,0 +1,14 @@
+/* Teletext / Ceefax — design tokens
+   Extracted from styles/08-teletext/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --tt-black: #000000;
+  --tt-red: #ff0000;
+  --tt-green: #00ff00;
+  --tt-yellow: #ffff00;
+  --tt-blue: #0000ff;
+  --tt-magenta: #ff00ff;
+  --tt-cyan: #00ffff;
+  --tt-white: #ffffff;
+  --font: "VT323", "Courier New", "Consolas", monospace;
+}

@@ -245,6 +245,8 @@ Principle: Learn an interaction once and use it everywhere.
 - `FEATURE_AGENT_MODE_AVAILABLE` - Agent mode UI toggle
 - `VITE_FEATURE_ANIMATED_LOGO` - Animated logo (build-time Vite flag; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 - `VITE_FEATURE_RAG_CITATIONS` - Perplexity-style inline citations & collapsible Sources section for RAG responses (build-time Vite flag; defaults to `false`; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
+- `FEATURE_RETRO_THEMES_ENABLED` - Retro Design System theme gallery in Settings (run-time; defaults to `false`; a saved retro theme falls back to its Light/Dark base mode when off)
+- `VITE_FEATURE_RETRO_THEMES` - Includes the 53 retro themes and their CSS in the bundle (build-time Vite flag; defaults to on, only `false` compiles them out; in `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 
 ## Per-User LLM API Keys
 

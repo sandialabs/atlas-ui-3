@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>16 Vaporwave</title>
+<style>
+  :root {
+    --pink: #ff71ce;
+    --cyan: #01cdfe;
+    --purple: #b967ff;
+    --green: #05ffa1;
+    --yellow: #fffb96;
+    --bg: #1a0b2e;
+    --grid: #ff00e5;
+    --ink: #f8f8ff;
+    --font-jp: "MS PGothic", "Noto Serif JP", serif;
+    --font: "Times New Roman", "Hiragino Mincho Pro", serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background:
+      linear-gradient(to bottom, #1a0b2e 0%, #3a1458 30%, #ff71ce 60%, #ff9a3a 80%, #ffe87a 100%);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    bottom: 0; left: -20%; right: -20%; height: 50vh;
+    background:
+      linear-gradient(to top, transparent 0%, var(--bg) 40%),
+      repeating-linear-gradient(to right, transparent 0 58px, var(--grid) 58px 60px),
+      repeating-linear-gradient(to bottom, transparent 0 58px, var(--grid) 58px 60px);
+    transform: perspective(400px) rotateX(60deg);
+    transform-origin: center bottom;
+    opacity: 0.7;
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed; top: 10%; right: 8%;
+    width: 220px; height: 220px;
+    background: radial-gradient(circle at 60% 40%, #ff9a3a, #ff2d95 50%, #5a1488 100%);
+    border-radius: 50%;
+    box-shadow: 0 0 80px rgba(255,45,149,0.6);
+    pointer-events: none;
+  }
+  .page { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; }
+  h1 {
+    font-family: var(--font-jp);
+    font-size: 72px;
+    color: var(--cyan);
+    text-shadow:
+      4px 4px 0 var(--pink),
+      -4px -4px 0 var(--purple);
+    letter-spacing: 8px;
+    margin-bottom: 4px;
+    line-height: 1;
+  }
+  .sub {
+    font-family: var(--font-jp);
+    font-size: 28px;
+    color: var(--pink);
+    text-shadow: 2px 2px 0 var(--cyan);
+    letter-spacing: 12px;
+    margin-bottom: 20px;
+  }
+  h2 {
+    font-family: var(--font-jp);
+    font-size: 20px;
+    color: var(--yellow);
+    letter-spacing: 6px;
+    margin: 24px 0 10px;
+    text-shadow: 2px 2px 0 var(--purple);
+  }
+  p { line-height: 1.7; color: var(--ink); margin-bottom: 8px; }
+  .bust {
+    width: 140px; height: 140px;
+    background:
+      radial-gradient(circle at 40% 35%, #fff 0%, #d8c4e8 40%, #9b7ec4 100%);
+    border-radius: 40% 60% 55% 45% / 50% 45% 55% 50%;
+    box-shadow: inset -20px -20px 40px rgba(90,20,136,0.4), 0 10px 30px rgba(0,0,0,0.4);
+    float: right;
+    margin-left: 20px;
+    filter: hue-rotate(0deg);
+    animation: shift 8s ease-in-out infinite;
+  }
+  @keyframes shift { 50% { filter: hue-rotate(45deg); } }
+  .btn {
+    font-family: var(--font-jp);
+    font-size: 14px;
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    color: #fff;
+    border: 3px solid var(--cyan);
+    padding: 10px 22px;
+    cursor: pointer;
+    letter-spacing: 4px;
+    text-shadow: 2px 2px 0 var(--purple);
+    box-shadow: 4px 4px 0 var(--cyan), 8px 8px 0 var(--yellow);
+  }
+  .btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--cyan), 10px 10px 0 var(--yellow); }
+  .input {
+    font-family: var(--font-jp);
+    font-size: 15px;
+    background: rgba(26,11,46,0.6);
+    color: var(--cyan);
+    border: 2px solid var(--pink);
+    padding: 8px 14px;
+    width: 320px;
+    letter-spacing: 2px;
+  }
+  .input:focus { outline: none; border-color: var(--yellow); color: var(--yellow); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch {
+    width: 72px; height: 72px;
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+  }
+  .glitch {
+    position: relative;
+    display: inline-block;
+  }
+  .glitch::before, .glitch::after {
+    content: attr(data-text);
+    position: absolute; left: 0; top: 0;
+  }
+  .glitch::before { color: var(--pink); transform: translate(-3px, 0); }
+  .glitch::after { color: var(--cyan); transform: translate(3px, 0); }
+  .jp { font-family: var(--font-jp); color: var(--pink); letter-spacing: 4px; }
+  .card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(8px);
+    border: 2px solid var(--pink);
+    padding: 20px;
+    box-shadow: 6px 6px 0 var(--cyan);
+    margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="bust"></div>
+  <h1 class="glitch" data-text="AESTHETIC">AESTHETIC</h1>
+  <div class="sub">ア　ェ　ス　テ　ィ　ッ　ク</div>
+  <p class="jp">気分はモール — 1995年の夏 — ローマン石膏像</p>
+
+  <div class="card">
+    <h2>パ　レ　ッ　ト</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--pink)"></span>
+      <span class="swatch" style="background:var(--cyan)"></span>
+      <span class="swatch" style="background:var(--purple)"></span>
+      <span class="swatch" style="background:var(--green)"></span>
+      <span class="swatch" style="background:var(--yellow)"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>INPUT</h2>
+    <div class="row"><input class="input" value="MALL SOFT MIX 95"></div>
+    <h2>CONTROLS</h2>
+    <div class="row">
+      <button class="btn">PLAY ▶</button>
+      <button class="btn">エンター</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

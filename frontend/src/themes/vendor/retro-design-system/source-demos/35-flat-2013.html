@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>35 Flat Design 2013</title>
+<style>
+  :root {
+    --bg: #ecf0f1;
+    --turq: #1abc9c;
+    --green: #2ecc71;
+    --blue: #3498db;
+    --purple: #9b59b6;
+    --dark: #34495e;
+    --yellow: #f1c40f;
+    --orange: #e67e22;
+    --red: #e74c3c;
+    --silver: #bdc3c7;
+    --gray: #95a5a6;
+    --font: "Helvetica Neue Light", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--dark);
+    font-family: var(--font);
+    font-weight: 200;
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .page { max-width: 820px; margin: 0 auto; }
+  h1 { font-weight: 100; font-size: 56px; letter-spacing: -1px; margin-bottom: 6px; color: var(--dark); }
+  h1 strong { color: var(--turq); font-weight: 300; }
+  .sub { color: var(--gray); font-size: 18px; font-weight: 300; margin-bottom: 30px; }
+  h2 { font-weight: 300; font-size: 14px; text-transform: uppercase; letter-spacing: 3px; margin: 30px 0 12px; color: var(--gray); }
+  p { margin-bottom: 10px; font-weight: 300; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 10px 0; }
+  .tile { aspect-ratio: 1; padding: 18px; color: #fff; display: flex; flex-direction: column; justify-content: space-between; font-weight: 300; cursor: pointer; transition: opacity 0.2s; }
+  .tile:hover { opacity: 0.85; }
+  .tile .icon { font-size: 48px; font-weight: 100; }
+  .tile .lbl { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; }
+  .t1 { background: var(--turq); }
+  .t2 { background: var(--blue); }
+  .t3 { background: var(--purple); }
+  .t4 { background: var(--red); }
+  .t5 { background: var(--orange); }
+  .t6 { background: var(--green); }
+  .t7 { background: var(--yellow); color: var(--dark); }
+  .t8 { background: var(--dark); }
+  .btn { font-family: var(--font); font-weight: 300; font-size: 14px; background: var(--turq); color: #fff; border: none; padding: 12px 24px; cursor: pointer; letter-spacing: 1px; text-transform: uppercase; }
+  .btn:hover { background: #16a085; }
+  .btn-blue { background: var(--blue); } .btn-blue:hover { background: #2980b9; }
+  .btn-red { background: var(--red); } .btn-red:hover { background: #c0392b; }
+  .btn-ghost { background: transparent; color: var(--dark); border: 1px solid var(--silver); }
+  .btn-ghost:hover { background: var(--silver); color: #fff; border-color: var(--silver); }
+  .input { font-family: var(--font); font-weight: 300; font-size: 15px; background: #fff; border: 1px solid var(--silver); padding: 12px 14px; width: 340px; }
+  .input:focus { outline: none; border-color: var(--turq); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .swatch { width: 68px; height: 68px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1><strong>flat</strong> is the new</h1>
+  <h1>black.</h1>
+  <div class="sub">No shadows. No bevels. No gloss. Just color, type, and whitespace.</div>
+
+  <h2>Tiles</h2>
+  <div class="tiles">
+    <div class="tile t1"><span class="icon">✉</span><span class="lbl">Mail</span></div>
+    <div class="tile t2"><span class="icon">☁</span><span class="lbl">Cloud</span></div>
+    <div class="tile t3"><span class="icon">♪</span><span class="lbl">Music</span></div>
+    <div class="tile t4"><span class="icon">♥</span><span class="lbl">Fitness</span></div>
+    <div class="tile t5"><span class="icon">✎</span><span class="lbl">Notes</span></div>
+    <div class="tile t6"><span class="icon">✓</span><span class="lbl">Tasks</span></div>
+    <div class="tile t7"><span class="icon">☀</span><span class="lbl">Weather</span></div>
+    <div class="tile t8"><span class="icon">⚙</span><span class="lbl">Settings</span></div>
+  </div>
+
+  <h2>Input</h2>
+  <div class="row"><input class="input" value="ios7@flat.design"></div>
+
+  <h2>Buttons</h2>
+  <div class="row">
+    <button class="btn">Sign Up</button>
+    <button class="btn btn-blue">Learn More</button>
+    <button class="btn btn-red">Delete</button>
+    <button class="btn btn-ghost">Cancel</button>
+  </div>
+
+  <h2>Palette</h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--turq)"></span>
+    <span class="swatch" style="background:var(--green)"></span>
+    <span class="swatch" style="background:var(--blue)"></span>
+    <span class="swatch" style="background:var(--purple)"></span>
+    <span class="swatch" style="background:var(--yellow)"></span>
+    <span class="swatch" style="background:var(--orange)"></span>
+    <span class="swatch" style="background:var(--red)"></span>
+    <span class="swatch" style="background:var(--dark)"></span>
+  </div>
+</div>
+</body>
+</html>

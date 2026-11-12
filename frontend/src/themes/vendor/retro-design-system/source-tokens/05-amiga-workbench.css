@@ -1,0 +1,12 @@
+/* Amiga Workbench — design tokens
+   Extracted from styles/05-amiga-workbench/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --wb-blue: #0055aa;
+  --wb-orange: #ff8800;
+  --wb-white: #ffffff;
+  --wb-black: #000000;
+  --wb-gray: #a0a0a0;
+  --ink: #000;
+  --font: "Topaz", "Courier New", "Consolas", monospace;
+}

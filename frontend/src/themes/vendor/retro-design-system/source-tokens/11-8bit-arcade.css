@@ -1,0 +1,15 @@
+/* 8-Bit Arcade — design tokens
+   Extracted from styles/11-8bit-arcade/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0b0b1e;
+  --pink: #ff2d95;
+  --cyan: #00e5ff;
+  --yellow: #ffd300;
+  --green: #2bff88;
+  --red: #ff3b3b;
+  --purple: #7c1dfd;
+  --white: #ffffff;
+  --ink: #e9e9ff;
+  --font: "Press Start 2P", "VT323", monospace;
+}

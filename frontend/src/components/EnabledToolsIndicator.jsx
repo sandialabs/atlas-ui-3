@@ -79,7 +79,7 @@ const EnabledToolsIndicator = () => {
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
           aria-expanded={isExpanded}
-          className={`flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-500 text-gray-300 transition-colors ${FOCUS_RING} ${
+          className={`flex-shrink-0 px-2 py-1 rounded flex items-center gap-1 bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50 ${FOCUS_RING} ${
             isExpandedLayout ? 'mt-0.5' : ''
           }`}
           title={isExpanded ? 'Show less' : `Show ${allTools.length - COMPACT_THRESHOLD} more`}
@@ -125,7 +125,7 @@ const EnabledToolsIndicator = () => {
         } ${
           autoApproveOn
             ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-700'
-            : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600'
+            : 'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600 hover:text-gray-50'
         }`}
         title={`Auto-approve tool calls is ${autoApproveOn ? 'on' : 'off'}. ${describeAutoApprove(autoApproveOn)} Click to turn it ${autoApproveOn ? 'off' : 'on'}.`}
       >

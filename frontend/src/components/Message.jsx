@@ -212,7 +212,9 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // `copyCodeBlock` N times — wasteful even when idempotent.
   const containerRef = useCodeBlockCopy()
 
-  const avatarBg = isUser ? 'bg-green-600' : isSystem ? 'bg-yellow-600' : 'bg-blue-600'
+  // Avatar and status fills are fixed palette colours, so their text is fixed
+  // too (AA in every theme): white on green-700/blue-600, black on yellow-600.
+  const avatarBg = isUser ? 'bg-green-700 text-white' : isSystem ? 'bg-yellow-600 text-black' : 'bg-blue-600 text-white'
   const avatarText = isUser ? 'Y' : isSystem ? 'S' : 'A'
   const authorName = isUser ? 'You' : isSystem ? 'System' : appName
 
@@ -260,15 +262,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         failed ? 'FAILED' :
         wasInterrupted ? 'STOPPED' : 'NO STATUS'
       const statusColor =
-        isToolActive ? 'bg-blue-600' :
-        succeeded ? 'bg-green-600' :
-        failed ? 'bg-red-600' : 'bg-gray-600'
+        isToolActive ? 'bg-blue-600 text-white' :
+        succeeded ? 'bg-green-700 text-white' :
+        failed ? 'bg-red-600 text-white' : 'bg-gray-600 text-gray-100'
       // Compact rows show the outcome as a glyph rather than a text pill so the
       // whole row fits one line on a phone (#762).
       const statusGlyph =
         succeeded ? '✓' : failed ? '✗' : wasInterrupted ? '⏹' : '–'
       const statusGlyphColor =
-        succeeded ? 'text-green-400' : failed ? 'text-red-400' : 'text-gray-400'
+        succeeded ? 'atlas-fg-success' : failed ? 'atlas-fg-danger' : 'text-gray-400'
       // The compact toggle controls chrome only (avatar / author-header / bubble
       // + badge sizing). The collapse behavior is shared across both modes, so
       // details start collapsed and expand on click either way — matching the
@@ -296,12 +298,12 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                signals that there is something to expand. */
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 ${hasDetails ? 'cursor-pointer hover:text-gray-50' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
               {hasDetails && (
-                <span className={`text-gray-500 text-xs flex-shrink-0 transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
+                <span className={`text-gray-400 text-xs flex-shrink-0 transform transition-transform duration-200 ${toolDetailsCollapsed ? 'rotate-0' : 'rotate-90'}`}>
                   ▶
                 </span>
               )}
@@ -340,7 +342,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           ) : (
             <button
               onClick={() => hasDetails && setToolDetailsCollapsed(!toolDetailsCollapsed)}
-              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-white' : 'cursor-default'} transition-colors`}
+              className={`no-print-hide w-full min-w-0 text-left flex flex-wrap items-center gap-2 mb-3 ${hasDetails ? 'cursor-pointer hover:text-gray-50' : 'cursor-default'} transition-colors`}
               type="button"
               aria-expanded={hasDetails ? !toolDetailsCollapsed : undefined}
             >
@@ -519,14 +521,14 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                 line (#762), so it lives here instead — the classic row still
                 shows it inline. */}
             {compactMessages && message.server_name && (
-              <div className="text-xs text-gray-500">Server: {message.server_name}</div>
+              <div className="text-xs text-gray-400">Server: {message.server_name}</div>
             )}
             {argCount > 0 && (
               <div className="border-l-2 border-blue-500 pl-3">
-                <div className="text-xs font-semibold text-blue-400 mb-1">Input Arguments</div>
+                <div className="text-xs font-semibold atlas-fg-info mb-1">Input Arguments</div>
                 <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
                   {debugMode && (
-                    <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Arguments</div>
+                    <div className="text-xs atlas-fg-warning mb-1 font-semibold">DEBUG: Raw Arguments</div>
                   )}
                   <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
                     {JSON.stringify(debugMode ? message.arguments : filterArgumentsForDisplay(message.arguments), null, 2)}
@@ -536,12 +538,12 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             )}
             {message.result && (
               <div className={`border-l-2 pl-3 ${failed ? 'border-red-500' : wasInterrupted ? 'border-gray-500' : 'border-green-500'}`}>
-                <div className={`text-xs font-semibold mb-1 ${failed ? 'text-red-400' : wasInterrupted ? 'text-gray-400' : 'text-green-400'}`}>
+                <div className={`text-xs font-semibold mb-1 ${failed ? 'atlas-fg-danger' : wasInterrupted ? 'text-gray-400' : 'atlas-fg-success'}`}>
                   {failed ? 'Error Details' : wasInterrupted ? 'Stopped Before Result' : 'Output Result'}
                 </div>
                 <div className={`bg-gray-900 border border-gray-700 rounded-lg p-3 overflow-y-auto ${debugMode ? 'max-h-96' : 'max-h-64'}`}>
                   {debugMode && (
-                    <div className="text-xs text-yellow-500 mb-1 font-semibold">DEBUG: Raw Output</div>
+                    <div className="text-xs atlas-fg-warning mb-1 font-semibold">DEBUG: Raw Output</div>
                   )}
                   <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
                     {(() => {
@@ -560,7 +562,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
 
           {/* Synthesis indicator - shown on completed tool messages while LLM interprets results */}
           {message.status === 'completed' && isSynthesizing && (
-            <div className="mt-3 flex items-center gap-2 text-blue-400 border-t border-gray-700 pt-3">
+            <div className="mt-3 flex items-center gap-2 atlas-fg-info border-t border-gray-700 pt-3">
               <svg className="w-4 h-4 spinner flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -593,7 +595,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               Agent
             </span>
             {hasContent
-              ? <span className="text-purple-300 min-w-0 break-words">{message.content}</span>
+              ? <span className="atlas-fg-agent min-w-0 break-words">{message.content}</span>
               : <span className="sr-only">Agent mode started</span>}
           </div>
         )
@@ -616,29 +618,29 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
           case 'error':
           case 'critical':
           case 'emergency':
-            badgeColor = 'bg-red-500 text-white'
-            textColor = 'text-red-300'
+            badgeColor = 'atlas-status-red'
+            textColor = 'atlas-fg-danger'
             break
           case 'warning':
           case 'warn':
-            badgeColor = 'bg-yellow-500 text-black'
-            textColor = 'text-yellow-300'
+            badgeColor = 'atlas-status-yellow'
+            textColor = 'atlas-fg-warning'
             break
           case 'alert':
-            badgeColor = 'bg-orange-500 text-white'
-            textColor = 'text-orange-300'
+            badgeColor = 'atlas-status-orange'
+            textColor = 'atlas-fg-alert'
             break
           case 'info':
           case 'notice':
-            badgeColor = 'bg-blue-500 text-white'
-            textColor = 'text-blue-300'
+            badgeColor = 'atlas-status-blue'
+            textColor = 'atlas-fg-info'
             break
           case 'debug':
-            badgeColor = 'bg-gray-500 text-gray-50'
+            badgeColor = 'atlas-status-neutral'
             textColor = 'text-gray-400'
             break
           default:
-            badgeColor = 'bg-blue-500 text-white'
+            badgeColor = 'atlas-status-blue'
             textColor = 'text-gray-200'
         }
 
@@ -658,19 +660,19 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
         switch (message.subtype) {
           case 'file-attaching':
             return (
-              <div className="text-blue-300 italic">
+              <div className="atlas-fg-info italic">
                 {message.text}
               </div>
             )
           case 'file-attached':
             return (
-              <div className="text-green-300">
+              <div className="atlas-fg-success">
                 {message.text}
               </div>
             )
           case 'file-attach-error':
             return (
-              <div className="text-red-300">
+              <div className="atlas-fg-danger">
                 {message.text}
               </div>
             )
@@ -774,7 +776,11 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   if (isCompact) {
     return (
       <div ref={containerRef} className="w-full min-w-0 pl-0 sm:pl-11 pr-2 text-sm">
-        {renderContent()}
+        {/* Retro themes back this with a transcript plate so log, tool and
+            system text never sits on raw desktop wallpaper (issue #1119). */}
+        <div className="atlas-transcript-row min-w-0">
+          {renderContent()}
+        </div>
       </div>
     )
   }
@@ -788,14 +794,14 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   if (message._seed) {
     return (
       <div ref={containerRef} className="w-full min-w-0 pl-0 sm:pl-11 pr-2" data-testid="stream-replay-seed">
-        {replayMarker}
+        <div className="atlas-transcript-row min-w-0">{replayMarker}</div>
       </div>
     )
   }
 
   return (
     <div className={`flex items-start gap-0 sm:gap-3 ${isUser ? 'flex-row-reverse' : 'w-full'} group`}>
-      <div className={`w-8 h-8 rounded-full ${avatarBg} items-center justify-center text-white text-sm font-medium flex-shrink-0 hidden sm:flex`}>
+      <div className={`w-8 h-8 rounded-full ${avatarBg} items-center justify-center text-sm font-medium flex-shrink-0 hidden sm:flex`}>
         {avatarText}
       </div>
 
@@ -870,7 +876,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
             />
             <div className="flex items-center justify-end gap-2">
               <span className="mr-auto text-xs text-gray-400">
-                Resubmitting replaces the messages below. <span className="text-gray-500">Enter to send, Shift+Enter for newline, Esc to cancel.</span>
+                Resubmitting replaces the messages below. <span className="text-gray-400">Enter to send, Shift+Enter for newline, Esc to cancel.</span>
               </span>
               <button
                 onClick={cancelEdit}

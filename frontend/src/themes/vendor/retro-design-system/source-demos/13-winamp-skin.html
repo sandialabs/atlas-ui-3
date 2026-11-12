@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>13 Winamp Skin</title>
+<style>
+  :root {
+    --chrome: #3c3c3c;
+    --chrome-light: #5a5a5a;
+    --chrome-lighter: #8a8a8a;
+    --chrome-dark: #1a1a1a;
+    --chrome-darker: #000;
+    --lcd-bg: #000;
+    --lcd: #00ff33;
+    --lcd-dim: #004d11;
+    --accent: #ffb400;
+    --accent-red: #ff3b3b;
+    --font: "Helvetica Neue", Arial, sans-serif;
+    --font-lcd: "VT323", "DS-Digital", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0e0e12;
+    background-image:
+      radial-gradient(circle at 50% 50%, #1d1d26, #0e0e12 70%);
+    color: #eee;
+    font-family: var(--font);
+    font-size: 12px;
+    padding: 40px;
+    min-height: 100vh;
+  }
+  .player {
+    background:
+      linear-gradient(to bottom, #5c5c5c, #2d2d2d);
+    border-top: 1px solid #7a7a7a;
+    border-left: 1px solid #7a7a7a;
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    padding: 2px;
+    max-width: 560px;
+    margin-bottom: 28px;
+    box-shadow: 6px 6px 0 rgba(0,0,0,0.6);
+  }
+  .titlebar {
+    background: linear-gradient(to bottom, #a0a0a0, #444);
+    color: #000;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+  }
+  .lcd {
+    background: var(--lcd-bg);
+    color: var(--lcd);
+    font-family: var(--font-lcd);
+    padding: 10px 14px;
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 2px rgba(0,0,0,0.8);
+    margin: 4px 0;
+    font-size: 20px;
+    letter-spacing: 1px;
+    text-shadow: 0 0 4px var(--lcd);
+    display: flex;
+    justify-content: space-between;
+  }
+  .lcd .small { font-size: 14px; color: var(--lcd-dim); }
+  .player-body {
+    padding: 10px;
+    background: linear-gradient(to bottom, #3c3c3c, #1e1e1e);
+  }
+  .viz {
+    background: var(--lcd-bg);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 2px rgba(0,0,0,0.8);
+    height: 40px;
+    padding: 4px;
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    margin-bottom: 8px;
+  }
+  .viz div {
+    flex: 1;
+    background: linear-gradient(to top, #00ff33 0%, #ffb400 60%, #ff3b3b 100%);
+    box-shadow: 0 0 4px rgba(0,255,51,0.6);
+  }
+  .transport {
+    display: flex;
+    gap: 1px;
+    margin-top: 8px;
+  }
+  .tbtn {
+    font-family: var(--font);
+    font-size: 10px;
+    flex: 1;
+    background: linear-gradient(to bottom, #a0a0a0, #555);
+    border-top: 1px solid #c0c0c0;
+    border-left: 1px solid #c0c0c0;
+    border-right: 1px solid #1a1a1a;
+    border-bottom: 1px solid #1a1a1a;
+    color: #000;
+    padding: 6px;
+    cursor: pointer;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+    font-weight: bold;
+  }
+  .tbtn:active { background: linear-gradient(to bottom, #555, #a0a0a0); }
+  .slider {
+    height: 14px;
+    background: var(--chrome-dark);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 2px rgba(0,0,0,0.8);
+    position: relative;
+    margin: 8px 0;
+  }
+  .slider::after {
+    content: "";
+    position: absolute;
+    left: 40%;
+    top: -2px;
+    width: 14px; height: 18px;
+    background: linear-gradient(to bottom, #c0c0c0, #606060);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 0 1px 0 #fff;
+  }
+  .metal-panel {
+    background:
+      linear-gradient(to bottom, #656565 0%, #3a3a3a 50%, #202020 100%);
+    border-top: 1px solid #888;
+    border-left: 1px solid #888;
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    padding: 18px;
+    max-width: 560px;
+    margin-bottom: 28px;
+    color: #eee;
+    box-shadow: 6px 6px 0 rgba(0,0,0,0.6);
+  }
+  h1 {
+    font-family: var(--font-lcd);
+    font-size: 32px;
+    color: var(--lcd);
+    text-shadow: 0 0 8px var(--lcd);
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 8px; color: #ccc; }
+  p { line-height: 1.5; margin-bottom: 8px; color: #bbb; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .swatch { width: 64px; height: 48px; border: 1px solid var(--chrome-darker); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.2); display: inline-block; }
+  .btn-chrome {
+    font-family: var(--font);
+    font-size: 11px;
+    background: linear-gradient(to bottom, #c0c0c0, #606060);
+    color: #000;
+    border-top: 1px solid #fff;
+    border-left: 1px solid #fff;
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    padding: 5px 14px;
+    cursor: pointer;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .input-chrome {
+    background: var(--lcd-bg);
+    color: var(--lcd);
+    font-family: var(--font-lcd);
+    font-size: 16px;
+    padding: 6px 10px;
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 2px rgba(0,0,0,0.8);
+    text-shadow: 0 0 4px var(--lcd);
+    width: 240px;
+  }
+</style>
+</head>
+<body>
+<div class="player">
+  <div class="titlebar"><span>◆ WINAMP ◆</span><span>LLAMA_AM</span></div>
+  <div class="player-body">
+    <div class="lcd">
+      <span>01. NULLSOFT - LLAMA.MP3</span>
+      <span class="small">128 / 44</span>
+    </div>
+    <div class="lcd"><span>2:14 / 4:02</span><span>STEREO</span></div>
+    <div class="viz">
+      <div style="height:30%"></div><div style="height:60%"></div><div style="height:80%"></div><div style="height:50%"></div><div style="height:90%"></div><div style="height:40%"></div><div style="height:70%"></div><div style="height:55%"></div><div style="height:85%"></div><div style="height:35%"></div><div style="height:65%"></div><div style="height:75%"></div><div style="height:45%"></div><div style="height:25%"></div><div style="height:95%"></div><div style="height:50%"></div>
+    </div>
+    <div class="slider"></div>
+    <div class="transport">
+      <button class="tbtn">◂◂</button>
+      <button class="tbtn">◂</button>
+      <button class="tbtn">▶</button>
+      <button class="tbtn">■</button>
+      <button class="tbtn">▸</button>
+      <button class="tbtn">▸▸</button>
+      <button class="tbtn">EJ</button>
+    </div>
+  </div>
+</div>
+
+<div class="metal-panel">
+  <h1>WINAMP</h1>
+  <p>It really whips the llama's ass. Brushed chrome panels. Green LCD readouts. Tiny raster fonts on every label.</p>
+
+  <h2>Palette</h2>
+  <div class="row">
+    <span class="swatch" style="background:linear-gradient(#a0a0a0,#444)"></span>
+    <span class="swatch" style="background:var(--lcd-bg)"></span>
+    <span class="swatch" style="background:var(--lcd)"></span>
+    <span class="swatch" style="background:var(--accent)"></span>
+    <span class="swatch" style="background:var(--accent-red)"></span>
+  </div>
+
+  <h2>Input</h2>
+  <div class="row"><input class="input-chrome" value="ENTER URL..."></div>
+
+  <h2>Buttons</h2>
+  <div class="row">
+    <button class="btn-chrome">Open</button>
+    <button class="btn-chrome">Skin</button>
+    <button class="btn-chrome">EQ</button>
+    <button class="btn-chrome">Playlist</button>
+  </div>
+</div>
+</body>
+</html>

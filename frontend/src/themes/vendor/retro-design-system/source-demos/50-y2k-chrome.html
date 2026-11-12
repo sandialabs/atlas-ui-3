@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>50 Y2K Chrome Bubble</title>
+<style>
+  :root {
+    --bg-1: #d7f0ff;
+    --bg-2: #ffccee;
+    --bg-3: #e8d9ff;
+    --ink: #202030;
+    --chrome-hi: #ffffff;
+    --chrome-mid: #b8c4d8;
+    --chrome-low: #5a6478;
+    --pink: #ff6ab8;
+    --blue: #5ab8ff;
+    --green: #7aff9a;
+    --purple: #9a7aff;
+    --font: "Neue Haas Grotesk", "Helvetica Neue", Arial, sans-serif;
+    --font-display: "Eurostile", "Bank Gothic", "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(ellipse at 20% 10%, var(--bg-1) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, var(--bg-2) 0%, transparent 60%),
+      radial-gradient(ellipse at 50% 80%, var(--bg-3) 0%, transparent 60%),
+      linear-gradient(135deg, #b8e0ff 0%, #ffc4e8 50%, #d0b0ff 100%);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  h1 {
+    font-family: var(--font-display);
+    font-size: 88px;
+    font-weight: 700;
+    letter-spacing: -3px;
+    line-height: 0.9;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    background:
+      linear-gradient(to bottom,
+        var(--chrome-hi) 0%,
+        var(--chrome-hi) 15%,
+        var(--chrome-mid) 30%,
+        var(--chrome-low) 50%,
+        var(--chrome-mid) 70%,
+        var(--chrome-hi) 85%,
+        var(--chrome-hi) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 1px var(--ink);
+    filter: drop-shadow(2px 2px 0 rgba(32,32,48,0.3)) drop-shadow(0 0 4px rgba(255,255,255,0.5));
+  }
+  .sub { font-family: var(--font-display); font-size: 22px; letter-spacing: 8px; text-transform: uppercase; color: var(--chrome-low); text-shadow: 1px 1px 0 rgba(255,255,255,0.6); margin-bottom: 30px; }
+  h2 { font-family: var(--font-display); font-size: 13px; letter-spacing: 4px; text-transform: uppercase; margin: 24px 0 10px; color: var(--chrome-low); }
+  p { line-height: 1.6; margin-bottom: 8px; }
+  .card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.3) 100%);
+    border: 1px solid rgba(255,255,255,0.8);
+    border-radius: 24px;
+    padding: 28px;
+    margin-bottom: 24px;
+    backdrop-filter: blur(20px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.9),
+      inset 0 -1px 0 rgba(0,0,0,0.1),
+      0 10px 40px rgba(90,100,120,0.2);
+  }
+  .orb-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 14px 0; }
+  .orb {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    position: relative;
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.3) 20%, var(--orb-color) 50%, color-mix(in srgb, var(--orb-color), #000 30%) 100%);
+    box-shadow:
+      inset 0 -10px 20px rgba(0,0,0,0.2),
+      0 8px 16px rgba(0,0,0,0.15);
+  }
+  .orb::after {
+    content: "";
+    position: absolute;
+    top: 10%; left: 20%;
+    width: 50%; height: 30%;
+    background: radial-gradient(ellipse, rgba(255,255,255,0.8) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .orb-1 { --orb-color: var(--pink); }
+  .orb-2 { --orb-color: var(--blue); }
+  .orb-3 { --orb-color: var(--green); }
+  .orb-4 { --orb-color: var(--purple); }
+  .btn {
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    background: linear-gradient(to bottom, var(--chrome-hi) 0%, #e0e8f5 45%, #a8b4c8 50%, #cad6ea 55%, var(--chrome-hi) 100%);
+    color: var(--chrome-low);
+    border: 1px solid var(--chrome-low);
+    border-radius: 999px;
+    padding: 12px 26px;
+    cursor: pointer;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.9);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 3px 8px rgba(90,100,120,0.3);
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn-pink { background: linear-gradient(to bottom, #ffe0f0 0%, #ffb0d8 45%, #ff6ab8 50%, #ff95cc 55%, #ffe0f0 100%); color: #a03070; border-color: #a03070; }
+  .btn-blue { background: linear-gradient(to bottom, #e0f0ff 0%, #a8d4ff 45%, var(--blue) 50%, #90caff 55%, #e0f0ff 100%); color: #204878; border-color: #204878; }
+  .input {
+    font-family: var(--font);
+    font-size: 15px;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.9), rgba(240,245,252,0.9));
+    color: var(--ink);
+    border: 1px solid var(--chrome-low);
+    border-radius: 999px;
+    padding: 10px 18px;
+    width: 340px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.08), 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .input:focus { outline: none; border-color: var(--pink); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .sticker {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #ffe0f0, #c0d8ff, #d0ffd0);
+    color: var(--ink);
+    border: 1px solid rgba(255,255,255,0.8);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(154,122,255,0.3);
+  }
+  .butterfly {
+    display: inline-block;
+    font-size: 28px;
+    background: linear-gradient(135deg, var(--pink), var(--blue), var(--purple));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+  }
+  .swatch { width: 72px; height: 72px; border-radius: 14px; display: inline-block; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 3px 8px rgba(0,0,0,0.15); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <h1>y2k.exe</h1>
+    <div class="sub">◂ chrome ◂ bubble ◂ butterfly ▸</div>
+    <p style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <span class="butterfly">✦</span>
+      <span class="sticker">NEW</span>
+      <span class="sticker">LIMITED ED.</span>
+      <span class="sticker">SPARKLE</span>
+      <span class="butterfly">☆</span>
+    </p>
+    <p>Millennium bug survived. Liquid chrome everywhere. Glossy bubble icons. Holographic sticker pack. Frosted translucent plastic. Cybershell.</p>
+  </div>
+
+  <div class="card">
+    <h2>◂ orbs</h2>
+    <div class="orb-grid">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="orb orb-4"></div>
+    </div>
+
+    <h2>◂ input</h2>
+    <div class="row"><input class="input" value="search the web ✨"></div>
+
+    <h2>◂ controls</h2>
+    <div class="row">
+      <button class="btn">Enter</button>
+      <button class="btn btn-pink">Sparkle</button>
+      <button class="btn btn-blue">Save</button>
+    </div>
+
+    <h2>◂ palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--pink)"></span>
+      <span class="swatch" style="background:var(--blue)"></span>
+      <span class="swatch" style="background:var(--green)"></span>
+      <span class="swatch" style="background:var(--purple)"></span>
+      <span class="swatch" style="background:linear-gradient(135deg, var(--chrome-hi), var(--chrome-mid), var(--chrome-low))"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

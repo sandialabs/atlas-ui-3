@@ -1,0 +1,17 @@
+/* Flat Design 2013 — design tokens
+   Extracted from styles/35-flat-2013/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #ecf0f1;
+  --turq: #1abc9c;
+  --green: #2ecc71;
+  --blue: #3498db;
+  --purple: #9b59b6;
+  --dark: #34495e;
+  --yellow: #f1c40f;
+  --orange: #e67e22;
+  --red: #e74c3c;
+  --silver: #bdc3c7;
+  --gray: #95a5a6;
+  --font: "Helvetica Neue Light", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}

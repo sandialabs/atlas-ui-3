@@ -1,0 +1,9 @@
+/* Op Art / Vasarely — design tokens
+   Extracted from styles/44-op-art/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --black: #0a0a0a;
+  --white: #f5f5f5;
+  --red: #ec1e23;
+  --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}

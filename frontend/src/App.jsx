@@ -4,7 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom' 
 import { ChatProvider, useChat } from './contexts/ChatContext'
 import { WSProvider } from './contexts/WSContext'
 import { MarketplaceProvider } from './contexts/MarketplaceContext'
-import { ThemeProvider } from './contexts/ThemeContext'
+import { ThemeProvider, useTheme } from './contexts/ThemeContext'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
@@ -27,11 +27,26 @@ import { ToastProvider, DialogProvider } from './components/ui/ToastProvider'
 import { watchAppViewportHeight } from './utils/visualViewportHeight'
 import { OPEN_SETTINGS_EVENT, parseOpenSettingsDetail } from './utils/settingsPanelEvents'
 import { useCanvasLayout } from './hooks/useCanvasLayout'
+// Retro theme stylesheets load through themeRegistry's `@atlas/retro-themes`
+// build-time alias, so VITE_FEATURE_RETRO_THEMES=false compiles them out.
 
 // Log build info to browser console on startup
 console.info(
   `Atlas v${__APP_VERSION__} (${__GIT_HASH__}) | Built ${__BUILD_TIME__}`
 )
+
+// Hands the run-time FEATURE_RETRO_THEMES_ENABLED value from /api/config to
+// ThemeProvider, which sits outside ChatProvider. When an admin turns the
+// feature off, a saved retro theme falls back to its own light/dark mode.
+function RetroThemeFeatureBridge() {
+  const { features } = useChat()
+  const { setRetroThemesEnabled } = useTheme()
+  const retroThemes = features?.retro_themes
+  useEffect(() => {
+    setRetroThemesEnabled(retroThemes)
+  }, [retroThemes, setRetroThemesEnabled])
+  return null
+}
 
 function ChatInterface() {
   // Tools, prompts, general settings, and admin quick controls are all tabs of
@@ -166,7 +181,7 @@ function ChatInterface() {
 
   return (
     <div
-      className="relative flex flex-col w-full h-full min-h-0 bg-gray-900 text-gray-200 overflow-hidden"
+      className="atlas-theme-desktop relative flex flex-col w-full h-full min-h-0 bg-gray-900 text-gray-200 overflow-hidden"
     >
       {/* Banner Panel - full width across the top */}
       <BannerPanel />
@@ -286,7 +301,7 @@ function AppRoutes() {
 
   return (
     <div
-      className="flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
+      className="atlas-theme-desktop flex flex-col w-full bg-gray-900 text-gray-200 overflow-hidden"
       style={{ height: 'var(--app-viewport-height, 100vh)' }}
     >
       {/* Compliance classification banner: shared shell, above every route, so
@@ -340,6 +355,7 @@ function App() {
           <DialogProvider>
             <WSProvider>
               <ChatProvider>
+                <RetroThemeFeatureBridge />
                 <MarketplaceProvider>
                   <UserSplashScreen config={splashConfig} />
                   <AppRoutes />
