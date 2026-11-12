@@ -35,10 +35,17 @@ def never_connecting_client():
 async def test_connected_client_times_out_with_a_message():
     client = never_connecting_client()
 
-    with pytest.raises(TimeoutError, match="Timeout connecting to MCP server"):
-        async with connected_client(client, 0.05):
-            pytest.fail("the block must not run without a connection")
+    block_ran = False
 
+    async def connect():
+        nonlocal block_ran
+        async with connected_client(client, 0.05):
+            block_ran = True
+
+    with pytest.raises(TimeoutError, match="Timeout connecting to MCP server"):
+        await connect()
+
+    assert not block_ran, "the block must not run without a connection"
     client.__aexit__.assert_not_awaited()
 
 
@@ -59,9 +66,12 @@ async def test_connected_client_enters_and_exits_once():
 async def test_connected_client_exits_and_propagates_block_errors():
     client = AsyncMock()
 
-    with pytest.raises(ValueError, match="boom"):
+    async def failing_block():
         async with connected_client(client, 1):
             raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        await failing_block()
 
     client.__aexit__.assert_awaited_once()
     assert ValueError in client.__aexit__.await_args.args
