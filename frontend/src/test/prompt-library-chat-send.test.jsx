@@ -29,6 +29,7 @@ const h = vi.hoisted(() => ({
   setComplianceLevelFilter: vi.fn(),
   activeKey: null,
   makePromptActive: vi.fn(),
+  clearActivePrompt: vi.fn(),
   library: { entries: [], loaded: true, error: null, testDraft: null, setTestDraft: () => {} },
 }))
 
@@ -71,7 +72,7 @@ vi.mock('../hooks/chat/useSelections', async (importActual) => {
       selectedPrompts: new Set(),
       activePrompts: [],
       activePromptKey: h.activeKey,
-      clearActivePrompt: vi.fn(),
+      clearActivePrompt: h.clearActivePrompt,
       selectedDataSources: new Set(),
       ragEnabled: false,
       toggleRagEnabled: vi.fn(),
@@ -299,5 +300,155 @@ describe('workspace restore never overrides a pinned version (issue #1169)', () 
       result.current.loadSavedConversation({ ...pinnedConversation, id: 'conv-plain', metadata: { workspace_id: 'ws-1' } })
     })
     expect(h.makePromptActive).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('listing completeness and the send path (issue #1169)', () => {
+  const missing = { id: 'p-other', title: 'Other', latest_version: { id: 'w1', version_number: 1 } }
+
+  it('sends a selection a complete listing contains', () => {
+    h.activeKey = libraryPromptKey('p1')
+    h.library = { ...h.library, complete: true }
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hello') })
+    expect(sent).toBe(true)
+    expect(chatFrames()[0].library_prompt).toEqual({ prompt_id: 'p1', version_id: null })
+  })
+
+  it('refuses a genuinely revoked selection (absent from a complete listing)', () => {
+    h.activeKey = libraryPromptKey('p1')
+    h.library = { ...h.library, entries: [missing], complete: true }
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hello') })
+    expect(sent).toBe(false)
+    expect(chatFrames()).toHaveLength(0)
+    expect(h.toastError).toHaveBeenCalledWith(expect.stringMatching(/no longer available/))
+  })
+
+  it('lets the server decide when the listing is incomplete and omits a valid selection', () => {
+    h.activeKey = libraryPromptKey('p1')
+    h.library = { ...h.library, entries: [missing], complete: false }
+    const { result } = renderChat()
+    let sent
+    act(() => { sent = result.current.sendChatMessage('hello') })
+    expect(sent).toBe(true)
+    expect(chatFrames()[0].library_prompt).toEqual({ prompt_id: 'p1', version_id: null })
+    expect(h.toastError).not.toHaveBeenCalled()
+  })
+})
+
+describe('pin revisions on the send path (issue #1169)', () => {
+  const load = (result, metadata) => act(() => {
+    result.current.loadSavedConversation({
+      id: 'conv-1',
+      messages: [{ role: 'user', content: 'hi', message_type: 'chat', timestamp: '2026-01-01T00:00:00Z' }],
+      metadata,
+    })
+  })
+
+  it('sends no revision for a chat the server has not stored', () => {
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()[0].library_prompt_revision).toBeUndefined()
+  })
+
+  it('sends the revision of the loaded conversation, 0 when it never changed', () => {
+    const { result } = renderChat()
+    load(result, { prompt_library: { prompt_id: 'p1', version_id: 'v1' }, prompt_library_pin_revision: 3 })
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()[0].library_prompt_revision).toBe(3)
+    load(result, {})
+    act(() => { result.current.sendChatMessage('again') })
+    expect(chatFrames()[1].library_prompt_revision).toBe(0)
+  })
+
+  it('follows the revision a conversation_saved frame reports', () => {
+    const { result } = renderChat()
+    load(result, { prompt_library_pin_revision: 1 })
+    act(() => {
+      h.wsHandler({ type: 'conversation_saved', conversation_id: 'conv-1', prompt_library: null, prompt_library_pin_revision: 2 })
+    })
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()[0].library_prompt_revision).toBe(2)
+  })
+
+  it('adopts the stored pin when the server reports a conflict', () => {
+    const { result } = renderChat()
+    load(result, { prompt_library_pin_revision: 1 })
+    h.makePromptActive.mockClear()
+    act(() => {
+      h.wsHandler({
+        type: 'error', error_type: 'prompt_pin_conflict', conversation_id: 'conv-1',
+        message: 'changed elsewhere', prompt_library: { prompt_id: 'p1', version_id: 'v2' },
+        prompt_library_pin_revision: 4,
+      })
+    })
+    expect(h.makePromptActive).toHaveBeenCalledWith(libraryPromptKey('p1', 'v2'))
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()[0].library_prompt_revision).toBe(4)
+    act(() => {
+      h.wsHandler({
+        type: 'error', error_type: 'prompt_pin_conflict', conversation_id: 'conv-1',
+        message: 'cleared elsewhere', prompt_library: null, prompt_library_pin_revision: 5,
+      })
+    })
+    expect(h.clearActivePrompt).toHaveBeenCalled()
+  })
+
+  it('ignores pin state for a conversation that is not on screen', () => {
+    const { result } = renderChat()
+    load(result, { prompt_library_pin_revision: 1 })
+    act(() => {
+      h.wsHandler({ type: 'conversation_saved', conversation_id: 'other', prompt_library_pin_revision: 9 })
+    })
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()[0].library_prompt_revision).toBe(1)
+  })
+})
+
+describe('live (in-flight) conversations keep their pin (issue #1169)', () => {
+  const live = {
+    id: 'conv-live',
+    in_flight: true,
+    run_id: 'run-1',
+    messages: [{ role: 'user', content: 'hi', message_type: 'chat', timestamp: '2026-01-01T00:00:00Z' }],
+    metadata: {
+      agent_mode: false,
+      prompt_library: { prompt_id: 'p1', version_id: 'v1', version_number: 1 },
+      prompt_library_pin_revision: 1,
+    },
+  }
+
+  it('re-selects the pin of a conversation whose run is still in flight', () => {
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(live) })
+    expect(h.makePromptActive).toHaveBeenCalledWith(libraryPromptKey('p1', 'v1'))
+  })
+
+  it('sends the pinned reference and revision next, never an accidental null', () => {
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(live) })
+    // The selection the load made is what the composer sends with.
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result: next } = renderChat()
+    act(() => { next.current.loadSavedConversation(live) })
+    act(() => { next.current.sendChatMessage('continue') })
+    const frame = chatFrames().at(-1)
+    expect(frame.library_prompt).toEqual({ prompt_id: 'p1', version_id: 'v1' })
+    expect(frame.library_prompt_revision).toBe(1)
+  })
+
+  it('moves from the live view to the saved record without losing the revision', () => {
+    const { result } = renderChat()
+    act(() => { result.current.loadSavedConversation(live) })
+    act(() => {
+      h.wsHandler({ type: 'conversation_saved', conversation_id: 'conv-live',
+        prompt_library: { prompt_id: 'p1', version_id: 'v1' }, prompt_library_pin_revision: 1 })
+    })
+    act(() => { result.current.sendChatMessage('after save') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(1)
   })
 })

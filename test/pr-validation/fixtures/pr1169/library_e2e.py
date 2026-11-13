@@ -119,6 +119,9 @@ async def main():
     check(s == 400, "sharing with the everyone group is refused")
     s, body = share(pid, ["eng"])
     check(s == 200 and body["sharing"]["groups"] == ["eng"], "owner shares with group eng")
+    s_groups, targets = api("GET", "/api/prompts/groups", OWNER)
+    check(s_groups == 200 and targets == {"groups": ["eng", "ops"], "incomplete": False},
+          "sharing targets are the owner's checked groups, reported complete")
     s, body = api("PUT", f"/api/prompts/{pid}/sharing", OWNER,
                   {"groups": [], "users": [], "expected_revision": body["sharing"]["revision"] - 1})
     check(s == 409, "a sharing change based on a stale revision is refused")
@@ -201,8 +204,37 @@ async def main():
               "the open session's next turn runs unpinned")
     s, stored = api("GET", f"/api/conversations/{live}", MEMBER)
     meta = stored.get("metadata") or {}
-    check(s == 200 and "prompt_library" not in meta and meta.get("prompt_library_pin_epoch") == 1,
-          "the open session's save did not restore the cleared pin")
+    check(s == 200 and "prompt_library" not in meta and meta.get("prompt_library_pin_revision") == 2,
+          "the open session's save did not restore the cleared pin (set = 1, clear = 2)")
+
+    # --- Two windows changing one conversation's pin -----------------------
+    race = str(uuid.uuid4())
+    async with websockets.connect(WS, additional_headers={"X-User-Email": MEMBER}) as tab_a, \
+            websockets.connect(WS, additional_headers={"X-User-Email": MEMBER}) as tab_b:
+        status, saved = await turn_on(tab_a, race, {"prompt_id": pid, "version_id": v1["id"]})
+        seen = saved.get("prompt_library_pin_revision") if saved else None
+        check(status == "ok" and seen == 1, "conversation_saved reports the pin revision (1)")
+        status, _ = await turn_on(tab_b, race, {"prompt_id": pid, "version_id": v2["id"]},
+                                  {"library_prompt_revision": seen})
+        check(status == "ok" and system_prompt_sent().startswith(V2), "tab B re-pins to v2 from revision 1")
+        before = last_llm_request().get("timestamp")
+        status, frame = await turn_on(tab_a, race, {"prompt_id": pid, "version_id": v1["id"]},
+                                      {"library_prompt_revision": seen})
+        check(status == "error" and frame.get("error_type") == "prompt_pin_conflict"
+              and (frame.get("prompt_library") or {}).get("version_id") == v2["id"]
+              and frame.get("prompt_library_pin_revision") == 2
+              and last_llm_request().get("timestamp") == before,
+              "tab A's stale change is refused with the stored pin, and nothing ran")
+        status, frame = await turn_on(tab_a, race, None, {"library_prompt_revision": seen})
+        check(status == "error" and frame.get("error_type") == "prompt_pin_conflict",
+              "tab A's stale explicit clear (library_prompt: null) is refused too")
+        status, _ = await turn_on(tab_a, race, None, {"library_prompt_revision": 2})
+        check(status == "ok" and not system_prompt_sent().startswith((V1, V2)),
+              "after catching up, tab A's explicit clear applies")
+    s, stored = api("GET", f"/api/conversations/{race}", MEMBER)
+    meta = stored.get("metadata") or {}
+    check("prompt_library" not in meta and meta.get("prompt_library_pin_revision") == 3,
+          "the stored pin went v1 -> v2 -> cleared, one revision each")
 
     # --- Save-and-publish publishes only what was saved -------------------
     rev = draft_revision(pid)
@@ -212,8 +244,13 @@ async def main():
           "a save returns exactly the draft it wrote")
     api("PUT", f"/api/prompts/{pid}", OWNER, {"content": "B'S UNSEEN TEXT", "expected_draft_revision": rev + 1})
     s, _ = api("POST", f"/api/prompts/{pid}/publish", OWNER, {"expected_draft_revision": a_saved["draft_revision"]})
+    s_hist, history = api("GET", f"/api/prompts/{pid}/versions?limit=1", OWNER)
+    check(s_hist == 200 and history["total"] == 2 and len(history["versions"]) == 1
+          and "content" not in history["versions"][0],
+          "version history is paged and carries no prompt text")
     versions = api("GET", f"/api/prompts/{pid}/versions", OWNER)[1]["versions"]
-    check(s == 409 and all("B'S UNSEEN" not in v["content"] for v in versions),
+    texts = [api("GET", f"/api/prompts/{pid}/versions/{v['id']}", OWNER)[1]["version"]["content"] for v in versions]
+    check(s == 409 and all("B'S UNSEEN" not in t for t in texts),
           "publishing the saved revision after another save is refused")
 
     # --- Revocation --------------------------------------------------------

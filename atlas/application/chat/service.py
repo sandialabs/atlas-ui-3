@@ -26,6 +26,7 @@ from atlas.domain.conversation_origin import (
 )
 from atlas.domain.errors import (
     AuthorizationError,
+    ConversationMetadataUnreadableError,
     DomainError,
     SessionConflictError,
     SessionNotFoundError,
@@ -809,6 +810,10 @@ class ChatService:
             message_index=len(session.history.messages),
             omitted=UNSET,
             load_metadata=self._conversation_metadata_loader(session, user_email),
+            store_pin=self._conversation_pin_writer(session, user_email, turn_is_incognito),
+            # The pin revision the client last saw (optional): a pin change
+            # decided on an older one is refused, not applied blindly.
+            observed_revision=kwargs.pop("library_prompt_revision", None),
         )
         if library_text is not None:
             kwargs["custom_system_prompt"] = library_text
@@ -1131,6 +1136,9 @@ class ChatService:
                         await update_callback({
                             "type": "conversation_saved",
                             "conversation_id": conv_id,
+                            # The stored pin and its revision (issue #1169),
+                            # so the client can name the revision it saw.
+                            **library_turn.public_pin_state(session.context),
                         })
                     else:
                         await update_callback({
@@ -1374,6 +1382,7 @@ class ChatService:
         canonical_messages = messages
         stored_workspace_id = None
         stored_metadata = None
+        metadata_unreadable = False
         binding = None
         if getattr(self, "conversation_repository", None) is not None:
             # A conversation with a run in flight is ahead of its stored
@@ -1404,6 +1413,7 @@ class ChatService:
             if isinstance(conv_metadata, dict):
                 stored_workspace_id = conv_metadata.get("workspace_id")
                 stored_metadata = conv_metadata
+            metadata_unreadable = bool(conv.get("metadata_unreadable"))
             binding = conv_class.binding_from_record(conv)
 
         if compliance_level is not UNSET:
@@ -1450,7 +1460,11 @@ class ChatService:
         session.context["workspace_id"] = stored_workspace_id
         session.context[conv_class.SESSION_BINDING_KEY] = binding
         # The exact library version the conversation ran with (issue #1169).
-        library_turn.load_pin_from_metadata(session.context, stored_metadata)
+        # Unreadable stored metadata leaves it unknown -- never "no pin".
+        if metadata_unreadable:
+            library_turn.mark_pin_unknown(session.context)
+        else:
+            library_turn.load_pin_from_metadata(session.context, stored_metadata)
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -1895,12 +1909,17 @@ class ChatService:
             return None
 
         read_metadata = getattr(repository, "get_conversation_metadata", None)
+        if not callable(read_metadata) and not callable(getattr(repository, "get_conversation", None)):
+            # A store that only saves (no reads) has no stored pin to follow.
+            return None
 
         def read_via_record():
             # Repositories without the light read: take it from the record.
             record = repository.get_conversation(conversation_id, user_email)
             if record is None:
                 return None
+            if record.get("metadata_unreadable"):
+                raise ConversationMetadataUnreadableError()
             metadata = record.get("metadata")
             return metadata if isinstance(metadata, dict) else {}
 
@@ -1910,6 +1929,25 @@ class ChatService:
             return await asyncio.to_thread(read_via_record)
 
         return load
+
+    def _conversation_pin_writer(self, session: Session, user_email: Optional[str], is_incognito: bool):
+        """Compare-and-sets the bound conversation's stored pin (issue #1169).
+
+        None when the turn is not persisted (no store, incognito) or the
+        repository has no pin writes: the change then lives in the session.
+        """
+        repository = self.conversation_repository
+        conversation_id = session.context.get("conversation_id")
+        change = getattr(repository, "change_prompt_pin", None)
+        if is_incognito or not callable(change) or not user_email or not isinstance(conversation_id, str):
+            return None
+
+        async def store(expected_revision, pin, history_entry):
+            return await asyncio.to_thread(
+                change, conversation_id, user_email, expected_revision, pin, history_entry
+            )
+
+        return store
 
     async def _hydrate_session_from_store(
         self,
@@ -2071,7 +2109,12 @@ class ChatService:
         # an API conversation reports the same origin as its stored record.
         session.context[ORIGIN_METADATA_KEY] = origin_from_metadata(conv_metadata)
         # The pinned library version travels with the stored record (#1169).
-        library_turn.load_pin_from_metadata(session.context, conv_metadata)
+        # A record whose metadata could not be decoded leaves the pin unknown:
+        # the turn re-reads it and is refused while it stays unreadable.
+        if conv.get("metadata_unreadable"):
+            library_turn.mark_pin_unknown(session.context)
+        else:
+            library_turn.load_pin_from_metadata(session.context, conv_metadata)
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
         # The history the session holds belongs to the previous conversation,

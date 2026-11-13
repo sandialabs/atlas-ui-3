@@ -1,13 +1,16 @@
-"""Stored team-prompt pin state (issue #1169, third review).
+"""Stored team-prompt pin state (issue #1169).
 
-A cleared pin must stay cleared: a session that still holds the old pin --
-however its save interleaves with the clear -- cannot write it back. Covers
-the pure merge rule, the repository on DuckDB, and the clear/save race on
-PostgreSQL with independent engines standing in for replicas.
+Every pin change -- set, re-pin, explicit clear, owner DELETE -- is a
+compare-and-set on ``prompt_library_pin_revision`` under the conversation's
+row lock, and a conversation save never writes the pin of an existing record.
+Covers the pure rules, the repository on DuckDB, and races on PostgreSQL with
+independent engines standing in for replicas.
 """
 
+import json
 import os
 import threading
+import time
 import uuid
 
 import pytest
@@ -17,23 +20,32 @@ from sqlalchemy.orm import sessionmaker
 
 from alembic import command
 from atlas.domain.conversation_prompt_pin import (
-    KEEP_STORED_PIN,
-    PIN_EPOCH_METADATA_KEY,
     PIN_HISTORY_METADATA_KEY,
     PIN_METADATA_KEY,
-    reconcile_prompt_pin,
+    PIN_REVISION_METADATA_KEY,
+    apply_pin_change,
+    carry_stored_pin,
+    new_record_pin,
+    pin_revision,
 )
+from atlas.domain.errors import ConversationMetadataUnreadableError
 from atlas.modules.chat_history.database import reset_engine
 from atlas.modules.chat_history.schema_migration import default_alembic_ini
 
 PG_URL = os.environ.get("ATLAS_TEST_POSTGRES_URL")
 USER = "member@example.com"
-PIN = {"prompt_id": "p1", "version_id": "v1", "version_number": 1, "title": "T"}
-HISTORY = [{**PIN, "pinned_at": "2026-01-01T00:00:00+00:00", "from_message_index": 0}]
+V1 = {"prompt_id": "p1", "version_id": "v1", "version_number": 1, "title": "T"}
+V2 = {"prompt_id": "p1", "version_id": "v2", "version_number": 2, "title": "T"}
+OTHER = {"prompt_id": "p2", "version_id": "w1", "version_number": 1, "title": "U"}
+HISTORY = [{**V1, "pinned_at": "2026-01-01T00:00:00+00:00", "from_message_index": 0}]
 MESSAGES = [
     {"role": "user", "content": "hello"},
     {"role": "assistant", "content": "reply"},
 ]
+
+
+def entry(pin):
+    return {**(pin or {"prompt_id": None, "version_id": None}), "pinned_at": "t", "from_message_index": 0}
 
 
 @pytest.fixture(autouse=True)
@@ -43,37 +55,52 @@ def _clean_engine():
     reset_engine()
 
 
-def test_stale_epoch_drops_the_pin_and_keeps_the_stored_epoch():
-    stored = {PIN_EPOCH_METADATA_KEY: 2, PIN_HISTORY_METADATA_KEY: HISTORY}
-    merged = reconcile_prompt_pin(stored, {"agent_mode": False, PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 1})
-    assert PIN_METADATA_KEY not in merged
-    assert merged[PIN_EPOCH_METADATA_KEY] == 2
-    assert merged[PIN_HISTORY_METADATA_KEY] == HISTORY  # history the save lacked is kept
-    assert merged["agent_mode"] is False
+# --- Pure rules -------------------------------------------------------------
 
 
-def test_current_epoch_keeps_the_pin():
-    merged = reconcile_prompt_pin({PIN_EPOCH_METADATA_KEY: 2}, {PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 2})
-    assert merged[PIN_METADATA_KEY] == PIN and merged[PIN_EPOCH_METADATA_KEY] == 2
+def test_a_save_of_an_existing_record_never_changes_the_pin():
+    stored = {PIN_METADATA_KEY: V2, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_REVISION_METADATA_KEY: 4}
+    for incoming in (
+        {"agent_mode": True, PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 9},  # stale pin, bigger number
+        {"agent_mode": True},  # a session that never saw the pin
+        {"agent_mode": True, PIN_HISTORY_METADATA_KEY: []},
+    ):
+        assert carry_stored_pin(stored, incoming) == {"agent_mode": True, **stored}
 
 
-def test_keep_stored_carries_the_stored_pin_through():
-    stored = {PIN_METADATA_KEY: PIN, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_EPOCH_METADATA_KEY: 3}
-    merged = reconcile_prompt_pin(stored, {"workspace_id": None, KEEP_STORED_PIN: True})
-    assert merged == {"workspace_id": None, **stored}
-    # Nothing stored: nothing invented, and the marker never reaches the record.
-    assert reconcile_prompt_pin(None, {KEEP_STORED_PIN: True}) == {}
+def test_a_new_record_takes_the_creating_sessions_pin():
+    incoming = {"agent_mode": False, PIN_METADATA_KEY: V1, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_REVISION_METADATA_KEY: 1}
+    assert new_record_pin(incoming) == incoming
+    assert new_record_pin({"agent_mode": False}) == {"agent_mode": False}  # no pin keys invented
 
 
-@pytest.mark.parametrize("bad_epoch", [None, -1, "3", True, 1.5])
-def test_malformed_epochs_read_as_zero(bad_epoch):
-    merged = reconcile_prompt_pin({PIN_EPOCH_METADATA_KEY: bad_epoch}, {PIN_METADATA_KEY: PIN})
-    assert merged[PIN_METADATA_KEY] == PIN and PIN_EPOCH_METADATA_KEY not in merged
+def test_compare_and_set_applies_only_on_the_expected_revision():
+    stored = {PIN_METADATA_KEY: V1, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_REVISION_METADATA_KEY: 1}
+    status, after = apply_pin_change(stored, 1, V2, entry(V2))
+    assert status == "ok" and after[PIN_METADATA_KEY] == V2 and after[PIN_REVISION_METADATA_KEY] == 2
+    assert [h["version_id"] for h in after[PIN_HISTORY_METADATA_KEY]] == ["v1", "v2"]
+    status, same = apply_pin_change(stored, 0, V2, entry(V2))
+    assert status == "conflict" and same is stored
+    status, same = apply_pin_change(stored, 1, V1, entry(V1))
+    assert status == "unchanged" and same is stored  # no revision churn
+    status, cleared = apply_pin_change(stored, 1, None, entry(None))
+    assert status == "ok" and PIN_METADATA_KEY not in cleared and cleared[PIN_REVISION_METADATA_KEY] == 2
+    status, forced = apply_pin_change(stored, None, None, None)  # owner DELETE
+    assert status == "ok" and forced[PIN_HISTORY_METADATA_KEY] == HISTORY
 
 
-def test_never_cleared_records_gain_no_epoch_key():
-    """Saves of conversations that were never cleared keep their metadata shape."""
-    assert reconcile_prompt_pin({"agent_mode": False}, {"agent_mode": True}) == {"agent_mode": True}
+@pytest.mark.parametrize("value, expected", [(None, 0), (-1, 0), ("3", 0), (True, 0), (1.5, 0), (7, 7)])
+def test_revisions_read_defensively(value, expected):
+    assert pin_revision({PIN_REVISION_METADATA_KEY: value}) == expected
+
+
+def test_the_earlier_epoch_key_reads_as_the_revision():
+    assert pin_revision({"prompt_library_pin_epoch": 3}) == 3
+    status, after = apply_pin_change({"prompt_library_pin_epoch": 3}, 3, V1, entry(V1))
+    assert status == "ok" and after == {PIN_METADATA_KEY: V1, PIN_HISTORY_METADATA_KEY: [entry(V1)], PIN_REVISION_METADATA_KEY: 4}
+
+
+# --- Repository on DuckDB ----------------------------------------------------
 
 
 @pytest.fixture
@@ -88,48 +115,103 @@ def _save(store, conv, metadata, messages=MESSAGES):
     return store.save_conversation(conv, USER, "t", "m", messages, metadata=metadata)
 
 
-def test_clear_bumps_the_epoch_and_a_stale_save_cannot_restore_the_pin(duck_store):
+def _meta(store, conv):
+    return store.get_conversation_metadata(conv, USER)
+
+
+def test_pin_changes_are_compare_and_set_and_saves_cannot_undo_them(duck_store):
     conv = str(uuid.uuid4())
-    _save(duck_store, conv, {PIN_METADATA_KEY: PIN, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_EPOCH_METADATA_KEY: 0})
-    assert duck_store.clear_prompt_pin(conv, USER) == {PIN_METADATA_KEY: PIN}
-    meta = duck_store.get_conversation_metadata(conv, USER)
-    assert PIN_METADATA_KEY not in meta and meta[PIN_EPOCH_METADATA_KEY] == 1
+    _save(duck_store, conv, {PIN_METADATA_KEY: V1, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_REVISION_METADATA_KEY: 1})
+    ok = duck_store.change_prompt_pin(conv, USER, 1, V2, entry(V2))
+    assert ok["status"] == "ok" and ok["state"]["revision"] == 2 and ok["state"]["pin"] == V2
+    stale = duck_store.change_prompt_pin(conv, USER, 1, OTHER, entry(OTHER))
+    assert stale["status"] == "conflict" and stale["state"]["pin"] == V2
+    # A session still holding v1 saves its turn: the stored pin is untouched.
+    _save(duck_store, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1}, MESSAGES * 2)
+    assert _meta(duck_store, conv)[PIN_METADATA_KEY] == V2
+    # A session that never saw any pin saves: still untouched.
+    _save(duck_store, conv, {"agent_mode": True}, MESSAGES * 3)
+    meta = _meta(duck_store, conv)
+    assert meta[PIN_METADATA_KEY] == V2 and meta[PIN_REVISION_METADATA_KEY] == 2 and meta["agent_mode"] is True
+    assert len(duck_store.get_conversation(conv, USER)["messages"]) == 6  # the turns themselves are kept
+
+
+def test_owner_clear_is_unconditional_and_owner_scoped(duck_store):
+    conv = str(uuid.uuid4())
+    _save(duck_store, conv, {PIN_METADATA_KEY: V1, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_REVISION_METADATA_KEY: 5})
+    assert duck_store.clear_prompt_pin(conv, "someone@example.com") is None
+    assert duck_store.change_prompt_pin(conv, "someone@example.com", 5, None, entry(None)) is None
+    assert duck_store.clear_prompt_pin(str(uuid.uuid4()), USER) is None
+    assert duck_store.clear_prompt_pin(conv, USER) == {PIN_METADATA_KEY: V1}
+    meta = _meta(duck_store, conv)
+    assert PIN_METADATA_KEY not in meta and meta[PIN_REVISION_METADATA_KEY] == 6
     assert meta[PIN_HISTORY_METADATA_KEY] == HISTORY
-
-    # The open session saves what it still holds: pin and the old epoch.
-    _save(duck_store, conv, {PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 0}, MESSAGES * 2)
-    meta = duck_store.get_conversation_metadata(conv, USER)
-    assert PIN_METADATA_KEY not in meta and meta[PIN_EPOCH_METADATA_KEY] == 1
-    assert len(duck_store.get_conversation(conv, USER)["messages"]) == 4  # the turn itself is kept
-
-    # A session that saw the clear may pin again.
-    _save(duck_store, conv, {PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 1}, MESSAGES * 3)
-    assert duck_store.get_conversation_metadata(conv, USER)[PIN_METADATA_KEY] == PIN
+    assert duck_store.clear_prompt_pin(conv, USER) == {}  # nothing to clear: no churn
+    assert _meta(duck_store, conv)[PIN_REVISION_METADATA_KEY] == 6
 
 
-def test_clear_is_owner_scoped_and_bumps_even_without_a_pin(duck_store):
+def test_concurrent_changes_on_duckdb_never_both_apply(duck_store):
+    """DuckDB has no row locks: a racing writer fails its commit or loses the
+    compare-and-set; it never applies on top of the other's change."""
+    conv = str(uuid.uuid4())
+    _save(duck_store, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1})
+    results, errors = [], []
+    barrier = threading.Barrier(2)
+
+    def change(pin):
+        barrier.wait()
+        try:
+            results.append(duck_store.change_prompt_pin(conv, USER, 1, pin, entry(pin)))
+        except Exception as e:  # DuckDB write-write conflict
+            errors.append(e)
+
+    threads = [threading.Thread(target=change, args=(p,)) for p in (V2, OTHER)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    applied = [r for r in results if r["status"] == "ok"]
+    assert len(applied) == 1 and len(results) + len(errors) == 2
+    meta = _meta(duck_store, conv)
+    assert meta[PIN_METADATA_KEY] == applied[0]["state"]["pin"] and meta[PIN_REVISION_METADATA_KEY] == 2
+
+
+@pytest.mark.parametrize("blob", ["{not json", "[1, 2]", '"text"', "42"])
+def test_unreadable_metadata_raises_and_is_never_rewritten(duck_store, blob):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    conv = str(uuid.uuid4())
+    _save(duck_store, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1})
+    with duck_store._get_session() as session:
+        session.get(ConversationRecord, conv).metadata_json = blob
+        session.commit()
+    with pytest.raises(ConversationMetadataUnreadableError):
+        _meta(duck_store, conv)
+    with pytest.raises(ConversationMetadataUnreadableError):
+        duck_store.change_prompt_pin(conv, USER, 1, None, entry(None))
+    with pytest.raises(ConversationMetadataUnreadableError):
+        duck_store.clear_prompt_pin(conv, USER)
+    record = duck_store.get_conversation(conv, USER)
+    assert record["metadata_unreadable"] is True and record["metadata"] == {}
+    with duck_store._get_session() as session:
+        assert session.get(ConversationRecord, conv).metadata_json == blob
+
+
+@pytest.mark.parametrize("blob", [None, "", "null", "{}"])
+def test_genuinely_empty_metadata_reads_as_empty(duck_store, blob):
+    from atlas.modules.chat_history.models import ConversationRecord
+
     conv = str(uuid.uuid4())
     _save(duck_store, conv, {"agent_mode": False})
-    assert duck_store.clear_prompt_pin(conv, "someone@example.com") is None
-    assert duck_store.get_conversation_metadata(conv, "someone@example.com") is None
-    assert duck_store.clear_prompt_pin(str(uuid.uuid4()), USER) is None
-    assert duck_store.clear_prompt_pin(conv, USER) == {}
-    # A session may hold a pin it has not saved yet; its save is still refused.
-    _save(duck_store, conv, {PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 0})
-    assert PIN_METADATA_KEY not in duck_store.get_conversation_metadata(conv, USER)
+    with duck_store._get_session() as session:
+        session.get(ConversationRecord, conv).metadata_json = blob
+        session.commit()
+    assert _meta(duck_store, conv) == {}
+    assert "metadata_unreadable" not in duck_store.get_conversation(conv, USER)
+    assert duck_store.change_prompt_pin(conv, USER, 0, V1, entry(V1))["status"] == "ok"
 
 
-def test_unknown_pin_state_saves_keep_the_stored_pin(duck_store):
-    conv = str(uuid.uuid4())
-    stored = {PIN_METADATA_KEY: PIN, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_EPOCH_METADATA_KEY: 4}
-    _save(duck_store, conv, stored)
-    _save(duck_store, conv, {"agent_mode": True, KEEP_STORED_PIN: True})
-    meta = duck_store.get_conversation_metadata(conv, USER)
-    assert {k: meta[k] for k in stored} == stored
-    assert KEEP_STORED_PIN not in meta and meta["agent_mode"] is True
-
-
-# --- PostgreSQL: the clear and a stale save race -------------------------
+# --- PostgreSQL: pin changes and saves race across replicas ------------------
 
 
 @pytest.fixture
@@ -156,96 +238,126 @@ def pg_url(monkeypatch):
         admin.dispose()
 
 
-def test_clear_and_stale_saves_race_across_replicas_postgresql(pg_url):
+@pytest.fixture
+def replicas(pg_url):
     from atlas.modules.chat_history import ConversationRepository
 
     engines = [create_engine(pg_url, pool_size=5) for _ in range(2)]
-    try:
-        clearer, saver = (ConversationRepository(sessionmaker(bind=e, expire_on_commit=False)) for e in engines)
-        for attempt in range(15):
-            conv = str(uuid.uuid4())
-            _save(saver, conv, {PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 0})
-            barrier = threading.Barrier(2)
-            errors = []
-
-            def clear(conv=conv, barrier=barrier):
-                barrier.wait()
-                clearer.clear_prompt_pin(conv, USER)
-
-            def stale_save(n, conv=conv, barrier=barrier, errors=errors):
-                barrier.wait()
-                try:
-                    # The session that has not seen the clear, saving a longer thread.
-                    _save(
-                        saver, conv,
-                        {PIN_METADATA_KEY: PIN, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_EPOCH_METADATA_KEY: 0},
-                        MESSAGES * n,
-                    )
-                except Exception as e:  # collected for the assertion
-                    errors.append(e)
-
-            threads = [threading.Thread(target=clear), threading.Thread(target=stale_save, args=(2 + attempt,))]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(30)
-            assert errors == []
-            meta = saver.get_conversation_metadata(conv, USER)
-            # Whichever ran first, the clear wins: no pin, epoch 1.
-            assert PIN_METADATA_KEY not in meta, f"pin restored on attempt {attempt}"
-            assert meta[PIN_EPOCH_METADATA_KEY] == 1
-    finally:
-        for e in engines:
-            e.dispose()
+    yield [ConversationRepository(sessionmaker(bind=e, expire_on_commit=False)) for e in engines]
+    for e in engines:
+        e.dispose()
 
 
-def test_a_save_waits_for_an_in_flight_clear_postgresql(pg_url):
-    """Deterministic interleaving: the clear holds the row, a stale save arrives.
+def _race(calls):
+    results, errors = [], []
+    barrier = threading.Barrier(len(calls))
 
-    Without the save's row lock it would read the pre-clear epoch, wait only
-    at its UPDATE, and then write the old pin back over the clear.
-    """
-    import json
-    import time
+    def run(fn):
+        barrier.wait()
+        try:
+            results.append(fn())
+        except Exception as e:  # collected for the assertions
+            errors.append(e)
 
+    threads = [threading.Thread(target=run, args=(fn,)) for fn in calls]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    return results, errors
+
+
+def test_two_replicas_selecting_different_versions_have_one_winner_postgresql(replicas):
+    a, b = replicas
+    for attempt in range(10):
+        conv = str(uuid.uuid4())
+        _save(a, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1})
+        results, errors = _race([
+            lambda conv=conv: a.change_prompt_pin(conv, USER, 1, V2, entry(V2)),
+            lambda conv=conv: b.change_prompt_pin(conv, USER, 1, OTHER, entry(OTHER)),
+        ])
+        assert errors == []
+        statuses = sorted(r["status"] for r in results)
+        assert statuses == ["conflict", "ok"], f"attempt {attempt}: {statuses}"
+        winner = next(r for r in results if r["status"] == "ok")["state"]["pin"]
+        meta = _meta(a, conv)
+        assert meta[PIN_METADATA_KEY] == winner and meta[PIN_REVISION_METADATA_KEY] == 2
+        # The loser was told the winner's state, so it can adopt it.
+        assert next(r for r in results if r["status"] == "conflict")["state"]["pin"] == winner
+
+
+def test_a_pin_set_survives_racing_stale_saves_postgresql(replicas):
+    a, b = replicas
+    for attempt in range(10):
+        conv = str(uuid.uuid4())
+        _save(a, conv, {PIN_METADATA_KEY: V1, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_REVISION_METADATA_KEY: 1})
+        results, errors = _race([
+            lambda conv=conv: a.change_prompt_pin(conv, USER, 1, V2, entry(V2)),
+            # A session that only ever saw v1, saving a longer thread.
+            lambda n=attempt, conv=conv: _save(b, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1}, MESSAGES * (2 + n)),
+        ])
+        assert errors == []
+        meta = _meta(a, conv)
+        assert meta[PIN_METADATA_KEY] == V2 and meta[PIN_REVISION_METADATA_KEY] == 2, f"attempt {attempt}"
+
+
+def test_a_save_waits_for_an_in_flight_pin_change_postgresql(pg_url):
+    """Deterministic interleaving: a pin change holds the row, a stale save
+    arrives and must wait, then carry the *new* stored pin through."""
     from atlas.modules.chat_history import ConversationRepository
 
     engine = create_engine(pg_url)
     try:
         store = ConversationRepository(sessionmaker(bind=engine, expire_on_commit=False))
         conv = str(uuid.uuid4())
-        _save(store, conv, {PIN_METADATA_KEY: PIN, PIN_EPOCH_METADATA_KEY: 0})
+        _save(store, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1})
         done = {}
-        with engine.connect() as clearing:
-            tx = clearing.begin()
-            raw = clearing.execute(
+        with engine.connect() as changing:
+            tx = changing.begin()
+            raw = changing.execute(
                 text("SELECT metadata_json FROM conversations WHERE id = :id FOR UPDATE"), {"id": conv}
             ).scalar_one()
 
             def stale_save():
-                # Its metadata differs from the stored copy (a history entry),
-                # so the ORM really writes the column.
+                # A real metadata change (agent_mode), so the save writes the
+                # column: identical JSON would be skipped by the ORM and could
+                # not show a lost update.
                 done["result"] = _save(
                     store, conv,
-                    {PIN_METADATA_KEY: PIN, PIN_HISTORY_METADATA_KEY: HISTORY, PIN_EPOCH_METADATA_KEY: 0},
+                    {"agent_mode": True, PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1},
                     MESSAGES * 2,
                 )
 
             thread = threading.Thread(target=stale_save)
             thread.start()
             time.sleep(0.5)
-            assert "result" not in done  # blocked on the clear's row lock
+            assert "result" not in done  # blocked on the change's row lock
             meta = json.loads(raw)
-            meta.pop(PIN_METADATA_KEY)
-            meta[PIN_EPOCH_METADATA_KEY] = 1
-            clearing.execute(
+            meta[PIN_METADATA_KEY] = V2
+            meta[PIN_REVISION_METADATA_KEY] = 2
+            changing.execute(
                 text("UPDATE conversations SET metadata_json = :m WHERE id = :id"),
                 {"m": json.dumps(meta), "id": conv},
             )
             tx.commit()
         thread.join(30)
         assert done["result"] is not None
-        meta = store.get_conversation_metadata(conv, USER)
-        assert PIN_METADATA_KEY not in meta and meta[PIN_EPOCH_METADATA_KEY] == 1
+        meta = _meta(store, conv)
+        assert meta[PIN_METADATA_KEY] == V2 and meta[PIN_REVISION_METADATA_KEY] == 2
+        assert meta["agent_mode"] is True  # the save itself still landed
     finally:
         engine.dispose()
+
+
+def test_an_explicit_clear_and_a_stale_set_race_postgresql(replicas):
+    a, b = replicas
+    for attempt in range(10):
+        conv = str(uuid.uuid4())
+        _save(a, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1})
+        results, errors = _race([
+            lambda conv=conv: a.change_prompt_pin(conv, USER, 1, None, entry(None)),
+            lambda conv=conv: b.change_prompt_pin(conv, USER, 1, V2, entry(V2)),
+        ])
+        assert errors == []
+        assert sorted(r["status"] for r in results) == ["conflict", "ok"], f"attempt {attempt}"
+        assert _meta(a, conv)[PIN_REVISION_METADATA_KEY] == 2

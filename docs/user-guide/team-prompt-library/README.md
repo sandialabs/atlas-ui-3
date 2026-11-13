@@ -1,6 +1,6 @@
 # Team Prompt Library (issue #1169)
 
-Last updated: 2026-11-10
+Last updated: 2026-11-13
 
 The team prompt library lets you keep versioned system prompts and share them
 with the Atlas groups you belong to. It sits next to your private
@@ -61,6 +61,8 @@ Membership is checked on every request, so changes take effect immediately.
 
 Pick an entry in the prompt picker (or **Use** in the library) to follow its
 latest version, or open **Version history** to choose a specific version.
+The history lists versions newest first, a page at a time (**Load more
+versions**); a version's text loads when you open it.
 
 ![Version history](screenshots/1169-03-versions.png)
 
@@ -79,9 +81,14 @@ The conversation records the exact version it ran with:
   `DELETE /api/prompts/pins/{conversation_id}`, and the next run continues
   with the default prompt -- including in a window or session that already has
   the conversation open. Clearing is recorded in the prompt's audit trail.
-- If the conversation cannot be loaded (for example a brief database outage),
-  Atlas refuses the message rather than running it with a different prompt;
-  try again once it is back.
+- If the same conversation is open in two windows and one of them changes or
+  clears its team prompt, the other window's next change is refused with "This
+  conversation's team prompt was changed in another window or session". That
+  window then shows the current selection; check it and send again. Messages
+  that keep the current prompt are not affected.
+- If the conversation (or its stored settings) cannot be loaded -- for example
+  a brief database outage -- Atlas refuses the message rather than running it
+  with a different prompt; try again once it is back.
 - A message cannot use a team prompt and a custom prompt or persona at the
   same time; such a request is refused with "Choose either a team library
   prompt or a custom prompt, not both."
@@ -105,15 +112,16 @@ that does not exist.
 |--------|------|-------|
 | GET | `/api/prompts?scope=all\|mine\|shared\|team&q=&limit=&offset=` | -- (paged: `{prompts, total, limit, offset}`, plus `incomplete: true` when group checks were cut short; `limit` 1-200, default 50) |
 | POST | `/api/prompts` | -- (creates a private entry) |
-| GET | `/api/prompts/groups` | -- (groups you may share with) |
+| GET | `/api/prompts/groups` | -- (`{groups, incomplete}`: groups confirmed as yours, which you may share with) |
 | GET | `/api/prompts/{id}` | use (draft only for edit) |
 | PUT | `/api/prompts/{id}` | edit (body names `expected_draft_revision`) |
 | DELETE | `/api/prompts/{id}` | owner (archives) |
 | POST | `/api/prompts/{id}/publish` | edit (body names `expected_draft_revision`) |
-| GET | `/api/prompts/{id}/versions[/{version_id}]` | use |
+| GET | `/api/prompts/{id}/versions?limit=&offset=` | use (paged, newest first: `{versions, total, limit, offset}`; summaries without prompt text) |
+| GET | `/api/prompts/{id}/versions/{version_id}` | use (one version, with its content) |
 | GET/PUT | `/api/prompts/{id}/sharing` | manage (GET returns `revision`; PUT names `expected_revision`) |
 | POST | `/api/prompts/{id}/fork` | use |
-| GET | `/api/prompts/{id}/export` | use |
+| GET | `/api/prompts/{id}/export?offset=` | use (up to 100 versions with content; `versions_total`, `versions_truncated`) |
 | GET | `/api/prompts/{id}/audit` | manage |
 | GET | `/api/prompts/{id}/resolve?version_id=` | use (read-only advisory check) |
 | DELETE | `/api/prompts/pins/{conversation_id}` | conversation owner |
@@ -127,6 +135,12 @@ A chat frame names a library entry with
 latest; `"library_prompt": null` = no library prompt). The server resolves and
 authorizes it on every turn; prompt text never comes from the client. A frame
 that names an entry and also carries `custom_system_prompt` or `persona_id` is
-rejected (`error_type: "validation"`). See the
+rejected (`error_type: "validation"`). A frame may also carry
+`library_prompt_revision`, the conversation's pin revision the client last
+saw (from the conversation, `conversation_saved` frames and conflict errors).
+A change to the pin decided on an older revision -- because another window
+changed it meanwhile -- is refused with `error_type: "prompt_pin_conflict"`,
+and the error carries the current `prompt_library` and
+`prompt_library_pin_revision`. See the
 [design note](../../developer/design-notes/team-prompt-library-2026-11-09.md)
 for the full rules.

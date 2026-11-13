@@ -567,7 +567,7 @@ async def test_clearing_a_pin_binds_a_session_that_is_already_open(env, monkeypa
     assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY] is None
     meta = _stored_meta(env, conv)
     assert "prompt_library" not in meta
-    assert meta["prompt_library_pin_epoch"] == 1
+    assert meta["prompt_library_pin_revision"] == 2  # set (1), owner clear (2)
     assert meta["prompt_library_history"][0]["version_id"] == v1["id"]
     uses_after = [e for e in lib.repository.list_audit_events(prompt["id"]) if e["event_type"] == "use"]
     assert len(uses_after) == len(uses_before)
@@ -620,12 +620,21 @@ async def test_choosing_the_prompt_again_after_a_clear_pins_the_current_version(
     await _edit(lib, OWNER, prompt["id"], content="v2 body")
     v2 = await _publish(lib, OWNER, prompt["id"], "second")
     env["conversations"].clear_prompt_pin(conv, USER)
-    # "Latest" in this session no longer means "the version I had pinned".
+    # This session decided on the pin it last saw (revision 1); the owner's
+    # clear moved it to 2. The first re-selection is refused as stale and
+    # the session adopts the cleared state; the next one is informed.
+    from atlas.domain.conversation_prompt_pin import PromptPinConflictError
+
+    with pytest.raises(PromptPinConflictError) as exc:
+        await _turn(service, session_id, conv, library_prompt=ref)
+    assert exc.value.pin_state["pin"] is None and exc.value.pin_state["revision"] == 2
+    assert len(calls) == 1
+    # "Latest" no longer means "the version I had pinned".
     await _turn(service, session_id, conv, library_prompt=ref)
     assert calls[-1]["custom_system_prompt"] == "v2 body"
     meta = _stored_meta(env, conv)
-    assert meta["prompt_library"]["version_id"] == v2["id"]  # saved under the new epoch
-    assert meta["prompt_library_pin_epoch"] == 1
+    assert meta["prompt_library"]["version_id"] == v2["id"]
+    assert meta["prompt_library_pin_revision"] == 3
 
 
 @pytest.fixture
@@ -802,3 +811,382 @@ async def test_genuinely_new_conversations_are_unaffected(env):
     await _turn(service, session_id, conv)
     assert len(calls) == 2 and all(c.get("custom_system_prompt") is None for c in calls)
     assert library_turn.PIN_UNKNOWN_CONTEXT_KEY not in sessions[session_id].context
+
+
+# --- Pin revisions: sets and clears are compare-and-set (review of ab2fe60b) --
+
+
+async def _two_sessions_on_pinned(env, prompt, version_id=None):
+    a, a_calls, a_sessions = _service(env)
+    a_id, conv = uuid4(), str(uuid4())
+    await _turn(a, a_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": version_id})
+    b, b_calls, b_sessions = _service(env)
+    b_id = uuid4()
+    await _turn(b, b_id, conv)  # hydrates the pinned conversation (revision 1)
+    return (a, a_id, a_calls, a_sessions), (b, b_id, b_calls, b_sessions), conv
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_selecting_different_versions_do_not_overwrite_each_other(env):
+    from atlas.domain.conversation_prompt_pin import PromptPinConflictError
+
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"], "second")
+    (a, a_id, a_calls, _), (b, b_id, b_calls, b_sessions), conv = await _two_sessions_on_pinned(env, prompt, v1["id"])
+    assert _stored_meta(env, conv)["prompt_library_pin_revision"] == 1
+    await _turn(a, a_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v2["id"]})
+    assert a_calls[-1]["custom_system_prompt"] == "v2 body"
+    # B decided on revision 1 (v1) and now picks v1 explicitly: refused, not applied.
+    with pytest.raises(PromptPinConflictError) as exc:
+        await _turn(b, b_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
+    assert exc.value.pin_state["pin"]["version_id"] == v2["id"] and exc.value.pin_state["revision"] == 2
+    assert b_sessions[b_id].context[library_turn.PIN_CONTEXT_KEY]["version_id"] == v2["id"]
+    meta = _stored_meta(env, conv)
+    assert meta["prompt_library"]["version_id"] == v2["id"] and meta["prompt_library_pin_revision"] == 2
+    # Informed now, B's choice applies.
+    await _turn(b, b_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
+    assert b_calls[-1]["custom_system_prompt"] == "v1 body"
+    meta = _stored_meta(env, conv)
+    assert meta["prompt_library"]["version_id"] == v1["id"] and meta["prompt_library_pin_revision"] == 3
+    assert [h["version_id"] for h in meta["prompt_library_history"]] == [v1["id"], v2["id"], v1["id"]]
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_is_a_coordinated_clear(env):
+    from atlas.domain.conversation_prompt_pin import PromptPinConflictError
+
+    prompt, v1 = await _shared_prompt(env["library"])
+    (a, a_id, a_calls, a_sessions), (b, b_id, b_calls, _), conv = await _two_sessions_on_pinned(env, prompt)
+    await _turn(b, b_id, conv, library_prompt=None)  # B deliberately clears (revision 2)
+    assert b_calls[-1].get("custom_system_prompt") is None
+    meta = _stored_meta(env, conv)
+    assert "prompt_library" not in meta and meta["prompt_library_pin_revision"] == 2
+    assert meta["prompt_library_history"][-1]["prompt_id"] is None
+    # A still holds v1 in memory: an omitted-field turn follows the store...
+    await _turn(a, a_id, conv)
+    assert a_calls[-1].get("custom_system_prompt") is None
+    # ... and re-selecting v1 on its old view is refused once.
+    a_sessions[a_id].context[library_turn.PIN_REVISION_CONTEXT_KEY] = 1  # A's view before the clear
+    with pytest.raises(PromptPinConflictError):
+        await _turn(a, a_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
+    assert "prompt_library" not in _stored_meta(env, conv)
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_never_saw_the_pin_runs_and_saves_under_it(env):
+    prompt, v1 = await _shared_prompt(env["library"])
+    b, b_calls, b_sessions = _service(env)
+    b_id, conv = uuid4(), str(uuid4())
+    await _turn(b, b_id, conv)  # unpinned conversation, revision 0
+    a, _, _ = _service(env)
+    await _turn(a, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    # B (never saw the pin) continues with a client that sends nothing.
+    await _turn(b, b_id, conv)
+    assert b_calls[-1]["custom_system_prompt"] == "v1 body"  # not the default
+    meta = _stored_meta(env, conv)
+    assert meta["prompt_library"]["version_id"] == v1["id"] and meta["prompt_library_pin_revision"] == 1
+    # Its save of a session that holds no pin cannot drop the stored one.
+    b_sessions[b_id].context[library_turn.PIN_CONTEXT_KEY] = None
+    assert b._save_conversation(b_sessions[b_id], USER, "test-model") is True
+    assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
+
+
+@pytest.mark.asyncio
+async def test_a_browser_that_never_saw_the_pin_cannot_clear_it_blindly(env):
+    from atlas.domain.conversation_prompt_pin import PromptPinConflictError
+
+    prompt, v1 = await _shared_prompt(env["library"])
+    b, b_calls, _ = _service(env)
+    b_id, conv = uuid4(), str(uuid4())
+    await _turn(b, b_id, conv, library_prompt=None)  # browser, nothing selected (revision 0)
+    a, _, _ = _service(env)
+    await _turn(a, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    with pytest.raises(PromptPinConflictError) as exc:
+        await _turn(b, b_id, conv, library_prompt=None)
+    assert exc.value.pin_state["pin"]["version_id"] == v1["id"]
+    assert len(b_calls) == 1 and _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
+
+
+@pytest.mark.asyncio
+async def test_a_reconnected_client_with_an_old_view_is_refused(env):
+    """A new socket hydrates fresh state; the frame's revision is what the
+    client actually saw."""
+    from atlas.domain.conversation_prompt_pin import PromptPinConflictError
+
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"], "second")
+    a, _, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(a, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
+    await _turn(a, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": v2["id"]},
+                library_prompt_revision=1)
+    fresh, calls, _ = _service(env)
+    with pytest.raises(PromptPinConflictError):
+        await _turn(fresh, uuid4(), conv, library_prompt=None, library_prompt_revision=1)
+    assert calls == [] and _stored_meta(env, conv)["prompt_library"]["version_id"] == v2["id"]
+    await _turn(fresh, uuid4(), conv, library_prompt=None, library_prompt_revision=2)
+    assert "prompt_library" not in _stored_meta(env, conv)
+    with pytest.raises(ValidationError):
+        await _turn(fresh, uuid4(), conv, library_prompt=None, library_prompt_revision="2")
+
+
+@pytest.mark.asyncio
+async def test_revoked_access_cannot_set_a_pin(env):
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    service, calls, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(service, uuid4(), conv)
+    env["members"].table["eng"].discard(USER)
+    with pytest.raises(AuthorizationError):
+        await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
+    meta = _stored_meta(env, conv)
+    assert "prompt_library" not in meta and "prompt_library_pin_revision" not in meta and len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_conversation_saved_frames_carry_the_pin_revision(env):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, _, _ = _service(env)
+    frames = []
+
+    async def collect(frame):
+        frames.append(frame)
+
+    conv = str(uuid4())
+    await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None},
+                update_callback=collect)
+    saved = [f for f in frames if f.get("type") == "conversation_saved"][-1]
+    assert saved["prompt_library_pin_revision"] == 1 and saved["prompt_library"]["version_id"] == v1["id"]
+
+
+# --- Fourth review ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_incognito_turns_in_a_stored_conversation_never_conflict_or_write_the_pin(env):
+    """An off-record turn cannot persist a pin change, so it must not record one.
+
+    Recording it only in the session made the next turn (which re-reads the
+    stored record) see a revision it never observed and refuse a conflict.
+    """
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv)  # stored, unpinned
+    stored_before = _stored_meta(env, conv)
+    ref = {"prompt_id": prompt["id"], "version_id": None}
+    for _ in range(3):
+        await _turn(service, session_id, conv, library_prompt=ref, incognito=True)
+        assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _stored_meta(env, conv) == stored_before
+    assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY] is None
+    # Back on the record, the selection is made and stored as usual.
+    await _turn(service, session_id, conv, library_prompt=ref, incognito=False)
+    assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
+
+
+def _set_raw_metadata(env, conversation_id, raw):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    with env["conversations"]._session_factory() as db:
+        db.get(ConversationRecord, conversation_id).metadata_json = raw
+        db.commit()
+
+
+def _raw_metadata(env, conversation_id):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    with env["conversations"]._session_factory() as db:
+        return db.get(ConversationRecord, conversation_id).metadata_json
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["{not json", "[1, 2]", '"text"', "42"])
+async def test_unreadable_metadata_refuses_the_turn_and_is_left_alone(env, monkeypatch, raw):
+    """Finding 5: corrupt metadata never reads as "no team prompt"."""
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    good = _raw_metadata(env, conv)
+    _set_raw_metadata(env, conv, raw)
+    events_before = len(env["library"].repository.list_audit_events(prompt["id"]))
+
+    for frame in ({}, {"library_prompt": None}, {"library_prompt": {"prompt_id": prompt["id"], "version_id": None}}):
+        with pytest.raises(AuthorizationError) as exc:
+            await _turn(service, session_id, conv, **frame)
+        assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+    # A fresh connection (full load) is refused too. The conversation
+    # classification gate reads the same blob and refuses first (it fails
+    # closed on unreadable metadata even with compliance levels off); either
+    # way nothing runs on the default prompt.
+    fresh, fresh_calls, _ = _service(env)
+    with pytest.raises((AuthorizationError, ValidationError)):
+        await _turn(fresh, uuid4(), conv)
+    assert len(calls) == 1 and fresh_calls == []  # nothing ran on the default prompt
+    assert _raw_metadata(env, conv) == raw  # never rewritten
+    assert len(env["library"].repository.list_audit_events(prompt["id"])) == events_before
+
+    # Once the record is readable again, the stored pin runs -- not the default.
+    _set_raw_metadata(env, conv, good)
+    await _turn(service, session_id, conv)
+    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    await _turn(fresh, uuid4(), conv)
+    assert fresh_calls[-1]["custom_system_prompt"] == "v1 body"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [None, "", "null", "{}"])
+async def test_genuinely_empty_metadata_is_not_an_error(env, raw):
+    service, calls, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv)
+    _set_raw_metadata(env, conv, raw)
+    fresh, fresh_calls, _ = _service(env)
+    await _turn(fresh, uuid4(), conv)
+    assert fresh_calls[-1].get("custom_system_prompt") is None
+
+
+@pytest.mark.asyncio
+async def test_a_metadata_read_failure_refuses_the_turn(env, monkeypatch):
+    prompt, _ = await _shared_prompt(env["library"])
+    service, calls, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+
+    def db_down(*args, **kwargs):
+        from sqlalchemy.exc import OperationalError
+
+        raise OperationalError("SELECT", {}, Exception("connection refused"))
+
+    with monkeypatch.context() as patched:
+        patched.setattr(env["conversations"], "get_conversation_metadata", db_down)
+        with pytest.raises(AuthorizationError) as exc:
+            await _turn(service, session_id, conv)
+        assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+    assert len(calls) == 1
+    await _turn(service, session_id, conv)
+    assert calls[-1]["custom_system_prompt"] == "v1 body"
+
+
+@pytest.mark.asyncio
+async def test_restoring_a_conversation_with_unreadable_metadata_leaves_its_pin_unknown(env):
+    prompt, _ = await _shared_prompt(env["library"])
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    _set_raw_metadata(env, conv, "{broken")
+    other_id = uuid4()
+    other, other_calls, other_sessions = _service(env)
+    await _turn(other, other_id, str(uuid4()))  # a session on some other chat
+    await other.handle_restore_conversation(other_id, conv, [], user_email=USER)
+    assert other_sessions[other_id].context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY) is True
+    with pytest.raises((AuthorizationError, ValidationError)):  # pin layer and classification gate
+        await _turn(other, other_id, conv)
+    assert len(other_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_owner_clear_on_unreadable_metadata_is_refused_not_guessed(env, monkeypatch):
+    prompt, _ = await _shared_prompt(env["library"])
+    service, _, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    _set_raw_metadata(env, conv, "{broken")
+    client = _pin_client(env, monkeypatch, env["members"])
+    response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert response.status_code == 503
+    assert _raw_metadata(env, conv) == "{broken"
+
+
+# --- Finding 3: live (in-flight) metadata carries the pin --------------------
+
+
+@pytest.mark.asyncio
+async def test_live_view_of_a_running_turn_carries_the_pin_and_matches_the_saved_record(env, monkeypatch):
+    from atlas.application.chat import runs as runs_module
+    from atlas.application.chat.runs import RunRegistry
+    from atlas.application.chat.runs.in_flight import in_flight_conversation
+
+    prompt, v1 = await _shared_prompt(env["library"])
+    registry = RunRegistry()
+    monkeypatch.setattr(runs_module, "get_run_registry", lambda: registry)
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    observer_id = uuid4()
+    observer, observer_calls, _ = _service(env)
+    # Every connection shares one session store in production.
+    observer.session_repository = service.session_repository
+    observer_sessions = sessions
+    await _turn(observer, observer_id, str(uuid4()))  # another tab, on another chat
+    seen = {}
+
+    async def run_turn(**kwargs):
+        calls.append(kwargs)
+        session = kwargs["session"]
+        session.history.add_message(Message(role=MessageRole.USER, content=kwargs["content"]))
+        # The turn is running and nothing is stored yet: the live view is all
+        # another tab can open.
+        record = registry.start(conversation_id=conv, user_email=USER, session_id=session.id)
+        live = await in_flight_conversation(service.session_repository, registry, conv, USER)
+        seen["live"] = live["metadata"]
+        await observer.handle_restore_conversation(observer_id, conv, [], user_email=USER)
+        seen["observer"] = dict(observer_sessions[observer_id].context)
+        registry.cancel(record.run_id, USER)
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="reply"))
+        return {"type": "done"}
+
+    _set_execute(service, run_turn)
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+
+    live = seen["live"]
+    assert live["prompt_library"]["version_id"] == v1["id"]
+    assert live["prompt_library_pin_revision"] == 1
+    assert live["prompt_library_history"][-1]["version_id"] == v1["id"]
+    # The tab that opened the live view adopted the same pin and revision.
+    assert seen["observer"][library_turn.PIN_CONTEXT_KEY]["version_id"] == v1["id"]
+    assert seen["observer"][library_turn.PIN_REVISION_CONTEXT_KEY] == 1
+    # Active -> persisted: the saved record says exactly what the live view did.
+    stored = _stored_meta(env, conv)
+    for key in ("prompt_library", "prompt_library_pin_revision", "prompt_library_history"):
+        assert stored[key] == live[key]
+    # Resumed: the observing tab continues under the pin it saw, no conflict.
+    await _turn(observer, observer_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None},
+                library_prompt_revision=live["prompt_library_pin_revision"])
+    assert observer_calls[-1]["custom_system_prompt"] == "v1 body"
+
+
+@pytest.mark.asyncio
+async def test_live_view_of_an_unpinned_turn_has_no_pin_keys(env):
+    from atlas.application.chat.runs.in_flight import _live_metadata
+
+    service, _, sessions = _service(env)
+    session_id = uuid4()
+    await _turn(service, session_id, str(uuid4()))
+    metadata = _live_metadata(sessions[session_id])
+    assert "prompt_library" not in metadata and "prompt_library_pin_revision" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_unsaved_conversations_change_their_pin_without_spurious_conflicts(env):
+    """A chat the server never stores (browser-only or not saved) has no stored
+    revision to protect: the revision a client sends for it is not checked."""
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"], "second")
+    service, calls, sessions = _service(env)
+    session_id, conv = uuid4(), f"local_{uuid4()}"
+    # A conversation reopened from browser storage reports revision 0.
+    for version, body in ((v1, "v1 body"), (v2, "v2 body"), (v1, "v1 body")):
+        await _turn(service, session_id, conv, incognito=True, library_prompt_revision=0,
+                    library_prompt={"prompt_id": prompt["id"], "version_id": version["id"]})
+        assert calls[-1]["custom_system_prompt"] == body
+    await _turn(service, session_id, conv, incognito=True, library_prompt=None, library_prompt_revision=0)
+    assert calls[-1].get("custom_system_prompt") is None
+    assert env["conversations"].get_conversation(conv, USER) is None

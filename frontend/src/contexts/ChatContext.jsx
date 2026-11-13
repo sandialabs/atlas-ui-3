@@ -451,6 +451,11 @@ export const ChatProvider = ({ children }) => {
 	// replace the exact version the conversation ran with. An explicit
 	// workspace switch by the user is not a restore and is not affected.
 	const conversationLibraryPinRef = useRef(null)
+	// The stored team-prompt pin revision this client last saw for the
+	// conversation on screen (issue #1169); sent with each turn so a pin
+	// change decided on an older view is refused rather than applied. Null
+	// for a chat the server has not stored yet.
+	const libraryPinRevisionRef = useRef(null)
 
 	// restoreUndoSnapshot is declared after loadSavedConversation, which it
 	// delegates to; clearChat's Undo action reaches it through this ref rather
@@ -742,6 +747,22 @@ export const ChatProvider = ({ children }) => {
 			// on the run's terminal status, which a stopped run reports before
 			// its interrupted turn is persisted.
 			onConversationSaved: finishJoinedRun,
+			onPromptPinState: (data) => {
+				const shown = activeConversationIdRef.current
+				if (data?.conversation_id && shown && data.conversation_id !== shown) return
+				if (!Number.isInteger(data?.prompt_library_pin_revision)) return
+				libraryPinRevisionRef.current = data.prompt_library_pin_revision
+				if (data.error_type !== 'prompt_pin_conflict') return
+				// Another window changed this conversation's team prompt: show
+				// the stored selection so the next send is an informed one.
+				const pin = data.prompt_library
+				const key = (pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+					? libraryPromptKey(pin.prompt_id, pin.version_id)
+					: null
+				conversationLibraryPinRef.current = key
+				if (key) selections.makePromptActive(key)
+				else selections.clearActivePrompt()
+			},
 			onContextUsage: contextCompaction.handleUsage,
 			onContextCompaction: contextCompaction.handleCompaction,
 		})
@@ -1193,6 +1214,7 @@ export const ChatProvider = ({ children }) => {
 			// the server keeps a conversation's pinned version only while the
 			// client keeps naming it, so choosing another prompt unpins.
 			library_prompt: librarySelection.kind === 'library' ? librarySelection.ref : null,
+			library_prompt_revision: typeof libraryPinRevisionRef.current === 'number' ? libraryPinRevisionRef.current : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
 			data_sources_auto: dataSourcesAuto,
@@ -1454,6 +1476,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// fire into the fresh chat once the workspace list finishes loading.
 		pendingWorkspaceRestoreRef.current = null
 		conversationLibraryPinRef.current = null
+		libraryPinRevisionRef.current = null
 		conversationWorkspaceIdRef.current = null
 		conversationClassificationRef.current = null
 		setActiveConversationClassification(null)
@@ -1730,6 +1753,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// version rather than whatever the picker last held. Recorded before
 			// the workspace restore so that restore (now or deferred) keeps it.
 			const pin = meta.prompt_library
+			libraryPinRevisionRef.current = Number.isInteger(meta.prompt_library_pin_revision)
+				? meta.prompt_library_pin_revision
+				: 0
 			conversationLibraryPinRef.current =
 				(pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
 					? libraryPromptKey(pin.prompt_id, pin.version_id)

@@ -1,6 +1,6 @@
 # Team Prompt Library (issue #1169)
 
-Date: 2026-11-09 (review revisions 2026-11-10, third review 2026-11-10)
+Date: 2026-11-09 (review revisions 2026-11-10, 2026-11-13)
 
 How the team-shared, versioned prompt library was built, and why. User-facing
 behaviour is in the [user guide](../../user-guide/team-prompt-library/README.md).
@@ -51,10 +51,18 @@ model.
   search term, so a search can never widen visibility. For the Team scope the
   granted groups are checked once per request, bounded three ways: 8 checks
   at a time, at most 100 groups (the most-granted on live prompts first),
-  and 10 seconds for the whole pass. Past a bound the page carries
-  `"incomplete": true` and leaves out entries only the unchecked groups
-  would show (fail closed); the panel says so. Using an entry by reference
-  is unaffected -- its own grants are checked.
+  and 10 seconds for the whole pass. A check whose authorizer call failed
+  counts as unchecked, not as "no". Past a bound, or after a failed check,
+  the page carries `"incomplete": true` and leaves out entries only the
+  unchecked groups would show (fail closed); the panel says so, and the
+  client never concludes from an incomplete listing that a selected entry
+  was revoked -- it sends the reference and the server decides. Using an
+  entry by reference is unaffected: its own grants are checked.
+- The groups offered as sharing targets (`GET /api/prompts/groups`) are
+  bounded the same way (100 configured groups in name order, 10 seconds).
+  Only groups whose check completed as "member" are offered; the response
+  says `"incomplete": true` when some were not checked, and the sharing
+  editor says so. Adding a group to a prompt re-checks membership regardless.
 - A use-only caller does not see an entry until something is published.
 
 ## Execution and pinning
@@ -98,36 +106,61 @@ between preserving history and permitting new use.
 
 ### Pin state is the stored record's
 
-`atlas.domain.conversation_prompt_pin` owns the stored rules:
+`atlas.domain.conversation_prompt_pin` owns the stored rules.
+`metadata.prompt_library_pin_revision` counts every change to the pin: a set,
+a re-pin to another version, an explicit clear (`library_prompt: null`, or
+another prompt chosen while pinned) and the owner's `DELETE
+/api/prompts/pins/{conversation_id}`.
 
-- `metadata.prompt_library_pin_epoch` counts explicit clears. The clear bumps
-  it under the conversation's row lock (`SELECT ... FOR UPDATE` on
-  PostgreSQL), even when no pin is stored, because a session may hold one it
-  has not saved yet.
-- Every save reads the record under the same row lock and reconciles: a pin
-  sent with an older epoch than the stored one is dropped, the stored epoch
-  is kept, and stored pin history the save lacks is carried over. So a
-  session that was open during a clear can never write the pin back,
-  whichever way its save and the clear interleave.
-- Before a turn that is pinned, selects a library entry, or has an unknown
-  pin state, the session re-reads the record's metadata (owner-filtered, no
-  messages) and adopts the stored pin when the epoch moved. A clear therefore
-  takes effect on an already-open session's next turn, and re-choosing the
-  entry afterwards pins its current latest under the new epoch.
+Conflict resolution:
+
+- **Pin changes are compare-and-set.** A turn that changes the pin does it
+  before the turn runs, with `ConversationRepository.change_prompt_pin`: under
+  the conversation's row lock (`SELECT ... FOR UPDATE` on PostgreSQL) it
+  applies the change only if the stored revision equals the one the change was
+  decided on, appends a history entry and bumps the revision. On DuckDB, which
+  has no row locks, a concurrent writer fails its commit instead.
+- **The revision a change is decided on** is the frame's optional
+  `library_prompt_revision` (the browser sends the revision it last saw: from
+  the loaded conversation, `conversation_saved` frames and conflict errors),
+  else the session's own. If the stored revision moved since, the change is
+  refused with error type `prompt_pin_conflict`; the error carries the stored
+  pin and revision, the browser shows that selection, and the user sends
+  again. Nothing runs and nothing is audited for the refused turn.
+- **Saves never write the pin of an existing conversation.** A save carries
+  the stored pin, history and revision through whatever the saving session
+  holds, so a session that never saw the current pin (an older tab, a
+  reconnect, a run started earlier) cannot overwrite or remove it by saving.
+  A save that *creates* the record writes the creating session's pin.
+- **Turns that keep the pin follow the store.** Every turn of a stored
+  conversation re-reads its metadata (owner-filtered, no messages) first, so
+  a pin set, changed or cleared elsewhere applies to an open session's next
+  turn, and a turn that omits `library_prompt` runs the stored pin
+  (re-authorized).
+- **The owner's DELETE is unconditional**: it is the explicit way out when a
+  pinned prompt became unavailable.
+- **Off-record turns change nothing stored.** An incognito turn in a stored
+  conversation runs its selection but writes no pin and leaves the session's
+  view of the stored one alone.
+
+Unknown and unreadable state:
+
 - When a conversation fails to load and the session was not already carrying
-  it, the pin is *unknown*, never "none": the turn re-reads the metadata and
-  runs the stored pin (re-authorized), or is refused with "could not be
-  loaded right now ... try again" when the store cannot answer. This holds
-  with compliance enforcement on or off, so a failed load never swaps a
-  pinned prompt for the default. A session in that state saves
-  `KEEP_STORED_PIN` instead of pin keys, which carries the stored pin,
-  history and epoch through untouched. "No record" from the re-read does not
-  settle an unknown pin (the full load failed, so it is not proof the
-  conversation is new): the turn is refused, and every following turn
-  retries the full load until it answers -- a genuinely new conversation
-  then proceeds with no pin. A failed reload of the conversation
-  the session already carries keeps its own pin, which the re-read then
-  checks against the store.
+  it, the pin is *unknown*, never "none". The turn re-reads the metadata and
+  runs the stored pin, or is refused with "could not be loaded right now ...
+  try again" when the store cannot answer. "No record" from that re-read does
+  not settle it (the full load failed, so it is not proof the conversation is
+  new): the turn is refused and every following turn retries the full load
+  until it answers; a genuinely new conversation then proceeds with no pin.
+- Stored metadata that is not a JSON object (malformed JSON, a list, a
+  string, a number) raises `ConversationMetadataUnreadableError` instead of
+  reading as `{}`, so it never looks like "no pin, revision 0". Turns are
+  refused, the owner's DELETE answers 503, and nothing rewrites the blob (the
+  classification guard also refuses saves over it). An empty blob or JSON
+  `null` is genuinely empty metadata.
+- The live view of a run that has not saved yet (`in_flight`) carries the
+  same pin, history and revision as the session, so a tab that opens it shows
+  the right selection and does not send `library_prompt: null` by accident.
 
 ## Recovering from an unavailable pin
 
@@ -173,6 +206,11 @@ such and keeps the pin. Browsers choose explicitly every turn
 - Listing decides visibility from id-level grant data, then the database
   filters, searches (LIKE wildcards escaped), counts and pages; a page is
   rendered with one query each for grants and latest versions.
+- Version history is paged (`limit` 1-200, default 50, newest first) and
+  lists summaries without prompt text; the text is not even loaded from the
+  database. `GET .../versions/{version_id}` returns one version's content.
+  An export holds at most 100 versions with content per response and says
+  `versions_truncated` (continue with `offset`).
 - Database exception text (SQL, parameters, prompt text, identities) never
   reaches a log or a response: storage errors are logged as operation,
   exception type and SQLSTATE, and re-raised unchained as a typed error.

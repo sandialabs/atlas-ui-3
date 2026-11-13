@@ -26,21 +26,29 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [groupsIncomplete, setGroupsIncomplete] = useState(false)
 
+  // Depend on the stable request functions, not the library object (which
+  // changes whenever its state does): a refetch here would replace the
+  // selections being edited with the stored ones.
+  const { getSharing, listShareableGroups, setSharing } = library
   useEffect(() => {
     let cancelled = false
-    Promise.all([library.getSharing(prompt.id), library.listShareableGroups()])
+    setLoading(true)
+    Promise.all([getSharing(prompt.id), listShareableGroups()])
       .then(([sharing, shareable]) => {
         if (cancelled) return
         setGroups(sharing.groups || [])
         setUsers(sharing.users || [])
         setRevision(sharing.revision ?? 0)
-        setAvailable(shareable)
+        // Older servers return a bare list.
+        setAvailable(Array.isArray(shareable) ? shareable : (shareable?.groups || []))
+        setGroupsIncomplete(!Array.isArray(shareable) && shareable?.incomplete === true)
       })
       .catch(e => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false))
     return () => { cancelled = true }
-  }, [prompt.id, library])
+  }, [prompt.id, getSharing, listShareableGroups])
 
   // Already-shared groups stay listed even if you are not a member of them.
   const groupOptions = Array.from(new Set([...available, ...groups])).sort()
@@ -57,7 +65,7 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
     setSaving(true)
     setError(null)
     try {
-      await library.setSharing(prompt.id, { groups, users, expected_revision: revision })
+      await setSharing(prompt.id, { groups, users, expected_revision: revision })
       onClose()
     } catch (e) {
       setError(e.message)
@@ -83,6 +91,11 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
               </label>
             ))}
           </div>
+        )}
+        {groupsIncomplete && (
+          <p role="status" className="text-xs text-amber-300 mt-2">
+            Some of your groups could not be checked right now, so they are not listed. Try again later to share with them.
+          </p>
         )}
       </fieldset>
 

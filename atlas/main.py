@@ -97,6 +97,7 @@ from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
 from atlas.domain.conversation_classification import ERROR_CODE as CONVERSATION_CLASSIFICATION_ERROR
+from atlas.domain.conversation_prompt_pin import PromptPinConflictError, public_pin_fields
 from atlas.domain.errors import (
     AuthorizationError,
     ContextWindowExceededError,
@@ -2627,6 +2628,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             # resolved and authorized server-side; omitted
                             # keeps a pinned conversation's version.
                             library_prompt=data.get("library_prompt", UNSET),
+                            # The pin revision the client last saw; a pin
+                            # change decided on an older one is refused.
+                            library_prompt_revision=data.get("library_prompt_revision"),
                             steering=steering_channel,
                             # Per-conversation automatic compaction toggle
                             # (issue #877); a non-bool means the default.
@@ -2713,10 +2717,17 @@ async def websocket_endpoint(websocket: WebSocket):
                             if getattr(e, "code", None) == CONVERSATION_CLASSIFICATION_ERROR
                             else "validation"
                         )
+                        extra = {}
+                        if isinstance(e, PromptPinConflictError):
+                            # Issue #1169: the stored pin moved since the client
+                            # saw it. Send the current one so it can catch up.
+                            error_type = e.code
+                            extra = public_pin_fields(e.pin_state)
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": error_type,
+                            **extra,
                         })
                     except AuthorizationError as e:
                         logger.warning(f"Authorization error in chat handler: {e}")

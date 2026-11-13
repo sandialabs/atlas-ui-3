@@ -106,6 +106,8 @@ python -m pytest -q -p no:warnings \
     atlas/tests/test_prompt_library_concurrency.py \
     atlas/tests/test_prompt_library_storage.py \
     atlas/tests/test_conversation_prompt_pin.py \
+    atlas/tests/test_prompt_library_bounds.py \
+    atlas/tests/test_run_in_flight_conversation.py \
     atlas/tests/test_user_prompts.py \
     atlas/tests/test_schema_migration.py
 if [ -z "${ATLAS_TEST_POSTGRES_URL:-}" ]; then
@@ -117,6 +119,7 @@ echo "=== Frontend library tests ==="
     src/test/prompt-library-selection.test.js \
     src/test/prompt-library-chat-send.test.jsx \
     src/test/prompt-library-panel.test.jsx \
+    src/test/prompt-library-history-sharing.test.jsx \
     src/test/prompt-selector.test.jsx \
     src/test/useSelections.test.js > "$WORK/vitest.log" 2>&1) \
     || { cat "$WORK/vitest.log"; exit 1; }

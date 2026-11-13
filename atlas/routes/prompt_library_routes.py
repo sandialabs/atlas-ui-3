@@ -44,7 +44,7 @@ from atlas.modules.prompts.prompt_library_policy import (
     PromptNotFound,
     PromptValidationError,
 )
-from atlas.modules.prompts.prompt_library_service import PromptLibraryService
+from atlas.modules.prompts.prompt_library_service import DEFAULT_VERSION_PAGE_SIZE, PromptLibraryService
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,9 @@ async def list_shareable_groups(current_user: str = Depends(get_current_user)):
     """Configured groups the caller belongs to and may therefore share with."""
     service = _service()
     try:
-        return {"groups": await service.shareable_groups(current_user)}
+        # ``incomplete``: the membership checks were bounded and cut short;
+        # only groups confirmed as yours are listed.
+        return await service.shareable_groups_checked(current_user)
     except PromptLibraryError as e:
         raise _http_error(e)
 
@@ -224,10 +226,19 @@ async def publish_library_prompt(
 
 
 @router.get("/{prompt_id}/versions")
-async def list_library_prompt_versions(prompt_id: str, current_user: str = Depends(get_current_user)):
+async def list_library_prompt_versions(
+    prompt_id: str,
+    limit: int = Query(default=DEFAULT_VERSION_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(default=0, ge=0),
+    current_user: str = Depends(get_current_user),
+):
+    """One page of version history, newest first: ``{versions, total, limit, offset}``.
+
+    Entries carry no prompt text; ``GET .../versions/{version_id}`` returns it.
+    """
     service = _service()
     try:
-        return {"versions": await service.list_versions(current_user, prompt_id)}
+        return await service.list_versions(current_user, prompt_id, limit=limit, offset=offset)
     except PromptLibraryError as e:
         raise _http_error(e)
 
@@ -286,10 +297,18 @@ async def fork_library_prompt(
 
 
 @router.get("/{prompt_id}/export")
-async def export_library_prompt(prompt_id: str, current_user: str = Depends(get_current_user)):
+async def export_library_prompt(
+    prompt_id: str,
+    offset: int = Query(default=0, ge=0),
+    current_user: str = Depends(get_current_user),
+):
+    """The entry plus up to 100 published versions with content, newest first.
+
+    ``versions_truncated`` says more remain; continue with ``offset``.
+    """
     service = _service()
     try:
-        return await service.export_prompt(current_user, prompt_id)
+        return await service.export_prompt(current_user, prompt_id, offset=offset)
     except PromptLibraryError as e:
         raise _http_error(e)
 

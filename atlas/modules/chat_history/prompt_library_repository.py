@@ -30,7 +30,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import func, or_, update
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, defer, sessionmaker
 
 from atlas.core.user_identity import normalize_user_email
 
@@ -402,6 +402,41 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                 .all()
             )
             return [self.version_to_dict(r) for r in records]
+
+    @guarded("list versions")
+    def page_versions(
+        self, prompt_id: str, limit: int, offset: int, include_content: bool
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """``(total, versions)``: one page of a prompt's versions, newest first.
+
+        Without ``include_content`` the version text is not even loaded, so a
+        long history of large prompts stays cheap to list.
+        """
+        with self._session() as session:
+            base = session.query(PromptLibraryVersionRecord).filter(
+                PromptLibraryVersionRecord.prompt_id == prompt_id
+            )
+            total = base.count()
+            query = base.order_by(PromptLibraryVersionRecord.version_number.desc())
+            if not include_content:
+                query = query.options(defer(PromptLibraryVersionRecord.content))
+            records = query.offset(offset).limit(limit).all()
+            result = []
+            for record in records:
+                if include_content:
+                    result.append(self.version_to_dict(record))
+                else:
+                    result.append({
+                        "id": record.id,
+                        "prompt_id": record.prompt_id,
+                        "version_number": record.version_number,
+                        "title": record.title,
+                        "content": None,
+                        "change_description": record.change_description,
+                        "author_email": record.author_email,
+                        "created_at": _iso(record.created_at),
+                    })
+            return total, result
 
     @guarded("read version")
     def get_version(self, prompt_id: str, version_id: str) -> Optional[Dict[str, Any]]:

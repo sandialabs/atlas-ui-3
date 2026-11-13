@@ -134,7 +134,7 @@ async def test_group_membership_grants_use_not_edit_or_share(lib):
     detail = await lib.get_prompt(ALICE, prompt["id"])
     assert detail["latest_content"] == "v1 text"
     assert "draft_content" not in detail
-    assert len(await lib.list_versions(ALICE, prompt["id"])) == 1
+    assert len((await lib.list_versions(ALICE, prompt["id"]))["versions"]) == 1
     version = await lib.resolve_for_execution(ALICE, prompt["id"])
     assert version["content"] == "v1 text"
 
@@ -237,7 +237,7 @@ async def test_list_scopes_and_search_only_return_authorized_entries(lib):
 @pytest.mark.asyncio
 async def test_guessed_ids_are_indistinguishable_from_missing(lib):
     prompt = await _published(lib)
-    version = (await lib.list_versions(OWNER, prompt["id"]))[0]
+    version = (await lib.list_versions(OWNER, prompt["id"]))["versions"][0]
     for call in (
         lambda: lib.get_prompt(MALLORY, prompt["id"]),
         lambda: lib.list_versions(MALLORY, prompt["id"]),
@@ -260,7 +260,7 @@ async def test_guessed_ids_are_indistinguishable_from_missing(lib):
 async def test_version_of_another_prompt_is_not_reachable(lib):
     mine = await _published(lib, groups_=["eng"])
     secret = await _published(lib, content="secret text")
-    secret_version = (await lib.list_versions(OWNER, secret["id"]))[0]
+    secret_version = (await lib.list_versions(OWNER, secret["id"]))["versions"][0]
     with pytest.raises(PromptNotFound):
         await lib.get_version(ALICE, mine["id"], secret_version["id"])
     with pytest.raises(PromptUnavailable):
@@ -372,7 +372,7 @@ async def test_fork_is_private_and_isolated(lib):
 @pytest.mark.asyncio
 async def test_published_versions_are_immutable(lib):
     prompt = await _published(lib)
-    v1 = (await lib.list_versions(OWNER, prompt["id"]))[0]
+    v1 = (await lib.list_versions(OWNER, prompt["id"]))["versions"][0]
     await _edit(lib, OWNER, prompt["id"], title="Renamed", content="v2 text")
     await _publish(lib, OWNER, prompt["id"], "second")
     again = await lib.get_version(OWNER, prompt["id"], v1["id"])

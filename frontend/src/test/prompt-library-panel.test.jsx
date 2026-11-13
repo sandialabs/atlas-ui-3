@@ -39,12 +39,14 @@ function makeLibrary(items = [owned, teamUse]) {
     createPrompt: vi.fn(async fields => ({ ...owned, id: 'p-new', title: fields.title, latest_version: null, draft_content: fields.content, draft_revision: 1 })),
     updatePrompt: vi.fn(async (id, fields, rev) => ({ ...owned, ...fields, draft_content: fields.content, draft_revision: rev + 1 })),
     publishPrompt: vi.fn(async () => ({ id: 'v2', version_number: 2 })),
-    listVersions: vi.fn(async () => [
-      { id: 'v7', version_number: 7, content: 'seventh', change_description: 'tone', author_email: 'lead@x.com' },
-    ]),
+    listVersions: vi.fn(async () => ({
+      versions: [{ id: 'v7', version_number: 7, change_description: 'tone', author_email: 'lead@x.com' }],
+      total: 1,
+    })),
+    getVersion: vi.fn(async () => ({ id: 'v7', version_number: 7, content: 'seventh' })),
     getSharing: vi.fn(async () => ({ revision: 3, groups: ['eng'], users: [] })),
     setSharing: vi.fn(async () => ({ groups: ['eng', 'ops'], users: [] })),
-    listShareableGroups: vi.fn(async () => ['eng', 'ops']),
+    listShareableGroups: vi.fn(async () => ({ groups: ['eng', 'ops'], incomplete: false })),
     forkPrompt: vi.fn(async () => ({ ...owned, id: 'p-fork', title: 'Team helper (copy)', draft_content: 'seventh' })),
     archivePrompt: vi.fn(async () => true),
     setTestDraft: vi.fn(),

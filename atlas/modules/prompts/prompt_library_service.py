@@ -62,6 +62,7 @@ from atlas.modules.prompts.prompt_library_policy import (
     LEVEL_OWNER,
     LEVEL_USE,
     MAX_CHANGE_DESCRIPTION_LEN,
+    MAX_PAGE_SIZE,
     PERMISSION_LEVELS,
     Access,
     GroupCandidates,
@@ -85,6 +86,13 @@ from atlas.modules.prompts.prompt_library_sharing import PromptLibrarySharing
 
 logger = logging.getLogger(__name__)
 
+
+def _check_page(limit: Any, offset: Any) -> None:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_PAGE_SIZE:
+        raise PromptValidationError(f"limit must be between 1 and {MAX_PAGE_SIZE}")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise PromptValidationError("offset must be zero or more")
+
 # Concurrent group checks per request: an external authorizer is an HTTP call
 # per (user, group), so a large sharing footprint must not fan out unbounded.
 GROUP_CHECK_CONCURRENCY = 8
@@ -96,6 +104,14 @@ GROUP_CHECK_CONCURRENCY = 8
 # are checked.
 MAX_LISTING_GROUP_CHECKS = 100
 LISTING_GROUP_CHECK_TIMEOUT_S = 10.0
+# The groups offered as sharing targets (GET /api/prompts/groups) are bounded
+# the same way. Only groups whose check *completed* with "member" are offered;
+# an unchecked group is never presented as one the caller may share with.
+MAX_SHAREABLE_GROUP_CHECKS = 100
+SHAREABLE_GROUP_CHECK_TIMEOUT_S = 10.0
+# Version history pages, and how many versions (with content) one export holds.
+DEFAULT_VERSION_PAGE_SIZE = 50
+MAX_EXPORT_VERSIONS = 100
 
 T = TypeVar("T")
 
@@ -134,6 +150,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
     # ------------------------------------------------------------------
 
     async def _is_member(self, user_email: str, group: str) -> bool:
+        return bool(await self._membership(user_email, group))
+
+    async def _membership(self, user_email: str, group: str) -> Optional[bool]:
+        """True/False from the authorizer, or None when the check itself failed."""
         check = self._group_check
         if check is None:
             # Resolved per call so the live auth module (and test patches of
@@ -149,7 +169,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
                 "Group check failed for prompt-library access; treating as not a member: %s",
                 type(e).__name__,
             )
-            return False
+            return None
 
     async def _member_groups(self, user_email: str, groups: Iterable[str]) -> Set[str]:
         """The groups among ``groups`` the user is in, names as given (case kept)."""
@@ -165,6 +185,44 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         results = await asyncio.gather(*(check(g) for g in names))
         return {g for g in results if g}
 
+    async def _member_groups_within(
+        self, user_email: str, groups: List[str], timeout_s: float
+    ) -> Tuple[Set[str], bool]:
+        """Membership in ``groups`` within ``timeout_s``: ``(members, finished)``.
+
+        Checks still running at the deadline are cancelled, and checks whose
+        authorizer call failed are counted the same way: "not a member" (fail
+        closed), and ``finished`` is False because the answer is unknown, not
+        "no". Groups confirmed before the deadline are kept.
+        """
+        names = sorted({g for g in groups if g and not is_org_wide_group(g)})
+        if not names:
+            return set(), True
+        semaphore = asyncio.Semaphore(GROUP_CHECK_CONCURRENCY)
+
+        async def check(group: str) -> Tuple[str, Optional[bool]]:
+            async with semaphore:
+                return group, await self._membership(user_email, group)
+
+        tasks = [asyncio.ensure_future(check(g)) for g in names]
+        done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        members: Set[str] = set()
+        failed = bool(pending)
+        for task in done:
+            if task.cancelled() or task.exception() is not None:
+                failed = True
+                continue
+            group, answer = task.result()
+            if answer is None:
+                failed = True
+            elif answer:
+                members.add(group)
+        return members, not failed
+
     async def _listing_member_groups(self, user_email: str) -> Tuple[Set[str], bool]:
         """The caller's groups among those granted, and whether the check was complete."""
         groups = await self._db(self._repo.granted_groups_by_use, MAX_LISTING_GROUP_CHECKS + 1)
@@ -174,15 +232,14 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             logger.warning(
                 "Prompt-library listing checked only the %d most-granted groups", MAX_LISTING_GROUP_CHECKS
             )
-        try:
-            member = await asyncio.wait_for(
-                self._member_groups(user_email, groups), timeout=LISTING_GROUP_CHECK_TIMEOUT_S
-            )
-        except asyncio.TimeoutError:
-            # Fail closed: team entries are left out rather than guessed.
-            logger.warning("Prompt-library listing group checks timed out; team entries omitted")
-            return set(), False
-        return member, complete
+        member, finished = await self._member_groups_within(
+            user_email, groups, LISTING_GROUP_CHECK_TIMEOUT_S
+        )
+        if not finished:
+            # Fail closed: entries only an unchecked group would show are left
+            # out rather than guessed.
+            logger.warning("Prompt-library listing group checks timed out; some team entries omitted")
+        return member, complete and finished
 
     async def _access(
         self,
@@ -266,9 +323,28 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             data["latest_content"] = latest["content"]
         return data
 
-    async def list_versions(self, user_email: str, prompt_id: str) -> List[Dict[str, Any]]:
+    async def list_versions(
+        self,
+        user_email: str,
+        prompt_id: str,
+        limit: int = DEFAULT_VERSION_PAGE_SIZE,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """One page of version history, newest first: ``{versions, total, limit, offset}``.
+
+        Entries are summaries (number, title, author, change description,
+        date) without the prompt text; ``get_version`` returns one version's
+        full content.
+        """
+        _check_page(limit, offset)
         await self._authorize(user_email, prompt_id, LEVEL_USE)
-        return [version_view(v) for v in await self._db(self._repo.list_versions, prompt_id)]
+        total, versions = await self._db(self._repo.page_versions, prompt_id, limit, offset, False)
+        return {
+            "versions": [version_view(v, include_content=False) for v in versions],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
 
     async def get_version(self, user_email: str, prompt_id: str, version_id: str) -> Dict[str, Any]:
         await self._authorize(user_email, prompt_id, LEVEL_USE)
@@ -277,15 +353,23 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             raise PromptNotFound()
         return version_view(version)
 
-    async def export_prompt(self, user_email: str, prompt_id: str) -> Dict[str, Any]:
-        """A portable JSON view: the entry plus every published version.
+    async def export_prompt(self, user_email: str, prompt_id: str, offset: int = 0) -> Dict[str, Any]:
+        """A portable JSON view: the entry plus its published versions with content.
 
+        Bounded: at most ``MAX_EXPORT_VERSIONS`` versions per response, newest
+        first from ``offset``. ``versions_total`` and ``versions_truncated``
+        say whether more remain (request the next ``offset`` to continue).
         The draft is included only for editors, sharing only for managers --
         the same rules as the detail view.
         """
+        _check_page(MAX_EXPORT_VERSIONS, offset)
         detail = await self.get_prompt(user_email, prompt_id)
         detail.pop("latest_content", None)
-        detail["versions"] = [version_view(v) for v in await self._db(self._repo.list_versions, prompt_id)]
+        total, versions = await self._db(self._repo.page_versions, prompt_id, MAX_EXPORT_VERSIONS, offset, True)
+        detail["versions"] = [version_view(v) for v in versions]
+        detail["versions_total"] = total
+        detail["versions_offset"] = offset
+        detail["versions_truncated"] = offset + len(versions) < total
         detail["export_format"] = "atlas-prompt-library/1"
         return detail
 
@@ -295,10 +379,34 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
 
     async def shareable_groups(self, user_email: str) -> List[str]:
         """Configured groups the caller belongs to (the only ones they may share with)."""
+        return (await self.shareable_groups_checked(user_email))["groups"]
+
+    async def shareable_groups_checked(self, user_email: str) -> Dict[str, Any]:
+        """``{groups, incomplete}``: sharing targets, with the checks bounded.
+
+        At most ``MAX_SHAREABLE_GROUP_CHECKS`` configured groups are checked
+        (in name order) within ``SHAREABLE_GROUP_CHECK_TIMEOUT_S``. Only
+        groups whose check completed as "member" are returned; when a bound
+        cut the checks short, ``incomplete`` is true and the rest are simply
+        not offered (the server checks membership again on every sharing
+        change regardless).
+        """
         user_email = normalize_user_email(user_email)
         if not user_email:
-            return []
-        return sorted(await self._member_groups(user_email, self._group_candidates()))
+            return {"groups": [], "incomplete": False}
+        candidates = sorted({g for g in self._group_candidates() if g and not is_org_wide_group(g)})
+        within_cap = len(candidates) <= MAX_SHAREABLE_GROUP_CHECKS
+        if not within_cap:
+            logger.warning(
+                "Shareable-group lookup checked only %d of the configured groups", MAX_SHAREABLE_GROUP_CHECKS
+            )
+            candidates = candidates[:MAX_SHAREABLE_GROUP_CHECKS]
+        members, finished = await self._member_groups_within(
+            user_email, candidates, SHAREABLE_GROUP_CHECK_TIMEOUT_S
+        )
+        if not finished:
+            logger.warning("Shareable-group checks timed out; unchecked groups are not offered")
+        return {"groups": sorted(members), "incomplete": not (within_cap and finished)}
 
     # ------------------------------------------------------------------
     # Writing

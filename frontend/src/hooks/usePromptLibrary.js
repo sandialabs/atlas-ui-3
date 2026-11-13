@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 
 /**
  * Team-shared prompt library (issue #1169), backed by /api/prompts.
@@ -41,6 +41,19 @@ async function request(url, options = {}) {
 
 const enc = encodeURIComponent
 
+/**
+ * Whether a listing response is everything the user may see. The server sets
+ * `incomplete` when its authorization checks were cut short by their safety
+ * bounds (issue #1169): then entries can be missing that the user may still
+ * use, so the client must never conclude from their absence that access was
+ * revoked. Exported for tests.
+ */
+export function listingIsComplete(data, list) {
+  if (data?.incomplete === true) return false
+  if (typeof data?.total !== 'number') return false
+  return data.total <= list.length
+}
+
 export function usePromptLibrary(enabled = true) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(false)
@@ -63,7 +76,7 @@ export function usePromptLibrary(enabled = true) {
       const data = await request(`/api/prompts?scope=all&limit=${MAX_PAGE}`)
       const list = Array.isArray(data?.prompts) ? data.prompts : []
       setEntries(list)
-      setComplete(typeof data?.total === 'number' ? data.total <= list.length : true)
+      setComplete(listingIsComplete(data, list))
       setLoaded(true)
     } catch (e) {
       setError(e.message)
@@ -122,7 +135,18 @@ export function usePromptLibrary(enabled = true) {
     return data.version
   }, [refresh])
 
-  const listVersions = useCallback(async id => (await request(`/api/prompts/${enc(id)}/versions`)).versions || [], [])
+  // One page of history, newest first: { versions, total }. Entries carry no
+  // prompt text; getVersion returns one version's content.
+  const listVersions = useCallback(async (id, offset = 0) => {
+    const data = await request(`/api/prompts/${enc(id)}/versions?limit=${PAGE_SIZE}&offset=${offset}`)
+    return {
+      versions: Array.isArray(data?.versions) ? data.versions : [],
+      total: typeof data?.total === 'number' ? data.total : 0,
+    }
+  }, [])
+
+  const getVersion = useCallback(async (id, versionId) =>
+    (await request(`/api/prompts/${enc(id)}/versions/${enc(versionId)}`)).version, [])
 
   const getSharing = useCallback(async id => (await request(`/api/prompts/${enc(id)}/sharing`)).sharing, [])
 
@@ -133,7 +157,12 @@ export function usePromptLibrary(enabled = true) {
     return data.sharing
   }, [refresh])
 
-  const listShareableGroups = useCallback(async () => (await request('/api/prompts/groups')).groups || [], [])
+  // { groups, incomplete }: `incomplete` when the server's bounded membership
+  // checks were cut short (only groups confirmed as yours are listed).
+  const listShareableGroups = useCallback(async () => {
+    const data = await request('/api/prompts/groups')
+    return { groups: Array.isArray(data?.groups) ? data.groups : [], incomplete: data?.incomplete === true }
+  }, [])
 
   const forkPrompt = useCallback(async (id, versionId = null) => {
     const data = await request(`/api/prompts/${enc(id)}/fork`, {
@@ -152,7 +181,9 @@ export function usePromptLibrary(enabled = true) {
 
   const listAudit = useCallback(async id => (await request(`/api/prompts/${enc(id)}/audit`)).events || [], [])
 
-  return {
+  // One stable object per state change (not per render), so consumers
+  // that depend on it do not refetch on every parent render.
+  return useMemo(() => ({
     entries,
     loading,
     loaded,
@@ -165,6 +196,7 @@ export function usePromptLibrary(enabled = true) {
     updatePrompt,
     publishPrompt,
     listVersions,
+    getVersion,
     getSharing,
     setSharing,
     listShareableGroups,
@@ -173,7 +205,9 @@ export function usePromptLibrary(enabled = true) {
     listAudit,
     testDraft,
     setTestDraft,
-  }
+  }), [
+    entries, loading, loaded, complete, error, refresh, listPrompts, getPrompt, createPrompt, updatePrompt, publishPrompt, listVersions, getVersion, getSharing, setSharing, listShareableGroups, forkPrompt, archivePrompt, listAudit, testDraft, setTestDraft,
+  ])
 }
 
 export default usePromptLibrary

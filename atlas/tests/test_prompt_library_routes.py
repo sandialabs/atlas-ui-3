@@ -106,7 +106,7 @@ def test_full_owner_flow(client):
     assert export["export_format"] == "atlas-prompt-library/1" and len(export["versions"]) == 1
     audit = client.get(f"/api/prompts/{pid}/audit", headers=as_user(OWNER)).json()["events"]
     assert {e["event_type"] for e in audit} == {"create", "update_draft", "publish"}
-    assert client.get("/api/prompts/groups", headers=as_user(OWNER)).json() == {"groups": ["eng"]}
+    assert client.get("/api/prompts/groups", headers=as_user(OWNER)).json() == {"groups": ["eng"], "incomplete": False}
     archived = client.delete(f"/api/prompts/{pid}", headers=as_user(OWNER))
     assert archived.json() == {"success": True}
     assert client.get(f"/api/prompts/{pid}", headers=as_user(OWNER)).status_code == 404

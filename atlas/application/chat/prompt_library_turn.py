@@ -36,16 +36,20 @@ A turn never combines prompts: a frame naming a library entry *and* an inline
 custom prompt or persona is rejected before anything is looked up (no use or
 denial is audited -- nothing was attempted).
 
-Pin state is the stored record's, not the session's. Clearing a pin bumps a
-pin epoch in the record (see ``atlas.domain.conversation_prompt_pin``); every
-turn on a pinned conversation, every turn that selects a library entry, and
-every turn whose pin state is unknown re-reads the record's metadata first and
-adopts the stored pin when the epoch moved. A session that was open when the
-pin was cleared therefore runs unpinned from its next turn, and its saves
-cannot write the old pin back. When a conversation fails to load the pin state
-is *unknown*, not "unpinned": the turn is refused until the record can be read,
-so a failed load never silently swaps a pinned prompt for the default (with or
-without compliance enforcement).
+Pin state is the stored record's, not the session's. Every pin change -- a
+set, a re-pin, an explicit clear (``library_prompt: null`` or another prompt
+chosen while pinned) -- is a compare-and-set on the stored pin revision under
+the conversation's row lock, made before the turn runs; saves never write the
+pin. A change decided on a revision that is no longer current (the frame's
+``library_prompt_revision``, else the session's) is refused with a conflict
+and the session adopts the stored state. Turns that keep the pin re-read the
+stored record first and follow it. The full rules are in
+``atlas.domain.conversation_prompt_pin``.
+
+When a conversation fails to load, or its stored metadata is unreadable, the
+pin state is *unknown*, not "unpinned": the turn is refused until the record
+can be read, so a failed load never silently swaps a pinned prompt for the
+default (with or without compliance enforcement).
 
 Whenever a library prompt applies, authorization is checked on that turn. A
 refusal fails the turn with one generic message -- it never falls back to a
@@ -57,14 +61,16 @@ forever, but running it again requires current access.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from atlas.domain.conversation_prompt_pin import (
-    KEEP_STORED_PIN,
-    PIN_EPOCH_METADATA_KEY,
+    MAX_PIN_HISTORY,
     PIN_HISTORY_METADATA_KEY,
     PIN_METADATA_KEY,
-    pin_epoch,
+    PIN_REVISION_METADATA_KEY,
+    PromptPinConflictError,
+    pin_state,
+    valid_pin,
 )
 from atlas.domain.errors import AuthorizationError, ValidationError
 
@@ -72,16 +78,15 @@ logger = logging.getLogger(__name__)
 
 PIN_CONTEXT_KEY = "prompt_library_pin"
 PIN_HISTORY_CONTEXT_KEY = "prompt_library_pin_history"
-PIN_EPOCH_CONTEXT_KEY = "prompt_library_pin_epoch"
+PIN_REVISION_CONTEXT_KEY = "prompt_library_pin_revision"
 # Set when the conversation's stored pin could not be read (failed load).
 PIN_UNKNOWN_CONTEXT_KEY = "prompt_library_pin_unknown"
 PIN_STATE_CONTEXT_KEYS = (
     PIN_CONTEXT_KEY,
     PIN_HISTORY_CONTEXT_KEY,
-    PIN_EPOCH_CONTEXT_KEY,
+    PIN_REVISION_CONTEXT_KEY,
     PIN_UNKNOWN_CONTEXT_KEY,
 )
-MAX_PIN_HISTORY = 50
 
 CONFLICTING_PROMPTS_MESSAGE = (
     "Choose either a team library prompt or a custom prompt, not both."
@@ -92,8 +97,22 @@ PIN_STATE_UNAVAILABLE_MESSAGE = (
 )
 
 # Reads the conversation's stored metadata: a dict, or None when the store has
-# no such conversation for this user. Raises when the store cannot answer.
+# no such conversation for this user. Raises when the store cannot answer or
+# the stored metadata is unreadable.
 MetadataLoader = Callable[[], Awaitable[Optional[Dict[str, Any]]]]
+# Compare-and-sets the stored pin: (expected_revision, pin_or_None,
+# history_entry) -> {"status", "state"}, or None when the conversation is not
+# stored yet. Raises when the store cannot answer.
+PinWriter = Callable[[int, Optional[Dict[str, Any]], Dict[str, Any]], Awaitable[Optional[Dict[str, Any]]]]
+
+
+def parse_observed_revision(raw: Any) -> Optional[int]:
+    """The frame's ``library_prompt_revision``: the pin revision the client saw."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ValidationError("Malformed library_prompt_revision")
+    return raw
 
 
 def frame_has_conflicting_prompts(library_prompt: Any, custom_system_prompt: Any, persona_id: Any, omitted: Any) -> bool:
@@ -137,27 +156,24 @@ def parse_library_request(raw: Any) -> Any:
     return prompt_id.strip(), (version_id.strip() if version_id else None)
 
 
-def _valid_pin(value: Any) -> Optional[Dict[str, Any]]:
-    if not isinstance(value, dict):
-        return None
-    if not isinstance(value.get("prompt_id"), str) or not isinstance(value.get("version_id"), str):
-        return None
-    return {
-        "prompt_id": value["prompt_id"],
-        "version_id": value["version_id"],
-        "version_number": value.get("version_number"),
-        "title": value.get("title"),
-    }
+_valid_pin = valid_pin
+
+
+def _apply_state(context: Dict[str, Any], state: Dict[str, Any]) -> None:
+    context[PIN_CONTEXT_KEY] = state.get("pin")
+    context[PIN_HISTORY_CONTEXT_KEY] = list(state.get("history") or [])[-MAX_PIN_HISTORY:]
+    context[PIN_REVISION_CONTEXT_KEY] = state.get("revision", 0)
+    context.pop(PIN_UNKNOWN_CONTEXT_KEY, None)
+
+
+def session_revision(context: Dict[str, Any]) -> int:
+    value = context.get(PIN_REVISION_CONTEXT_KEY)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
 def load_pin_from_metadata(context: Dict[str, Any], metadata: Any) -> None:
     """Restore a stored conversation's pin into the session (hydrate/restore/refresh)."""
-    meta = metadata if isinstance(metadata, dict) else {}
-    context[PIN_CONTEXT_KEY] = _valid_pin(meta.get(PIN_METADATA_KEY))
-    history = meta.get(PIN_HISTORY_METADATA_KEY)
-    context[PIN_HISTORY_CONTEXT_KEY] = [h for h in history if isinstance(h, dict)][-MAX_PIN_HISTORY:] if isinstance(history, list) else []
-    context[PIN_EPOCH_CONTEXT_KEY] = pin_epoch(meta)
-    context.pop(PIN_UNKNOWN_CONTEXT_KEY, None)
+    _apply_state(context, pin_state(metadata))
 
 
 def clear_pin(context: Dict[str, Any]) -> None:
@@ -178,31 +194,43 @@ def save_pin_state(context: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def pin_metadata(context: Dict[str, Any]) -> Dict[str, Any]:
-    """Metadata entries for ``_save_conversation``.
+    """Pin entries for ``_save_conversation`` and live (in-flight) views.
 
-    With the pin state unknown, asks the repository to keep whatever is
-    stored rather than writing an absent pin over it.
+    A save only uses them when it *creates* the conversation; an existing
+    record keeps its stored pin (see ``conversation_prompt_pin``). Empty when
+    the pin state is unknown.
     """
     if context.get(PIN_UNKNOWN_CONTEXT_KEY):
-        return {KEEP_STORED_PIN: True}
+        return {}
     result: Dict[str, Any] = {}
-    epoch = pin_epoch({PIN_EPOCH_METADATA_KEY: context.get(PIN_EPOCH_CONTEXT_KEY)})
-    if epoch:
-        result[PIN_EPOCH_METADATA_KEY] = epoch
     pin = _valid_pin(context.get(PIN_CONTEXT_KEY))
     if pin:
         result[PIN_METADATA_KEY] = pin
     history = context.get(PIN_HISTORY_CONTEXT_KEY)
     if isinstance(history, list) and history:
         result[PIN_HISTORY_METADATA_KEY] = history[-MAX_PIN_HISTORY:]
+    revision = session_revision(context)
+    if revision:
+        result[PIN_REVISION_METADATA_KEY] = revision
     return result
 
 
-async def _refresh_pin_state(context: Dict[str, Any], load_metadata: MetadataLoader) -> None:
-    """Adopt the stored pin when it changed under this session.
+def public_pin_state(context: Dict[str, Any]) -> Dict[str, Any]:
+    """Pin fields for frames to the client (empty when unknown)."""
+    if context.get(PIN_UNKNOWN_CONTEXT_KEY):
+        return {}
+    return {
+        PIN_METADATA_KEY: _valid_pin(context.get(PIN_CONTEXT_KEY)),
+        PIN_REVISION_METADATA_KEY: session_revision(context),
+    }
 
-    Raises ``AuthorizationError`` when the store cannot answer: the turn
-    must not run on a pin state that may be stale or unknown.
+
+async def _refresh_pin_state(context: Dict[str, Any], load_metadata: MetadataLoader) -> bool:
+    """Adopt the stored pin state. Returns whether the conversation is stored.
+
+    Raises ``AuthorizationError`` when the store cannot answer or its
+    metadata is unreadable: the turn must not run on a pin state that may be
+    stale or unknown.
     """
     try:
         stored = await load_metadata()
@@ -218,43 +246,75 @@ async def _refresh_pin_state(context: Dict[str, Any], load_metadata: MetadataLoa
             # genuinely new conversation then proceeds normally.
             raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
         # The store has no record yet (a new conversation): nothing stored
-        # can be lost, and the session's own state stands.
+        # can be lost, and the session's own (pending) state stands.
+        return False
+    load_pin_from_metadata(context, stored)
+    return True
+
+
+def _history_entry(pin: Optional[Dict[str, Any]], message_index: int) -> Dict[str, Any]:
+    entry = dict(pin) if pin else {"prompt_id": None, "version_id": None}
+    entry["pinned_at"] = datetime.now(timezone.utc).isoformat()
+    # Messages already in the conversation when this change took effect.
+    entry["from_message_index"] = message_index
+    return entry
+
+
+async def _change_pin(
+    context: Dict[str, Any],
+    target: Optional[Dict[str, Any]],
+    message_index: int,
+    observed: int,
+    store_pin: Optional[PinWriter],
+    stored: bool = False,
+) -> None:
+    """Compare-and-set the pin to ``target`` (None clears it); see the module docs.
+
+    ``observed`` is the revision the change was decided on. ``stored`` says
+    the conversation has a stored record (from the refresh). A stored
+    conversation whose turn cannot write the pin (an off-record turn, or a
+    repository without pin writes) changes nothing: the turn runs its
+    selection, and neither the record nor the session's view of it moves --
+    recording it only in the session would make the next turn, which re-reads
+    the record, see a revision it never observed. Raises
+    ``PromptPinConflictError`` (after adopting the stored state) when the
+    stored revision moved, ``AuthorizationError`` when the store cannot
+    answer.
+    """
+    if stored and store_pin is None:
         return
-    stored_epoch = pin_epoch(stored)
-    session_epoch = pin_epoch({PIN_EPOCH_METADATA_KEY: context.get(PIN_EPOCH_CONTEXT_KEY)})
-    if context.get(PIN_UNKNOWN_CONTEXT_KEY) or stored_epoch != session_epoch:
-        load_pin_from_metadata(context, stored)
-
-
-def _record_pin(context: Dict[str, Any], version: Dict[str, Any], message_index: int) -> None:
-    pin = {
-        "prompt_id": version["prompt_id"],
-        "version_id": version["id"],
-        "version_number": version["version_number"],
-        "title": version["title"],
-    }
-    context[PIN_CONTEXT_KEY] = pin
-    history: List[Dict[str, Any]] = list(context.get(PIN_HISTORY_CONTEXT_KEY) or [])
-    history.append({
-        **pin,
-        "pinned_at": datetime.now(timezone.utc).isoformat(),
-        # Messages already in the conversation when this version took effect.
-        "from_message_index": message_index,
-    })
-    context[PIN_HISTORY_CONTEXT_KEY] = history[-MAX_PIN_HISTORY:]
-
-
-def _unpin(context: Dict[str, Any], message_index: int) -> None:
-    if context.get(PIN_CONTEXT_KEY):
-        history: List[Dict[str, Any]] = list(context.get(PIN_HISTORY_CONTEXT_KEY) or [])
-        history.append({
-            "prompt_id": None,
-            "version_id": None,
-            "pinned_at": datetime.now(timezone.utc).isoformat(),
-            "from_message_index": message_index,
+    current_revision = session_revision(context)
+    if stored and observed != current_revision:
+        # The client (or this session) decided on an older pin than the one
+        # stored: refuse rather than overwrite what it never saw. Only a
+        # stored conversation has a pin another window could have changed; an
+        # unsaved chat (browser-only, or before its first save) is this
+        # session's alone, and a record created meanwhile by another session
+        # is still caught by the compare-and-set below.
+        raise PromptPinConflictError({"pin": _valid_pin(context.get(PIN_CONTEXT_KEY)), "revision": current_revision})
+    entry = _history_entry(target, message_index)
+    result = None
+    if store_pin is not None:
+        try:
+            result = await store_pin(current_revision, target, entry)
+        except Exception as e:
+            logger.warning("Could not store the conversation's prompt pin (%s)", type(e).__name__)
+            raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
+    if result is None:
+        # Not stored yet (first turn of a new conversation, or a turn that is
+        # never persisted): the change lives in the session, and the save
+        # that creates the record writes it.
+        history = list(context.get(PIN_HISTORY_CONTEXT_KEY) or [])
+        _apply_state(context, {
+            "pin": target,
+            "history": (history + [entry])[-MAX_PIN_HISTORY:],
+            "revision": current_revision + 1,
         })
-        context[PIN_HISTORY_CONTEXT_KEY] = history[-MAX_PIN_HISTORY:]
-    context[PIN_CONTEXT_KEY] = None
+        return
+    _apply_state(context, result["state"])
+    if result["status"] == "conflict":
+        logger.info("Refused a stale team-prompt pin change (revision moved)")
+        raise PromptPinConflictError(result["state"])
 
 
 def _refusal_message(context: Dict[str, Any], from_pin_only: bool, default: Optional[str]) -> str:
@@ -279,19 +339,25 @@ async def resolve_library_prompt_for_turn(
     message_index: int,
     omitted: Any,
     load_metadata: Optional[MetadataLoader] = None,
+    store_pin: Optional[PinWriter] = None,
+    observed_revision: Any = None,
 ) -> Optional[str]:
     """Return the system-prompt text a library selection contributes, or None.
 
     ``request`` is the frame value or ``omitted``. ``library`` is the
     ``PromptLibraryService`` (None when the feature is unavailable).
-    ``load_metadata`` reads the conversation's stored metadata (None when the
-    conversation is not persisted).
-    Raises ``ValidationError`` when the turn names a library entry and another
-    prompt, and ``AuthorizationError`` when a library prompt applies but this
+    ``load_metadata`` reads, and ``store_pin`` compare-and-sets, the
+    conversation's stored pin (both None when the conversation is not
+    persisted). ``observed_revision`` is the frame's
+    ``library_prompt_revision`` (None: use the session's).
+    Raises ``ValidationError`` for a malformed or conflicting request
+    (``PromptPinConflictError`` when the pin changed since the client saw
+    it), and ``AuthorizationError`` when a library prompt applies but this
     user may not run it now or the pin state cannot be read; the caller fails
     the turn before anything is sent.
     """
     parsed = request if request is omitted else parse_library_request(request)
+    observed = parse_observed_revision(observed_revision)
     if isinstance(parsed, tuple) and other_prompt_selected:
         # Rejected before any lookup: nothing was attempted, so there is no
         # use or denial to audit. Nothing client-supplied is logged.
@@ -301,28 +367,29 @@ async def resolve_library_prompt_for_turn(
     unknown = bool(context.get(PIN_UNKNOWN_CONTEXT_KEY))
     if unknown and load_metadata is None:
         raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
-    if load_metadata is not None and (
-        unknown or _valid_pin(context.get(PIN_CONTEXT_KEY)) or isinstance(parsed, tuple)
-    ):
-        await _refresh_pin_state(context, load_metadata)
+    seen_revision = observed if observed is not None else session_revision(context)
+    stored = False
+    if load_metadata is not None:
+        # Every turn of a stored conversation follows the stored pin: a
+        # session that never saw a pin set elsewhere must not run the
+        # default prompt in a pinned conversation (one owner-filtered read).
+        stored = await _refresh_pin_state(context, load_metadata)
     current = _valid_pin(context.get(PIN_CONTEXT_KEY))
 
-    if parsed is None:
-        _unpin(context, message_index)
+    clearing = parsed is None or (parsed is omitted and other_prompt_selected)
+    if clearing:
+        if current is not None:
+            await _change_pin(context, None, message_index, seen_revision, store_pin, stored)
         return None
 
     from_pin_only = parsed is omitted
     if parsed is omitted:
         if current is None:
             return None
-        if other_prompt_selected:
-            _unpin(context, message_index)
-            return None
-        prompt_id, version_id, explicit = current["prompt_id"], current["version_id"], True
+        prompt_id, version_id = current["prompt_id"], current["version_id"]
     else:
         prompt_id, version_id = parsed
-        explicit = version_id is not None
-        if not explicit and current and current["prompt_id"] == prompt_id:
+        if version_id is None and current and current["prompt_id"] == prompt_id:
             # "Latest" in a conversation already running this entry keeps the
             # version it pinned.
             version_id = current["version_id"]
@@ -345,7 +412,13 @@ async def resolve_library_prompt_for_turn(
         raise AuthorizationError(_refusal_message(context, from_pin_only, e.message))
 
     if current is None or current["version_id"] != version["id"]:
-        _record_pin(context, version, message_index)
+        target = {
+            "prompt_id": version["prompt_id"],
+            "version_id": version["id"],
+            "version_number": version["version_number"],
+            "title": version["title"],
+        }
+        await _change_pin(context, target, message_index, seen_revision, store_pin, stored)
         try:
             await library.record_use(user_email, version, context.get("conversation_id"))
         except Exception:  # pragma: no cover - audit failure is logged inside
