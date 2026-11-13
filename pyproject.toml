@@ -20,7 +20,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-requires-python = ">=3.11"
+# 3.11.5 is the oldest patch release supported by a soupsieve with the selector
+# denial-of-service fixes (4.0+); beautifulsoup4 in mcp-demos pulls it in. A
+# lower floor makes resolvers pick an unpatched soupsieve 2.x on 3.11.0-3.11.4.
+requires-python = ">=3.11.5"
 dependencies = [
     "boto3>=1.43.40,<2.0.0",
     "cryptography>=44.0.0,<51.0.0",
@@ -170,14 +173,6 @@ atlas = [
     "mcp/**/*",
     "static/**/*",
 ]
-
-[tool.uv]
-# Lock only for Python >= 3.11.5. beautifulsoup4 (mcp-demos) pulls in soupsieve,
-# and every soupsieve release with the selector denial-of-service fixes (4.0+)
-# requires Python >= 3.11.5. Without this, uv.lock also carries an unpatched
-# soupsieve 2.x for 3.11.0-3.11.4. requires-python is unchanged, so a plain
-# install on those patch releases still works; `uv sync` from the lock does not.
-environments = ["python_full_version >= '3.11.5'"]
 
 [tool.pytest.ini_options]
 markers = [

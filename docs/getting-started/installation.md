@@ -222,8 +222,7 @@ For those who want to contribute to the code or run the application natively, fo
 
 ### Prerequisites
 
-*   **Python 3.11+** (the published image runs 3.14; CI also runs 3.12 and 3.13)
-    `uv.lock` is resolved for Python 3.11.5 and later, so `uv sync` needs at least that patch release. `uv pip install -e ".[dev,mcp-demos]"` still works on 3.11.0-3.11.4, but installs an older soupsieve without its security fixes.
+*   **Python 3.11.5+** (the published image runs 3.14; CI also runs 3.11, 3.12 and 3.13). Python 3.11.0-3.11.4 is not supported: no soupsieve release with the current security fixes installs there. `uv sync` picks or downloads a suitable interpreter on its own.
 *   **Node.js 18+** and npm
 *   **uv**: This project uses `uv` as the Python package manager. It's required.
 

@@ -1,10 +1,11 @@
 #!/bin/bash
 # PR #1205: Pillow and soupsieve security updates.
 # Checks that uv.lock carries only patched versions (and no second, older
-# soupsieve for Python 3.11.0-3.11.4), that the lock matches pyproject.toml,
-# and that the code paths using the two packages still work on the upgraded
-# versions: the TIFF-to-PNG vision conversion, the image_demo MCP tool and the
-# HTML extraction used by the duckduckgo MCP server.
+# soupsieve for Python 3.11.0-3.11.4), that the Python floor which keeps it
+# that way is declared, that the lock matches pyproject.toml, and that the code
+# paths using the two packages still work on the upgraded versions: the
+# TIFF-to-PNG vision conversion, the image_demo MCP tool and the page
+# extraction of the duckduckgo MCP server.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -23,8 +24,32 @@ print_result() {
 }
 
 cd "$PROJECT_ROOT"
+if [ ! -f .venv/bin/activate ]; then
+    echo "No .venv in $PROJECT_ROOT. Create it with: uv venv && uv pip install -e '.[dev,mcp-demos]'"
+    exit 1
+fi
 source .venv/bin/activate
 export PYTHONPATH="$PROJECT_ROOT"
+
+python - <<'PY'
+import sys
+import tomllib
+
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
+
+# soupsieve 4 needs Python >= 3.11.5. If the project or the lock admitted an
+# older patch release, uv would lock a second, unpatched soupsieve for it.
+with open("pyproject.toml", "rb") as handle:
+    declared = tomllib.load(handle)["project"]["requires-python"]
+with open("uv.lock", "rb") as handle:
+    locked_for = tomllib.load(handle)["requires-python"]
+print(f"requires-python: pyproject {declared}, uv.lock {locked_for}")
+for spec in (declared, locked_for):
+    if "3.11.4" in SpecifierSet(spec) or "3.11.5" not in SpecifierSet(spec):
+        sys.exit(1)
+PY
+print_result $? "pyproject.toml and uv.lock exclude Python older than 3.11.5"
 
 python - <<'PY'
 import sys
@@ -45,7 +70,7 @@ sys.exit(1 if failed else 0)
 PY
 print_result $? "uv.lock has only patched Pillow and soupsieve versions"
 
-uv lock --check > /dev/null 2>&1
+uv lock --check
 print_result $? "uv.lock is in sync with pyproject.toml"
 
 python - <<'PY'
@@ -101,6 +126,45 @@ with Image.open(BytesIO(base64.b64decode(images[0].data))) as image:
 PY
 )
 print_result $? "image_demo MCP tool renders an image"
+
+python - <<'PY'
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+os.environ["NO_PROXY"] = "127.0.0.1"
+
+from atlas.mcp.duckduckgo.main import get_page_content
+
+PAGE = b"""<html><head><title>Atlas</title><style>p { color: red }</style>
+<script>var hidden = 1;</script></head>
+<body>
+<h1>Heading</h1>
+<p>First  paragraph</p>
+<p>Second</p>
+</body></html>"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(PAGE)
+
+    def log_message(self, *args):
+        pass
+
+
+server = HTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+try:
+    text = get_page_content(f"http://127.0.0.1:{server.server_port}/")
+finally:
+    server.shutdown()
+assert text == "Atlas\nHeading\nFirst\nparagraph\nSecond", repr(text)
+PY
+print_result $? "duckduckgo server extracts page text from a served HTML page"
 
 python - <<'PY'
 from bs4 import BeautifulSoup
