@@ -159,16 +159,59 @@ async def test_an_app_still_running_after_the_client_disconnects_is_reported():
     assert "after the client disconnected" in str(caught.value)
 
 
+async def test_an_app_error_is_noted_on_a_test_that_was_already_failing():
+    injected = ValueError("application bug")
+    with pytest.raises(AssertionError) as caught:
+        async with AsgiWebSocketSession(_raising_app(injected), "/ws", deadline=BOUND) as ws:
+            await ws.send_json({"type": "chat"})
+            await asyncio.sleep(0.05)  # let the app fail before the body does
+            raise AssertionError("the body's own failure")
+    assert str(caught.value) == "the body's own failure"
+    assert any("application bug" in note for note in caught.value.__notes__)
+
+
 def test_every_backend_test_runs_under_the_suite_timeout(request):
     """The backstop for waits this client does not cover (conftest.py)."""
-    from conftest import BACKEND_TEST_TIMEOUT_SECONDS  # the suite's own conftest
+    from conftest import (  # the suite's own conftest
+        BACKEND_TEST_TIMEOUT_SECONDS,
+        default_timeout_is_overridden,
+    )
 
     assert request.config.pluginmanager.hasplugin("timeout"), (
         "pytest-timeout is missing; reinstall the dev extra (uv pip install -e '.[dev]')"
     )
-    if request.config.getoption("timeout") is not None:
-        pytest.skip("--timeout was given on the command line, which replaces the default")
+    if default_timeout_is_overridden(request.config):
+        pytest.skip("a timeout was chosen for this run, which replaces the default")
     marker = request.node.get_closest_marker("timeout")
     assert marker is not None and marker.args == (BACKEND_TEST_TIMEOUT_SECONDS,)
     # Under the 300s the suite as a whole is given by test/atlas_tests.sh.
     assert 0 < BACKEND_TEST_TIMEOUT_SECONDS <= 120
+
+
+class _Config:
+    def __init__(self, option=None, ini=""):
+        self._option, self._ini = option, ini
+
+    def getoption(self, name, default=None):
+        return self._option
+
+    def getini(self, name):
+        return self._ini
+
+
+@pytest.mark.parametrize(
+    "config, environ, overridden",
+    [
+        (_Config(), {}, False),
+        (_Config(option=0.0), {}, True),
+        (_Config(option=600.0), {}, True),
+        (_Config(), {"PYTEST_TIMEOUT": "0"}, True),
+        (_Config(), {"PYTEST_TIMEOUT": ""}, False),
+        (_Config(ini="300"), {}, True),
+    ],
+    ids=["nothing-chosen", "cli-zero", "cli-value", "env-zero", "env-empty", "ini"],
+)
+def test_a_timeout_chosen_for_the_run_replaces_the_default(config, environ, overridden):
+    from conftest import default_timeout_is_overridden  # the suite's own conftest
+
+    assert default_timeout_is_overridden(config, environ) is overridden

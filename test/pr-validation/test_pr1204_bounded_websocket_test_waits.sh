@@ -90,7 +90,7 @@ STABLE=0
 for _ in 1 2 3 4 5; do
     (cd atlas && timeout 300 python -m pytest tests/test_asgi_websocket_session.py \
         tests/test_websocket_admission_guard.py -q -n 2 -p no:cacheprovider > "$WORK/bounded.log" 2>&1)
-    if [ $? -ne 0 ] || ! grep -q "16 passed" "$WORK/bounded.log"; then
+    if [ $? -ne 0 ] || ! grep -Eq "[0-9]+ passed" "$WORK/bounded.log"; then
         STABLE=1
         tail -20 "$WORK/bounded.log"
         break

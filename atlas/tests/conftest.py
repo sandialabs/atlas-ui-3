@@ -702,20 +702,41 @@ def skip_auth_checks_env():
 BACKEND_TEST_TIMEOUT_SECONDS = 90
 
 
+def default_timeout_is_overridden(config, environ=None) -> bool:
+    """Whether the person running pytest chose a timeout themselves.
+
+    pytest-timeout reads ``--timeout``, the ``PYTEST_TIMEOUT`` environment
+    variable and the ``timeout`` ini option, and lets a marker beat all three.
+    The default below is applied as a marker, so it has to stand aside for
+    each of them or ``PYTEST_TIMEOUT=0`` would silently do nothing.
+    """
+    environ = os.environ if environ is None else environ
+    return (
+        config.getoption("timeout", None) is not None
+        or bool(environ.get("PYTEST_TIMEOUT"))
+        or bool(config.getini("timeout"))
+    )
+
+
 def pytest_collection_modifyitems(config, items):
     """Give every backend test the per-test timeout, unless it sets its own.
 
-    Scoped to this suite by living here rather than in ``pyproject.toml``,
-    whose pytest options also govern the multi-replica and PR-validation
-    runs. An explicit ``--timeout`` on the command line (``--timeout=0`` to
-    debug) or a ``@pytest.mark.timeout`` on the test wins.
+    Applied here rather than in ``pyproject.toml``, whose pytest options also
+    govern the multi-replica and PR-validation runs, and only to tests under
+    this directory: this hook sees every item of the session, including
+    another suite's when the two are collected together. A timeout chosen on
+    the command line or in the environment (``--timeout=0`` to debug), or a
+    ``@pytest.mark.timeout`` on the test, wins.
     """
     if not config.pluginmanager.hasplugin("timeout"):
         # An environment installed before pytest-timeout joined the dev extra.
         return
-    if config.getoption("timeout", None) is not None:
+    if default_timeout_is_overridden(config):
         return
+    suite_dir = Path(__file__).resolve().parent
     for item in items:
+        if suite_dir not in Path(item.path).resolve().parents:
+            continue
         if item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(BACKEND_TEST_TIMEOUT_SECONDS))
 

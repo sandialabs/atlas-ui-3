@@ -22,7 +22,8 @@ Three outcomes stay distinct, so one can never pass for another:
   ``AssertionError``, which no ``pytest.raises(RuntimeError)`` can swallow.
 
 An app exception the test never asked for is re-raised when the session
-closes, as ``TestClient`` does, so an application error cannot go unnoticed.
+closes, as ``TestClient`` does, so an application error cannot go unnoticed;
+if the test body is already failing, it is attached to that failure as a note.
 """
 
 from __future__ import annotations
@@ -124,11 +125,16 @@ class AsgiWebSocketSession:
                     f"the client disconnected.\n{self._frames_seen()}\n{where}"
                 )
             return
-        if task.cancelled() or exc is not None or self._app_failure_reported:
+        if task.cancelled() or self._app_failure_reported:
             return
         failure = task.exception()
-        if failure is not None:
+        if failure is None:
+            return
+        if exc is None:
             raise failure
+        # The test body failed first and its error is the one that propagates;
+        # say that the app failed too, or the cause of both may stay hidden.
+        exc.add_note(f"The app had also failed, with {failure!r}")
 
     async def send_json(self, data: Any) -> None:
         await self._to_app.put({"type": "websocket.receive", "text": json.dumps(data)})

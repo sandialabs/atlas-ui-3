@@ -166,9 +166,11 @@ and `atlas/tests/conftest.py` gives each test `BACKEND_TEST_TIMEOUT_SECONDS`
 `Failed: Timeout`, the stack of every thread is printed, and the run carries
 on with the next test. The limit is a backstop, not a budget: it must stay well
 under the 300-second limit `test/atlas_tests.sh` puts on the whole suite.
-`--timeout=0` on the command line turns it off for a debugging session, and
-`@pytest.mark.timeout(N)` overrides it for one test. It lives in `conftest.py`
-rather than in `pyproject.toml` so that it applies to this suite only.
+`--timeout=0` on the command line (or `PYTEST_TIMEOUT=0` in the environment)
+turns it off for a debugging session, and `@pytest.mark.timeout(N)` overrides
+it for one test. It lives in `conftest.py` rather than in `pyproject.toml`, and
+is applied only to tests under `atlas/tests/`, so that it covers this suite
+and no other.
 
 **WebSocket tests that wait for the app to fail use `AsgiWebSocketSession`.**
 Starlette's `TestClient` runs the app on a second thread, and its
