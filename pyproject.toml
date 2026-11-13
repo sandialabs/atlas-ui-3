@@ -41,7 +41,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.48b0,<1.0.0",
     "opentelemetry-instrumentation-logging>=0.48b0,<1.0.0",
     "opentelemetry-sdk>=1.43.0,<2.0.0",
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     # SQLAlchemy 2.1 (the required minimum) uses psycopg (v3) for postgresql:// URLs.
     # psycopg2-binary stays for explicit postgresql+psycopg2:// URLs.
     "psycopg[binary]>=3.3.0,<4.0.0",
@@ -65,7 +65,7 @@ dependencies = [
 # tool without pulling the full mcp-demos set. Keep in sync with the
 # [dependency-groups] pptx entry below.
 pptx = [
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Schema migrations (`alembic upgrade head`). The container image installs
@@ -82,7 +82,7 @@ mcp-demos = [
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
     "reportlab>=5.0.0,<6.0.0",
@@ -116,7 +116,7 @@ Issues = "https://github.com/sandialabs/atlas/issues"
 [dependency-groups]
 # Keep in sync with [project.optional-dependencies] pptx above
 pptx = [
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Keep in sync with [project.optional-dependencies] mcp-demos above
@@ -127,7 +127,7 @@ mcp-demos = [
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
     "reportlab>=5.0.0,<6.0.0",
@@ -170,6 +170,14 @@ atlas = [
     "mcp/**/*",
     "static/**/*",
 ]
+
+[tool.uv]
+# Lock only for Python >= 3.11.5. beautifulsoup4 (mcp-demos) pulls in soupsieve,
+# and every soupsieve release with the selector denial-of-service fixes (4.0+)
+# requires Python >= 3.11.5. Without this, uv.lock also carries an unpatched
+# soupsieve 2.x for 3.11.0-3.11.4. requires-python is unchanged, so a plain
+# install on those patch releases still works; `uv sync` from the lock does not.
+environments = ["python_full_version >= '3.11.5'"]
 
 [tool.pytest.ini_options]
 markers = [
