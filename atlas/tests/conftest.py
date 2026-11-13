@@ -691,6 +691,35 @@ def skip_auth_checks_env():
         _config_manager.reload_configs()
 
 
+# The longest any single backend test (setup, call and teardown together) may
+# run before pytest-timeout fails it and prints every thread's stack. The
+# slowest tests here (they start child interpreters) take about 20 seconds on
+# a busy machine; the limit exists so that a test blocked on something that
+# will never happen -- a WebSocket frame, a lock, a task that ignores
+# cancellation -- is reported by name instead of stalling the run until the
+# suite's own ``timeout 300`` kills it with no diagnostics (issue #1203). It
+# has to stay well under that outer limit minus the suite's normal run time.
+BACKEND_TEST_TIMEOUT_SECONDS = 90
+
+
+def pytest_collection_modifyitems(config, items):
+    """Give every backend test the per-test timeout, unless it sets its own.
+
+    Scoped to this suite by living here rather than in ``pyproject.toml``,
+    whose pytest options also govern the multi-replica and PR-validation
+    runs. An explicit ``--timeout`` on the command line (``--timeout=0`` to
+    debug) or a ``@pytest.mark.timeout`` on the test wins.
+    """
+    if not config.pluginmanager.hasplugin("timeout"):
+        # An environment installed before pytest-timeout joined the dev extra.
+        return
+    if config.getoption("timeout", None) is not None:
+        return
+    for item in items:
+        if item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(BACKEND_TEST_TIMEOUT_SECONDS))
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Remove the session's temp directories.
 
