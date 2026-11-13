@@ -165,8 +165,8 @@ async def test_an_app_error_is_noted_on_a_test_that_was_already_failing():
         async with AsgiWebSocketSession(_raising_app(injected), "/ws", deadline=BOUND) as ws:
             await ws.send_json({"type": "chat"})
             await asyncio.sleep(0.05)  # let the app fail before the body does
-            raise AssertionError("the body's own failure")
-    assert str(caught.value) == "the body's own failure"
+            assert ws.closed_by_app == 1234, "the body's own failure"
+    assert "the body's own failure" in str(caught.value)
     assert any("application bug" in note for note in caught.value.__notes__)
 
 
