@@ -20,7 +20,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-requires-python = ">=3.11"
+# 3.11.5 is the oldest patch release supported by a soupsieve with the selector
+# denial-of-service fixes (4.0+); beautifulsoup4 in mcp-demos pulls it in. A
+# lower floor makes resolvers pick an unpatched soupsieve 2.x on 3.11.0-3.11.4.
+requires-python = ">=3.11.5"
 dependencies = [
     "boto3>=1.43.40,<2.0.0",
     "cryptography>=44.0.0,<51.0.0",
@@ -41,7 +44,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.48b0,<1.0.0",
     "opentelemetry-instrumentation-logging>=0.48b0,<1.0.0",
     "opentelemetry-sdk>=1.43.0,<2.0.0",
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     # SQLAlchemy 2.1 (the required minimum) uses psycopg (v3) for postgresql:// URLs.
     # psycopg2-binary stays for explicit postgresql+psycopg2:// URLs.
     "psycopg[binary]>=3.3.0,<4.0.0",
@@ -65,7 +68,7 @@ dependencies = [
 # tool without pulling the full mcp-demos set. Keep in sync with the
 # [dependency-groups] pptx entry below.
 pptx = [
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Schema migrations (`alembic upgrade head`). The container image installs
@@ -82,7 +85,7 @@ mcp-demos = [
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
     "reportlab>=5.0.0,<6.0.0",
@@ -116,7 +119,7 @@ Issues = "https://github.com/sandialabs/atlas/issues"
 [dependency-groups]
 # Keep in sync with [project.optional-dependencies] pptx above
 pptx = [
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "python-pptx>=0.6.21,<2.0.0",
 ]
 # Keep in sync with [project.optional-dependencies] mcp-demos above
@@ -127,7 +130,7 @@ mcp-demos = [
     "numpy>=2.4.6,<3.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "pandas>=2.0.0,<4.0.0",
-    "Pillow>=12.3.0,<14.0.0",
+    "Pillow>=13.0.0,<14.0.0",
     "pypdf>=5.0.0,<7.0.0",
     "python-pptx>=0.6.21,<2.0.0",
     "reportlab>=5.0.0,<6.0.0",

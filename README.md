@@ -4,7 +4,7 @@
 [![Security Checks](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml)
 [![Docker Image](https://ghcr-badge.egpl.dev/sandialabs/atlas-ui-3/latest_tag?trim=major&label=latest)](https://github.com/sandialabs/atlas-ui-3/pkgs/container/atlas-ui-3)
 [![PyPI version](https://badge.fury.io/py/atlas-chat.svg)](https://badge.fury.io/py/atlas-chat)
-![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Python 3.11.5+](https://img.shields.io/badge/python-3.11.5+-blue.svg)
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
