@@ -1,6 +1,6 @@
 # Test Isolation
 
-Last updated: 2026-11-02
+Last updated: 2026-11-13
 
 The Python suite runs in a single process, in one pass, with no per-test
 forking, and is also supported under `pytest-xdist` for parallel execution
@@ -152,6 +152,70 @@ conflicting `.env` and in different import orders.
 - **Prefer a dedicated app over mutating the shared one.** Edits to
   `app.user_middleware`/`app.middleware_stack` leak process-wide; build a small
   `FastAPI()` for the test instead (as `test_middleware_auth.py` does).
+- **Never wait without a deadline.** A test that blocks on something the code
+  under test may never do turns a failure into a stalled run. See
+  [Bounded waits](#bounded-waits).
+
+## Bounded waits
+
+Two layers keep a stuck test from stalling the suite (issue #1203).
+
+**Every backend test has a timeout.** `pytest-timeout` is in the `dev` extra,
+and `atlas/tests/conftest.py` gives each test `BACKEND_TEST_TIMEOUT_SECONDS`
+(90) for setup, call and teardown together. A test that exceeds it fails with
+`Failed: Timeout`, the stack of every thread is printed, and the run carries
+on with the next test. The limit is a backstop, not a budget: it must stay well
+under the 300-second limit `test/atlas_tests.sh` puts on the whole suite.
+`--timeout=0` on the command line (or `PYTEST_TIMEOUT=0` in the environment)
+turns it off for a debugging session, and `@pytest.mark.timeout(N)` overrides
+it for one test. It lives in `conftest.py` rather than in `pyproject.toml`, and
+is applied only to tests under `atlas/tests/`, so that it covers this suite
+and no other.
+
+**WebSocket tests that wait for the app to fail use `AsgiWebSocketSession`.**
+Starlette's `TestClient` runs the app on a second thread, and its
+`receive_json()` blocks the test thread until the app sends a frame or raises.
+It blocks forever in two ordinary situations:
+
+- the handler answered the frame and went back to listening (every refused
+  turn on `/ws` does this: an error frame, then `continue`), so each side is
+  now waiting for the other;
+- the handler returned without sending a close frame.
+
+A bounded `for` loop around `receive_json()` does not help, and neither does a
+`time.monotonic()` check between calls: the call that blocks is never
+interrupted. `atlas/tests/asgi_websocket_session.py` runs the app as a task on
+the test's own event loop instead, so every wait is raced against a deadline:
+
+```python
+from atlas.tests.asgi_websocket_session import AsgiWebSocketSession
+
+async def test_handler_failure_releases_the_claim(monkeypatch):
+    injected = RuntimeError("socket gone")
+    ...                                   # make the handler raise `injected`
+    async with AsgiWebSocketSession(main.app, "/ws", headers=HEADERS) as ws:
+        await ws.send_json(frame)
+        failure = await ws.run_until_app_exits()
+    assert failure is injected            # the same object, not just the type
+```
+
+The three ways such a test can end stay distinct:
+
+| What the app did | What the test sees |
+|------------------|--------------------|
+| Raised | `run_until_app_exits()` returns the exception object |
+| Returned, or closed the socket | It returns `None`; `closed_by_app` holds the close code |
+| Neither, before the deadline | `WebSocketDeadlineError` (an `AssertionError`) listing the frames received and the line the handler is suspended on |
+
+Compare the returned exception by identity. `pytest.raises(RuntimeError)`
+around a socket also passes for any other `RuntimeError` the app or the client
+raises. An app error the test did not ask about is re-raised when the session
+closes, so it cannot go unnoticed. `receive_json()` and `receive_until()` have
+the same deadline and raise `WebSocketClosedError` when the app closes or
+exits instead of sending the frame.
+
+`TestClient` remains fine for request/response tests and for WebSocket tests
+that receive exactly the frames the handler is certain to send.
 
 ## Checking for order dependence
 
