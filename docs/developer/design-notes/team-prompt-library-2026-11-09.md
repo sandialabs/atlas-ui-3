@@ -156,8 +156,12 @@ Unknown and unreadable state:
   string, a number) raises `ConversationMetadataUnreadableError` instead of
   reading as `{}`, so it never looks like "no pin, revision 0". Turns are
   refused, the owner's DELETE answers 503, and nothing rewrites the blob (the
-  classification guard also refuses saves over it). An empty blob or JSON
-  `null` is genuinely empty metadata.
+  classification guard also refuses saves over it). The same holds for valid
+  JSON whose pin or pin revision is malformed (a pin without non-blank string
+  `prompt_id` and `version_id`, or a revision that is not a non-negative
+  integer): it is not read as "no pin" or revision 0, saves over it are
+  refused, and the pin state is unknown. An empty blob, JSON `null`, absent pin
+  keys and `prompt_library: null` are genuinely empty.
 - The live view of a run that has not saved yet (`in_flight`) carries the
   same pin, history and revision as the session, so a tab that opens it shows
   the right selection and does not send `library_prompt: null` by accident.

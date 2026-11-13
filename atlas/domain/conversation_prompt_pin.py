@@ -85,10 +85,14 @@ def pin_revision(metadata: Any) -> int:
     return 0
 
 
+def _nonblank(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def valid_pin(value: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(value, dict):
         return None
-    if not isinstance(value.get("prompt_id"), str) or not isinstance(value.get("version_id"), str):
+    if not _nonblank(value.get("prompt_id")) or not _nonblank(value.get("version_id")):
         return None
     return {
         "prompt_id": value["prompt_id"],
@@ -96,6 +100,28 @@ def valid_pin(value: Any) -> Optional[Dict[str, Any]]:
         "version_number": value.get("version_number"),
         "title": value.get("title"),
     }
+
+
+def pin_fields_readable(metadata: Dict[str, Any]) -> bool:
+    """Whether the stored pin and pin revision are well formed.
+
+    The rest of this module reads them leniently (a malformed pin as "no pin",
+    a malformed revision as 0). That is right for values this module wrote,
+    but a stored record carrying a malformed one has been damaged: reading it
+    as "no pin" would silently run the default prompt in a pinned
+    conversation, and reading the revision as 0 would let a stale change pass
+    the compare-and-set. So the repository treats such a record as unreadable
+    (``ConversationMetadataUnreadableError``), exactly like invalid JSON.
+
+    Absent keys and ``prompt_library: null`` are legitimate (no pin).
+    """
+    pin = metadata.get(PIN_METADATA_KEY)
+    if pin is not None and valid_pin(pin) is None:
+        return False
+    for key in (PIN_REVISION_METADATA_KEY, _LEGACY_EPOCH_KEY):
+        if key in metadata and _revision_value(metadata[key]) is None:
+            return False
+    return True
 
 
 def pin_history(metadata: Any) -> List[Dict[str, Any]]:

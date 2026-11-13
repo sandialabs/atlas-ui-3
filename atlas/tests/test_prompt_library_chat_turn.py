@@ -1190,3 +1190,107 @@ async def test_unsaved_conversations_change_their_pin_without_spurious_conflicts
     await _turn(service, session_id, conv, incognito=True, library_prompt=None, library_prompt_revision=0)
     assert calls[-1].get("custom_system_prompt") is None
     assert env["conversations"].get_conversation(conv, USER) is None
+
+
+# --- Follow-up: valid JSON, malformed pin fields ------------------------------
+
+
+_MALFORMED_PIN_FIELDS = [
+    ("prompt_library", {"prompt_id": 5, "version_id": "v"}),
+    ("prompt_library", {"prompt_id": "p", "version_id": None}),
+    ("prompt_library", {"prompt_id": "p", "version_id": ""}),
+    ("prompt_library", {"prompt_id": "  ", "version_id": "v"}),
+    ("prompt_library", {"version_id": "v"}),
+    ("prompt_library", "p1"),
+    ("prompt_library", []),
+    ("prompt_library", {}),
+    ("prompt_library_pin_revision", "3"),
+    ("prompt_library_pin_revision", -1),
+    ("prompt_library_pin_revision", True),
+    ("prompt_library_pin_revision", 1.5),
+    ("prompt_library_pin_revision", None),
+    ("prompt_library_pin_epoch", "2"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key, bad", _MALFORMED_PIN_FIELDS)
+async def test_malformed_pin_fields_never_run_the_default_prompt(env, key, bad):
+    """Valid JSON whose pin or pin revision is malformed is unreadable, not "no pin"."""
+    import json
+
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    good = _raw_metadata(env, conv)
+    corrupted = json.loads(good)
+    corrupted[key] = bad
+    raw = json.dumps(corrupted)
+    _set_raw_metadata(env, conv, raw)
+
+    # The open session, every kind of frame, and a fresh connection: all refused.
+    for frame in ({}, {"library_prompt": None}, {"library_prompt": {"prompt_id": prompt["id"], "version_id": None}}):
+        with pytest.raises(AuthorizationError) as exc:
+            await _turn(service, session_id, conv, **frame)
+        assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+    fresh, fresh_calls, _ = _service(env)
+    with pytest.raises(AuthorizationError):
+        await _turn(fresh, uuid4(), conv)
+    assert len(calls) == 1 and fresh_calls == []  # nothing ran on the default prompt
+    assert _raw_metadata(env, conv) == raw  # never rewritten or "repaired"
+
+    # Readable again: the stored pin runs.
+    _set_raw_metadata(env, conv, good)
+    await _turn(fresh, uuid4(), conv)
+    assert fresh_calls[-1]["custom_system_prompt"] == "v1 body"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [
+    {},
+    {"prompt_library": None},
+    {"prompt_library_pin_revision": 0},
+    {"prompt_library_pin_revision": 4, "prompt_library_history": []},
+    {"prompt_library_pin_epoch": 2},
+])
+async def test_legitimate_unpinned_metadata_still_runs(env, extra):
+    import json
+
+    service, calls, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(service, uuid4(), conv)
+    meta = json.loads(_raw_metadata(env, conv))
+    meta.update(extra)
+    _set_raw_metadata(env, conv, json.dumps(meta))
+    fresh, fresh_calls, _ = _service(env)
+    await _turn(fresh, uuid4(), conv)
+    assert fresh_calls[-1].get("custom_system_prompt") is None
+
+
+@pytest.mark.asyncio
+async def test_malformed_pin_blocks_owner_clear_and_restore_without_guessing(env, monkeypatch):
+    import json
+
+    prompt, _ = await _shared_prompt(env["library"])
+    service, _, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    meta = json.loads(_raw_metadata(env, conv))
+    meta["prompt_library"] = {"prompt_id": prompt["id"]}  # version_id lost
+    raw = json.dumps(meta)
+    _set_raw_metadata(env, conv, raw)
+
+    client = _pin_client(env, monkeypatch, env["members"])
+    response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert response.status_code == 503
+
+    other_id = uuid4()
+    other, other_calls, other_sessions = _service(env)
+    await _turn(other, other_id, str(uuid4()))
+    await other.handle_restore_conversation(other_id, conv, [], user_email=USER)
+    assert other_sessions[other_id].context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY) is True
+    with pytest.raises(AuthorizationError):
+        await _turn(other, other_id, conv)
+    assert len(other_calls) == 1
+    assert _raw_metadata(env, conv) == raw

@@ -361,3 +361,91 @@ def test_an_explicit_clear_and_a_stale_set_race_postgresql(replicas):
         assert errors == []
         assert sorted(r["status"] for r in results) == ["conflict", "ok"], f"attempt {attempt}"
         assert _meta(a, conv)[PIN_REVISION_METADATA_KEY] == 2
+
+
+# --- Valid JSON, malformed pin fields (follow-up security check) -------------
+
+_MALFORMED = [
+    {"prompt_library": {"prompt_id": 5, "version_id": "v1"}},
+    {"prompt_library": {"prompt_id": "p1", "version_id": None}},
+    {"prompt_library": {"prompt_id": "p1", "version_id": ""}},
+    {"prompt_library": {"prompt_id": " ", "version_id": "v1"}},
+    {"prompt_library": {"version_id": "v1"}},
+    {"prompt_library": "p1"},
+    {"prompt_library": []},
+    {"prompt_library": {}},
+    {"prompt_library": V1, "prompt_library_pin_revision": "3"},
+    {"prompt_library": V1, "prompt_library_pin_revision": -1},
+    {"prompt_library": V1, "prompt_library_pin_revision": True},
+    {"prompt_library": V1, "prompt_library_pin_revision": 2.0},
+    {"prompt_library": V1, "prompt_library_pin_revision": None},
+    {"prompt_library": V1, "prompt_library_pin_epoch": "2"},
+]
+_LEGITIMATE = [
+    {},
+    {"agent_mode": False},
+    {"prompt_library": None},
+    {"prompt_library": V1},
+    {"prompt_library": V1, "prompt_library_pin_revision": 0},
+    {"prompt_library": V1, "prompt_library_pin_revision": 7, "prompt_library_history": []},
+    {"prompt_library_pin_epoch": 3},
+]
+
+
+@pytest.mark.parametrize("metadata", _MALFORMED)
+def test_malformed_pin_fields_are_unreadable(metadata):
+    from atlas.domain.conversation_prompt_pin import pin_fields_readable
+
+    assert pin_fields_readable(metadata) is False
+
+
+@pytest.mark.parametrize("metadata", _LEGITIMATE)
+def test_legitimate_pin_fields_are_readable(metadata):
+    from atlas.domain.conversation_prompt_pin import pin_fields_readable
+
+    assert pin_fields_readable(metadata) is True
+
+
+def _set_raw(store, conv, raw):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    with store._session_factory() as db:
+        db.get(ConversationRecord, conv).metadata_json = raw
+        db.commit()
+
+
+def _raw(store, conv):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    with store._session_factory() as db:
+        return db.get(ConversationRecord, conv).metadata_json
+
+
+@pytest.mark.parametrize("metadata", _MALFORMED)
+def test_a_malformed_pin_is_never_read_as_no_pin_or_overwritten(duck_store, metadata):
+    conv = str(uuid.uuid4())
+    _save(duck_store, conv, {"agent_mode": False, PIN_METADATA_KEY: V1})
+    raw = json.dumps({"agent_mode": False, **metadata})
+    _set_raw(duck_store, conv, raw)
+
+    with pytest.raises(ConversationMetadataUnreadableError):
+        duck_store.get_conversation_metadata(conv, USER)
+    with pytest.raises(ConversationMetadataUnreadableError):
+        duck_store.change_prompt_pin(conv, USER, 0, V2, {"version_id": "v2"})
+    with pytest.raises(ConversationMetadataUnreadableError):
+        duck_store.clear_prompt_pin(conv, USER)
+    record = duck_store.get_conversation(conv, USER)
+    assert record["metadata_unreadable"] is True
+    # A save would carry the pin through as "no pin": it is refused instead.
+    assert _save(duck_store, conv, {"agent_mode": True}, MESSAGES * 2) is None
+    assert _raw(duck_store, conv) == raw
+
+
+@pytest.mark.parametrize("metadata", _LEGITIMATE)
+def test_legitimate_metadata_stays_readable_and_savable(duck_store, metadata):
+    conv = str(uuid.uuid4())
+    _save(duck_store, conv, {"agent_mode": False})
+    _set_raw(duck_store, conv, json.dumps(metadata))
+    assert duck_store.get_conversation_metadata(conv, USER) == metadata
+    assert "metadata_unreadable" not in duck_store.get_conversation(conv, USER)
+    assert _save(duck_store, conv, {"agent_mode": True}, MESSAGES * 2) is not None

@@ -40,6 +40,7 @@ from atlas.domain.conversation_prompt_pin import (
     apply_pin_change,
     carry_stored_pin,
     new_record_pin,
+    pin_fields_readable,
     pin_state,
 )
 from atlas.domain.errors import ConversationMetadataUnreadableError
@@ -214,6 +215,19 @@ class ConversationRepository:
                         "its recorded data classification. This turn was not "
                         "persisted.",
                         sanitize_for_logging(conversation_id),
+                    )
+                    return None
+
+                # A stored pin or pin revision that is malformed is unreadable
+                # (issue #1169): carrying it through would read it as "no pin"
+                # and silently write an unpinned record over it.
+                stored_for_pin = _load_metadata(existing.metadata_json)
+                if isinstance(stored_for_pin, dict) and not pin_fields_readable(stored_for_pin):
+                    # No client-supplied value in the message (the id came
+                    # from the frame).
+                    logger.error(
+                        "Refusing to save a conversation: its stored team-prompt "
+                        "pin is malformed. This turn was not persisted."
                     )
                     return None
 
@@ -454,6 +468,11 @@ class ConversationRepository:
                 if not isinstance(conv_metadata, dict):
                     # Valid JSON of the wrong shape is no more readable.
                     conv_metadata = {}
+                    metadata_unreadable = True
+                elif not pin_fields_readable(conv_metadata):
+                    # A malformed pin is not "no pin" (issue #1169). The rest
+                    # of the record stays readable; the pin state is unknown.
+                    logger.warning("Malformed team-prompt pin in conversation %s", conv.id)
                     metadata_unreadable = True
 
             lineage = self._lineage_fields_by_id(
@@ -948,7 +967,8 @@ _MISSING = object()
 def _readable_metadata(metadata_json: Optional[str]) -> Dict[str, Any]:
     """Stored metadata as a dict; ``{}`` only for genuinely empty metadata.
 
-    A blob that is not valid JSON, or is JSON but not an object, raises
+    A blob that is not valid JSON, is JSON but not an object, or carries a
+    malformed team-prompt pin or pin revision (``pin_fields_readable``) raises
     ``ConversationMetadataUnreadableError`` (the message names no content).
     """
     if not metadata_json:
@@ -959,7 +979,7 @@ def _readable_metadata(metadata_json: Optional[str]) -> Dict[str, Any]:
         raise ConversationMetadataUnreadableError() from None
     if value is None:
         return {}
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or not pin_fields_readable(value):
         raise ConversationMetadataUnreadableError()
     return value
 
