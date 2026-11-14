@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Pencil, Trash2, Check, X, Sparkles } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, X, Sparkles, BookPlus } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { userPromptKey, isUserPromptKey, userPromptIdFromKey } from '../hooks/chat/useSelections'
+import PromptLibraryPanel from './PromptLibraryPanel'
 
 /**
  * Prompt library manager (issue #153) — lives in the Settings "Prompts" tab.
@@ -31,7 +32,22 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
     activePromptKey,
     makePromptActive,
     clearActivePrompt,
+    promptLibrary = null,
   } = useChat()
+  const [libraryNotice, setLibraryNotice] = useState(null)
+
+  // Copy a private custom prompt into the team library as a new private entry
+  // (issue #1169). The original stays where it is; nothing is shared until the
+  // owner shares the library copy.
+  const saveToLibrary = async (prompt) => {
+    setLibraryNotice(null)
+    try {
+      await promptLibrary.createPrompt({ title: prompt.title, content: prompt.content })
+      setLibraryNotice({ ok: true, text: `Saved "${prompt.title}" to the team library as a private draft.` })
+    } catch (e) {
+      setLibraryNotice({ ok: false, text: e.message })
+    }
+  }
 
   // editingId: null = not editing; 'new' = creating; otherwise an existing id
   const [editingId, setEditingId] = useState(null)
@@ -201,6 +217,12 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
         )}
       </div>
 
+      {libraryNotice && (
+        <div role="status" className={`p-3 rounded-lg text-sm border ${libraryNotice.ok ? 'bg-emerald-900/30 border-emerald-700 text-emerald-300' : 'bg-red-900/30 border-red-700 text-red-300'}`}>
+          {libraryNotice.text}
+        </div>
+      )}
+
       {userPromptsError && (
         <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
           {userPromptsError}
@@ -258,6 +280,16 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
                   >
                     <Pencil className="w-4 h-4" />
                   </button>
+                  {promptLibrary && (
+                    <button
+                      onClick={() => saveToLibrary(prompt)}
+                      title="Save to team library"
+                      aria-label={`Save ${prompt.title} to team library`}
+                      className="p-1.5 rounded bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+                    >
+                      <BookPlus className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDelete(prompt)}
                     title="Delete"
@@ -271,6 +303,12 @@ const PromptManager = ({ intent = null, onIntentConsumed = null, onDirtyChange =
           )
         ))}
       </div>
+
+      {promptLibrary && (
+        <div className="pt-4 border-t border-gray-700">
+          <PromptLibraryPanel />
+        </div>
+      )}
     </div>
   )
 }

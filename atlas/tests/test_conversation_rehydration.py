@@ -237,6 +237,12 @@ class _FakeRepository:
             return None
         return conv
 
+    def get_conversation_metadata(self, conversation_id, user_email):
+        conv = self.conversations.get(conversation_id)
+        if not conv or conv["user_email"] != user_email:
+            return None
+        return dict(conv.get("metadata") or {})
+
 
 def _make_service(repository=None):
     sessions = {}
@@ -452,6 +458,27 @@ async def test_a_failing_store_does_not_fail_the_turn():
     await _run_turn(service, session_id, conversation_id="conv-1")
 
     assert sessions[session_id].history.messages == []
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_say_whether_a_team_prompt_is_pinned_refuses_the_turn():
+    """Issue #1169 review: an unreadable store must not run a pinned
+    conversation on the default prompt. When neither the conversation nor its
+    prompt settings can be read, the turn is refused -- with or without
+    compliance enforcement -- and nothing reaches the model."""
+    from atlas.application.chat import prompt_library_turn
+    from atlas.domain.errors import AuthorizationError
+
+    repository = _FakeRepository({"conv-1": _stored_conversation(10)})
+    repository.get_conversation = MagicMock(side_effect=RuntimeError("db is down"))
+    repository.get_conversation_metadata = MagicMock(side_effect=RuntimeError("db is down"))
+    service, sessions = _make_service(repository)
+    executed = []
+
+    with pytest.raises(AuthorizationError) as exc:
+        await _run_turn(service, uuid4(), conversation_id="conv-1", on_execute=lambda: executed.append(1))
+    assert exc.value.message == prompt_library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+    assert executed == []
 
 
 def _rewind_removed(sessions, session_id):

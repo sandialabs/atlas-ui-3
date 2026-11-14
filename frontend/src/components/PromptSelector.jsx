@@ -3,7 +3,8 @@ import { useMarketplace } from '../contexts/MarketplaceContext'
 import { classificationsOf } from '../utils/complianceAccess'
 import { ChevronDown, Sparkles, User, Users, Pencil, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
-import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
+import { userPromptKey, isUserPromptKey, userPromptIdFromKey, personaKey, isPersonaKey, personaIdFromKey, isLibraryPromptKey, isLibraryDraftKey, libraryPromptKey, parseLibraryPromptKey } from '../hooks/chat/useSelections'
+import { libraryPromptLabel } from '../utils/libraryPromptSelection'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 import { openSettingsPanel } from '../utils/settingsPanelEvents'
 
@@ -25,6 +26,8 @@ const PromptSelector = () => {
     fetchPersonas,
     complianceLevelFilter = null,
     features = {},
+    libraryPrompts = [],
+    promptLibrary = null,
   } = useChat()
   const { isComplianceAccessible } = useMarketplace()
   const customPromptsEnabled = !!features.custom_prompts
@@ -96,6 +99,28 @@ const PromptSelector = () => {
     openSettingsPanel({ tab: 'prompts', promptIntent: { type: 'create' } })
   }
 
+  const openLibrary = () => {
+    setIsOpen(false)
+    openSettingsPanel({ tab: 'prompts' })
+  }
+
+  // Team library (issue #1169). A selection the loaded list no longer has is
+  // shown as unavailable (and the send path refuses it) rather than quietly
+  // replaced -- see utils/libraryPromptSelection.js.
+  const activeLibrary = parseLibraryPromptKey(activePromptKey)
+  // Only a complete list can say an entry is gone (an entry past the first
+  // page is not missing).
+  const libraryReady = !!promptLibrary?.loaded && !promptLibrary?.error && promptLibrary?.complete !== false
+  const activeLibraryUnavailable = !!activeLibrary && libraryReady &&
+    !libraryPrompts.some(p => p.id === activeLibrary.promptId && p.latest_version)
+  const usableLibraryPrompts = libraryPrompts.filter(p => p.latest_version)
+  // Loading, a failed request and a genuinely empty library are different
+  // answers; only the last may say "no prompts". A failure keeps whatever an
+  // earlier load returned (and the user's selection) and offers a retry.
+  const libraryError = promptLibrary?.error || null
+  const libraryLoading = !!promptLibrary?.loading && !promptLibrary?.loaded && !libraryError
+  const retryLibrary = () => { if (typeof promptLibrary?.refresh === 'function') promptLibrary.refresh() }
+
   const handlePromptSelect = (promptKey) => {
     // Just make this prompt active without reordering
     if (makePromptActive) {
@@ -117,6 +142,10 @@ const PromptSelector = () => {
       const match = personas.find(p => p.id === id)
       return match ? match.name : 'Persona'
     }
+    if (isLibraryPromptKey(activePromptKey) || isLibraryDraftKey(activePromptKey)) {
+      if (activeLibrary && !libraryReady) return 'Team prompt'
+      return libraryPromptLabel(activePromptKey, libraryPrompts) || 'Team prompt'
+    }
     return getMcpNameFromKey(activePromptKey, prompts)
   }
 
@@ -125,7 +154,7 @@ const PromptSelector = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 text-xs text-gray-400 hover:text-purple-400 transition-colors max-sm:h-8 max-sm:px-2 max-sm:rounded max-sm:bg-gray-700/70 flex-shrink-0"
+        className={`flex items-center gap-1 text-xs ${activeLibraryUnavailable ? 'text-amber-400' : 'text-gray-400'} hover:text-purple-400 transition-colors max-sm:h-8 max-sm:px-2 max-sm:rounded max-sm:bg-gray-700/70 flex-shrink-0`}
         title={`Select custom prompts (active: ${getButtonText()})`}
       >
         <Sparkles className="w-3 h-3" />
@@ -284,6 +313,78 @@ const PromptSelector = () => {
                           {p.description || p.preview || personaPreview(p.content)}
                         </div>
                       </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </>
+          )}
+
+          {/* Team-shared prompt library (issue #1169) */}
+          {customPromptsEnabled && (
+            <>
+              <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-2">
+                    <Users className="w-3 h-3 text-sky-400" />
+                    Team Library
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openLibrary}
+                    className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-medium transition-colors"
+                  >
+                    Browse library
+                  </button>
+                </div>
+                {libraryLoading ? (
+                  <div role="status" className="text-xs text-gray-400 mt-1">Loading team prompts...</div>
+                ) : (
+                  (usableLibraryPrompts.length > 0 || !libraryError) && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      {usableLibraryPrompts.length > 0
+                        ? 'Published prompts you own or that are shared with you'
+                        : 'No published team prompts available'}
+                    </div>
+                  )
+                )}
+                {libraryError && (
+                  <div role="alert" className="text-xs text-red-300 mt-1 flex items-center justify-between gap-2">
+                    <span>Team prompts could not be loaded{usableLibraryPrompts.length > 0 ? ' (showing the last list)' : ''}.</span>
+                    <button
+                      type="button"
+                      onClick={retryLibrary}
+                      aria-label="Retry loading team prompts"
+                      className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {activeLibraryUnavailable && (
+                  <div role="alert" className="text-xs text-amber-400 mt-1">
+                    The selected team prompt is no longer available. Choose another prompt.
+                  </div>
+                )}
+              </div>
+              {usableLibraryPrompts.map((p) => {
+                const isActive = !!activeLibrary && activeLibrary.promptId === p.id
+                return (
+                  <button
+                    key={`lib-${p.id}`}
+                    onClick={() => handlePromptSelect(libraryPromptKey(p.id))}
+                    className={`w-full px-3 py-2 text-left hover:bg-gray-700 transition-colors border-b border-gray-700 last:border-b-0 ${
+                      isActive ? 'bg-blue-900/30' : ''
+                    }`}
+                  >
+                    <div className="font-medium text-gray-200 flex items-center gap-2">
+                      {isActive && <span className="text-blue-400">✓</span>}
+                      <span className="truncate">{p.title}</span>
+                      <span className="text-xs text-gray-500 flex-shrink-0">v{p.latest_version.version_number}</span>
+                      {isActive && <span className="text-xs text-blue-400">(active)</span>}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1 line-clamp-2">
+                      {p.description || (p.is_owner ? 'Yours' : `Shared by ${p.owner_email}`)}
                     </div>
                   </button>
                 )

@@ -139,3 +139,119 @@ class UserWorkspaceRecord(Base):
     __table_args__ = (
         Index("ix_user_workspaces_user_updated", "user_email", "updated_at"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Team-shared prompt library (issue #1169)
+#
+# A registry entry is private to its owner until it is shared. Sharing is a set
+# of grants: a group grant gives the members of an Atlas group (checked with
+# ``atlas.core.auth.is_user_in_group``) permission to view and use published
+# versions; a user grant names one identity and may also give edit or manage
+# rights. Published versions are immutable rows -- the repository never issues
+# an UPDATE against ``prompt_library_versions`` -- so a conversation that
+# pinned a version id can always be shown the exact text it ran with.
+# ---------------------------------------------------------------------------
+
+
+class PromptLibraryPromptRecord(Base):
+    """A prompt-library entry: metadata plus the owner's editable draft."""
+
+    __tablename__ = "prompt_library_prompts"
+
+    id = Column(String(36), primary_key=True, default=_uuid_default)
+    owner_email = Column(String(255), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(String(1000), nullable=True)
+    draft_content = Column(Text, nullable=False)
+    # Optimistic-concurrency counters. ``draft_revision`` advances on every
+    # draft change: saving and publishing name the revision the editor last
+    # saw, so nobody publishes text they did not review. ``sharing_revision``
+    # advances on every grant change, so a sharing update computed from a
+    # stale view cannot restore a grant someone else just revoked.
+    draft_revision = Column(Integer, nullable=False, default=1)
+    sharing_revision = Column(Integer, nullable=False, default=0)
+    # Denormalized pointer to the newest published version; the versions table
+    # stays authoritative (unique on prompt_id + version_number).
+    latest_version_id = Column(String(36), nullable=True)
+    latest_version_number = Column(Integer, nullable=False, default=0)
+    forked_from_prompt_id = Column(String(36), nullable=True)
+    forked_from_version_id = Column(String(36), nullable=True)
+    # Soft delete: an archived prompt is hidden and unusable for new turns,
+    # but its versions stay readable for the conversations that pinned them.
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now_utc, onupdate=_now_utc, nullable=False)
+
+    __table_args__ = (
+        Index("ix_prompt_library_prompts_owner_updated", "owner_email", "updated_at"),
+    )
+
+
+class PromptLibraryVersionRecord(Base):
+    """One immutable published version of a prompt-library entry."""
+
+    __tablename__ = "prompt_library_versions"
+
+    id = Column(String(36), primary_key=True, default=_uuid_default)
+    prompt_id = Column(String(36), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    change_description = Column(String(1000), nullable=True)
+    author_email = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+
+    __table_args__ = (
+        # Two concurrent publishes (two replicas, two tabs) race for the same
+        # number; the loser's insert fails here and it retries with the next.
+        UniqueConstraint("prompt_id", "version_number", name="uq_prompt_library_version_number"),
+    )
+
+
+class PromptLibraryGrantRecord(Base):
+    """A sharing grant on a prompt-library entry.
+
+    ``grantee_type`` is ``group`` (an Atlas group name exactly as configured
+    -- external authorizers may be case-sensitive -- permission always ``use``) or ``user`` (a normalized identity, permission ``use``, ``edit`` or
+    ``manage``). The owner is never a grant.
+    """
+
+    __tablename__ = "prompt_library_grants"
+
+    id = Column(String(36), primary_key=True, default=_uuid_default)
+    prompt_id = Column(String(36), nullable=False, index=True)
+    grantee_type = Column(String(10), nullable=False)
+    grantee = Column(String(255), nullable=False)
+    permission = Column(String(10), nullable=False)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+
+    __table_args__ = (
+        Index("ix_prompt_library_grants_grantee", "grantee_type", "grantee"),
+        # One grant per grantee: concurrent sharing updates cannot leave two
+        # rows (and two permissions) for the same group or user.
+        UniqueConstraint("prompt_id", "grantee_type", "grantee", name="uq_prompt_library_grant"),
+    )
+
+
+class PromptLibraryAuditRecord(Base):
+    """A durable governance event for a prompt-library entry.
+
+    ``details_json`` carries non-sensitive change details only (field names,
+    group names, version numbers) -- never prompt text.
+    """
+
+    __tablename__ = "prompt_library_audit_events"
+
+    id = Column(String(36), primary_key=True, default=_uuid_default)
+    prompt_id = Column(String(36), nullable=False, index=True)
+    version_id = Column(String(36), nullable=True)
+    event_type = Column(String(50), nullable=False)
+    actor_email = Column(String(255), nullable=False)
+    details_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+
+    __table_args__ = (
+        Index("ix_prompt_library_audit_prompt_created", "prompt_id", "created_at"),
+    )

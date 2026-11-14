@@ -146,6 +146,7 @@ class AppFactory:
         self.conversation_repository = None
         self.user_prompt_repository = None
         self.workspace_repository = None
+        self.prompt_library_service = None
         self._init_chat_history()
 
         logger.info("AppFactory initialized")
@@ -165,6 +166,7 @@ class AppFactory:
             from atlas.modules.chat_history import (
                 ConversationRepository,
                 PoolSettings,
+                PromptLibraryRepository,
                 UserPromptRepository,
                 WorkspaceRepository,
                 get_session_factory,
@@ -179,6 +181,13 @@ class AppFactory:
             self.conversation_repository = ConversationRepository(session_factory)
             self.user_prompt_repository = UserPromptRepository(session_factory)
             self.workspace_repository = WorkspaceRepository(session_factory)
+            # Team prompt library (issue #1169): shares the chat-history
+            # database; authorization lives in the service, not the repository.
+            from atlas.modules.prompts.prompt_library_service import PromptLibraryService
+
+            self.prompt_library_service = PromptLibraryService(
+                PromptLibraryRepository(session_factory)
+            )
             self.startup_outcomes["chat_history"] = "ok"
             logger.info("Chat history persistence initialized")
         except Exception as e:  # noqa: BLE001
@@ -275,6 +284,7 @@ class AppFactory:
             file_manager=self.file_manager,
             session_repository=self.session_repository,
             conversation_repository=self.conversation_repository,
+            prompt_library_service=self._prompt_library_for_chat(),
         )
 
     def create_headless_chat_service(
@@ -290,7 +300,18 @@ class AppFactory:
             session_repository=self.session_repository,
             event_publisher=event_publisher,
             conversation_repository=self.conversation_repository,
+            prompt_library_service=self._prompt_library_for_chat(),
         )
+
+    def _prompt_library_for_chat(self):
+        """The library service for chat turns, or None when the feature is off.
+
+        Read when each chat service is built, so the same flag that hides the
+        /api/prompts routes also makes a library reference on a turn fail closed.
+        """
+        if not self.config_manager.app_settings.custom_prompts_effective:
+            return None
+        return self.prompt_library_service
 
     # Accessors
     def get_config_manager(self) -> ConfigManager:  # noqa: D401
