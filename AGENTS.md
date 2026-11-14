@@ -339,7 +339,7 @@ ATLAS runs in security-sensitive environments and must work in restricted or dis
 All application dependencies and static assets -- including frontend themes, fonts, icons, JavaScript, CSS and images -- must be bundled with or hosted by ATLAS. This applies to both frontend and backend development.
 
 **Frontend:**
-- Do not load anything from an external CDN: no remote fonts, icons, stylesheets or scripts. Package the asset or serve it from ATLAS (the retro theme assets, for example, are bundled locally; see #1175).
+- Do not load anything from an external CDN: no remote fonts, icons, stylesheets or scripts. Package the asset or serve it from ATLAS.
 - Do not add analytics, telemetry, or automatic requests to third-party APIs from the browser.
 - Same-origin requests to ATLAS and links the user chooses to open are not prohibited.
 
