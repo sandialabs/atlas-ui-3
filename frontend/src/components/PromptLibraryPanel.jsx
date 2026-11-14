@@ -50,38 +50,56 @@ const PromptLibraryPanel = () => {
   // debounce below fires once per filter/search change instead of re-arming
   // on every render.
   const listPrompts = library?.listPrompts
+  // Listing requests can finish out of order (a slow search answered after a
+  // faster, newer one). Each request takes a generation number; only the
+  // newest may touch the list, its error or the loading indicator, so a late
+  // or failed older response -- including a "load more" page of a filter the
+  // user has since changed -- is dropped instead of overwriting the current
+  // results.
+  const generation = useRef(0)
+  // Which filter `items` belongs to. Until the debounced load for a new
+  // scope or search has answered, "Load more" would append a page of the new
+  // filter to the old one's list, so it is not offered.
+  const listedFor = useRef(null)
+  const filterKey = `${scope}\u0000${query}`
   const load = useCallback(async () => {
     if (!listPrompts) return
+    const mine = ++generation.current
     setLoading(true)
     setError(null)
     try {
       const page = await listPrompts(scope, query, 0)
+      if (mine !== generation.current) return
+      listedFor.current = `${scope}\u0000${query}`
       setItems(page.prompts)
       setTotal(page.total)
       setIncomplete(Boolean(page.incomplete))
     } catch (e) {
-      setError(e.message)
+      if (mine === generation.current) setError(e.message)
     } finally {
-      setLoading(false)
+      if (mine === generation.current) setLoading(false)
     }
   }, [listPrompts, scope, query])
 
   // Next page, appended. The server orders newest first, so a page never
   // repeats an entry unless the list changed meanwhile (dropped as a duplicate).
   const loadMore = async () => {
+    if (listedFor.current !== filterKey) return
+    const mine = ++generation.current
     setLoading(true)
     setError(null)
     try {
-      const page = await library.listPrompts(scope, query, items.length)
+      const page = await listPrompts(scope, query, items.length)
+      if (mine !== generation.current) return
       setItems(prev => {
         const seen = new Set(prev.map(p => p.id))
         return [...prev, ...page.prompts.filter(p => !seen.has(p.id))]
       })
       setTotal(page.total)
     } catch (e) {
-      setError(e.message)
+      if (mine === generation.current) setError(e.message)
     } finally {
-      setLoading(false)
+      if (mine === generation.current) setLoading(false)
     }
   }
 
@@ -138,6 +156,17 @@ const PromptLibraryPanel = () => {
     setDetail(prompt)
     setOpen({ type, id: prompt.id })
   }
+
+  // The entry with an open panel stays in the list -- in the same keyed
+  // <ul> -- even when a search, a scope change, a reload or a page leaves it
+  // out of the results. Rendering it anywhere else would unmount its editor
+  // and discard unsaved edits; React keeps a keyed child mounted however the
+  // list around it changes. It goes when the user closes the panel. (An entry
+  // just created or forked is held the same way until the list includes it.)
+  const heldOpen = open && open.type !== 'create' && detail && !items.some(p => p.id === open.id)
+    ? detail
+    : null
+  const shown = heldOpen ? [heldOpen, ...items] : items
 
   const active = parseLibraryPromptKey(activePromptKey)
   const selectEntry = (id, versionId = null) => makePromptActive(libraryPromptKey(id, versionId))
@@ -282,11 +311,6 @@ const PromptLibraryPanel = () => {
         />
       )}
 
-      {/* An entry just created or forked may not be in the current list yet
-          (another filter, or the reload is still in flight): keep its editor
-          on screen rather than letting it vanish. */}
-      {open && open.type !== 'create' && detail && !items.some(p => p.id === open.id) && renderPanelFor(detail)}
-
       {incomplete && (
         <div role="status" className="p-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-300 text-xs">
           Some team prompts could not be checked right now and may be missing from this list.
@@ -301,9 +325,9 @@ const PromptLibraryPanel = () => {
       )}
 
       <ul className="space-y-3">
-        {items.map(p => {
+        {shown.map(p => {
           const isActive = active && active.promptId === p.id
-          const sharedGroups = p.sharing?.groups || (p.is_owner ? [] : p.access_via.filter(v => v !== 'user' && v !== 'owner'))
+          const sharedGroups = p.sharing?.groups || (p.is_owner ? [] : (p.access_via || []).filter(v => v !== 'user' && v !== 'owner'))
           return (
             <li key={p.id} className="space-y-2">
               <div className="bg-gray-700 rounded-lg p-4">
@@ -342,6 +366,11 @@ const PromptLibraryPanel = () => {
                   </div>
                 </div>
               </div>
+              {heldOpen && p.id === heldOpen.id && (
+                <p className="text-xs text-amber-300 px-1">
+                  Not in the current results -- kept open while you work on it.
+                </p>
+              )}
               {renderPanelFor(p)}
             </li>
           )
@@ -351,7 +380,7 @@ const PromptLibraryPanel = () => {
       {items.length < total && (
         <div className="flex items-center justify-center gap-3">
           <span className="text-xs text-gray-400">Showing {items.length} of {total}</span>
-          <button type="button" onClick={loadMore} disabled={loading}
+          <button type="button" onClick={loadMore} disabled={loading || listedFor.current !== filterKey}
             className="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm disabled:opacity-50">
             Load more
           </button>

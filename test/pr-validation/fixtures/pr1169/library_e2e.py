@@ -214,9 +214,12 @@ async def main():
         status, saved = await turn_on(tab_a, race, {"prompt_id": pid, "version_id": v1["id"]})
         seen = saved.get("prompt_library_pin_revision") if saved else None
         check(status == "ok" and seen == 1, "conversation_saved reports the pin revision (1)")
-        status, _ = await turn_on(tab_b, race, {"prompt_id": pid, "version_id": v2["id"]},
-                                  {"library_prompt_revision": seen})
+        status, b_saved = await turn_on(tab_b, race, {"prompt_id": pid, "version_id": v2["id"]},
+                                        {"library_prompt_revision": seen})
         check(status == "ok" and system_prompt_sent().startswith(V2), "tab B re-pins to v2 from revision 1")
+        check(b_saved and (b_saved.get("prompt_library") or {}).get("version_id") == v2["id"]
+              and b_saved.get("prompt_library_pin_revision") == 2,
+              "tab B's conversation_saved reports the stored pin (v2, revision 2)")
         before = last_llm_request().get("timestamp")
         status, frame = await turn_on(tab_a, race, {"prompt_id": pid, "version_id": v1["id"]},
                                       {"library_prompt_revision": seen})
@@ -225,6 +228,8 @@ async def main():
               and frame.get("prompt_library_pin_revision") == 2
               and last_llm_request().get("timestamp") == before,
               "tab A's stale change is refused with the stored pin, and nothing ran")
+        check(frame.get("conversation_id") == race,
+              "the conflict frame names the conversation it belongs to")
         status, frame = await turn_on(tab_a, race, None, {"library_prompt_revision": seen})
         check(status == "error" and frame.get("error_type") == "prompt_pin_conflict",
               "tab A's stale explicit clear (library_prompt: null) is refused too")

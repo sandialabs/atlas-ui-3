@@ -2723,6 +2723,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             # saw it. Send the current one so it can catch up.
                             error_type = e.code
                             extra = public_pin_fields(e.pin_state)
+                            # The conversation the conflict is about. The run
+                            # envelope (turn_update_callback) adds run_id and
+                            # never overwrites this, so a client that switched
+                            # conversations meanwhile cannot apply another
+                            # conversation's selection to the one it shows.
+                            if e.conversation_id:
+                                extra["conversation_id"] = e.conversation_id
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),

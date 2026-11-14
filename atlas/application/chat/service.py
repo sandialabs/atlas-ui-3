@@ -1136,9 +1136,11 @@ class ChatService:
                         await update_callback({
                             "type": "conversation_saved",
                             "conversation_id": conv_id,
-                            # The stored pin and its revision (issue #1169),
-                            # so the client can name the revision it saw.
-                            **library_turn.public_pin_state(session.context),
+                            # The pin and revision the save committed (issue
+                            # #1169), read back from the saved record -- never
+                            # this session's view, which a concurrent change
+                            # can have made stale.
+                            **library_turn.persisted_pin_fields(session.context),
                         })
                     else:
                         await update_callback({
@@ -2274,6 +2276,10 @@ class ChatService:
             metadata=metadata,
             allow_shrink=allow_shrink,
         )
+        if record is not None:
+            # The committed pin state (issue #1169): the save carried the
+            # stored pin through, which may differ from this session's view.
+            library_turn.adopt_persisted_pin(session.context, getattr(record, "metadata_json", None))
         if record is None:
             logger.warning(
                 "Conversation %s save rejected by repository (owned by another "

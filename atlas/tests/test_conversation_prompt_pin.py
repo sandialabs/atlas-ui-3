@@ -449,3 +449,67 @@ def test_legitimate_metadata_stays_readable_and_savable(duck_store, metadata):
     assert duck_store.get_conversation_metadata(conv, USER) == metadata
     assert "metadata_unreadable" not in duck_store.get_conversation(conv, USER)
     assert _save(duck_store, conv, {"agent_mode": True}, MESSAGES * 2) is not None
+
+
+def test_a_save_returns_the_pin_it_committed_after_waiting_on_a_change_postgresql(pg_url):
+    """Finding 1 (fifth review), PostgreSQL: the record a save returns carries
+    the pin the database committed -- the concurrent change's, not the stale
+    one the saving session held -- and that is what conversation_saved sends."""
+    from atlas.application.chat import prompt_library_turn as library_turn
+    from atlas.modules.chat_history import ConversationRepository
+
+    engine = create_engine(pg_url)
+    try:
+        store = ConversationRepository(sessionmaker(bind=engine, expire_on_commit=False))
+        conv = str(uuid.uuid4())
+        _save(store, conv, {PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1})
+        done = {}
+        with engine.connect() as changing:
+            tx = changing.begin()
+            raw = changing.execute(
+                text("SELECT metadata_json FROM conversations WHERE id = :id FOR UPDATE"), {"id": conv}
+            ).scalar_one()
+
+            def stale_save():
+                done["record"] = _save(
+                    store, conv, {"agent_mode": True, PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 1},
+                    MESSAGES * 2,
+                )
+
+            thread = threading.Thread(target=stale_save)
+            thread.start()
+            time.sleep(0.5)
+            assert "record" not in done
+            meta = json.loads(raw)
+            meta[PIN_METADATA_KEY] = V2
+            meta[PIN_REVISION_METADATA_KEY] = 2
+            changing.execute(
+                text("UPDATE conversations SET metadata_json = :m WHERE id = :id"),
+                {"m": json.dumps(meta), "id": conv},
+            )
+            tx.commit()
+        thread.join(30)
+        record = done["record"]
+        context = {
+            library_turn.PIN_CONTEXT_KEY: V1,
+            library_turn.PIN_REVISION_CONTEXT_KEY: 1,
+        }
+        assert library_turn.adopt_persisted_pin(context, record.metadata_json) is True
+        fields = library_turn.persisted_pin_fields(context)
+        assert fields[PIN_METADATA_KEY]["version_id"] == "v2"
+        assert fields[PIN_REVISION_METADATA_KEY] == 2
+        assert library_turn.persisted_pin_fields(context) == {}  # consumed once
+    finally:
+        engine.dispose()
+
+
+def test_persisted_pin_fields_are_never_guessed():
+    from atlas.application.chat import prompt_library_turn as library_turn
+
+    context = {library_turn.PIN_CONTEXT_KEY: V1, library_turn.PIN_REVISION_CONTEXT_KEY: 4}
+    for unknown in (None, object(), "{broken", "[1]", json.dumps({PIN_METADATA_KEY: {"prompt_id": 5}})):
+        assert library_turn.adopt_persisted_pin(context, unknown) is False
+        assert library_turn.persisted_pin_fields(context) == {}  # no stale session view either
+    assert context[library_turn.PIN_REVISION_CONTEXT_KEY] == 4  # untouched
+    assert library_turn.adopt_persisted_pin(context, "") is True  # empty metadata: no pin
+    assert library_turn.persisted_pin_fields(context) == {PIN_METADATA_KEY: None, PIN_REVISION_METADATA_KEY: 0}

@@ -62,12 +62,15 @@ PIN_CONFLICT_MESSAGE = (
 class PromptPinConflictError(ValidationError):
     """A pin change was decided on a revision that is no longer current.
 
-    ``pin_state`` is the stored state the caller should adopt (pin, revision).
+    ``pin_state`` is the stored state the caller should adopt (pin, revision);
+    ``conversation_id`` the conversation it belongs to, so the error frame is
+    routed to that conversation and not to whichever one a client shows.
     """
 
-    def __init__(self, pin_state: Dict[str, Any]):
+    def __init__(self, pin_state: Dict[str, Any], conversation_id: Optional[str] = None):
         super().__init__(PIN_CONFLICT_MESSAGE, code=PIN_CONFLICT_CODE)
         self.pin_state = pin_state
+        self.conversation_id = conversation_id
 
 
 def _revision_value(value: Any) -> Optional[int]:

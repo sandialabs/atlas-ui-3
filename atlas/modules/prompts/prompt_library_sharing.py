@@ -8,16 +8,18 @@ repository refuses the write if they changed since (see
 grant.
 """
 
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Set
 
 from atlas.modules.chat_history.prompt_library_repository import GRANTEE_GROUP, GRANTEE_USER
 from atlas.modules.prompts.prompt_library_policy import (
     LEVEL_MANAGE,
     LEVEL_OWNER,
+    GroupCheckUnavailable,
     PromptConflict,
     PromptForbidden,
     PromptNotFound,
     check_revision,
+    is_org_wide_group,
     parse_grants,
     sharing_view,
 )
@@ -33,6 +35,41 @@ class PromptLibrarySharing:
             raise PromptNotFound()
         revision, grants = state
         return sharing_view(grants, revision)
+
+    async def _check_added_groups(self, user_email: str, added_groups: Set[str]) -> None:
+        """Refuse a newly added group unless it is configured and the caller's.
+
+        Only groups Atlas is configured with (the sharing-target candidates)
+        are ever sent to the authorizer: an arbitrary client-supplied name is
+        refused without a check. Configured groups are checked within the
+        same count and time bounds as the offered list
+        (``_member_groups_within``); a check that times out or fails is
+        "unknown", which refuses the change rather than counting as "yes".
+        The configured groups in the request are checked first, and an
+        unfinished check refuses the whole change as "unknown" (503) whether or
+        not unconfigured names are also present; after that, a name that is
+        not configured and one the caller is not in get the same 403 and
+        message. So the status code never tells a caller which names are
+        configured. (Response time still differs, since unconfigured names
+        never reach the authorizer; that is the price of not sending arbitrary
+        strings to it.) Existing grants are not re-checked: removing a group
+        never needs the authorizer.
+        """
+        from atlas.modules.prompts import prompt_library_service as svc
+
+        configured = {g for g in self._group_candidates() if g and not is_org_wide_group(g)}
+        to_check = sorted(added_groups & configured)
+        member, finished = (
+            await self._member_groups_within(user_email, to_check, svc.SHAREABLE_GROUP_CHECK_TIMEOUT_S)
+            if to_check else (set(), True)
+        )
+        if not finished and set(to_check) - member:
+            raise GroupCheckUnavailable()
+        not_member = added_groups - (member & configured)
+        if not_member:
+            raise PromptForbidden(
+                "You can only share with groups you belong to: " + ", ".join(sorted(not_member))
+            )
 
     async def set_sharing(
         self,
@@ -72,12 +109,7 @@ class PromptLibrarySharing:
 
         added_groups = new_groups - current_groups
         if added_groups:
-            member = await self._member_groups(user_email, added_groups)
-            not_member = added_groups - member
-            if not_member:
-                raise PromptForbidden(
-                    "You can only share with groups you belong to: " + ", ".join(sorted(not_member))
-                )
+            await self._check_added_groups(user_email, added_groups)
 
         grants = [
             {"grantee_type": GRANTEE_GROUP, "grantee": g, "permission": "use"} for g in sorted(new_groups)

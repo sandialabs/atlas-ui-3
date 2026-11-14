@@ -59,6 +59,7 @@ permitting new use are separate: a pinned version's text stays in the store
 forever, but running it again requires current access.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -215,6 +216,50 @@ def pin_metadata(context: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+_PERSISTED_CONTEXT_KEY = "_prompt_library_pin_persisted"
+
+
+def adopt_persisted_pin(context: Dict[str, Any], metadata_json: Any) -> bool:
+    """Adopt the pin state a save actually committed (``metadata_json`` of the
+    saved record). Returns whether it could be read.
+
+    A save carries the *stored* pin through, which another session may have
+    changed since this turn read it, so the session's own view can be stale
+    by the time the save commits. ``conversation_saved`` must advertise the
+    committed state, and the session follows it.
+    """
+    context.pop(_PERSISTED_CONTEXT_KEY, None)
+    if not isinstance(metadata_json, str):
+        return False
+    try:
+        stored = json.loads(metadata_json) if metadata_json else {}
+    except (ValueError, TypeError):
+        return False
+    if stored is None:
+        stored = {}
+    if not isinstance(stored, dict):
+        return False
+    from atlas.domain.conversation_prompt_pin import pin_fields_readable
+
+    if not pin_fields_readable(stored):
+        return False
+    load_pin_from_metadata(context, stored)
+    context[_PERSISTED_CONTEXT_KEY] = True
+    return True
+
+
+def persisted_pin_fields(context: Dict[str, Any]) -> Dict[str, Any]:
+    """Pin fields for ``conversation_saved``: the committed state, or nothing.
+
+    Only what ``adopt_persisted_pin`` read from the saved record is
+    advertised; when the committed state is not known, the frame carries no
+    pin fields rather than the session's possibly stale view.
+    """
+    if not context.pop(_PERSISTED_CONTEXT_KEY, False):
+        return {}
+    return public_pin_state(context)
+
+
 def public_pin_state(context: Dict[str, Any]) -> Dict[str, Any]:
     """Pin fields for frames to the client (empty when unknown)."""
     if context.get(PIN_UNKNOWN_CONTEXT_KEY):
@@ -291,7 +336,10 @@ async def _change_pin(
         # unsaved chat (browser-only, or before its first save) is this
         # session's alone, and a record created meanwhile by another session
         # is still caught by the compare-and-set below.
-        raise PromptPinConflictError({"pin": _valid_pin(context.get(PIN_CONTEXT_KEY)), "revision": current_revision})
+        raise PromptPinConflictError(
+            {"pin": _valid_pin(context.get(PIN_CONTEXT_KEY)), "revision": current_revision},
+            conversation_id=context.get("conversation_id"),
+        )
     entry = _history_entry(target, message_index)
     result = None
     if store_pin is not None:
@@ -314,7 +362,7 @@ async def _change_pin(
     _apply_state(context, result["state"])
     if result["status"] == "conflict":
         logger.info("Refused a stale team-prompt pin change (revision moved)")
-        raise PromptPinConflictError(result["state"])
+        raise PromptPinConflictError(result["state"], conversation_id=context.get("conversation_id"))
 
 
 def _refusal_message(context: Dict[str, Any], from_pin_only: bool, default: Optional[str]) -> str:

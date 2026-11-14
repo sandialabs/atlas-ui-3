@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 
 /**
  * Team-shared prompt library (issue #1169), backed by /api/prompts.
@@ -63,25 +63,32 @@ export function usePromptLibrary(enabled = true) {
   // A draft being tried in chat before publishing; memory only (see useSelections).
   const [testDraft, setTestDraft] = useState(null)
 
+  // Refreshes overlap (one runs after every change), and their answers can
+  // arrive out of order: only the newest may set the list, error or loading
+  // state. A failed refresh keeps the last good list.
+  const refreshGeneration = useRef(0)
   const refresh = useCallback(async () => {
+    const mine = ++refreshGeneration.current
     if (!enabled) {
       setEntries([])
       setLoaded(false)
       setError(null)
+      setLoading(false) // an in-flight refresh is now stale and will not clear it
       return
     }
     setLoading(true)
     setError(null)
     try {
       const data = await request(`/api/prompts?scope=all&limit=${MAX_PAGE}`)
+      if (mine !== refreshGeneration.current) return
       const list = Array.isArray(data?.prompts) ? data.prompts : []
       setEntries(list)
       setComplete(listingIsComplete(data, list))
       setLoaded(true)
     } catch (e) {
-      setError(e.message)
+      if (mine === refreshGeneration.current) setError(e.message)
     } finally {
-      setLoading(false)
+      if (mine === refreshGeneration.current) setLoading(false)
     }
   }, [enabled])
 

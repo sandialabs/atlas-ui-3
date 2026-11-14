@@ -87,7 +87,9 @@ class PromptLibraryListing:
         page_ids = [p["id"] for p in prompts]
         grants_by_prompt = await self._db(self._repo.grants_for_prompts, page_ids)
         latest_by_id = await self._db(
-            self._repo.versions_by_id, [p["latest_version_id"] for p in prompts if p.get("latest_version_id")]
+            self._repo.versions_by_id,
+            [p["latest_version_id"] for p in prompts if p.get("latest_version_id")],
+            False,  # metadata only: a list never needs version text
         )
         if scope not in ("all", "team"):
             # Membership is only needed for the groups on this page.

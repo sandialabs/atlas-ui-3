@@ -223,13 +223,13 @@ async def test_a_failed_check_also_marks_the_library_listing_incomplete(tmp_path
 @pytest.mark.asyncio
 async def test_an_unchecked_group_still_cannot_be_shared_with(tmp_path, monkeypatch):
     """Sharing re-checks every added group, whatever the offered list said."""
-    from atlas.modules.prompts.prompt_library_policy import PromptForbidden
+    from atlas.modules.prompts.prompt_library_policy import PromptLibraryUnavailable
 
     groups = Groups({"eng": {OWNER}}, fail={"ops"})
     lib = _service(tmp_path, groups, candidates=["eng", "ops"])
     prompt = await lib.create_prompt(OWNER, "Reviewer", "text")
     sharing = await lib.get_sharing(OWNER, prompt["id"])
-    with pytest.raises(PromptForbidden):
+    with pytest.raises(PromptLibraryUnavailable):  # unknown, so refused (503)
         await lib.set_sharing(OWNER, prompt["id"], ["ops"], [], sharing["revision"])
 
 
@@ -273,3 +273,123 @@ def test_routes_page_history_and_keep_the_groups_shape(client):
     assert http.get("/api/prompts/groups", headers={"x-test-user": OWNER}).json() == {
         "groups": ["eng"], "incomplete": False,
     }
+
+
+# --- Sharing targets are restricted to configured groups (recommendation 6) ---
+
+
+async def _owned_prompt(lib):
+    return await lib.create_prompt(OWNER, "Reviewer", "text")
+
+
+async def _share_groups(lib, prompt_id, groups):
+    sharing = await lib.get_sharing(OWNER, prompt_id)
+    return await lib.set_sharing(OWNER, prompt_id, groups, [], sharing["revision"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["not-configured", "eng,ops", "../admin", "EnG", "x" * 100])
+async def test_unconfigured_group_names_never_reach_the_authorizer(tmp_path, name):
+    from atlas.modules.prompts.prompt_library_policy import PromptForbidden
+
+    groups = Groups({"eng": {OWNER}, name: {OWNER}})  # even a "yes" would not matter
+    lib = _service(tmp_path, groups, candidates=["eng", "ops"])
+    prompt = await _owned_prompt(lib)
+    with pytest.raises(PromptForbidden) as exc:
+        await _share_groups(lib, prompt["id"], ["eng", name])
+    # One answer for "not configured" and "not a member": no probing which
+    # group names exist.
+    assert "groups you belong to" in exc.value.message
+    assert name not in groups.calls
+    assert (await lib.get_sharing(OWNER, prompt["id"]))["groups"] == []
+
+
+@pytest.mark.asyncio
+async def test_configured_groups_are_checked_for_membership(tmp_path):
+    from atlas.modules.prompts.prompt_library_policy import PromptForbidden
+
+    groups = Groups({"eng": {OWNER}})
+    lib = _service(tmp_path, groups, candidates=["eng", "ops"])
+    prompt = await _owned_prompt(lib)
+    with pytest.raises(PromptForbidden):
+        await _share_groups(lib, prompt["id"], ["ops"])  # configured, but not a member
+    assert (await _share_groups(lib, prompt["id"], ["eng"]))["groups"] == ["eng"]
+    assert groups.calls.count("eng") == 1 and groups.calls.count("ops") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_slow_authorizer_fails_the_change_closed(tmp_path, monkeypatch):
+    from atlas.modules.prompts.prompt_library_policy import PromptLibraryUnavailable
+
+    monkeypatch.setattr(service_module, "SHAREABLE_GROUP_CHECK_TIMEOUT_S", 0.3)
+    groups = Groups({"eng": {OWNER}, "slow": {OWNER}}, delay={"slow": 5})
+    lib = _service(tmp_path, groups, candidates=["eng", "slow"])
+    prompt = await _owned_prompt(lib)
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(PromptLibraryUnavailable) as exc:
+        await _share_groups(lib, prompt["id"], ["eng", "slow"])
+    assert asyncio.get_running_loop().time() - started < 2
+    assert "could not be checked" in exc.value.message
+    assert (await lib.get_sharing(OWNER, prompt["id"]))["groups"] == []  # nothing half-applied
+
+
+@pytest.mark.asyncio
+async def test_an_authorizer_failure_fails_the_change_closed(tmp_path):
+    from atlas.modules.prompts.prompt_library_policy import PromptLibraryUnavailable
+
+    groups = Groups({"eng": {OWNER}}, fail={"eng"})
+    lib = _service(tmp_path, groups, candidates=["eng"])
+    prompt = await _owned_prompt(lib)
+    with pytest.raises(PromptLibraryUnavailable):
+        await _share_groups(lib, prompt["id"], ["eng"])
+    assert (await lib.get_sharing(OWNER, prompt["id"]))["groups"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_status_code_does_not_reveal_which_names_are_configured(tmp_path):
+    """Independent review: with the authorizer down, a configured name used to
+    get 503 and an unconfigured one 403. Now a request that contains any
+    configured name the authorizer could not answer is 503 as a whole, and
+    with no configured name to check it is the same 403 as "not a member"."""
+    from atlas.modules.prompts.prompt_library_policy import PromptForbidden, PromptLibraryUnavailable
+
+    groups = Groups({"eng": {OWNER}}, fail={"eng", "ops"})
+    lib = _service(tmp_path, groups, candidates=["eng", "ops"])
+    prompt = await _owned_prompt(lib)
+    for request in (["eng"], ["eng", "secret-unconfigured"], ["secret-unconfigured", "ops"]):
+        with pytest.raises(PromptLibraryUnavailable):
+            await _share_groups(lib, prompt["id"], request)
+    with pytest.raises(PromptForbidden) as unconfigured:
+        await _share_groups(lib, prompt["id"], ["secret-unconfigured"])
+    groups.fail = set()
+    with pytest.raises(PromptForbidden) as not_member:
+        await _share_groups(lib, prompt["id"], ["ops"])
+    assert type(unconfigured.value) is type(not_member.value)
+    assert "secret-unconfigured" not in groups.calls
+    assert (await lib.get_sharing(OWNER, prompt["id"]))["groups"] == []
+
+
+@pytest.mark.asyncio
+async def test_existing_groups_are_kept_and_removable_without_a_new_check(tmp_path):
+    groups = Groups({"eng": {OWNER}})
+    candidates = ["eng"]
+    lib = _service(tmp_path, groups, candidates=candidates)
+    prompt = await _owned_prompt(lib)
+    await _share_groups(lib, prompt["id"], ["eng"])
+    candidates.clear()  # "eng" is no longer configured (deployment change)
+    groups.fail = {"eng"}  # and the authorizer is down
+    sharing = await lib.get_sharing(OWNER, prompt["id"])
+    kept = await lib.set_sharing(OWNER, prompt["id"], ["eng"], [{"email": ALICE, "permission": "use"}],
+                                 sharing["revision"])
+    assert kept["groups"] == ["eng"]  # an existing grant is not re-validated
+    assert (await _share_groups(lib, prompt["id"], []))["groups"] == []  # and can always be removed
+
+
+def test_sharing_route_status_codes(client):
+    http, lib = client
+    prompt = asyncio.run(lib.create_prompt(OWNER, "Reviewer", "text"))
+    as_owner = {"x-test-user": OWNER}
+    revision = http.get(f"/api/prompts/{prompt['id']}/sharing", headers=as_owner).json()["sharing"]["revision"]
+    response = http.put(f"/api/prompts/{prompt['id']}/sharing", headers=as_owner,
+                        json={"groups": ["not-configured"], "users": [], "expected_revision": revision})
+    assert response.status_code == 403

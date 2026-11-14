@@ -47,7 +47,9 @@ Owners and people with manage permission open the share editor:
 ![Sharing editor](screenshots/1169-02-sharing.png)
 
 - **Groups** let their members view and use published versions. You can only
-  share with groups you are a member of. Group membership never allows editing
+  share with groups you are a member of, chosen from the groups the share
+  editor offers. If Atlas cannot check your membership right now, the change
+  is not saved and you are asked to try again shortly. Group membership never allows editing
   or re-sharing. The everyone-group `users` cannot be shared with: the library
   has no organization-wide catalog, and the server refuses such a grant.
 - **Named people** can be given **Use**, **Edit & publish**, or **Manage
@@ -85,7 +87,9 @@ The conversation records the exact version it ran with:
   clears its team prompt, the other window's next change is refused with "This
   conversation's team prompt was changed in another window or session". That
   window then shows the current selection; check it and send again. Messages
-  that keep the current prompt are not affected.
+  that keep the current prompt are not affected, and the message only ever
+  changes the conversation it is about, even if you have switched to another
+  one in the meantime.
 - If the conversation (or its stored settings) cannot be loaded -- for example
   a brief database outage -- Atlas refuses the message rather than running it
   with a different prompt; try again once it is back.
@@ -96,7 +100,15 @@ The conversation records the exact version it ran with:
 **Fork** copies a published version into a new private entry you own; changes
 to either entry do not affect the other. Owners can **archive** an entry: it
 disappears from the library and can no longer be used, while conversations that
-used it keep their history.
+used it keep their history. Anyone who still has access can read an archived
+entry's published versions and export them; nobody can edit, share or run it.
+
+In the prompt picker, the Team Library section says when it is still loading,
+and when the library could not be loaded it says so with a **Retry** button
+instead of showing an empty list; your current selection is kept. In the
+library panel, a prompt you are editing stays open (marked as not in the
+current results) if a search, filter or refresh no longer lists it, so unsaved
+changes are not lost.
 
 Saved [workspaces](../workspaces/README.md) can include a library selection.
 If you lose access to it, the picker shows **Unavailable team prompt** and the

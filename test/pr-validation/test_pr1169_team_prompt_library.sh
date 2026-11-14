@@ -107,6 +107,9 @@ python -m pytest -q -p no:warnings \
     atlas/tests/test_prompt_library_storage.py \
     atlas/tests/test_conversation_prompt_pin.py \
     atlas/tests/test_prompt_library_bounds.py \
+    atlas/tests/test_prompt_library_archived.py \
+    atlas/tests/test_prompt_library_listing_columns.py \
+    atlas/tests/test_prompt_pin_conflict_frames.py \
     atlas/tests/test_run_in_flight_conversation.py \
     atlas/tests/test_user_prompts.py \
     atlas/tests/test_schema_migration.py
@@ -121,6 +124,8 @@ echo "=== Frontend library tests ==="
     src/test/prompt-library-panel.test.jsx \
     src/test/prompt-library-history-sharing.test.jsx \
     src/test/prompt-selector.test.jsx \
+    src/test/prompt-library-panel-lifecycle.test.jsx \
+    src/test/prompt-selector-library-states.test.jsx \
     src/test/useSelections.test.js > "$WORK/vitest.log" 2>&1) \
     || { cat "$WORK/vitest.log"; exit 1; }
 tail -n 4 "$WORK/vitest.log"

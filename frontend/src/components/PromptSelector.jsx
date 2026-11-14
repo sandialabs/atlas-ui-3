@@ -114,6 +114,12 @@ const PromptSelector = () => {
   const activeLibraryUnavailable = !!activeLibrary && libraryReady &&
     !libraryPrompts.some(p => p.id === activeLibrary.promptId && p.latest_version)
   const usableLibraryPrompts = libraryPrompts.filter(p => p.latest_version)
+  // Loading, a failed request and a genuinely empty library are different
+  // answers; only the last may say "no prompts". A failure keeps whatever an
+  // earlier load returned (and the user's selection) and offers a retry.
+  const libraryError = promptLibrary?.error || null
+  const libraryLoading = !!promptLibrary?.loading && !promptLibrary?.loaded && !libraryError
+  const retryLibrary = () => { if (typeof promptLibrary?.refresh === 'function') promptLibrary.refresh() }
 
   const handlePromptSelect = (promptKey) => {
     // Just make this prompt active without reordering
@@ -331,11 +337,30 @@ const PromptSelector = () => {
                     Browse library
                   </button>
                 </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  {usableLibraryPrompts.length > 0
-                    ? 'Published prompts you own or that are shared with you'
-                    : 'No published team prompts available'}
-                </div>
+                {libraryLoading ? (
+                  <div role="status" className="text-xs text-gray-400 mt-1">Loading team prompts...</div>
+                ) : (
+                  (usableLibraryPrompts.length > 0 || !libraryError) && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      {usableLibraryPrompts.length > 0
+                        ? 'Published prompts you own or that are shared with you'
+                        : 'No published team prompts available'}
+                    </div>
+                  )
+                )}
+                {libraryError && (
+                  <div role="alert" className="text-xs text-red-300 mt-1 flex items-center justify-between gap-2">
+                    <span>Team prompts could not be loaded{usableLibraryPrompts.length > 0 ? ' (showing the last list)' : ''}.</span>
+                    <button
+                      type="button"
+                      onClick={retryLibrary}
+                      aria-label="Retry loading team prompts"
+                      className="px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
                 {activeLibraryUnavailable && (
                   <div role="alert" className="text-xs text-amber-400 mt-1">
                     The selected team prompt is no longer available. Choose another prompt.

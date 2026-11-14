@@ -113,6 +113,17 @@ class PromptLibraryUnavailable(PromptLibraryError):
         super().__init__("The prompt library is temporarily unavailable. Try again shortly.")
 
 
+class GroupCheckUnavailable(PromptLibraryUnavailable):
+    """Group membership could not be confirmed (authorizer slow or failing)."""
+
+    def __init__(self) -> None:
+        PromptLibraryError.__init__(
+            self,
+            "Group membership could not be checked right now, so sharing was not "
+            "changed. Try again shortly.",
+        )
+
+
 class PromptUnavailable(PromptLibraryError):
     """A chat turn named a prompt/version this user may not run right now."""
 
@@ -227,7 +238,10 @@ def summary_view(
         data["draft_revision"] = prompt.get("draft_revision", 1)
         data["forked_from_prompt_id"] = prompt.get("forked_from_prompt_id")
         data["forked_from_version_id"] = prompt.get("forked_from_version_id")
-        if latest is not None:
+        if "has_unpublished_changes" in prompt:
+            # A listing row: compared in the database, no text loaded.
+            data["has_unpublished_changes"] = bool(prompt["has_unpublished_changes"])
+        elif latest is not None:
             data["has_unpublished_changes"] = (
                 latest["content"] != prompt["draft_content"] or latest["title"] != prompt["title"]
             )

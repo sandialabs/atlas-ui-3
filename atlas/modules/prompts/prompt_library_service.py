@@ -247,8 +247,18 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         prompt: Dict[str, Any],
         grants: Optional[List[Dict[str, Any]]] = None,
         member_groups: Optional[Set[str]] = None,
+        history: bool = False,
     ) -> Access:
-        if prompt is None or prompt.get("archived_at"):
+        """The caller's level on ``prompt``.
+
+        An archived entry grants nothing (it cannot be listed, opened, run,
+        edited, shared or forked), except for ``history=True``: the read-only
+        history operations (version list, one version's text, export). Those
+        keep the normal rules -- owner, current direct grants, current group
+        membership -- so revocation still applies; archiving only stops new
+        use (design note: a pinned version always resolves to its text).
+        """
+        if prompt is None or (prompt.get("archived_at") and not history):
             return Access()
         if prompt["owner_email"] == user_email:
             return Access(LEVEL_OWNER, ["owner"])
@@ -279,14 +289,14 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             return Access()
         return Access(level, via)
 
-    async def _authorize(self, user_email: str, prompt_id: str, minimum: int):
+    async def _authorize(self, user_email: str, prompt_id: str, minimum: int, history: bool = False):
         user_email = normalize_user_email(user_email)
         if not user_email:
             raise PromptNotFound()
         prompt = await self._db(self._repo.get_prompt, prompt_id)
         if prompt is None:
             raise PromptNotFound()
-        access = await self._access(user_email, prompt)
+        access = await self._access(user_email, prompt, history=history)
         if access.level == LEVEL_NONE:
             raise PromptNotFound()
         if access.level < minimum:
@@ -337,7 +347,8 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         full content.
         """
         _check_page(limit, offset)
-        await self._authorize(user_email, prompt_id, LEVEL_USE)
+        # History stays readable after archiving (see _access).
+        await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
         total, versions = await self._db(self._repo.page_versions, prompt_id, limit, offset, False)
         return {
             "versions": [version_view(v, include_content=False) for v in versions],
@@ -347,7 +358,8 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         }
 
     async def get_version(self, user_email: str, prompt_id: str, version_id: str) -> Dict[str, Any]:
-        await self._authorize(user_email, prompt_id, LEVEL_USE)
+        # History stays readable after archiving (see _access).
+        await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
         version = await self._db(self._repo.get_version, prompt_id, version_id)
         if version is None:
             raise PromptNotFound()
@@ -360,11 +372,15 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         first from ``offset``. ``versions_total`` and ``versions_truncated``
         say whether more remain (request the next ``offset`` to continue).
         The draft is included only for editors, sharing only for managers --
-        the same rules as the detail view.
+        the same rules as the detail view. An archived entry stays exportable
+        by the callers the normal rules admit (``archived`` is true): export
+        is a read-only copy of its history.
         """
         _check_page(MAX_EXPORT_VERSIONS, offset)
-        detail = await self.get_prompt(user_email, prompt_id)
+        user_email, prompt, access = await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
+        detail = await self._detail_view(prompt_id, prompt, access)
         detail.pop("latest_content", None)
+        detail["archived"] = bool(prompt.get("archived_at"))
         total, versions = await self._db(self._repo.page_versions, prompt_id, MAX_EXPORT_VERSIONS, offset, True)
         detail["versions"] = [version_view(v) for v in versions]
         detail["versions_total"] = total

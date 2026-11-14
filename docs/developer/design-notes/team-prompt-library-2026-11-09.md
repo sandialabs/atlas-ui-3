@@ -38,7 +38,14 @@ model.
   `is_user_in_group` already returns `False` on an authorizer error.
 - Callers with no access get the same `PromptNotFound` as a missing id; 403 is
   only for callers who can already see the entry.
-- Sharing into a group requires the sharer to be a member of it.
+- Sharing into a group requires the sharer to be a member of it, and the
+  group must be one of the configured sharing candidates (the same list
+  `GET /api/prompts/groups` draws from). A name outside that list is refused
+  (403) before the authorizer is asked, so an arbitrary string never reaches
+  it. A configured group whose membership check failed or timed out
+  (`SHAREABLE_GROUP_CHECK_TIMEOUT_S`) is refused with 503 "could not be
+  checked", not a 403: sharing is unchanged and the caller can retry.
+  Only groups being added are checked; existing grants are kept as they are.
 - Group names are stored and passed to `is_user_in_group` exactly as
   configured (only surrounding whitespace is dropped): an external authorizer
   receives the raw name and may match case-sensitively. Only the reserved
@@ -64,6 +71,15 @@ model.
   says `"incomplete": true` when some were not checked, and the sharing
   editor says so. Adding a group to a prompt re-checks membership regardless.
 - A use-only caller does not see an entry until something is published.
+- Archiving hides an entry from listing, detail, editing, sharing and new
+  chat selections for everyone. Its *history* stays readable: version
+  summaries, a single version's content and export (`archived: true`) remain
+  available to anyone whose grants still allow `use`, because those versions
+  are immutable and conversations pinned to them keep referring to them. A
+  revoked caller gets the same not-found as before; history access never
+  creates or widens access. A conversation pinned to an archived prompt is
+  refused (never silently run on another prompt) and keeps its pin history;
+  the owner can clear the pin to continue.
 
 ## Execution and pinning
 
@@ -126,7 +142,17 @@ Conflict resolution:
   else the session's own. If the stored revision moved since, the change is
   refused with error type `prompt_pin_conflict`; the error carries the stored
   pin and revision, the browser shows that selection, and the user sends
-  again. Nothing runs and nothing is audited for the refused turn.
+  again. Nothing runs and nothing is audited for the refused turn. The error
+  frame names its `conversation_id` (and, through the run envelope, the
+  `run_id`); the browser applies it only to the conversation it names and
+  ignores a conflict for a conversation it is no longer showing.
+- **`conversation_saved` reports what was committed.** The frame's
+  `prompt_library` and `prompt_library_pin_revision` come from the record the
+  save just wrote (the save carries the stored pin, so this is the pin another
+  window may have set or cleared meanwhile), not from the session's earlier
+  view. If the saved record's pin cannot be read, the frame carries no pin
+  fields at all rather than a guess; the browser never treats their absence
+  as "default prompt".
 - **Saves never write the pin of an existing conversation.** A save carries
   the stored pin, history and revision through whatever the saving session
   holds, so a session that never saw the current pin (an older tab, a
@@ -209,7 +235,11 @@ such and keeps the pin. Browsers choose explicitly every turn
   slow database never stalls the event loop.
 - Listing decides visibility from id-level grant data, then the database
   filters, searches (LIKE wildcards escaped), counts and pages; a page is
-  rendered with one query each for grants and latest versions.
+  rendered with one query each for grants and latest versions. Listing never
+  loads prompt text: the draft body is deferred, "has unpublished changes" is
+  computed in SQL against the latest version, and latest-version summaries
+  are loaded without their content. Detail and single-version reads still
+  return text.
 - Version history is paged (`limit` 1-200, default 50, newest first) and
   lists summaries without prompt text; the text is not even loaded from the
   database. `GET .../versions/{version_id}` returns one version's content.
@@ -236,6 +266,8 @@ Prompt text is never written to audit rows or logs.
 
 `atlas/tests/test_prompt_library_access.py`, `..._routes.py`,
 `..._chat_turn.py`, `..._migration.py`, `..._concurrency.py`,
-`..._storage.py`, `atlas/tests/test_conversation_prompt_pin.py` (SQLite,
+`..._storage.py`, `..._bounds.py`, `..._archived.py`, `..._listing_columns.py`,
+`atlas/tests/test_prompt_pin_conflict_frames.py`,
+`atlas/tests/test_conversation_prompt_pin.py` (SQLite,
 DuckDB and, with `ATLAS_TEST_POSTGRES_URL`, PostgreSQL); frontend `src/test/prompt-library-*.test.*`;
 end-to-end `test/pr-validation/test_pr1169_team_prompt_library.sh`.

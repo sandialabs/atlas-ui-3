@@ -13,6 +13,7 @@ from atlas.modules.chat_history.database import reset_engine
 from atlas.modules.prompts.prompt_library_service import (
     PromptForbidden,
     PromptLibraryService,
+    PromptLibraryUnavailable,
     PromptNotFound,
     PromptUnavailable,
     PromptValidationError,
@@ -302,8 +303,9 @@ async def test_authorizer_failure_fails_closed(lib, groups):
         await lib.resolve_for_execution(ALICE, prompt["id"])
     # A direct user grant does not depend on the authorizer.
     assert (await lib.get_prompt(BOB, prompt["id"]))["permission"] == "use"
-    # Sharing into a group cannot be verified either, so it is refused.
-    with pytest.raises(PromptForbidden):
+    # Sharing into a group cannot be verified either, so it is refused --
+    # as "could not be checked" (503), not as "not a member".
+    with pytest.raises(PromptLibraryUnavailable):
         await _share(lib, OWNER, prompt["id"], ["eng", "ops"], [])
 
 
@@ -321,6 +323,7 @@ async def test_external_authorizer_errors_fail_closed(lib, groups, monkeypatch):
     from atlas.modules.config.config_manager import config_manager
 
     groups.add(OWNER, "admin")
+    lib._group_candidates = lambda: ["eng", "ops", "hr", "admin"]  # admin is configured here
     prompt = await _published(lib, groups_=["admin"])
     real = PromptLibraryService(lib.repository)  # default: atlas.core.auth.is_user_in_group
     settings = config_manager.app_settings
@@ -454,6 +457,7 @@ async def test_group_names_keep_their_spelling_for_the_authorizer(lib, groups):
         return await original(user, group)
 
     lib._group_check = recording
+    lib._group_candidates = lambda: ["Eng-Team", "USERS"]  # configured with this spelling
     prompt = await _published(lib, groups_=["  Eng-Team  "])
     assert (await lib.get_sharing(OWNER, prompt["id"]))["groups"] == ["Eng-Team"]
     assert (await lib.get_prompt(ALICE, prompt["id"]))["access_via"] == ["Eng-Team"]
@@ -470,6 +474,7 @@ async def test_real_authorizer_receives_the_exact_group_name(lib, groups, monkey
     from atlas.modules.config.config_manager import config_manager
 
     groups.add(OWNER, "Eng-Team")
+    lib._group_candidates = lambda: ["Eng-Team"]
     prompt = await _published(lib, groups_=["Eng-Team"])
     settings = config_manager.app_settings
     monkeypatch.setattr(settings, "skip_authorization_checks", False)

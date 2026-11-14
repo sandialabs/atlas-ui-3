@@ -749,10 +749,23 @@ export const ChatProvider = ({ children }) => {
 			onConversationSaved: finishJoinedRun,
 			onPromptPinState: (data) => {
 				const shown = activeConversationIdRef.current
-				if (data?.conversation_id && shown && data.conversation_id !== shown) return
+				const conflict = data?.error_type === 'prompt_pin_conflict'
+				if (conflict) {
+					// A conflict replaces the user's selection, so it must name
+					// the conversation on screen. One that names none, or another
+					// conversation (the user switched, or started a new chat,
+					// while the turn was in flight), belongs elsewhere: applying
+					// it here would change an unrelated conversation's prompt.
+					if (!data.conversation_id || data.conversation_id !== shown) return
+				} else if (data?.conversation_id && shown && data.conversation_id !== shown) {
+					// conversation_saved for another conversation. (A new chat's
+					// first save names the id it is about to adopt: shown is
+					// still empty then, and the revision is this chat's.)
+					return
+				}
 				if (!Number.isInteger(data?.prompt_library_pin_revision)) return
 				libraryPinRevisionRef.current = data.prompt_library_pin_revision
-				if (data.error_type !== 'prompt_pin_conflict') return
+				if (!conflict) return
 				// Another window changed this conversation's team prompt: show
 				// the stored selection so the next send is an informed one.
 				const pin = data.prompt_library

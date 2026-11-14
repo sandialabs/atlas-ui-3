@@ -71,7 +71,9 @@ def env(tmp_path):
     init_database(f"duckdb:///{tmp_path / 'chat.db'}")
     factory = get_session_factory()
     members = Members()
-    library = PromptLibraryService(PromptLibraryRepository(factory), group_check=members.check)
+    library = PromptLibraryService(
+        PromptLibraryRepository(factory), group_check=members.check, group_candidates=lambda: ["eng"]
+    )
     return {
         "conversations": ConversationRepository(factory),
         "library": library,
@@ -1294,3 +1296,123 @@ async def test_malformed_pin_blocks_owner_clear_and_restore_without_guessing(env
         await _turn(other, other_id, conv)
     assert len(other_calls) == 1
     assert _raw_metadata(env, conv) == raw
+
+
+# --- Fifth review -------------------------------------------------------------
+
+
+def _frames():
+    frames = []
+
+    async def collect(frame):
+        frames.append(frame)
+
+    return frames, collect
+
+
+@pytest.mark.asyncio
+async def test_conversation_saved_reports_the_persisted_pin_after_a_concurrent_change(env):
+    """Finding 1: another session re-pins while this turn runs; the frame must
+    advertise what the database holds, not this session's stale view."""
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    await _edit(lib, OWNER, prompt["id"], content="v2 body")
+    v2 = await _publish(lib, OWNER, prompt["id"], "second")
+    service, calls, sessions = _service(env)
+    other, _, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
+
+    async def other_tab_repins_mid_turn(**kwargs):
+        calls.append(kwargs)
+        await _turn(other, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": v2["id"]},
+                    library_prompt_revision=1)
+        session = kwargs["session"]
+        session.history.add_message(Message(role=MessageRole.USER, content=kwargs["content"]))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="reply"))
+        return {"type": "done"}
+
+    _set_execute(service, other_tab_repins_mid_turn)
+    frames, collect = _frames()
+    await _turn(service, session_id, conv, update_callback=collect)
+    assert calls[-2]["custom_system_prompt"] == "v1 body"  # this turn ran v1 (its pin when it started)
+    saved = [f for f in frames if f.get("type") == "conversation_saved"][-1]
+    stored = _stored_meta(env, conv)
+    assert stored["prompt_library"]["version_id"] == v2["id"] and stored["prompt_library_pin_revision"] == 2
+    assert saved["prompt_library"]["version_id"] == v2["id"]
+    assert saved["prompt_library_pin_revision"] == 2
+    # The session follows the persisted state too, and its next turn runs v2.
+    assert sessions[session_id].context[library_turn.PIN_REVISION_CONTEXT_KEY] == 2
+    _set_execute(service, _plain_execute(calls))
+    await _turn(service, session_id, conv, library_prompt_revision=saved["prompt_library_pin_revision"])
+    assert calls[-1]["custom_system_prompt"] == "v2 body"
+
+
+def _plain_execute(calls):
+    async def run(**kwargs):
+        calls.append(kwargs)
+        session = kwargs["session"]
+        session.history.add_message(Message(role=MessageRole.USER, content=kwargs["content"]))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="reply"))
+        return {"type": "done"}
+
+    return run
+
+
+@pytest.mark.asyncio
+async def test_conversation_saved_reports_a_concurrent_clear(env):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, calls, _ = _service(env)
+    session_id, conv = uuid4(), str(uuid4())
+    await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+
+    async def owner_clears_mid_turn(**kwargs):
+        env["conversations"].clear_prompt_pin(conv, USER)
+        return await _plain_execute(calls)(**kwargs)
+
+    _set_execute(service, owner_clears_mid_turn)
+    frames, collect = _frames()
+    await _turn(service, session_id, conv, update_callback=collect)
+    saved = [f for f in frames if f.get("type") == "conversation_saved"][-1]
+    assert saved["prompt_library"] is None and saved["prompt_library_pin_revision"] == 2
+    # The next turn follows the clear rather than quietly re-pinning.
+    _set_execute(service, _plain_execute(calls))
+    await _turn(service, session_id, conv)
+    assert calls[-1].get("custom_system_prompt") is None
+    assert "prompt_library" not in _stored_meta(env, conv)
+
+
+@pytest.mark.asyncio
+async def test_conversation_saved_reports_the_pin_of_a_new_conversation(env):
+    prompt, v1 = await _shared_prompt(env["library"])
+    service, _, _ = _service(env)
+    frames, collect = _frames()
+    await _turn(service, uuid4(), str(uuid4()), library_prompt={"prompt_id": prompt["id"], "version_id": None},
+                update_callback=collect)
+    saved = [f for f in frames if f.get("type") == "conversation_saved"][-1]
+    assert saved["prompt_library"]["version_id"] == v1["id"] and saved["prompt_library_pin_revision"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_conversation_on_an_archived_prompt_refuses_but_keeps_its_history(env):
+    """Finding 4: archiving stops new use -- never a silent fallback -- while the
+    pinned version's text stays readable to the user who ran it."""
+    lib = env["library"]
+    prompt, v1 = await _shared_prompt(lib)
+    service, calls, _ = _service(env)
+    conv = str(uuid4())
+    await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
+    await lib.archive(OWNER, prompt["id"])
+
+    fresh, fresh_calls, _ = _service(env)
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(fresh, uuid4(), conv)
+    assert f"DELETE /api/prompts/pins/{conv}" in exc.value.message and fresh_calls == []
+    pin = _stored_meta(env, conv)["prompt_library"]
+    assert (await lib.get_version(USER, prompt["id"], pin["version_id"]))["content"] == "v1 body"
+    # Revoked users lose the history as well.
+    env["members"].table["eng"].discard(USER)
+    from atlas.modules.prompts.prompt_library_service import PromptNotFound
+
+    with pytest.raises(PromptNotFound):
+        await lib.get_version(USER, prompt["id"], pin["version_id"])

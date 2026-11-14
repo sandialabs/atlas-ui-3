@@ -28,9 +28,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import case, func, or_, update
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, defer, sessionmaker
+from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
 from atlas.core.user_identity import normalize_user_email
 
@@ -122,6 +122,26 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
         }
 
     @staticmethod
+    def prompt_summary_to_dict(record: PromptLibraryPromptRecord, has_unpublished_changes: bool) -> Dict[str, Any]:
+        """A listing row: everything but the draft text (never loaded for lists)."""
+        return {
+            "id": record.id,
+            "owner_email": record.owner_email,
+            "title": record.title,
+            "description": record.description,
+            "draft_revision": record.draft_revision or 1,
+            "sharing_revision": record.sharing_revision or 0,
+            "latest_version_id": record.latest_version_id,
+            "latest_version_number": record.latest_version_number or 0,
+            "forked_from_prompt_id": record.forked_from_prompt_id,
+            "forked_from_version_id": record.forked_from_version_id,
+            "archived_at": _iso(record.archived_at),
+            "created_at": _iso(record.created_at),
+            "updated_at": _iso(record.updated_at),
+            "has_unpublished_changes": bool(has_unpublished_changes),
+        }
+
+    @staticmethod
     def version_to_dict(record: PromptLibraryVersionRecord) -> Dict[str, Any]:
         return {
             "id": record.id,
@@ -201,17 +221,30 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                     pattern, escape=_LIKE_ESCAPE
                 ),
             ))
+        # The rows come back without any prompt text: the draft is deferred,
+        # and whether it differs from the latest published version (the only
+        # reason a list needed either text) is compared in the database.
+        latest = aliased(PromptLibraryVersionRecord)
+        unpublished = case(
+            (latest.id.is_(None), True),
+            else_=or_(
+                latest.content != PromptLibraryPromptRecord.draft_content,
+                latest.title != PromptLibraryPromptRecord.title,
+            ),
+        ).label("has_unpublished_changes")
         with self._session() as session:
             total = session.query(func.count(PromptLibraryPromptRecord.id)).filter(*conditions).scalar() or 0
-            records = (
-                session.query(PromptLibraryPromptRecord)
+            rows = (
+                session.query(PromptLibraryPromptRecord, unpublished)
+                .options(defer(PromptLibraryPromptRecord.draft_content))
+                .outerjoin(latest, latest.id == PromptLibraryPromptRecord.latest_version_id)
                 .filter(*conditions)
                 .order_by(PromptLibraryPromptRecord.updated_at.desc(), PromptLibraryPromptRecord.id)
                 .limit(limit)
                 .offset(offset)
                 .all()
             )
-            return total, [self.prompt_to_dict(r) for r in records]
+            return total, [self.prompt_summary_to_dict(record, flag) for record, flag in rows]
 
     @guarded("create prompt")
     def create_prompt(
@@ -461,11 +494,29 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
             return self.version_to_dict(record) if record else None
 
     @guarded("read versions")
-    def versions_by_id(self, version_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
-        """Several versions in one query (the list view's latest versions)."""
+    def versions_by_id(self, version_ids: Iterable[str], include_content: bool = True) -> Dict[str, Dict[str, Any]]:
+        """Several versions in one query (the list view's latest versions).
+
+        ``include_content=False`` leaves the text unloaded and out of the
+        result (the list view needs only the version's metadata).
+        """
         ids = [v for v in set(version_ids) if v]
         if not ids:
             return {}
         with self._session() as session:
-            records = session.query(PromptLibraryVersionRecord).filter(PromptLibraryVersionRecord.id.in_(ids)).all()
-            return {r.id: self.version_to_dict(r) for r in records}
+            query = session.query(PromptLibraryVersionRecord).filter(PromptLibraryVersionRecord.id.in_(ids))
+            if include_content:
+                return {r.id: self.version_to_dict(r) for r in query.all()}
+            records = query.options(defer(PromptLibraryVersionRecord.content)).all()
+            return {
+                r.id: {
+                    "id": r.id,
+                    "prompt_id": r.prompt_id,
+                    "version_number": r.version_number,
+                    "title": r.title,
+                    "change_description": r.change_description,
+                    "author_email": r.author_email,
+                    "created_at": _iso(r.created_at),
+                }
+                for r in records
+            }

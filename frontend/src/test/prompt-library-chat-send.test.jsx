@@ -44,7 +44,7 @@ vi.mock('../contexts/WSContext', () => ({
 }))
 
 vi.mock('../components/ui/toastContext', () => ({
-  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: h.toastInfo }),
+  useToast: () => ({ error: h.toastError, success: h.toastSuccess, info: h.toastInfo, dismiss: () => {}, show: () => 'toast-id' }),
 }))
 
 vi.mock('../hooks/chat/useChatConfig', () => ({
@@ -450,5 +450,88 @@ describe('live (in-flight) conversations keep their pin (issue #1169)', () => {
     })
     act(() => { result.current.sendChatMessage('after save') })
     expect(chatFrames().at(-1).library_prompt_revision).toBe(1)
+  })
+})
+
+describe('pin-conflict errors reach only their own conversation (issue #1169)', () => {
+  const conflict = extra => ({
+    type: 'error', error_type: 'prompt_pin_conflict', message: 'changed elsewhere',
+    prompt_library: { prompt_id: 'p1', version_id: 'v9' }, prompt_library_pin_revision: 7, ...extra,
+  })
+  const load = (result, id, metadata) => act(() => {
+    result.current.loadSavedConversation({
+      id,
+      messages: [{ role: 'user', content: 'hi', message_type: 'chat', timestamp: '2026-01-01T00:00:00Z' }],
+      metadata,
+    })
+  })
+
+  it('applies a conflict that names the conversation on screen', () => {
+    const { result } = renderChat()
+    load(result, 'conv-a', { prompt_library_pin_revision: 1 })
+    h.makePromptActive.mockClear()
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-a', run_id: 'run-a' })) })
+    expect(h.makePromptActive).toHaveBeenCalledWith(libraryPromptKey('p1', 'v9'))
+  })
+
+  it('ignores a conflict for another open conversation, with or without a run id', () => {
+    const { result } = renderChat()
+    load(result, 'conv-a', { prompt_library_pin_revision: 1 })
+    h.makePromptActive.mockClear()
+    h.clearActivePrompt.mockClear()
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-b', run_id: 'run-b' })) })
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-b' })) })
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-b', prompt_library: null })) })
+    expect(h.makePromptActive).not.toHaveBeenCalled()
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+    act(() => { result.current.sendChatMessage('next') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(1)
+  })
+
+  it('ignores a conflict that names no conversation at all', () => {
+    const { result } = renderChat()
+    load(result, 'conv-a', { prompt_library_pin_revision: 1 })
+    h.makePromptActive.mockClear()
+    act(() => { h.wsHandler(conflict({})) })
+    expect(h.makePromptActive).not.toHaveBeenCalled()
+    act(() => { result.current.sendChatMessage('next') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(1)
+  })
+
+  it('ignores a conflict that arrives after the user moved to a new chat', () => {
+    const { result } = renderChat()
+    load(result, 'conv-a', { prompt_library_pin_revision: 1 })
+    act(() => { result.current.clearChat() })
+    h.makePromptActive.mockClear()
+    h.clearActivePrompt.mockClear()
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-a', run_id: 'run-a' })) })
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-a' })) })
+    expect(h.makePromptActive).not.toHaveBeenCalled()
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+    act(() => { result.current.sendChatMessage('fresh chat') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBeUndefined()
+  })
+
+  it("still records a new chat's revision from its first conversation_saved", () => {
+    const { result } = renderChat()
+    act(() => {
+      h.wsHandler({ type: 'conversation_saved', conversation_id: 'conv-new',
+        prompt_library: { prompt_id: 'p1', version_id: 'v1' }, prompt_library_pin_revision: 1 })
+    })
+    act(() => { result.current.sendChatMessage('second turn') })
+    const frame = chatFrames().at(-1)
+    expect(frame.conversation_id).toBe('conv-new')
+    expect(frame.library_prompt_revision).toBe(1)
+  })
+
+  it('ignores a conflict for a conversation the user switched away from mid-turn', () => {
+    const { result } = renderChat()
+    load(result, 'conv-a', { prompt_library_pin_revision: 1 })
+    load(result, 'conv-b', { prompt_library_pin_revision: 5 })
+    h.makePromptActive.mockClear()
+    act(() => { h.wsHandler(conflict({ conversation_id: 'conv-a', run_id: 'run-a' })) })
+    expect(h.makePromptActive).not.toHaveBeenCalled()
+    act(() => { result.current.sendChatMessage('in b') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(5)
   })
 })
