@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Plus, Search, Pencil, History, Share2, GitFork, Archive, Users, Lock } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { libraryPromptKey, libraryDraftKey, parseLibraryPromptKey } from '../hooks/chat/useSelections'
@@ -63,7 +63,10 @@ const PromptLibraryPanel = () => {
   const listedFor = useRef(null)
   const filterKey = `${scope}\u0000${query}`
   const load = useCallback(async () => {
-    if (!listPrompts) return
+    if (!listPrompts) {
+      setLoading(false) // nothing to wait for (see the invalidation below)
+      return
+    }
     const mine = ++generation.current
     setLoading(true)
     setError(null)
@@ -102,6 +105,17 @@ const PromptLibraryPanel = () => {
       if (mine === generation.current) setLoading(false)
     }
   }
+
+  // A scope or search change makes every request still in flight stale at
+  // once -- not when the debounced request below finally starts. Otherwise a
+  // response (or "load more" page, or failure) for the previous filter that
+  // lands inside the 250 ms window would still be applied. A layout effect,
+  // so the invalidation is in place before any later event can deliver one.
+  useLayoutEffect(() => {
+    generation.current += 1
+    setLoading(true)
+    setError(null)
+  }, [scope, query])
 
   // Debounced so typing a search does not fire a request per keystroke.
   useEffect(() => {

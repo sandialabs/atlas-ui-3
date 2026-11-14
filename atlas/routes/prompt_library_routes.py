@@ -365,6 +365,11 @@ async def clear_conversation_pin(conversation_id: str, current_user: str = Depen
     turned off, a pinned conversation is refused on every turn, and this is
     how its owner continues. It needs only the conversation store.
 
+    A conversation whose stored pin state is unreadable (damaged metadata)
+    refuses every turn; this request resets that state without guessing a
+    pin and keeps the rest of the record, answering ``{"cleared": true,
+    "recovered": true}`` (see ``recover_unreadable_metadata``).
+
     The clear also binds sessions that already have the conversation open:
     it bumps the stored pin epoch, so their next turn re-reads the record and
     runs unpinned, and their saves cannot write the old pin back.
@@ -384,6 +389,10 @@ async def clear_conversation_pin(conversation_id: str, current_user: str = Depen
         raise HTTPException(status_code=503, detail=PromptLibraryUnavailable().message)
     if removed is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if removed.get("recovered"):
+        # The stored pin state was unreadable and has been reset (nothing in
+        # it could be trusted, so nothing from it is audited).
+        return {"cleared": True, "recovered": True}
     pin = removed.get(PIN_METADATA_KEY)
     service = _get_service() if _library_enabled() else None
     if service is not None and isinstance(pin, dict) and isinstance(pin.get("prompt_id"), str):

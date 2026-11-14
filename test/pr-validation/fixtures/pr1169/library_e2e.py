@@ -22,6 +22,10 @@ import uuid
 import websockets
 
 BASE, MOCK = sys.argv[1].rstrip("/"), sys.argv[2].rstrip("/")
+# The server's chat-history database. Given only for PostgreSQL, where this
+# script can damage a stored record while the server runs (DuckDB's file lock
+# allows one process): the recovery section below needs it.
+DB_URL = sys.argv[3] if len(sys.argv) > 3 else ""
 WS = BASE.replace("http", "ws", 1) + "/ws"
 OWNER, MEMBER, OUTSIDER = "owner@example.com", "member@example.com", "outsider@example.com"
 V1 = "SYSTEM-PROMPT-V1: review code for security issues first."
@@ -295,8 +299,75 @@ async def main():
     s, _ = api("GET", f"/api/prompts/{pid}/audit", MEMBER)
     check(s == 403, "audit trail needs manage permission")
 
+    if DB_URL.startswith("postgresql"):
+        await damaged_metadata_recovery(pid, v1)
+    else:
+        print("NOTE: damaged-metadata recovery checks need a PostgreSQL database URL; skipped")
+
     print(f"\nlibrary_e2e: {passed} passed, {failed} failed")
     return failed == 0
+
+
+def set_raw_metadata(conversation_id, raw):
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(DB_URL)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE conversations SET metadata_json = :m WHERE id = :id"),
+                         {"m": raw, "id": conversation_id})
+    finally:
+        engine.dispose()
+
+
+async def damaged_metadata_recovery(pid, v1):
+    """Review nit 1, against the live server: a damaged record refuses every
+    turn and names the way out; only its owner's DELETE recovers it, without
+    guessing a pin; a stale pre-damage revision cannot apply afterwards."""
+    print("--- damaged-metadata recovery (PostgreSQL) ---")
+    conv = str(uuid.uuid4())
+    status, saved = await chat(MEMBER, conv, {"prompt_id": pid, "version_id": v1["id"]})
+    seen = (saved or {}).get("prompt_library_pin_revision")
+    check(status == "ok" and system_prompt_sent().startswith(V1) and seen == 1, "a pinned conversation (v1, revision 1)")
+    s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
+    meta = dict(stored.get("metadata") or {})
+    meta["prompt_library"] = {"prompt_id": pid}  # version_id lost
+    meta["prompt_library_pin_revision"] = "corrupted"
+    set_raw_metadata(conv, json.dumps(meta))
+
+    before = last_llm_request().get("timestamp")
+    status, frame = await chat(MEMBER, conv, ...)
+    check(status == "error" and f"DELETE /api/prompts/pins/{conv}" in frame.get("message", "")
+          and last_llm_request().get("timestamp") == before,
+          "a turn on the damaged record is refused, names the owner's way out, and never reaches the model")
+    s, _ = api("DELETE", f"/api/prompts/pins/{conv}", OUTSIDER)
+    check(s == 404, "another user cannot recover it (same 404 as an unknown id)")
+    s, body = api("DELETE", f"/api/prompts/pins/{conv}", MEMBER)
+    check(s == 200 and body == {"cleared": True, "recovered": True}, "the owner's clear recovers it")
+    s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
+    meta = stored.get("metadata") or {}
+    check("prompt_library" not in meta and meta.get("prompt_library_recovery", {}).get("reason") == "malformed_pin_fields"
+          and isinstance(meta.get("prompt_library_pin_revision"), int) and meta["prompt_library_pin_revision"] > 1000,
+          "no pin is guessed, the damaged values are quarantined, the revision moves past any earlier one")
+    status, frame = await chat(MEMBER, conv, {"prompt_id": pid, "version_id": v1["id"]},
+                               {"library_prompt_revision": seen})
+    check(status == "error" and frame.get("error_type") == "prompt_pin_conflict",
+          "a tab still holding the pre-damage revision cannot re-pin blindly")
+    status, _ = await chat(MEMBER, conv, ...)
+    check(status == "ok" and not system_prompt_sent().startswith(V1),
+          "after the owner's reset the conversation continues on the default prompt")
+
+    broken = str(uuid.uuid4())
+    await chat(MEMBER, broken, {"prompt_id": pid, "version_id": v1["id"]})
+    set_raw_metadata(broken, "{not json")
+    s, body = api("DELETE", f"/api/prompts/pins/{broken}", MEMBER)
+    s2, stored = api("GET", f"/api/conversations/{broken}", MEMBER)
+    check(s == 200 and body.get("recovered") is True and stored.get("data_classification_state") == "invalid",
+          "metadata that is not JSON at all is recovered with an unknown (invalid) classification")
+    before = last_llm_request().get("timestamp")
+    status, _ = await chat(MEMBER, broken, ...)
+    check(status == "error" and last_llm_request().get("timestamp") == before,
+          "...so that conversation still cannot run under any prompt")
 
 
 if __name__ == "__main__":

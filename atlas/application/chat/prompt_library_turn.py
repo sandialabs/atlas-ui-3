@@ -73,7 +73,7 @@ from atlas.domain.conversation_prompt_pin import (
     pin_state,
     valid_pin,
 )
-from atlas.domain.errors import AuthorizationError, ValidationError
+from atlas.domain.errors import AuthorizationError, ConversationMetadataUnreadableError, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,20 @@ PIN_STATE_UNAVAILABLE_MESSAGE = (
     "This conversation's prompt settings could not be loaded right now, so the "
     "turn was not run. Try again shortly."
 )
+
+def pin_state_damaged_message(conversation_id: Any) -> str:
+    """Refusal for a conversation whose stored pin state is unreadable."""
+    where = (
+        f"DELETE /api/prompts/pins/{conversation_id}"
+        if isinstance(conversation_id, str) and conversation_id
+        else "DELETE /api/prompts/pins/{conversation_id}"
+    )
+    return (
+        "This conversation's stored prompt settings are damaged, so the turn was not "
+        f"run. Its owner can reset them ({where}); the conversation then continues "
+        "with the default prompt."
+    )
+
 
 # Reads the conversation's stored metadata: a dict, or None when the store has
 # no such conversation for this user. Raises when the store cannot answer or
@@ -279,6 +293,10 @@ async def _refresh_pin_state(context: Dict[str, Any], load_metadata: MetadataLoa
     """
     try:
         stored = await load_metadata()
+    except ConversationMetadataUnreadableError:
+        # Damaged, not unavailable: retrying will not help, so name the way out.
+        logger.warning("The conversation's stored prompt pin is unreadable")
+        raise AuthorizationError(pin_state_damaged_message(context.get("conversation_id")))
     except Exception as e:
         logger.warning("Could not read the conversation's prompt pin (%s)", type(e).__name__)
         raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)

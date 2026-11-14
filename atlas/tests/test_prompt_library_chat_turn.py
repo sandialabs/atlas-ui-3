@@ -7,6 +7,7 @@ pinning across publications, restoration from history, revocation, and that
 platform admission checks still run first.
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -1022,7 +1023,8 @@ async def test_unreadable_metadata_refuses_the_turn_and_is_left_alone(env, monke
     for frame in ({}, {"library_prompt": None}, {"library_prompt": {"prompt_id": prompt["id"], "version_id": None}}):
         with pytest.raises(AuthorizationError) as exc:
             await _turn(service, session_id, conv, **frame)
-        assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+        # Damaged, not unavailable: the refusal names the owner's way out.
+        assert exc.value.message == library_turn.pin_state_damaged_message(conv)
     # A fresh connection (full load) is refused too. The conversation
     # classification gate reads the same blob and refuses first (it fails
     # closed on unreadable metadata even with compliance levels off); either
@@ -1094,16 +1096,27 @@ async def test_restoring_a_conversation_with_unreadable_metadata_leaves_its_pin_
 
 
 @pytest.mark.asyncio
-async def test_owner_clear_on_unreadable_metadata_is_refused_not_guessed(env, monkeypatch):
+async def test_owner_clear_on_unreadable_metadata_recovers_it_without_guessing(env, monkeypatch):
+    """Review nit 1 (was: refused with 503, leaving no way to continue). The
+    owner's explicit clear resets the pin state; the classification stays
+    invalid, so the conversation still cannot run. See
+    test_prompt_pin_recovery.py for every shape."""
     prompt, _ = await _shared_prompt(env["library"])
-    service, _, _ = _service(env)
+    service, calls, _ = _service(env)
     conv = str(uuid4())
     await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
     _set_raw_metadata(env, conv, "{broken")
     client = _pin_client(env, monkeypatch, env["members"])
     response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert response.status_code == 503
-    assert _raw_metadata(env, conv) == "{broken"
+    assert response.status_code == 200 and response.json() == {"cleared": True, "recovered": True}
+    stored = json.loads(_raw_metadata(env, conv))
+    assert "prompt_library" not in stored
+    assert stored["prompt_library_recovery"]["original_metadata_json"] == "{broken"
+    assert env["conversations"].get_conversation(conv, USER)["data_classification_state"] == "invalid"
+    fresh, fresh_calls, _ = _service(env)
+    with pytest.raises((AuthorizationError, ValidationError)):
+        await _turn(fresh, uuid4(), conv)
+    assert fresh_calls == []
 
 
 # --- Finding 3: live (in-flight) metadata carries the pin --------------------
@@ -1219,7 +1232,6 @@ _MALFORMED_PIN_FIELDS = [
 @pytest.mark.parametrize("key, bad", _MALFORMED_PIN_FIELDS)
 async def test_malformed_pin_fields_never_run_the_default_prompt(env, key, bad):
     """Valid JSON whose pin or pin revision is malformed is unreadable, not "no pin"."""
-    import json
 
     prompt, v1 = await _shared_prompt(env["library"])
     service, calls, _ = _service(env)
@@ -1235,7 +1247,7 @@ async def test_malformed_pin_fields_never_run_the_default_prompt(env, key, bad):
     for frame in ({}, {"library_prompt": None}, {"library_prompt": {"prompt_id": prompt["id"], "version_id": None}}):
         with pytest.raises(AuthorizationError) as exc:
             await _turn(service, session_id, conv, **frame)
-        assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
+        assert exc.value.message == library_turn.pin_state_damaged_message(conv)
     fresh, fresh_calls, _ = _service(env)
     with pytest.raises(AuthorizationError):
         await _turn(fresh, uuid4(), conv)
@@ -1257,7 +1269,6 @@ async def test_malformed_pin_fields_never_run_the_default_prompt(env, key, bad):
     {"prompt_library_pin_epoch": 2},
 ])
 async def test_legitimate_unpinned_metadata_still_runs(env, extra):
-    import json
 
     service, calls, _ = _service(env)
     conv = str(uuid4())
@@ -1271,8 +1282,7 @@ async def test_legitimate_unpinned_metadata_still_runs(env, extra):
 
 
 @pytest.mark.asyncio
-async def test_malformed_pin_blocks_owner_clear_and_restore_without_guessing(env, monkeypatch):
-    import json
+async def test_malformed_pin_blocks_restore_until_the_owner_recovers_it(env, monkeypatch):
 
     prompt, _ = await _shared_prompt(env["library"])
     service, _, _ = _service(env)
@@ -1283,10 +1293,6 @@ async def test_malformed_pin_blocks_owner_clear_and_restore_without_guessing(env
     raw = json.dumps(meta)
     _set_raw_metadata(env, conv, raw)
 
-    client = _pin_client(env, monkeypatch, env["members"])
-    response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert response.status_code == 503
-
     other_id = uuid4()
     other, other_calls, other_sessions = _service(env)
     await _turn(other, other_id, str(uuid4()))
@@ -1295,7 +1301,14 @@ async def test_malformed_pin_blocks_owner_clear_and_restore_without_guessing(env
     with pytest.raises(AuthorizationError):
         await _turn(other, other_id, conv)
     assert len(other_calls) == 1
-    assert _raw_metadata(env, conv) == raw
+    assert _raw_metadata(env, conv) == raw  # a refused turn never repairs it
+
+    # Only the owner's explicit clear does; the restored session then follows.
+    client = _pin_client(env, monkeypatch, env["members"])
+    response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
+    assert response.status_code == 200 and response.json()["recovered"] is True
+    await _turn(other, other_id, conv)
+    assert len(other_calls) == 2 and other_calls[-1].get("custom_system_prompt") is None
 
 
 # --- Fifth review -------------------------------------------------------------

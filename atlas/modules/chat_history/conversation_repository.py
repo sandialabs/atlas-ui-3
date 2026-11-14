@@ -42,6 +42,7 @@ from atlas.domain.conversation_prompt_pin import (
     new_record_pin,
     pin_fields_readable,
     pin_state,
+    recover_unreadable_metadata,
 )
 from atlas.domain.errors import ConversationMetadataUnreadableError
 
@@ -860,15 +861,32 @@ class ConversationRepository:
         pin revision so every session sees the change on its next turn. The
         pin history is kept. Returns ``{"prompt_library": <removed pin>}``
         (empty when none was stored), or None when the user owns no such
-        conversation. Raises ``ConversationMetadataUnreadableError`` for an
-        unreadable blob.
+        conversation.
+
+        A record whose pin state is unreadable (invalid JSON, not an object,
+        or a malformed pin or revision) refuses every turn and save, so this
+        explicit owner action is how it is recovered: under the same lock,
+        ``recover_unreadable_metadata`` resets the pin state without guessing
+        a pin and keeps everything else (see there). The result then says
+        ``{"recovered": True}``. Nothing from the damaged pin is audited or
+        logged: it cannot be trusted.
         """
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
             conv = self._owned_conversation(session, conversation_id, user_email)
             if not conv:
                 return None
-            current = _readable_metadata(conv.metadata_json)
+            try:
+                current = _readable_metadata(conv.metadata_json)
+            except ConversationMetadataUnreadableError:
+                now = datetime.now(timezone.utc)
+                conv.metadata_json = json.dumps(
+                    recover_unreadable_metadata(conv.metadata_json, int(now.timestamp()), now.isoformat())
+                )
+                session.commit()
+                # No identifiers or content: the owner's request is the audit.
+                logger.warning("An owner reset a conversation's unreadable team-prompt state")
+                return {"recovered": True}
             removed = pin_state(current)["pin"]
             status, updated = apply_pin_change(current, None, None, None)
             if status == "ok":

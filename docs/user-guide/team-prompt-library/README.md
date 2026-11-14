@@ -93,6 +93,13 @@ The conversation records the exact version it ran with:
 - If the conversation (or its stored settings) cannot be loaded -- for example
   a brief database outage -- Atlas refuses the message rather than running it
   with a different prompt; try again once it is back.
+- If a conversation's stored prompt settings are damaged, every message is
+  refused with a note saying so. Its owner can reset them with
+  `DELETE /api/prompts/pins/{conversation_id}`: the damaged team-prompt
+  selection is set aside (kept for reference, never guessed) and the
+  conversation continues with the default prompt. If nothing in the stored
+  settings could be read at all, its data classification is unknown too, so
+  the conversation stays closed to chat until an administrator reviews it.
 - A message cannot use a team prompt and a custom prompt or persona at the
   same time; such a request is refused with "Choose either a team library
   prompt or a custom prompt, not both."

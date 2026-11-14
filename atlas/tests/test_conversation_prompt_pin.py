@@ -189,12 +189,17 @@ def test_unreadable_metadata_raises_and_is_never_rewritten(duck_store, blob):
         _meta(duck_store, conv)
     with pytest.raises(ConversationMetadataUnreadableError):
         duck_store.change_prompt_pin(conv, USER, 1, None, entry(None))
-    with pytest.raises(ConversationMetadataUnreadableError):
-        duck_store.clear_prompt_pin(conv, USER)
     record = duck_store.get_conversation(conv, USER)
     assert record["metadata_unreadable"] is True and record["metadata"] == {}
     with duck_store._get_session() as session:
         assert session.get(ConversationRecord, conv).metadata_json == blob
+    # Only the owner's explicit clear rewrites it (review nit 1): the pin
+    # state is reset, the original quarantined, the classification unknown.
+    assert duck_store.clear_prompt_pin(conv, "someone@example.com") is None
+    assert duck_store.clear_prompt_pin(conv, USER) == {"recovered": True}
+    meta = _meta(duck_store, conv)
+    assert PIN_METADATA_KEY not in meta and meta["prompt_library_recovery"]["original_metadata_json"] == blob
+    assert duck_store.get_conversation(conv, USER)["data_classification_state"] == "invalid"
 
 
 @pytest.mark.parametrize("blob", [None, "", "null", "{}"])
@@ -432,13 +437,16 @@ def test_a_malformed_pin_is_never_read_as_no_pin_or_overwritten(duck_store, meta
         duck_store.get_conversation_metadata(conv, USER)
     with pytest.raises(ConversationMetadataUnreadableError):
         duck_store.change_prompt_pin(conv, USER, 0, V2, {"version_id": "v2"})
-    with pytest.raises(ConversationMetadataUnreadableError):
-        duck_store.clear_prompt_pin(conv, USER)
     record = duck_store.get_conversation(conv, USER)
     assert record["metadata_unreadable"] is True
     # A save would carry the pin through as "no pin": it is refused instead.
     assert _save(duck_store, conv, {"agent_mode": True}, MESSAGES * 2) is None
     assert _raw(duck_store, conv) == raw
+    # The owner's explicit clear recovers it, keeping the rest (review nit 1).
+    assert duck_store.clear_prompt_pin(conv, USER) == {"recovered": True}
+    meta = _meta(duck_store, conv)
+    assert PIN_METADATA_KEY not in meta and meta["agent_mode"] is False
+    assert _save(duck_store, conv, {"agent_mode": True}, MESSAGES * 2) is not None  # saves work again
 
 
 @pytest.mark.parametrize("metadata", _LEGITIMATE)
@@ -513,3 +521,48 @@ def test_persisted_pin_fields_are_never_guessed():
     assert context[library_turn.PIN_REVISION_CONTEXT_KEY] == 4  # untouched
     assert library_turn.adopt_persisted_pin(context, "") is True  # empty metadata: no pin
     assert library_turn.persisted_pin_fields(context) == {PIN_METADATA_KEY: None, PIN_REVISION_METADATA_KEY: 0}
+
+
+def test_owner_recovery_of_a_damaged_pin_waits_on_the_row_lock_postgresql(pg_url):
+    """Review nit 1: the owner's DELETE resets an unreadable pin state under
+    the conversation's row lock, so it cannot interleave with a pin change or
+    a save, and a change decided on the pre-damage revision then conflicts."""
+    from atlas.domain.conversation_prompt_pin import PIN_RECOVERY_METADATA_KEY
+    from atlas.modules.chat_history import ConversationRepository
+
+    engine = create_engine(pg_url)
+    try:
+        store = ConversationRepository(sessionmaker(bind=engine, expire_on_commit=False))
+        conv = str(uuid.uuid4())
+        _save(store, conv, {"workspace_id": "ws", PIN_METADATA_KEY: V1, PIN_REVISION_METADATA_KEY: 4})
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE conversations SET metadata_json = :m WHERE id = :id"), {
+                "m": json.dumps({"workspace_id": "ws", PIN_METADATA_KEY: {"prompt_id": "p1"},
+                                 PIN_REVISION_METADATA_KEY: 4}), "id": conv})
+        with pytest.raises(ConversationMetadataUnreadableError):
+            _meta(store, conv)
+        done = {}
+        with engine.connect() as holding:
+            tx = holding.begin()
+            holding.execute(text("SELECT id FROM conversations WHERE id = :id FOR UPDATE"), {"id": conv})
+            thread = threading.Thread(target=lambda: done.setdefault("result", store.clear_prompt_pin(conv, USER)))
+            thread.start()
+            time.sleep(0.5)
+            assert "result" not in done  # blocked on the row lock
+            tx.rollback()
+        thread.join(30)
+        assert done["result"] == {"recovered": True}
+        meta = _meta(store, conv)
+        assert PIN_METADATA_KEY not in meta and meta["workspace_id"] == "ws"
+        assert meta[PIN_REVISION_METADATA_KEY] == 5
+        assert meta[PIN_RECOVERY_METADATA_KEY]["damaged_fields"][PIN_METADATA_KEY] == {"prompt_id": "p1"}
+        stale = store.change_prompt_pin(conv, USER, 4, V2, entry(V2))
+        assert stale["status"] == "conflict" and stale["state"]["pin"] is None
+        fresh = store.change_prompt_pin(conv, USER, 5, V2, entry(V2))
+        assert fresh["status"] == "ok" and fresh["state"]["revision"] == 6
+        # A later save keeps the recovery record and the new pin.
+        _save(store, conv, {"workspace_id": "ws", "agent_mode": True}, MESSAGES * 2)
+        meta = _meta(store, conv)
+        assert meta[PIN_METADATA_KEY]["version_id"] == "v2" and PIN_RECOVERY_METADATA_KEY in meta
+    finally:
+        engine.dispose()

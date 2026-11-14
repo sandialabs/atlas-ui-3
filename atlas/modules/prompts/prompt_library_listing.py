@@ -26,6 +26,20 @@ from atlas.modules.prompts.prompt_library_policy import (
 class PromptLibraryListing:
     """``list_prompts`` for ``PromptLibraryService``."""
 
+    async def _label_member_groups(self, user_email: str, groups: Set[str]) -> Set[str]:
+        """The caller's groups among ``groups``, for route labels only.
+
+        Bounded like the team listing (``MAX_LISTING_GROUP_CHECKS`` groups,
+        ``LISTING_GROUP_CHECK_TIMEOUT_S``); unchecked groups are not returned.
+        """
+        from atlas.modules.prompts import prompt_library_service as svc
+
+        names = sorted(groups)[: svc.MAX_LISTING_GROUP_CHECKS]
+        if not names:
+            return set()
+        member, _finished = await self._member_groups_within(user_email, names, svc.LISTING_GROUP_CHECK_TIMEOUT_S)
+        return member
+
     async def list_prompts(
         self,
         user_email: str,
@@ -92,11 +106,20 @@ class PromptLibraryListing:
             False,  # metadata only: a list never needs version text
         )
         if scope not in ("all", "team"):
-            # Membership is only needed for the groups on this page.
-            page_groups = {
-                g["grantee"] for gs in grants_by_prompt.values() for g in gs if g["grantee_type"] == GRANTEE_GROUP
-            }
-            member_groups = await self._member_groups(user_email, page_groups)
+            # Here visibility never depends on groups: "mine" is ownership and
+            # "shared" a direct grant, which is always at least ``use`` -- the
+            # most a group can give. Membership only labels the routes, so it
+            # is checked for entries the caller does not own, within the same
+            # bounds as the team listing; a group whose check did not finish
+            # is not claimed as a route (fail closed), and nothing is omitted.
+            member_groups = await self._label_member_groups(
+                user_email,
+                {
+                    g["grantee"]
+                    for p in prompts if p["id"] not in owned
+                    for g in grants_by_prompt.get(p["id"], []) if g["grantee_type"] == GRANTEE_GROUP
+                },
+            )
 
         results = []
         for prompt in prompts:

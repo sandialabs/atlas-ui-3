@@ -65,6 +65,12 @@ model.
   client never concludes from an incomplete listing that a selected entry
   was revoked -- it sends the reference and the server decides. Using an
   entry by reference is unaffected: its own grants are checked.
+- In the Mine and Shared scopes visibility never depends on groups (Mine is
+  ownership; Shared is a direct grant, always at least `use`, the most a
+  group can give), so groups only label the routes. Entries the caller owns
+  are never group-checked; the others' groups are checked within the same
+  count and time bounds, and a group whose check did not finish is not shown
+  as a route. Nothing is omitted, so these pages are never `incomplete`.
 - The groups offered as sharing targets (`GET /api/prompts/groups`) are
   bounded the same way (100 configured groups in name order, 10 seconds).
   Only groups whose check completed as "member" are offered; the response
@@ -181,13 +187,32 @@ Unknown and unreadable state:
 - Stored metadata that is not a JSON object (malformed JSON, a list, a
   string, a number) raises `ConversationMetadataUnreadableError` instead of
   reading as `{}`, so it never looks like "no pin, revision 0". Turns are
-  refused, the owner's DELETE answers 503, and nothing rewrites the blob (the
-  classification guard also refuses saves over it). The same holds for valid
-  JSON whose pin or pin revision is malformed (a pin without non-blank string
-  `prompt_id` and `version_id`, or a revision that is not a non-negative
-  integer): it is not read as "no pin" or revision 0, saves over it are
-  refused, and the pin state is unknown. An empty blob, JSON `null`, absent pin
-  keys and `prompt_library: null` are genuinely empty.
+  refused, and no turn or save rewrites the blob (the classification guard
+  also refuses saves over it). The same holds for valid JSON whose pin or pin
+  revision is malformed (a pin without non-blank string `prompt_id` and
+  `version_id`, or a revision that is not a non-negative integer): it is not
+  read as "no pin" or revision 0, saves over it are refused, and the pin
+  state is unknown. An empty blob, JSON `null`, absent pin keys and
+  `prompt_library: null` are genuinely empty. A refused turn says the stored
+  settings are damaged and names the owner's way out (below); a store that
+  cannot answer still says "try again".
+- **Recovery is the owner's explicit DELETE** (`recover_unreadable_metadata`,
+  under the row lock). It never guesses a pin and changes nothing else:
+  - a JSON object keeps every other key as stored (data classification,
+    workspace, origin, lineage); the pin is removed, readable history entries
+    stay, and the damaged values are kept under `prompt_library_recovery`;
+  - anything else cannot be read at all, so nothing in it is trusted: the
+    result holds only the quarantined original blob and an *unknown*
+    classification record, which still reads as `invalid` -- the
+    conversation remains unusable for chat (as before) until an operator
+    decides what it holds;
+  - the revision becomes the old one + 1 when it was readable, otherwise at
+    least the current Unix time in seconds, so no revision a client saw
+    before the damage can match it;
+  - the response is `{"cleared": true, "recovered": true}`; nothing from the
+    damaged pin is audited or logged, and other users still get 404;
+  - `prompt_library_recovery` is server-written: saves carry it like the
+    pin, and a new conversation cannot be created with one.
 - The live view of a run that has not saved yet (`in_flight`) carries the
   same pin, history and revision as the session, so a tab that opens it shows
   the right selection and does not send `library_prompt: null` by accident.

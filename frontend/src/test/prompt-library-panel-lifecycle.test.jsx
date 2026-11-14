@@ -272,6 +272,91 @@ describe('"Load more" between a filter change and its answer (independent review
   })
 })
 
+describe('a filter change invalidates older requests at once, not after the debounce (review nit 2)', () => {
+  const D = entry('p-d', 'Delta stale')
+  const E = entry('p-e', 'Echo stale page')
+  function usePendingLibrary() {
+    const pending = []
+    useLibrary(vi.fn((scope, query, offset) => {
+      const d = deferred()
+      pending.push({ scope, query, offset, d })
+      return d.promise
+    }))
+    return pending
+  }
+
+  it('drops a search response for the previous filter that lands inside the debounce window', async () => {
+    const pending = usePendingLibrary()
+    render(<PromptLibraryPanel />)
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await act(async () => { pending[0].d.resolve({ prompts: [A, B, C], total: 3 }) })
+    const search = screen.getByPlaceholderText('Search title or description')
+    fireEvent.change(search, { target: { value: 'de' } })
+    await waitFor(() => expect(pending).toHaveLength(2))          // "de" is in flight
+    fireEvent.change(search, { target: { value: 'delta' } })      // ...and is now stale
+    await act(async () => { pending[1].d.resolve({ prompts: [D], total: 1 }) })  // lands inside the 250 ms window
+    expect(screen.queryByText('Delta stale')).toBeNull()
+    expect(screen.queryByText(/Showing 1 of 1/)).toBeNull()
+    await waitFor(() => expect(pending).toHaveLength(3))
+    expect(pending[2]).toMatchObject({ query: 'delta', offset: 0 })
+    await act(async () => { pending[2].d.resolve({ prompts: [A], total: 1 }) })
+    expect(screen.getByText('Alpha reviewer')).toBeInTheDocument()
+    expect(screen.queryByText('Delta stale')).toBeNull()
+    expect(screen.queryByText('Beta helper')).toBeNull()
+  })
+
+  it('drops a "Load more" page that was in flight when the filter changed', async () => {
+    const pending = usePendingLibrary()
+    render(<PromptLibraryPanel />)
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await act(async () => { pending[0].d.resolve({ prompts: [A], total: 3 }) })
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(pending).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
+    await act(async () => { pending[1].d.resolve({ prompts: [E], total: 3 }) })  // the old filter's page 2
+    expect(screen.queryByText('Echo stale page')).toBeNull()
+    await waitFor(() => expect(pending).toHaveLength(3))
+    expect(pending[2]).toMatchObject({ scope: 'team', offset: 0 })
+    await act(async () => { pending[2].d.resolve({ prompts: [B], total: 1 }) })
+    expect(screen.getByText('Beta helper')).toBeInTheDocument()
+    expect(screen.queryByText('Echo stale page')).toBeNull()
+    expect(screen.queryByText('Alpha reviewer')).toBeNull()
+  })
+
+  it('ignores a failure of the previous filter inside the window and keeps loading until the new answer', async () => {
+    const pending = usePendingLibrary()
+    render(<PromptLibraryPanel />)
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await act(async () => { pending[0].d.resolve({ prompts: [A], total: 3 }) })
+    const search = screen.getByPlaceholderText('Search title or description')
+    fireEvent.change(search, { target: { value: 'b' } })
+    await waitFor(() => expect(pending).toHaveLength(2))
+    fireEvent.change(search, { target: { value: 'be' } })
+    // While the new filter has not answered, "Load more" for the old list is not offered.
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeDisabled()
+    await act(async () => { pending[1].d.reject(new Error('old filter failed')) })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeDisabled()
+    await waitFor(() => expect(pending).toHaveLength(3))
+    await act(async () => { pending[2].d.resolve({ prompts: [B], total: 1 }) })
+    expect(screen.getByText('Beta helper')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('sends one request per settled filter, not one per keystroke', async () => {
+    const pending = usePendingLibrary()
+    render(<PromptLibraryPanel />)
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await act(async () => { pending[0].d.resolve({ prompts: [A], total: 1 }) })
+    const search = screen.getByPlaceholderText('Search title or description')
+    for (const value of ['a', 'al', 'alp']) fireEvent.change(search, { target: { value } })
+    await waitFor(() => expect(pending).toHaveLength(2))
+    await sleep(400)
+    expect(pending).toHaveLength(2)
+    expect(pending[1].query).toBe('alp')
+  })
+})
+
 describe('a just-created prompt that the reloaded list does not include yet', () => {
   it('stays open in the editor even though its detail has no listing fields', async () => {
     const listPrompts = vi.fn(async () => ({ prompts: [A], total: 1 }))

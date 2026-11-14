@@ -33,15 +33,19 @@ session holds. Together:
   A turn that keeps the stored pin (omitted field, or the same selection)
   simply follows the stored state.
 * The owner's DELETE is unconditional: it is the explicit way out when a
-  pinned prompt became unavailable.
+  pinned prompt became unavailable. It is also the way out of damaged pin
+  state (``recover_unreadable_metadata``): every turn and save refuses such a
+  record, so without it the owner could never continue the conversation.
 
 A conversation the store does not have yet (its first turn) keeps the pin in
 the session; the save that creates the record writes it. Running a pinned
 version always requires current access; see ``prompt_library_turn``.
 """
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from atlas.domain.conversation_classification import CLASSIFICATION_METADATA_KEY
 from atlas.domain.errors import ValidationError
 
 PIN_METADATA_KEY = "prompt_library"
@@ -49,7 +53,21 @@ PIN_HISTORY_METADATA_KEY = "prompt_library_history"
 PIN_REVISION_METADATA_KEY = "prompt_library_pin_revision"
 # Written by an earlier draft of this feature; read as the revision.
 _LEGACY_EPOCH_KEY = "prompt_library_pin_epoch"
-PIN_KEYS = (PIN_METADATA_KEY, PIN_HISTORY_METADATA_KEY, PIN_REVISION_METADATA_KEY, _LEGACY_EPOCH_KEY)
+# Set by ``recover_unreadable_metadata``: when the owner reset damaged pin
+# state, why, and the damaged values. Server-written and carried like the pin.
+PIN_RECOVERY_METADATA_KEY = "prompt_library_recovery"
+PIN_KEYS = (
+    PIN_METADATA_KEY, PIN_HISTORY_METADATA_KEY, PIN_REVISION_METADATA_KEY, _LEGACY_EPOCH_KEY,
+    PIN_RECOVERY_METADATA_KEY,
+)
+# A recovered record whose old revision cannot be read restarts its revision
+# here or above (the current Unix time in seconds): far above any count a
+# conversation reaches one change at a time, so no revision a client saw
+# before the damage can match it, and later recoveries only move it up.
+# Written to ``data_classification`` when the whole blob was unreadable: the
+# conversation's classification record is unknown, so it must stay "invalid"
+# (matches no level, never legacy) exactly as it was before the recovery.
+UNKNOWN_CLASSIFICATION_RECORD = {"state": "unknown", "reason": "unreadable_metadata"}
 MAX_PIN_HISTORY = 50
 
 PIN_CONFLICT_CODE = "prompt_pin_conflict"
@@ -136,10 +154,12 @@ def pin_history(metadata: Any) -> List[Dict[str, Any]]:
 
 def pin_state(metadata: Any) -> Dict[str, Any]:
     """The pin part of stored metadata, normalized."""
+    recovery = metadata.get(PIN_RECOVERY_METADATA_KEY) if isinstance(metadata, dict) else None
     return {
         "pin": valid_pin(metadata.get(PIN_METADATA_KEY)) if isinstance(metadata, dict) else None,
         "history": pin_history(metadata),
         "revision": pin_revision(metadata),
+        "recovery": recovery if isinstance(recovery, dict) else None,
     }
 
 
@@ -159,6 +179,8 @@ def _write_state(metadata: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, A
         result[PIN_HISTORY_METADATA_KEY] = state["history"][-MAX_PIN_HISTORY:]
     if state.get("revision"):
         result[PIN_REVISION_METADATA_KEY] = state["revision"]
+    if state.get("recovery"):
+        result[PIN_RECOVERY_METADATA_KEY] = state["recovery"]
     return result
 
 
@@ -173,7 +195,8 @@ def carry_stored_pin(stored_metadata: Any, incoming: Dict[str, Any]) -> Dict[str
 
 def new_record_pin(incoming: Dict[str, Any]) -> Dict[str, Any]:
     """Metadata for *creating* a conversation: the creating session's pin."""
-    return _write_state(incoming, pin_state(incoming))
+    # A recovery record is only ever written by the recovery itself.
+    return _write_state(incoming, {**pin_state(incoming), "recovery": None})
 
 
 def apply_pin_change(
@@ -199,5 +222,66 @@ def apply_pin_change(
     history = state["history"]
     if history_entry is not None:
         history = (history + [history_entry])[-MAX_PIN_HISTORY:]
-    new_state = {"pin": target, "history": history, "revision": state["revision"] + 1}
+    new_state = {
+        "pin": target, "history": history, "revision": state["revision"] + 1,
+        "recovery": state["recovery"],
+    }
     return "ok", _write_state(stored_metadata, new_state)
+
+
+def recover_unreadable_metadata(metadata_json: Any, now_unix: int, now_iso: str) -> Dict[str, Any]:
+    """Metadata for the owner's DELETE on a record whose pin state is unreadable.
+
+    Such a record refuses every turn and save (see ``pin_fields_readable``),
+    and nothing else can repair it. The owner's explicit clear resets the pin
+    state only; it never guesses a pin and never weakens anything else:
+
+    * A JSON object with a malformed pin or revision keeps every other key
+      as stored (data classification, workspace, origin, lineage, ...). The
+      pin is removed, readable history entries are kept, and the damaged pin
+      values are kept under ``prompt_library_recovery``.
+    * Anything else (invalid JSON, a list, a string, a number) cannot be
+      read at all, so nothing in it is trusted: the result holds only the
+      quarantined original blob and an *unknown* classification record,
+      which reads as "invalid" (matches no level, is never legacy) -- the
+      same classification state the record had before, so the conversation
+      stays unusable for chat until an operator decides what it holds.
+    * The revision moves past anything a client could have seen: the old
+      revision + 1 when it was readable, else at least ``now_unix``.
+
+    The caller holds the conversation's row lock.
+    """
+    damaged: Dict[str, Any]
+    try:
+        decoded = json.loads(metadata_json) if isinstance(metadata_json, str) else metadata_json
+    except (ValueError, TypeError):
+        decoded = _UNDECODABLE
+    if isinstance(decoded, dict):
+        kept = {k: v for k, v in decoded.items() if k not in PIN_KEYS}
+        damaged = {k: decoded[k] for k in PIN_KEYS if k in decoded and k != PIN_RECOVERY_METADATA_KEY}
+        readable = [
+            _revision_value(decoded[k]) for k in (PIN_REVISION_METADATA_KEY, _LEGACY_EPOCH_KEY) if k in decoded
+        ]
+        revision_known = all(v is not None for v in readable)
+        last = max((v for v in readable if v is not None), default=0)
+        revision = last + 1 if revision_known else max(last + 1, now_unix)
+        history = pin_history(decoded)
+        reason = "malformed_pin_fields"
+        recovery: Dict[str, Any] = {"reason": reason, "recovered_at": now_iso, "damaged_fields": damaged}
+    else:
+        kept = {CLASSIFICATION_METADATA_KEY: dict(UNKNOWN_CLASSIFICATION_RECORD)}
+        history = []
+        revision = now_unix
+        recovery = {
+            "reason": "unreadable_metadata",
+            "recovered_at": now_iso,
+            "original_metadata_json": metadata_json if isinstance(metadata_json, str) else None,
+        }
+    previous = decoded.get(PIN_RECOVERY_METADATA_KEY) if isinstance(decoded, dict) else None
+    if isinstance(previous, dict):
+        # One level only, so repeated recoveries cannot grow the record.
+        recovery["previous"] = {k: v for k, v in previous.items() if k != "previous"}
+    return _write_state(kept, {"pin": None, "history": history, "revision": revision, "recovery": recovery})
+
+
+_UNDECODABLE = object()
