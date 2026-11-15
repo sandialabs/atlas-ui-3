@@ -13,7 +13,8 @@ const bootstrap = readFileSync('public/theme-bootstrap.js', 'utf8')
 function firstPaint(saved, {
   blocked = false, retroBuild = 'true', cachedConfig = null, cachedConfigRaw = undefined,
   runtime = null, allowed = ALL_ALLOWED_THEMES, cssVersion = null,
-  readyState = 'loading', written = [], appended = [],
+  readyState = 'loading', written = [], appended = [], rootStyle = { visibility: '' },
+  scheduled = [],
 } = {}) {
   const attributes = {}
   const storage = {
@@ -22,6 +23,8 @@ function firstPaint(saved, {
       ? (cachedConfig === null ? null : JSON.stringify(cachedConfig)) : cachedConfigRaw,
   }
   runInNewContext(bootstrap, {
+    setTimeout(fn) { scheduled.push(fn); return scheduled.length },
+    clearTimeout() {},
     localStorage: {
       getItem(key) {
         if (blocked) throw new Error('blocked')
@@ -35,12 +38,18 @@ function firstPaint(saved, {
           'data-allowed-themes': allowed, 'data-retro-css': cssVersion,
         })[name] ?? null,
       },
-      documentElement: { setAttribute(key, value) { attributes[key] = value } },
+      documentElement: { style: rootStyle, setAttribute(key, value) { attributes[key] = value } },
       readyState,
       write: html => written.push(html),
       createElement: () => {
-        const link = { attributes: {}, setAttribute(key, value) { this.attributes[key] = value } }
-        return link
+        const listeners = {}
+        return {
+          attributes: {}, sheet: null, removed: false,
+          setAttribute(key, value) { this.attributes[key] = value },
+          addEventListener(type, fn) { listeners[type] = fn },
+          emit(type) { listeners[type]?.() },
+          remove() { this.removed = true },
+        }
       },
       head: { appendChild: link => appended.push(link) },
     },
@@ -137,12 +146,51 @@ describe('first paint with retro themes turned off (issue #1119)', () => {
 })
 
 describe('first-paint per-theme retro CSS (issue #1119 lazy loading)', () => {
-  it.each(retroThemes)('writes a render-blocking <link> for a saved $id', ({ id }) => {
+  it.each(retroThemes)('creates a render-blocking DOM <link> for saved $id', ({ id }) => {
     const written = []
-    firstPaint(id, { cssVersion: 'abc123', written })
-    expect(written).toEqual([
-      `<link rel="stylesheet" data-atlas-theme-css="${id}" data-atlas-theme-css-blocking="true" href="/assets/retro/${id}.css?v=abc123">`,
-    ])
+    const appended = []
+    const rootStyle = { visibility: '' }
+    firstPaint(id, { cssVersion: 'abc123', written, appended, rootStyle })
+    expect(written).toEqual([]) // No document.write or HTML string injection.
+    expect(appended).toHaveLength(1)
+    const link = appended[0]
+    expect(link).toMatchObject({
+      rel: 'stylesheet', href: `/assets/retro/${id}.css?v=abc123`,
+      attributes: {
+        'data-atlas-theme-css': id,
+        'blocking': 'render',
+        'data-atlas-theme-css-first-paint': 'true',
+      },
+    })
+    expect(rootStyle.visibility).toBe('hidden')
+    link.sheet = { cssRules: [{}] }
+    link.emit('load')
+    expect(rootStyle.visibility).toBe('')
+    expect(link.attributes['data-atlas-theme-css-settled']).toBe('loaded')
+  })
+  it.each(['error', 'empty-sheet', 'timeout'])('fails closed on %s before first paint', failure => {
+    const appended = []
+    const scheduled = []
+    const rootStyle = { visibility: '' }
+    const attributes = firstPaint('windows-xp-luna', {
+      cssVersion: 'abc123', appended, scheduled, rootStyle,
+    })
+    const link = appended[0]
+    expect(rootStyle.visibility).toBe('hidden')
+    if (failure === 'error') link.emit('error')
+    if (failure === 'empty-sheet') {
+      link.sheet = { cssRules: [] }
+      link.emit('load')
+    }
+    if (failure === 'timeout') scheduled[0]()
+    expect(rootStyle.visibility).toBe('')
+    expect(link.removed).toBe(true)
+    expect(link.attributes['data-atlas-theme-css-settled']).toBe('failed')
+    expect(attributes).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
+    // An old late event cannot re-enable the revoked/failed stylesheet.
+    link.sheet = { cssRules: [{}] }
+    link.emit('load')
+    expect(attributes['data-atlas-theme']).toBe('light')
   })
   it('appends the <link> when the document is no longer parsing', () => {
     const written = []
@@ -183,7 +231,7 @@ describe('first-paint per-theme retro CSS (issue #1119 lazy loading)', () => {
         write() { throw new Error('blocked') },
       },
     })
-    expect(attributes).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'beos' })
+    expect(attributes).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
   })
 })
 

@@ -9,9 +9,10 @@
 // so there is no flash.
 // Retro CSS is split per theme (/assets/retro/<id>.css, see
 // src/themes/retro/retroCssPlugin.js). When a retro ID applies and the
-// build stamped a CSS version (data-retro-css), its stylesheet is written
-// into <head> here, parser-inserted so it blocks first paint like a static
-// <link>; src/themes/retroThemeCss.js adopts it after React starts.
+// build stamped a CSS version (data-retro-css), its stylesheet is
+// inserted with DOM APIs and blocking=render. A visibility guard
+// keeps first paint hidden until CSS settles in browsers lacking
+// render blocking; retroThemeCss.js adopts the link after React.
 (function () {
   var modes = {"dark":"dark","light":"light","mac7":"light","win95":"light","windows-xp-luna":"light","aqua-osx":"light","amiga-workbench":"light","nextstep":"light","beos":"light","teletext":"dark","crt-phosphor":"dark","dos-cga":"dark","8bit-arcade":"dark","frutiger-aero":"light","winamp-skin":"dark","geocities-web10":"dark","cassette-futurism":"dark","vaporwave":"dark","memphis":"dark","ps1-tech":"light","os2-warp":"light","macos9-platinum":"dark","web20-glossy":"light","gameboy-dmg":"dark","braun-rams":"light","tron-vector":"dark","vhs-tracking":"dark","risograph":"light","ibm-3270":"dark","nethack-ascii":"dark","templeos":"dark","bbs-ansi":"dark","midnight-commander":"dark","matrix-rain":"dark","btop-meters":"dark","c64-basic":"dark","flat-2013":"light","glassmorphism":"light","neumorphism":"light","blueprint-cad":"dark","claymorphism":"light","brutalist-web":"light","swiss-intl":"light","bauhaus":"light","pop-art-lichtenstein":"light","op-art":"dark","hypnagogic":"light","monochrome-zen":"light","default-browser":"light","wireframe-sketch":"light","glitch-databend":"dark","y2k-chrome":"light","duotone-poster":"light","grid-paper":"light","maximalist-banners":"light"};
   var script = document.currentScript;
@@ -47,15 +48,49 @@
   if (retro && version && version.charAt(0) !== '%' && id !== 'dark' && id !== 'light') {
     var href = '/assets/retro/' + id + '.css?v=' + encodeURIComponent(version);
     try {
+      var link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = href;
+      link.setAttribute('data-atlas-theme-css', id);
       if (document.readyState === 'loading') {
-        document.write('<link rel="stylesheet" data-atlas-theme-css="' + id + '" data-atlas-theme-css-blocking="true" href="' + href + '">');
-      } else {
-        var link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = href;
-        link.setAttribute('data-atlas-theme-css', id);
-        document.head.appendChild(link);
+        // Dynamically added styles need render blocking; Firefox also needs
+        // the visibility guard until CSS has loaded or failed.
+        link.setAttribute('blocking', 'render');
+        link.setAttribute('data-atlas-theme-css-first-paint', 'true');
+        var root = document.documentElement;
+        var priorVisibility = root.style.visibility;
+        root.style.visibility = 'hidden';
+        var finished = false;
+        var timer;
+        function settle(ok) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          link.setAttribute('data-atlas-theme-css-settled', ok ? 'loaded' : 'failed');
+          if (!ok) {
+            link.remove();
+            root.setAttribute('data-theme', modes[id]);
+            root.setAttribute('data-atlas-theme', modes[id]);
+          }
+          root.style.visibility = priorVisibility;
+        }
+        link.addEventListener('load', function () {
+          var ok = !!link.sheet;
+          if (ok) {
+            try { ok = link.sheet.cssRules.length > 0; }
+            catch { /* Sheet exists but cannot be inspected. */ }
+          }
+          settle(ok);
+        }, { once: true });
+        link.addEventListener('error', function () { settle(false); }, { once: true });
+        timer = setTimeout(function () { settle(false); }, 15000);
       }
-    } catch { /* React's loader (retroThemeCss.js) retries or falls back. */ }
+      document.head.appendChild(link);
+    } catch {
+      // A broken or unavailable DOM API must not leave the page invisible.
+      if (root && typeof priorVisibility === 'string') root.style.visibility = priorVisibility;
+      document.documentElement.setAttribute('data-theme', modes[id]);
+      document.documentElement.setAttribute('data-atlas-theme', modes[id]);
+    }
   }
 })();

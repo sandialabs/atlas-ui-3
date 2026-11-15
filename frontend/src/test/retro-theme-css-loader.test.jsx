@@ -152,18 +152,33 @@ describe('retro theme CSS loader', () => {
     expect(linkFor('templeos')).toBeUndefined()
   })
 
-  it('fails immediately when a parser-blocking bootstrap CSS link already errored', async () => {
+  it('fails immediately when bootstrap recorded a CSS error before React', async () => {
     vi.useFakeTimers()
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.setAttribute(RETRO_CSS_ATTRIBUTE, 'vaporwave')
-    link.setAttribute('data-atlas-theme-css-blocking', 'true')
+    link.setAttribute('data-atlas-theme-css-settled', 'failed')
     Object.defineProperty(link, 'sheet', { value: null })
     document.head.appendChild(link)
     expect(await loadRetroThemeCss('vaporwave')).toBe(false)
     expect(retroThemeCssStatus('vaporwave')).toBe('failed')
     expect(linkFor('vaporwave')).toBeUndefined()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('pending render-blocking bootstrap links await their load event', async () => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.setAttribute(RETRO_CSS_ATTRIBUTE, 'vaporwave')
+    link.setAttribute('blocking', 'render')
+    link.setAttribute('data-atlas-theme-css-first-paint', 'true')
+    Object.defineProperty(link, 'sheet', { value: null })
+    document.head.appendChild(link)
+    const result = loadRetroThemeCss('vaporwave')
+    await Promise.resolve()
+    expect(retroThemeCssStatus('vaporwave')).toBe('pending')
+    link.dispatchEvent(new Event('error'))
+    expect(await result).toBe(false)
   })
 
   it('unmarked dynamic links still await an event when their sheet is null', async () => {
