@@ -9,20 +9,26 @@ failed, which releases the claim on every replica.
 
 These tests drive the real ``/ws`` frame loop against a Redis coordinator on
 fakeredis and read the shared keys afterwards.
+
+The socket is an ``AsgiWebSocketSession``, not Starlette's ``TestClient``
+(issue #1203). A handler that answers a frame and goes back to listening --
+which is what every refused turn does -- leaves a blocking ``receive_json()``
+waiting forever for a frame nobody will send; here every wait has a deadline
+and reports the frames that did arrive.
 """
 
-import time
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import fakeredis
 import main
 import pytest
-from fastapi.testclient import TestClient
 
 from atlas.application.chat.runs import RunStatus, get_run_registry, reset_run_registry
 from atlas.application.chat.runs.coordination import set_run_coordinator
 from atlas.infrastructure.redis import RedisClientManager, RedisSettings
 from atlas.infrastructure.redis.run_coordinator import RedisRunCoordinator
+from atlas.tests.asgi_websocket_session import AsgiWebSocketSession, WebSocketDeadlineError
 
 USER = "guard@example.com"
 CONV = "conv-guard"
@@ -93,13 +99,18 @@ def _shared_keys(coord, server):
     )
 
 
-def _wait_released(coord, server, timeout=5.0):
+def _connect(**kwargs):
+    return AsgiWebSocketSession(main.app, "/ws", headers={"X-User-Email": USER}, **kwargs)
+
+
+async def _wait_released(coord, server, timeout=5.0):
     """The release is scheduled on the app's loop; poll the shared keys."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
         if _shared_keys(coord, server) == (0, None):
             return
-        time.sleep(0.02)
+        await asyncio.sleep(0.02)
     raise AssertionError(f"claim still held: {_shared_keys(coord, server)}")
 
 
@@ -109,33 +120,46 @@ def _only_record():
     return records[0]
 
 
-def _run_until_the_handler_fails(frame):
+async def _run_until_the_handler_fails(frame, injected, **kwargs):
     """Send one chat frame; the handler fails inside the admission window.
 
-    The error ends the socket, and TestClient re-raises the server-side
-    exception into the test thread, which is the failure we injected.
+    The handler must end by raising ``injected`` itself. A handler that closes
+    the socket, returns, raises anything else, or simply keeps listening is a
+    failure of the test, each reported as what it was. Returns the frames the
+    handler sent first.
     """
-    client = TestClient(main.app)
-    with pytest.raises(RuntimeError):
-        with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
-            ws.send_json(frame)
-            for _ in range(20):
-                ws.receive_json()
+    async with _connect(**kwargs) as ws:
+        await ws.send_json(frame)
+        failure = await ws.run_until_app_exits()
+    sent = [f.get("type") for f in ws.frames]
+    if failure is None:
+        raise AssertionError(
+            "the handler ended without the injected failure "
+            f"(close code {ws.closed_by_app}); frames sent: {sent}"
+        )
+    if failure is not injected:
+        raise AssertionError(
+            f"the handler failed with {failure!r}, not the injected failure; frames sent: {sent}"
+        ) from failure
+    return ws.frames
 
 
-def test_seeding_failure_after_admission_releases_the_claim(
+async def test_seeding_failure_after_admission_releases_the_claim(
     mock_app_factory, coordinator, server, monkeypatch
 ):
+    injected = RuntimeError("seeding blew up")
+
     async def boom(*_args, **_kwargs):
-        raise RuntimeError("seeding blew up")
+        raise injected
 
     monkeypatch.setattr(main, "_seed_run_session_files", boom)
-    _run_until_the_handler_fails(_chat_frame())
+    frames = await _run_until_the_handler_fails(_chat_frame(), injected)
+    assert "run_started" not in [f["type"] for f in frames]
 
     record = _only_record()
     assert record.status == RunStatus.FAILED
     assert record.task is None
-    _wait_released(coordinator, server)
+    await _wait_released(coordinator, server)
     shared = fakeredis.FakeRedis(server=server, decode_responses=True).hgetall(
         coordinator.keys.run(record.run_id)
     )
@@ -143,46 +167,87 @@ def test_seeding_failure_after_admission_releases_the_claim(
     assert shared["lease_expires_at"] == "0"
 
 
-def test_run_started_send_failure_releases_the_claim(
-    mock_app_factory, coordinator, server, monkeypatch
-):
-    """The other await in the window: the ``run_started`` frame cannot be sent."""
+def _refuse_run_started(monkeypatch, injected):
     from starlette.websockets import WebSocket
 
     real_send = WebSocket.send_json
+    refused = []
 
     async def refuse_run_started(self, data, *args, **kwargs):
         if isinstance(data, dict) and data.get("type") == "run_started":
-            raise RuntimeError("socket gone")
+            refused.append(data)
+            raise injected
         return await real_send(self, data, *args, **kwargs)
 
     monkeypatch.setattr(WebSocket, "send_json", refuse_run_started)
-    _run_until_the_handler_fails(_chat_frame())
+    return refused
 
+
+async def test_run_started_send_failure_releases_the_claim(
+    mock_app_factory, coordinator, server, monkeypatch
+):
+    """The other await in the window: the ``run_started`` frame cannot be sent."""
+    injected = RuntimeError("socket gone")
+    refused = _refuse_run_started(monkeypatch, injected)
+    frames = await _run_until_the_handler_fails(_chat_frame(), injected)
+
+    # The failure came from the one send this test refuses, for the run the
+    # registry admitted, and that frame never reached the client.
     record = _only_record()
+    assert [f["run_id"] for f in refused] == [record.run_id]
+    assert "run_started" not in [f["type"] for f in frames]
     assert record.status == RunStatus.FAILED
-    _wait_released(coordinator, server)
+    await _wait_released(coordinator, server)
     # The conversation is free for the next turn on any replica.
     mock_app_factory.create_chat_service.return_value.handle_chat_message.assert_not_called()
 
 
-def test_successful_turn_holds_then_releases_the_claim(mock_app_factory, coordinator, server):
+async def test_a_turn_that_never_reaches_the_window_is_a_bounded_failure(
+    mock_app_factory, coordinator, monkeypatch
+):
+    """Why this file has deadlines (#1203): a refused turn is not the failure.
+
+    When admission refuses the turn the handler sends an error frame and goes
+    back to waiting for the client, so ``run_started`` is never attempted and
+    nothing is ever raised. A client blocked in ``receive_json()`` would wait
+    forever; this one fails in bounded time, names the error frame it did
+    get, and is not the injected ``RuntimeError``.
+    """
+    from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+
+    async def down(**_kwargs):
+        raise RunCoordinationUnavailableError("ConnectionError")
+
+    monkeypatch.setattr(coordinator, "claim", down)
+    injected = RuntimeError("socket gone")
+    refused = _refuse_run_started(monkeypatch, injected)
+
+    with pytest.raises(WebSocketDeadlineError) as stalled:
+        await _run_until_the_handler_fails(_chat_frame(), injected, deadline=1.0)
+    assert not isinstance(stalled.value, RuntimeError)
+    assert "'error'" in str(stalled.value), "the report lists the frames received"
+    assert "websocket_endpoint" in str(stalled.value), "and where the handler is waiting"
+    assert refused == []
+
+
+async def test_successful_turn_holds_then_releases_the_claim(mock_app_factory, coordinator, server):
     """Control: with nothing failing, the claim is held while the run is live
     and released when it completes."""
-    client = TestClient(main.app)
-    with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
-        ws.send_json(_chat_frame())
-        while (frame := ws.receive_json())["type"] != "run_started":
-            pass
+    async with _connect() as ws:
+        await ws.send_json(_chat_frame())
+        frame = await ws.receive_until(
+            lambda f: f["type"] == "run_started", describe="the run_started frame"
+        )
         record = get_run_registry().get(frame["run_id"])
-        deadline = time.monotonic() + 5
-        while not record.is_terminal and time.monotonic() < deadline:
-            time.sleep(0.02)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while not record.is_terminal and loop.time() < deadline:
+            await asyncio.sleep(0.02)
     assert record.status == RunStatus.COMPLETED
-    _wait_released(coordinator, server)
+    await _wait_released(coordinator, server)
 
 
-def test_coordinator_outage_refuses_the_turn(mock_app_factory, coordinator, monkeypatch):
+async def test_a_coordinator_outage_refuses_the_turn(mock_app_factory, coordinator, monkeypatch):
     """Fail closed on the WebSocket: an error frame, no run, no untracked turn."""
     from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
 
@@ -190,18 +255,18 @@ def test_coordinator_outage_refuses_the_turn(mock_app_factory, coordinator, monk
         raise RunCoordinationUnavailableError("ConnectionError")
 
     monkeypatch.setattr(coordinator, "claim", down)
-    client = TestClient(main.app)
-    with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
-        ws.send_json(_chat_frame())
-        while (frame := ws.receive_json())["type"] == "run_status":
-            pass
+    async with _connect() as ws:
+        await ws.send_json(_chat_frame())
+        frame = await ws.receive_until(
+            lambda f: f["type"] != "run_status", describe="the frame answering the turn"
+        )
     assert frame["type"] == "error"
     assert frame["error_type"] == "run_coordination_unavailable"
     assert get_run_registry().records_for_user(USER) == []
     mock_app_factory.create_chat_service.return_value.handle_chat_message.assert_not_called()
 
 
-def test_any_other_admission_refusal_refuses_the_turn(mock_app_factory, coordinator, monkeypatch):
+async def test_any_other_admission_refusal_refuses_the_turn(mock_app_factory, coordinator, monkeypatch):
     """A future RunRegistryError subclass is refused, never run untracked."""
     from atlas.application.chat.runs.admission_errors import RunRegistryError
 
@@ -212,11 +277,11 @@ def test_any_other_admission_refusal_refuses_the_turn(mock_app_factory, coordina
         raise _NewRefusal("internal detail: shard 7")
 
     monkeypatch.setattr(main, "admit_run", refuse)
-    client = TestClient(main.app)
-    with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
-        ws.send_json(_chat_frame())
-        while (frame := ws.receive_json())["type"] == "run_status":
-            pass
+    async with _connect() as ws:
+        await ws.send_json(_chat_frame())
+        frame = await ws.receive_until(
+            lambda f: f["type"] != "run_status", describe="the frame answering the turn"
+        )
     assert frame["type"] == "error"
     assert frame["error_type"] == "run_not_admitted"
     assert "shard 7" not in frame["message"] and frame["message"]
