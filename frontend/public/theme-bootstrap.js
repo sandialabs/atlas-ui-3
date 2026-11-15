@@ -16,6 +16,16 @@
   var modes = {"dark":"dark","light":"light","mac7":"light","win95":"light","windows-xp-luna":"light","aqua-osx":"light","amiga-workbench":"light","nextstep":"light","beos":"light","teletext":"dark","crt-phosphor":"dark","dos-cga":"dark","8bit-arcade":"dark","frutiger-aero":"light","winamp-skin":"dark","geocities-web10":"dark","cassette-futurism":"dark","vaporwave":"dark","memphis":"dark","ps1-tech":"light","os2-warp":"light","macos9-platinum":"dark","web20-glossy":"light","gameboy-dmg":"dark","braun-rams":"light","tron-vector":"dark","vhs-tracking":"dark","risograph":"light","ibm-3270":"dark","nethack-ascii":"dark","templeos":"dark","bbs-ansi":"dark","midnight-commander":"dark","matrix-rain":"dark","btop-meters":"dark","c64-basic":"dark","flat-2013":"light","glassmorphism":"light","neumorphism":"light","blueprint-cad":"dark","claymorphism":"light","brutalist-web":"light","swiss-intl":"light","bauhaus":"light","pop-art-lichtenstein":"light","op-art":"dark","hypnagogic":"light","monochrome-zen":"light","default-browser":"light","wireframe-sketch":"light","glitch-databend":"dark","y2k-chrome":"light","duotone-poster":"light","grid-paper":"light","maximalist-banners":"light"};
   var script = document.currentScript;
   var runtime = script && script.getAttribute('data-retro-runtime');
+  var rawAllowed = script && script.getAttribute('data-allowed-themes');
+  var allowed = Object.create(null);
+  allowed.dark = true;
+  allowed.light = true;
+  if (typeof rawAllowed === 'string') {
+    rawAllowed.split(',').forEach(function (part) {
+      var key = part.trim().toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(modes, key)) allowed[key] = true;
+    });
+  }
   var retro = !!script && script.getAttribute('data-retro-themes') === 'true';
   if (runtime === 'false') retro = false;
   var id = 'dark';
@@ -29,7 +39,8 @@
       if (cached && cached.features && cached.features.retro_themes === false) retro = false;
     } catch { /* Invalid or inaccessible cache cannot override the stamped flag. */ }
   }
-  if (!retro && id !== 'dark' && id !== 'light') id = modes[id];
+  if (id !== 'dark' && id !== 'light' && (!retro || !allowed[id])) id = modes[id];
+  if (!allowed[id]) id = 'dark';
   document.documentElement.setAttribute('data-theme', modes[id]);
   document.documentElement.setAttribute('data-atlas-theme', id);
   var version = script && script.getAttribute('data-retro-css');

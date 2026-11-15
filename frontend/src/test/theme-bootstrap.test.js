@@ -12,7 +12,7 @@ const bootstrap = readFileSync('public/theme-bootstrap.js', 'utf8')
  */
 function firstPaint(saved, {
   blocked = false, retroBuild = 'true', cachedConfig = null, cachedConfigRaw = undefined,
-  runtime = null, cssVersion = null,
+  runtime = null, allowed = ALL_ALLOWED_THEMES, cssVersion = null,
   readyState = 'loading', written = [], appended = [],
 } = {}) {
   const attributes = {}
@@ -31,7 +31,8 @@ function firstPaint(saved, {
     document: {
       currentScript: {
         getAttribute: name => ({
-          'data-retro-themes': retroBuild, 'data-retro-runtime': runtime, 'data-retro-css': cssVersion,
+          'data-retro-themes': retroBuild, 'data-retro-runtime': runtime,
+          'data-allowed-themes': allowed, 'data-retro-css': cssVersion,
         })[name] ?? null,
       },
       documentElement: { setAttribute(key, value) { attributes[key] = value } },
@@ -46,6 +47,8 @@ function firstPaint(saved, {
   })
   return attributes
 }
+
+const ALL_ALLOWED_THEMES = THEME_REGISTRY.map(theme => theme.id).join(',')
 
 const retroThemes = THEME_REGISTRY.filter(theme => theme.reference)
 
@@ -171,12 +174,69 @@ describe('first-paint per-theme retro CSS (issue #1119 lazy loading)', () => {
     runInNewContext(bootstrap, {
       localStorage: { getItem: key => (key === 'atlas-theme' ? 'beos' : null) },
       document: {
-        currentScript: { getAttribute: name => (name === 'data-retro-css' ? 'v1' : 'true') },
+        currentScript: { getAttribute: name => (
+          name === 'data-retro-css' ? 'v1'
+            : name === 'data-allowed-themes' ? 'dark,light,beos' : 'true'
+        ) },
         documentElement: { setAttribute(key, value) { attributes[key] = value } },
         readyState: 'loading',
         write() { throw new Error('blocked') },
       },
     })
     expect(attributes).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'beos' })
+  })
+})
+
+
+describe('administrator theme allowlist at first paint (PR #1175)', () => {
+  it('defaults safely to Light/Dark when the server did not stamp a policy', () => {
+    expect(firstPaint('win95', { allowed: null })).toEqual({
+      'data-theme': 'light', 'data-atlas-theme': 'light',
+    })
+    expect(firstPaint('crt-phosphor', { allowed: null })).toEqual({
+      'data-theme': 'dark', 'data-atlas-theme': 'dark',
+    })
+  })
+
+  it('allows an explicitly approved theme but never one absent from the allowlist', () => {
+    expect(firstPaint('windows-xp-luna', { allowed: 'dark,light,windows-xp-luna' }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'windows-xp-luna' })
+    expect(firstPaint('win95', { allowed: 'dark,light,windows-xp-luna' }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
+  })
+
+  it('ignores unknown and prototype-related IDs in the administrator policy', () => {
+    for (const allowed of ['', 'unknown', '__proto__,constructor', 'win95ish']) {
+      expect(firstPaint('win95', { allowed }))
+        .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
+    }
+    expect(firstPaint('win95', { allowed: 'light, WIN95 , win95' }))
+      .toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'win95' })
+  })
+
+  it('stamped policy beats a stale cached allowlist and corrupt config JSON', () => {
+    const written = []
+    expect(firstPaint('win95', {
+      allowed: 'dark,light', runtime: 'true', cssVersion: 'abc123', written,
+      cachedConfig: { features: { retro_themes: true, allowed_themes: ['win95'] } },
+    })).toEqual({ 'data-theme': 'light', 'data-atlas-theme': 'light' })
+    expect(written).toEqual([])
+    expect(firstPaint('win95', {
+      allowed: 'dark,light', runtime: 'true', cachedConfigRaw: '{invalid-json',
+    })['data-atlas-theme']).toBe('light')
+  })
+
+  it('runtime/build flags still override an administrator allowlist', () => {
+    const policy = 'dark,light,win95'
+    expect(firstPaint('win95', { allowed: policy, runtime: 'false' })['data-atlas-theme']).toBe('light')
+    expect(firstPaint('win95', { allowed: policy, retroBuild: 'false' })['data-atlas-theme']).toBe('light')
+  })
+
+  it('never loads CSS for a revoked saved retro theme', () => {
+    const written = []
+    const appended = []
+    firstPaint('win95', { allowed: 'dark,light', cssVersion: 'v1', written, appended })
+    expect(written).toEqual([])
+    expect(appended).toEqual([])
   })
 })

@@ -37,8 +37,13 @@ beforeEach(() => {
   links().forEach(link => link.remove())
   document.documentElement.removeAttribute('data-atlas-theme')
   __resetRetroThemeCss('v1')
+  const policy = document.createElement('script')
+  policy.id = 'test-theme-admin-policy'
+  policy.setAttribute('data-allowed-themes', THEME_REGISTRY.map(theme => theme.id).join(','))
+  document.head.appendChild(policy)
 })
 afterEach(() => {
+  document.getElementById('test-theme-admin-policy')?.remove()
   vi.useRealTimers()
   __resetRetroThemeCss()
 })

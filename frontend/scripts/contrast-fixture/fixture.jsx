@@ -17,6 +17,8 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { MemoryRouter } from 'react-router-dom'
 import { ThemeProvider, useTheme } from '../../src/contexts/ThemeContext'
+import { THEME_REGISTRY } from '../../src/themes/themeRegistry'
+import ComplianceBanner from '../../src/components/ComplianceBanner'
 import { ToastProvider, DialogProvider } from '../../src/components/ui/ToastProvider'
 import { useToast } from '../../src/components/ui/toastContext'
 import Header from '../../src/components/Header'
@@ -194,7 +196,12 @@ const ELICITATION = {
 }
 
 function ThemeHandle() {
-  const { setTheme } = useTheme()
+  const { setTheme, setAllowedThemes } = useTheme()
+  // Browser contrast fixture intentionally enables all 55 locally bundled
+  // themes. Production still defaults to the administrator's Light/Dark policy.
+  useEffect(() => {
+    setAllowedThemes(THEME_REGISTRY.map(theme => theme.id))
+  }, [setAllowedThemes])
   useEffect(() => {
     window.__atlasContrastFixture = {
       setTheme(id) { flushSync(() => setTheme(id)) },
@@ -243,6 +250,21 @@ function Fixture() {
             <FixtureChatProvider value={{}}>
               {/* App.jsx desktop shell classes, so retro desktop fills apply. */}
               <div className="atlas-theme-desktop flex flex-col w-full bg-gray-900 text-gray-200">
+                {/* The real top-of-shell classification component; never a
+                    themed or hand-copied visual approximation. */}
+                <FixtureChatProvider value={{
+                  complianceEnabled: true,
+                  complianceLevels: [{
+                    name: 'CUI', aliases: [], allowed_with: ['CUI'],
+                    banner: { label: 'CONTROLLED UNCLASSIFIED INFORMATION',
+                      background_color: '#502B85', text_color: '#FFFFFF',
+                      pattern: { type: 'edge_stripes', color: '#9871B9', width: 8, angle: 45 } },
+                  }],
+                  activeComplianceFilter: 'CUI', activeConversationId: null,
+                  messages: [], activeConversationClassification: null,
+                }}>
+                  <Region name="classification-banner"><ComplianceBanner /></Region>
+                </FixtureChatProvider>
                 <Region name="header">
                   <Header
                     onToggleSidebar={noop} onToggleRag={noop} onToggleFiles={noop}
@@ -389,8 +411,70 @@ function Fixture() {
   )
 }
 
+// A focused render-only view for classification-banner screenshot evidence.
+// It mounts the real shell/banner/chrome; the context contains synthetic CUI
+// metadata and never connects to a backend or stores real protected data.
+function BannerProofView() {
+  const { themeDefinition } = useTheme()
+  return (
+    <FixtureChatProvider value={{
+      ...BASE_CHAT,
+      complianceEnabled: true,
+      complianceLevels: [{
+        name: 'CUI', aliases: [], allowed_with: ['CUI'],
+        banner: {
+          label: 'CONTROLLED UNCLASSIFIED INFORMATION',
+          background_color: '#502B85', text_color: '#FFFFFF',
+          pattern: { type: 'edge_stripes', color: '#9871B9', width: 8, angle: 45 },
+        },
+      }],
+      activeComplianceFilter: 'CUI',
+      activeConversationId: null, messages: [], activeConversationClassification: null,
+    }}>
+      <div className="atlas-theme-desktop flex flex-col w-full min-h-screen bg-gray-900 text-gray-200">
+        <ComplianceBanner />
+        <Header
+          onToggleSidebar={noop} onToggleRag={noop} onToggleFiles={noop}
+          onToggleCanvas={noop} onCloseCanvas={noop} onToggleSettings={noop}
+        />
+        <main className="p-8 space-y-5 max-w-4xl mx-auto w-full">
+          <h1 className="text-2xl font-semibold">Theme policy verification</h1>
+          <p className="text-sm text-gray-200">
+            Synthetic CUI classification banner. The banner stays independently
+            configured while the application theme changes.
+          </p>
+          <RetroWindow title={'Atlas UI 3 · ' + themeDefinition.name}>
+            <div className="space-y-3">
+              <p>Representative application content and native themed controls.</p>
+              <div className="flex gap-3">
+                <RetroButton>Secondary action</RetroButton>
+                <RetroButton variant="primary">Primary action</RetroButton>
+              </div>
+            </div>
+          </RetroWindow>
+          <RetroWorkbench />
+        </main>
+      </div>
+    </FixtureChatProvider>
+  )
+}
+function BannerProofRoot() {
+  return (
+    <ThemeProvider>
+      <ThemeHandle />
+      <MemoryRouter>
+        <ToastProvider>
+          <DialogProvider>
+            <BannerProofView />
+          </DialogProvider>
+        </ToastProvider>
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+}
+
 // Expand tool-call details (input arguments + output) like a user who opened them.
 try { localStorage.setItem('toolDetailsCollapsed', 'false') } catch { /* file:// storage */ }
 installFixtureFetch()
 const root = createRoot(document.getElementById('fixture-root'))
-flushSync(() => root.render(<Fixture />))
+flushSync(() => root.render(window.__atlasBannerOnly ? <BannerProofRoot /> : <Fixture />))

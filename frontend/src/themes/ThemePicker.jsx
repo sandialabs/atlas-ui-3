@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
-import { THEME_REGISTRY } from './themeRegistry'
+import { THEME_REGISTRY, isThemePermitted } from './themeRegistry'
 import { RetroWorkbench, RetroInput, RetroButton } from './RetroControls'
 import { readThemeFavorites, writeThemeFavorites } from './themeFavorites'
 
 /** Native radio controls preserve arrow-key navigation and screen-reader state. */
 export default function ThemePicker() {
-  const { theme, setTheme, themeDefinition } = useTheme()
+  const { theme, setTheme, themeDefinition, allowedThemeIds, retroThemesAvailable } = useTheme()
   const [filter, setFilter] = useState('')
   const [category, setCategory] = useState('all')
   // Keep known favorites even when this build hides retro IDs from THEME_REGISTRY.
@@ -15,10 +15,12 @@ export default function ThemePicker() {
   const [focusSelected, setFocusSelected] = useState(false)
   const selectedRadioRef = useRef(null)
   const query = filter.trim().toLowerCase()
-  const categories = Array.from(new Set(THEME_REGISTRY.map(entry => entry.era.split(' · ')[0]))).sort()
+  const permittedThemes = THEME_REGISTRY.filter(entry =>
+    isThemePermitted(entry.id, retroThemesAvailable, allowedThemeIds))
+  const categories = Array.from(new Set(permittedThemes.map(entry => entry.era.split(' · ')[0]))).sort()
   const favoriteIds = new Set(favorites)
   const currentIsFavorite = favoriteIds.has(theme)
-  const visibleThemes = THEME_REGISTRY.filter(entry =>
+  const visibleThemes = permittedThemes.filter(entry =>
     (category === 'all' || entry.era.split(' · ')[0] === category) &&
     (!favoritesOnly || favoriteIds.has(entry.id)) &&
     (!query || [entry.name, entry.era, entry.description, ...(entry.tags || [])]
@@ -95,7 +97,7 @@ export default function ThemePicker() {
         )}
       </div>
       <p className="text-xs text-gray-400" aria-live="polite">
-        Showing {visibleThemes.length} of {THEME_REGISTRY.length} themes
+        Showing {visibleThemes.length} of {permittedThemes.length} themes
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Interface theme">
         {visibleThemes.map(entry => (

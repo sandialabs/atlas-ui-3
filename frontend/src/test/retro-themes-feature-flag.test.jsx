@@ -6,7 +6,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { act, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsPanel from '../components/SettingsPanel'
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext'
 import { useChat } from '../contexts/ChatContext'
@@ -63,7 +63,12 @@ beforeEach(() => {
   localStorage.clear()
   document.documentElement.removeAttribute('data-theme')
   document.documentElement.removeAttribute('data-atlas-theme')
+  const policy = document.createElement('script')
+  policy.id = 'test-theme-admin-policy'
+  policy.setAttribute('data-allowed-themes', THEME_REGISTRY.map(theme => theme.id).join(','))
+  document.head.appendChild(policy)
 })
+afterEach(() => document.getElementById('test-theme-admin-policy')?.remove())
 
 describe('VITE_FEATURE_RETRO_THEMES build flag', () => {
   it('defaults on; only the literal "false" compiles the catalog out', () => {
@@ -221,5 +226,68 @@ describe('FEATURE_RETRO_THEMES_ENABLED run-time flag', () => {
     act(() => { screen.getByRole('button', { name: 'off' }).click() })
     expect(screen.getByTestId('t')).toHaveTextContent('light')
     expect(document.documentElement.getAttribute('data-atlas-theme')).toBe('light')
+  })
+})
+
+
+describe('ATLAS_ALLOWED_THEMES run-time administrator policy', () => {
+  it('hides denied themes and falls back without destroying saved preference', () => {
+    document.getElementById('test-theme-admin-policy')
+      .setAttribute('data-allowed-themes', 'dark,light,windows-xp-luna')
+    localStorage.setItem('atlas-theme', 'win95')
+    renderSettings(true)
+    expect(screen.getByTestId('active-theme')).toHaveTextContent('light')
+    expect(document.documentElement.getAttribute('data-atlas-theme')).toBe('light')
+    expect(screen.queryByRole('radio', { name: 'Windows 95' })).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Windows XP Luna' })).toBeInTheDocument()
+    expect(screen.getAllByRole('radio')).toHaveLength(3)
+    expect(localStorage.getItem('atlas-theme')).toBe('win95')
+  })
+
+  it('rejects injected setTheme calls when the target is not permitted', () => {
+    document.getElementById('test-theme-admin-policy')
+      .setAttribute('data-allowed-themes', 'dark,light')
+    function Attempt() {
+      const { setTheme, theme } = useTheme()
+      return <><output data-testid="chosen">{theme}</output>
+        <button onClick={() => setTheme('win95')}>Unauthorized selection</button></>
+    }
+    render(<ThemeProvider><Attempt /></ThemeProvider>)
+    act(() => { screen.getByRole('button', { name: 'Unauthorized selection' }).click() })
+    expect(screen.getByTestId('chosen')).toHaveTextContent('dark')
+    expect(localStorage.getItem('atlas-theme')).toBe('dark')
+  })
+
+  it('does not trust a stale cached policy over the current server stamp', () => {
+    document.getElementById('test-theme-admin-policy')
+      .setAttribute('data-allowed-themes', 'dark,light')
+    localStorage.setItem('atlas-theme', 'win95')
+    localStorage.setItem('chatui-config-cache', JSON.stringify({
+      features: { retro_themes: true, allowed_themes: ['dark', 'light', 'win95'] },
+    }))
+    renderSettings(true)
+    expect(screen.getByTestId('active-theme')).toHaveTextContent('light')
+    expect(screen.queryByRole('radio', { name: 'Windows 95' })).not.toBeInTheDocument()
+  })
+
+  it('updates allowed choices from the bridge when no authoritative stamp exists', () => {
+    document.getElementById('test-theme-admin-policy')?.remove()
+    localStorage.setItem('atlas-theme', 'win95')
+    function PolicyBridge({ value }) {
+      const { setAllowedThemes } = useTheme()
+      useEffect(() => { setAllowedThemes(value) }, [setAllowedThemes, value])
+      return null
+    }
+    const { rerender } = render(<ThemeProvider>
+      <PolicyBridge value={['dark', 'light', 'win95']} />
+      <ActiveTheme />
+    </ThemeProvider>)
+    expect(screen.getByTestId('active-theme')).toHaveTextContent('win95')
+    rerender(<ThemeProvider>
+      <PolicyBridge value={['dark', 'light']} />
+      <ActiveTheme />
+    </ThemeProvider>)
+    expect(screen.getByTestId('active-theme')).toHaveTextContent('light')
+    expect(localStorage.getItem('atlas-theme')).toBe('win95')
   })
 })

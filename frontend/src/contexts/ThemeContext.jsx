@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react'
 import {
   DEFAULT_THEME_ID, RETRO_THEMES_IN_BUILD, effectiveThemeId, getRegisteredTheme, isKnownThemeId,
+  isThemePermitted, normalizeAllowedThemes,
 } from '../themes/themeRegistry'
 import { forgetFailedRetroThemeCss, loadRetroThemeCss, retroThemeCssStatus } from '../themes/retroThemeCss'
 
@@ -35,6 +36,19 @@ function getStampedRetroRuntime() {
   return undefined
 }
 
+// First-paint policy comes from a server-stamped tag, never a stale config
+// cache. Without that tag (development/older servers), default to Light/Dark
+// until the current config bridge supplies an explicit allowlist.
+function getStampedAllowedThemes() {
+  try {
+    const raw = document.querySelector('script[data-allowed-themes]')
+      ?.getAttribute('data-allowed-themes')
+    return raw == null ? null : normalizeAllowedThemes(raw)
+  } catch {
+    return null
+  }
+}
+
 function getCachedRetroRuntime() {
   const stamped = getStampedRetroRuntime()
   if (stamped !== undefined) return stamped
@@ -63,8 +77,12 @@ export function ThemeProvider({ children }) {
   // features start from the same localStorage cache, so until /api/config
   // answers they would replay the stale value; ignore them when stamped.
   const [stamped] = useState(getStampedRetroRuntime)
+  const [stampedAllowedThemes] = useState(getStampedAllowedThemes)
+  const [allowedThemeIds, setAllowedThemeIds] = useState(
+    () => stampedAllowedThemes ?? normalizeAllowedThemes(null),
+  )
   const retroThemesAvailable = RETRO_THEMES_IN_BUILD && retroRuntime !== false
-  const wanted = effectiveThemeId(selectedTheme, retroThemesAvailable)
+  const wanted = effectiveThemeId(selectedTheme, retroThemesAvailable, allowedThemeIds)
   // Retro CSS loads per theme on demand (themes/retroThemeCss.js). Until the
   // wanted theme's sheet is in, keep showing the last theme whose CSS was
   // ready, so a switch never paints an unstyled retro ID; if it fails, use
@@ -73,9 +91,13 @@ export function ThemeProvider({ children }) {
   const [, cssSettled] = useReducer(count => count + 1, 0)
   const shown = useRef(null)
   const cssStatus = retroThemeCssStatus(wanted)
+  // A revoked theme must not remain visible while the replacement stylesheet
+  // is loading. Light/Dark are always available as a safe local fallback.
+  const previousPermitted = isThemePermitted(shown.current, retroThemesAvailable, allowedThemeIds)
   const theme = cssStatus === 'loaded' ? wanted
     : cssStatus === 'failed' ? getRegisteredTheme(wanted).mode
-      : (shown.current ?? wanted)
+      : (shown.current === null ? wanted
+        : previousPermitted ? shown.current : getRegisteredTheme(wanted).mode)
   const definition = getRegisteredTheme(theme)
 
   useEffect(() => {
@@ -98,16 +120,27 @@ export function ThemeProvider({ children }) {
   }, [theme, definition.mode, selectedTheme])
 
   const setTheme = useCallback(id => {
-    // Choosing a theme again retries a stylesheet that failed earlier.
-    if (typeof id === 'string' && isKnownThemeId(id)) {
-      forgetFailedRetroThemeCss(id)
-      cssSettled()
-    }
-    setSelectedTheme(current => {
-      const next = typeof id === 'function' ? id(current) : id
-      return isKnownThemeId(next) ? next : current
-    })
-  }, [])
+    const next = typeof id === 'function' ? id(selectedTheme) : id
+    // An injected UI event cannot write a disallowed retro selection or
+    // initiate a stylesheet fetch for it.
+    if (!isKnownThemeId(next) ||
+        !isThemePermitted(next, retroThemesAvailable, allowedThemeIds)) return
+    forgetFailedRetroThemeCss(next)
+    cssSettled()
+    setSelectedTheme(next)
+  }, [selectedTheme, retroThemesAvailable, allowedThemeIds])
+
+  // The stamped policy is authoritative for this page load. The ChatContext
+  // may replay stale cached features before /api/config has answered; those
+  // cached bytes cannot reinstate a revoked theme.
+  const setAllowedThemes = useCallback(value => {
+    if (stampedAllowedThemes !== null) return
+    const next = normalizeAllowedThemes(value)
+    setAllowedThemeIds(current =>
+      current.length === next.length && current.every((id, index) => id === next[index])
+        ? current : next,
+    )
+  }, [stampedAllowedThemes])
 
   // Called with features.retro_themes once /api/config(/shell) answers.
   // Anything but a boolean (an older backend without the field) is ignored,
@@ -129,6 +162,8 @@ export function ThemeProvider({ children }) {
       themeDefinition: definition,
       retroThemesAvailable,
       retroThemesInBuild: RETRO_THEMES_IN_BUILD,
+      allowedThemeIds,
+      setAllowedThemes,
       setRetroThemesEnabled,
     }}>
       {children}

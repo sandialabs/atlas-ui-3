@@ -51,12 +51,31 @@ running deployment:
 |---|---|---|---|
 | `VITE_FEATURE_RETRO_THEMES` | `npm run build` / Docker build (`ARG`) | `true` | Only the literal `false` compiles the 53 retro themes, their window chrome CSS, and the gallery out. The bundle then ships just Light and Dark (about 133 kB of CSS instead of about 380 kB). |
 | `FEATURE_RETRO_THEMES_ENABLED` | backend start-up | `false` | Exposed as `features.retro_themes` by `/api/config/shell` and `/api/config`. When false the gallery is hidden even in a build that contains it. |
+| `ATLAS_ALLOWED_THEMES` | backend start-up (no frontend rebuild) | `light,dark` | Administrator-approved theme IDs. Light/Dark always stay permitted; only explicitly listed, recognized retro themes appear in the gallery when both feature gates allow. Exposed as `features.allowed_themes` and stamped on `index.html` before first paint. |
 
 ```
 # Ship the catalog in the image (default) but keep it hidden:
 VITE_FEATURE_RETRO_THEMES=true
 FEATURE_RETRO_THEMES_ENABLED=false
+ATLAS_ALLOWED_THEMES=light,dark
 ```
+
+To permit selected retro styles without rebuilding the frontend, set the
+runtime flag and allowlist on the backend, for example:
+
+```
+FEATURE_RETRO_THEMES_ENABLED=true
+ATLAS_ALLOWED_THEMES=light,dark,windows-xp-luna,dos-cga
+```
+
+Unlisted or unrecognized theme IDs are never selectable. If a user's saved
+choice is revoked, Atlas shows that theme's safe Light/Dark base instead of
+rendering a restricted stylesheet. The saved choice and favorites remain in
+local storage so re-authorizing the theme restores the prior preference.
+The allowlist is read from the backend on each deployment restart; an image
+rebuild is not required. The server stamps its authoritative permitted IDs in
+`data-allowed-themes` before first paint, so a stale cached browser config
+cannot briefly show a revoked theme.
 
 When either flag is off, a user whose saved theme is a retro theme sees its base
 Light or Dark mode. The inline bootstrap script applies that fallback before

@@ -40,11 +40,15 @@ console.info(
 // feature off, a saved retro theme falls back to its own light/dark mode.
 function RetroThemeFeatureBridge() {
   const { features } = useChat()
-  const { setRetroThemesEnabled } = useTheme()
+  const { setRetroThemesEnabled, setAllowedThemes } = useTheme()
   const retroThemes = features?.retro_themes
+  const permittedThemes = features?.allowed_themes
   useEffect(() => {
     setRetroThemesEnabled(retroThemes)
   }, [retroThemes, setRetroThemesEnabled])
+  useEffect(() => {
+    setAllowedThemes(permittedThemes)
+  }, [permittedThemes, setAllowedThemes])
   return null
 }
 

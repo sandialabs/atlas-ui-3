@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext'
 import ThemePicker from '../themes/ThemePicker'
 import { FAVORITES_STORAGE_KEY, readThemeFavorites } from '../themes/themeFavorites'
+import { THEME_REGISTRY } from '../themes/themeRegistry'
 
 function ActiveTheme() {
   const { theme } = useTheme()
@@ -22,7 +23,12 @@ describe('the complete theme catalog favorites and selection recovery', () => {
     localStorage.clear()
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-atlas-theme')
+    const policy = document.createElement('script')
+    policy.id = 'test-theme-admin-policy'
+    policy.setAttribute('data-allowed-themes', THEME_REGISTRY.map(theme => theme.id).join(','))
+    document.head.appendChild(policy)
   })
+  afterEach(() => document.getElementById('test-theme-admin-policy')?.remove())
 
   it('persists favorite registered IDs and restores them when the gallery reopens', () => {
     const { unmount } = render(<Gallery />)

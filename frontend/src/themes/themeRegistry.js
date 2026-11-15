@@ -32,6 +32,7 @@ export const THEME_REGISTRY = Object.freeze([...BASE_THEMES, ...RETRO_CATALOG])
 export const RETRO_THEMES_IN_BUILD = RETRO_THEMES_BUILT && RETRO_CATALOG.length > 0
 
 export const DEFAULT_THEME_ID = 'dark'
+export const BASE_ALLOWED_THEMES = Object.freeze(['dark', 'light'])
 const themeById = new Map(THEME_REGISTRY.map(theme => [theme.id, theme]))
 
 export function getRegisteredTheme(id) {
@@ -59,9 +60,10 @@ function isRetroThemeId(id) {
  * its own light/dark base mode, so a Windows 95 user lands on Light rather
  * than the default Dark; unknown values still fall back to the default.
  */
-export function effectiveThemeId(id, retroAllowed = true) {
+export function effectiveThemeId(id, retroAllowed = true, allowedThemes = undefined) {
   if (isBaseThemeId(id)) return id
-  if (retroAllowed && themeById.has(id)) return id
+  if (retroAllowed && themeById.has(id) &&
+      (allowedThemes === undefined || isThemePermitted(id, retroAllowed, allowedThemes))) return id
   if (isRetroThemeId(id)) return RETRO_THEME_MODES[id]
   return DEFAULT_THEME_ID
 }
@@ -69,4 +71,26 @@ export function effectiveThemeId(id, retroAllowed = true) {
 /** Whether `id` is worth persisting: a base theme or any known retro ID. */
 export function isKnownThemeId(id) {
   return isBaseThemeId(id) || isRetroThemeId(id)
+}
+
+
+// A server-provided policy may only add known, bundled theme identities.
+// The base themes are always allowed, including for malformed or absent input.
+export function normalizeAllowedThemes(value) {
+  const ids = Array.isArray(value) ? value
+    : typeof value === 'string' ? value.split(',') : []
+  const allowed = new Set(BASE_ALLOWED_THEMES)
+  for (const raw of ids) {
+    if (typeof raw !== 'string') continue
+    const id = raw.trim().toLowerCase()
+    if (isKnownThemeId(id)) allowed.add(id)
+  }
+  return [...allowed]
+}
+
+/** No CSS may apply for an ID that policy, build or runtime excludes. */
+export function isThemePermitted(id, retroAllowed = true, allowedThemes = BASE_ALLOWED_THEMES) {
+  if (isBaseThemeId(id)) return true
+  return Boolean(retroAllowed && getRegisteredTheme(id) &&
+    normalizeAllowedThemes(allowedThemes).includes(id))
 }

@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext'
 import ThemePicker from '../themes/ThemePicker'
-import { DEFAULT_THEME_ID, THEME_REGISTRY, resolveThemeId } from '../themes/themeRegistry'
+import {
+  DEFAULT_THEME_ID, THEME_REGISTRY, resolveThemeId,
+  normalizeAllowedThemes, isThemePermitted, effectiveThemeId,
+} from '../themes/themeRegistry'
 import manifest from '../themes/vendor/retro-design-system/manifest.json'
 
 function Probe() {
@@ -20,8 +23,13 @@ describe('build-time theme registry', () => {
     localStorage.clear()
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-atlas-theme')
+    const policy = document.createElement('script')
+    policy.setAttribute('data-allowed-themes', THEME_REGISTRY.map(theme => theme.id).join(','))
+    policy.id = 'test-theme-admin-policy'
+    document.head.appendChild(policy)
   })
   afterEach(() => {
+    document.getElementById('test-theme-admin-policy')?.remove()
     document.documentElement.removeAttribute('data-theme')
     document.documentElement.removeAttribute('data-atlas-theme')
   })
@@ -158,5 +166,25 @@ describe('build-time theme registry', () => {
     expect(source).toHaveAttribute('href', 'https://github.com/NovusGFX/retro-design-system')
     expect(source).toHaveAttribute('rel', 'noopener noreferrer')
     expect(source).toHaveAttribute('target', '_blank')
+  })
+})
+
+
+describe('administrator theme policy normalization', () => {
+  it('permits only Light and Dark with no administrator policy', () => {
+    expect(normalizeAllowedThemes(null)).toEqual(['dark', 'light'])
+    expect(normalizeAllowedThemes([])).toEqual(['dark', 'light'])
+    expect(isThemePermitted('win95')).toBe(false)
+    expect(isThemePermitted('light')).toBe(true)
+  })
+  it('includes explicit known themes, rejects unknown IDs and never removes base themes', () => {
+    const allowed = normalizeAllowedThemes(['win95', 'win95', '__proto__', 'unknown', ' LIGHT '])
+    expect(allowed).toEqual(['dark', 'light', 'win95'])
+    expect(isThemePermitted('win95', true, allowed)).toBe(true)
+    expect(isThemePermitted('mac7', true, allowed)).toBe(false)
+    expect(isThemePermitted('win95', false, allowed)).toBe(false)
+    expect(effectiveThemeId('mac7', true, allowed)).toBe('light')
+    expect(effectiveThemeId('win95', true, allowed)).toBe('win95')
+    expect(effectiveThemeId('win95', false, allowed)).toBe('light')
   })
 })
