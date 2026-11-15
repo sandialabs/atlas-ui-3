@@ -13,7 +13,7 @@ def test_stamps_disabled_flag(tmp_path):
     path = tmp_path / "index.html"
     path.write_text(INDEX)
     html = render_spa_index(path, False)
-    assert '<script src="/theme-bootstrap.js" data-retro-runtime="false" data-retro-themes="true">' in html
+    assert '<script src="/theme-bootstrap.js" data-retro-runtime="false" data-allowed-themes="dark,light" data-retro-themes="true">' in html
     assert html.count("data-retro-runtime") == 1
 
 
@@ -64,3 +64,21 @@ def test_theme_bootstrap_script_is_served():
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "data-retro-runtime" in response.text
+
+
+
+def test_first_paint_stamps_allowlist_instead_of_cached_browser_policy(tmp_path):
+    path = tmp_path / "index.html"
+    path.write_text(INDEX)
+    html = render_spa_index(path, True, ["light", "dark", "win95", "javascript:bad", "win95"])
+    assert 'data-allowed-themes="dark,light,win95"' in html
+    assert "javascript:bad" not in html
+    assert html.count("data-allowed-themes") == 1
+
+
+def test_revoked_theme_is_not_stamped_even_if_request_lists_unknown_ids(tmp_path):
+    path = tmp_path / "index.html"
+    path.write_text(INDEX)
+    html = render_spa_index(path, False, ["win95", "unknown"])
+    assert 'data-retro-runtime="false"' in html
+    assert 'data-allowed-themes="dark,light,win95"' in html
