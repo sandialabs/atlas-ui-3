@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-11-10
+Last updated: 2026-11-13
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -331,6 +331,24 @@ For operational security, AI coding agents must never indicate which LLM or prov
 
 ### Auth Assumption
 In production, reverse proxy injects `X-User-Email` (after stripping client headers); dev falls back to test user.
+
+### Self-Contained Assets and Controlled Outbound Connectivity
+
+ATLAS runs in security-sensitive environments and must work in restricted or disconnected (air-gapped) deployments. Outbound requests can expose internal metadata or user activity, and they fail when the network is closed. ATLAS is therefore self-contained by default and must not make unapproved outbound requests to third-party services from either the frontend or the backend.
+
+All application dependencies and static assets -- including frontend themes, fonts, icons, JavaScript, CSS and images -- must be bundled with or hosted by ATLAS. This applies to both frontend and backend development.
+
+**Frontend:**
+- Do not load anything from an external CDN: no remote fonts, icons, stylesheets or scripts. Package the asset or serve it from ATLAS.
+- Do not add analytics, telemetry, or automatic requests to third-party APIs from the browser.
+- Same-origin requests to ATLAS and links the user chooses to open are not prohibited.
+
+**Backend:**
+- Do not introduce implicit outbound calls or unapproved third-party runtime dependencies.
+- External integrations such as model gateways, identity providers and MCP servers are allowed only when the deployment administrator explicitly configures and authorizes them, and they must respect the egress controls of the deployment.
+- Application startup and core functionality must not require an external network connection.
+
+Principle: Self-contained by default; external connectivity only when it is explicitly configured and authorized.
 
 ## Extend by Example
 
