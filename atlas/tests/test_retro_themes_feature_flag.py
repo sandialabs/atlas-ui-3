@@ -38,3 +38,47 @@ def test_config_endpoints_expose_flag(monkeypatch, enabled, path):
     resp = TestClient(app).get(path, headers=_headers())
     assert resp.status_code == 200
     assert resp.json()["features"]["retro_themes"] is enabled
+
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, ["dark", "light"]),
+        ("", ["dark", "light"]),
+        ("windows-xp-luna", ["dark", "light", "windows-xp-luna"]),
+        (" LIGHT, dark,win95, WIN95, unknown, https://evil.test", ["dark", "light", "win95"]),
+        ("bad-id,also-bad", ["dark", "light"]),
+    ],
+)
+def test_theme_allowlist_defaults_safely_and_filters_unknown_ids(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("ATLAS_ALLOWED_THEMES", raising=False)
+    else:
+        monkeypatch.setenv("ATLAS_ALLOWED_THEMES", raw)
+    settings = AppSettings(_env_file=None)
+    assert list(settings.allowed_theme_ids) == expected
+
+
+@pytest.mark.parametrize("path", ["/api/config/shell", "/api/config"])
+def test_both_config_endpoints_publish_only_approved_themes(monkeypatch, path):
+    app_settings = app_factory.get_config_manager().app_settings
+    monkeypatch.setattr(app_settings, "atlas_allowed_themes", "windows-xp-luna,unknown,win95")
+    response = TestClient(app).get(path, headers=_headers())
+    assert response.status_code == 200
+    assert response.json()["features"]["allowed_themes"] == [
+        "dark", "light", "windows-xp-luna", "win95"
+    ]
+
+
+def test_backend_theme_catalog_matches_generated_frontend(tmp_path):
+    import json
+    import re
+    from pathlib import Path
+    from atlas.core.theme_policy import RETRO_THEME_IDS
+
+    source = Path(__file__).parents[2] / "frontend/src/themes/retroThemeModes.generated.js"
+    text = source.read_text()
+    found = re.search(r"Object\.freeze\((\{.*?\})\)", text, re.S)
+    assert found is not None
+    assert frozenset(json.loads(found.group(1))) == RETRO_THEME_IDS
