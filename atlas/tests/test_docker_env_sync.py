@@ -155,6 +155,45 @@ def test_docker_compose_has_required_env_vars():
         )
 
 
+def is_valid_boolean_compose_value(flag: str, raw_value: str) -> bool:
+    """Accept literals or a Compose default bound to this exact feature flag.
+
+    A placeholder for a different variable, one without a boolean fallback,
+    or one containing extra shell syntax must not pass the static check.
+    """
+    if raw_value.lower() in ("true", "false"):
+        return True
+    match = re.fullmatch(
+        r"\$\{([A-Z_][A-Z0-9_]*):-(true|false)\}",
+        raw_value,
+    )
+    return match is not None and match.group(1) == flag
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("true", True),
+        ("false", True),
+        ("FALSE", True),
+        ("${FEATURE_RETRO_THEMES_ENABLED:-false}", True),
+        ("${FEATURE_RETRO_THEMES_ENABLED:-true}", True),
+        ("${OTHER_FLAG:-false}", False),
+        ("${FEATURE_RETRO_THEMES_ENABLED:-invalid}", False),
+        ("${FEATURE_RETRO_THEMES_ENABLED}", False),
+        ("${FEATURE_RETRO_THEMES_ENABLED:-false}garbage", False),
+        ("${FEATURE_RETRO_THEMES_ENABLED:-false:-true}", False),
+        ("${FEATURE_RETRO_THEMES_ENABLED:-False}", False),
+        ("${FEATURE_RETRO_THEMES_ENABLED:?required}", False),
+        ("$(exec something)", False),
+        ("yes", False),
+        ("", False),
+    ],
+)
+def test_boolean_compose_default_must_match_feature_name_and_boolean(value, expected):
+    assert is_valid_boolean_compose_value("FEATURE_RETRO_THEMES_ENABLED", value) is expected
+
+
 def test_docker_compose_env_var_values_reasonable():
     """Test that environment variable values in docker-compose.yml are reasonable.
 
@@ -168,8 +207,7 @@ def test_docker_compose_env_var_values_reasonable():
     # Check that boolean feature flags have boolean-like values
     feature_flags = [k for k in docker_compose_vars.keys() if k.startswith('FEATURE_')]
     for flag in feature_flags:
-        value = docker_compose_vars[flag].lower()
-        assert value in ['true', 'false'], (
+        assert is_valid_boolean_compose_value(flag, docker_compose_vars[flag]), (
             f"Feature flag '{flag}' has non-boolean value: '{docker_compose_vars[flag]}'"
         )
 
