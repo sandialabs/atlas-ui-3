@@ -45,6 +45,7 @@ def test_spa_routes_serve_stamped_index(monkeypatch, tmp_path):
     for route in ("/", "/admin/logview"):
         response = client.get(route, headers={"X-User-Email": "test@test.com"})
         assert response.status_code == 200
+        assert response.headers["Cache-Control"] == "no-store"
         if BOOTSTRAP_TAG in response.text:
             assert 'data-retro-runtime="false"' in response.text
 
@@ -82,3 +83,16 @@ def test_revoked_theme_is_not_stamped_even_if_request_lists_unknown_ids(tmp_path
     html = render_spa_index(path, False, ["win95", "unknown"])
     assert 'data-retro-runtime="false"' in html
     assert 'data-allowed-themes="dark,light,win95"' in html
+
+
+
+def test_compose_passes_runtime_theme_settings_through_with_safe_defaults():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    compose = (root / "docker-compose.yml").read_text()
+    env = (root / ".env.example").read_text()
+    assert "- ATLAS_ALLOWED_THEMES=${ATLAS_ALLOWED_THEMES:-light,dark}" in compose
+    assert "- FEATURE_RETRO_THEMES_ENABLED=${FEATURE_RETRO_THEMES_ENABLED:-false}" in compose
+    assert "\nATLAS_ALLOWED_THEMES=light,dark\n" in env
+    assert "\nFEATURE_RETRO_THEMES_ENABLED=false\n" in env

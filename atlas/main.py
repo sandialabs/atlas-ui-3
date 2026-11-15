@@ -1623,7 +1623,16 @@ static_dir = _package_static if _package_static.exists() else _dev_static
 def _spa_index_response() -> HTMLResponse:
     """index.html with the live retro-themes flag for the first-paint bootstrap."""
     settings = app_factory.get_config_manager().app_settings
-    return HTMLResponse(render_spa_index(static_dir / "index.html", settings.feature_retro_themes_enabled, settings.allowed_theme_ids))
+    # This HTML embeds live administrator theme policy and must never be
+    # replayed from a browser or intermediary cache after a revocation.
+    return HTMLResponse(
+        render_spa_index(
+            static_dir / "index.html",
+            settings.feature_retro_themes_enabled,
+            settings.allowed_theme_ids,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 if static_dir.exists():
