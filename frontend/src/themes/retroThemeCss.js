@@ -89,6 +89,13 @@ function waitFor(link, adopted) {
     // The bootstrap's parser-inserted <link> blocks module scripts, so by
     // now it has settled: Chrome leaves an empty sheet behind a 404, and the
     // split files are never empty, so no rules means it failed.
+    // Parser-inserted blocking CSS has settled before a module can adopt
+    // it. Failed/404 sheets may have no sheet and a long-gone error event;
+    // fall back immediately, not after the 15-second timeout.
+    // Dynamic, unmarked links can still be pending and must await events.
+    if (adopted && link.hasAttribute('data-atlas-theme-css-blocking')) {
+      return resolve(Boolean(link.sheet && sheetHasRules(link)))
+    }
     if (adopted && link.sheet) return resolve(sheetHasRules(link))
     let timer
     const done = ok => {

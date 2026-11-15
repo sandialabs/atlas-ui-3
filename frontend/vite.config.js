@@ -1,4 +1,5 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import crypto from 'crypto'
 import { readFileSync } from 'fs'
@@ -37,20 +38,6 @@ const logViteEnv = () => {
   console.log('')
 }
 
-logViteEnv()
-
-// Retro Design System themes (issue #1119): on unless the build sets
-// VITE_FEATURE_RETRO_THEMES=false. Off resolves `@atlas/retro-themes` to an
-// empty catalog, so no retro CSS or catalog entries enter the bundle, and the
-// first-paint bootstrap (index.html data-retro-themes) only applies Light/Dark.
-const retroThemesEnabled = retroThemesBuildEnabled()
-process.env.VITE_FEATURE_RETRO_THEMES = String(retroThemesEnabled)
-console.log(`[atlas-ui-3] Retro themes ${retroThemesEnabled ? 'included in' : 'compiled out of'} this build\n`)
-// Retro CSS is not bundled: retroCssPlugin emits /assets/retro/<id>.css per
-// theme, loaded on demand. The version busts caches when the sources change
-// and is empty (no retro CSS to load) when the flag is off.
-process.env.VITE_RETRO_CSS_VERSION = retroThemesEnabled ? retroCssVersion(readRetroCssSources()) : ''
-
 // Read app version: env var (Docker) -> atlas/version.py (local dev) -> 'unknown'
 function getAppVersion() {
   if (process.env.APP_VERSION) return process.env.APP_VERSION
@@ -74,7 +61,18 @@ function getGitHash() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Resolve the documented build flag from Vite's .env/.env.local files;
+  // explicit process/Docker build arguments take precedence.
+  const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'VITE_')
+  const retroThemesEnabled = retroThemesBuildEnabled({ ...env, ...process.env })
+  process.env.VITE_FEATURE_RETRO_THEMES = String(retroThemesEnabled)
+  process.env.VITE_RETRO_CSS_VERSION = retroThemesEnabled
+    ? retroCssVersion(readRetroCssSources()) : ''
+  logViteEnv()
+  console.log('[atlas-ui-3] Retro themes ' +
+    (retroThemesEnabled ? 'included in' : 'compiled out of') + ' this build\n')
+  return {
   plugins: [react(), retroCssPlugin(retroThemesEnabled)],
   resolve: {
     alias: {
@@ -125,4 +123,4 @@ export default defineConfig({
       }
     }
   }
-})
+}})

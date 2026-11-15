@@ -152,6 +152,33 @@ describe('retro theme CSS loader', () => {
     expect(linkFor('templeos')).toBeUndefined()
   })
 
+  it('fails immediately when a parser-blocking bootstrap CSS link already errored', async () => {
+    vi.useFakeTimers()
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.setAttribute(RETRO_CSS_ATTRIBUTE, 'vaporwave')
+    link.setAttribute('data-atlas-theme-css-blocking', 'true')
+    Object.defineProperty(link, 'sheet', { value: null })
+    document.head.appendChild(link)
+    expect(await loadRetroThemeCss('vaporwave')).toBe(false)
+    expect(retroThemeCssStatus('vaporwave')).toBe('failed')
+    expect(linkFor('vaporwave')).toBeUndefined()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('unmarked dynamic links still await an event when their sheet is null', async () => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.setAttribute(RETRO_CSS_ATTRIBUTE, 'vaporwave')
+    Object.defineProperty(link, 'sheet', { value: null })
+    document.head.appendChild(link)
+    const result = loadRetroThemeCss('vaporwave')
+    await Promise.resolve()
+    expect(retroThemeCssStatus('vaporwave')).toBe('pending')
+    link.dispatchEvent(new Event('error'))
+    expect(await result).toBe(false)
+  })
+
   it('re-loads a first-paint sheet at the end of <head> when app styles follow it (dev server)', async () => {
     localStorage.setItem('atlas-theme', 'nextstep')
     const early = document.createElement('link')

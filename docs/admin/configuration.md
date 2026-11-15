@@ -49,7 +49,7 @@ running deployment:
 
 | Variable | When it applies | Default | Effect |
 |---|---|---|---|
-| `VITE_FEATURE_RETRO_THEMES` | `npm run build` / Docker build (`ARG`) | `true` | Only the literal `false` compiles the 53 retro themes, their window chrome CSS, and the gallery out. The bundle then ships just Light and Dark (about 133 kB of CSS instead of about 380 kB). |
+| `VITE_FEATURE_RETRO_THEMES` | `npm run build` with `frontend/.env` / `frontend/.env.local`, shell environment, or Docker build (`ARG`) | `true` | Only the literal `false` compiles the 53 retro themes, their window chrome CSS, and the gallery out. Explicit shell/Docker variables override Vite env-file values. The bundle then ships just Light and Dark (about 133 kB of CSS instead of about 380 kB). |
 | `FEATURE_RETRO_THEMES_ENABLED` | backend start-up | `false` | Exposed as `features.retro_themes` by `/api/config/shell` and `/api/config`. When false the gallery is hidden even in a build that contains it. |
 | `ATLAS_ALLOWED_THEMES` | backend start-up (no frontend rebuild) | `light,dark` | Administrator-approved theme IDs. Light/Dark always stay permitted; only explicitly listed, recognized retro themes appear in the gallery when both feature gates allow. Exposed as `features.allowed_themes` and stamped on `index.html` before first paint. |
 

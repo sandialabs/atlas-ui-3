@@ -481,7 +481,7 @@ def theme_bootstrap(catalog):
             "    var href = '/assets/retro/' + id + '.css?v=' + encodeURIComponent(version);\n"
             "    try {\n"
             "      if (document.readyState === 'loading') {\n"
-            "        document.write('<link rel=\"stylesheet\" data-atlas-theme-css=\"' + id + '\" href=\"' + href + '\">');\n"
+            "        document.write('<link rel=\"stylesheet\" data-atlas-theme-css=\"' + id + '\" data-atlas-theme-css-blocking=\"true\" href=\"' + href + '\">');\n"
             "      } else {\n"
             "        var link = document.createElement('link');\n"
             "        link.rel = 'stylesheet';\n"

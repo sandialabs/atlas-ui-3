@@ -48,7 +48,7 @@
     var href = '/assets/retro/' + id + '.css?v=' + encodeURIComponent(version);
     try {
       if (document.readyState === 'loading') {
-        document.write('<link rel="stylesheet" data-atlas-theme-css="' + id + '" href="' + href + '">');
+        document.write('<link rel="stylesheet" data-atlas-theme-css="' + id + '" data-atlas-theme-css-blocking="true" href="' + href + '">');
       } else {
         var link = document.createElement('link');
         link.rel = 'stylesheet';

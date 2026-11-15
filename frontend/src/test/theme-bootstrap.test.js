@@ -141,7 +141,7 @@ describe('first-paint per-theme retro CSS (issue #1119 lazy loading)', () => {
     const written = []
     firstPaint(id, { cssVersion: 'abc123', written })
     expect(written).toEqual([
-      `<link rel="stylesheet" data-atlas-theme-css="${id}" href="/assets/retro/${id}.css?v=abc123">`,
+      `<link rel="stylesheet" data-atlas-theme-css="${id}" data-atlas-theme-css-blocking="true" href="/assets/retro/${id}.css?v=abc123">`,
     ])
   })
   it('appends the <link> when the document is no longer parsing', () => {

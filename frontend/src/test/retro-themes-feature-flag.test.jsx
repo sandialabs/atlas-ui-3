@@ -3,7 +3,10 @@
  * (FEATURE_RETRO_THEMES_ENABLED -> features.retro_themes) gates for the Retro
  * Design System gallery (issue #1119, maintainer request on PR #1175).
  */
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { act, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -77,6 +80,34 @@ describe('VITE_FEATURE_RETRO_THEMES build flag', () => {
     expect(retroThemesBuildEnabled({ VITE_FEATURE_RETRO_THEMES: '' })).toBe(true)
     expect(retroThemesBuildEnabled({ VITE_FEATURE_RETRO_THEMES: 'false' })).toBe(false)
     expect(retroThemesBuildEnabled({ VITE_FEATURE_RETRO_THEMES: ' FALSE ' })).toBe(false)
+  })
+
+  it('resolves .env/.env.local with Vite mode loading and honors shell override', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atlas-retro-env-'))
+    try {
+      writeFileSync(join(dir, '.env'), 'VITE_FEATURE_RETRO_THEMES=true\n')
+      writeFileSync(join(dir, '.env.local'), 'VITE_FEATURE_RETRO_THEMES=false\n')
+      // Run Vite's env loader in Node: Vitest's jsdom TextEncoder/Uint8Array
+      // globals are intentionally incompatible with esbuild in this process.
+      const env = { ...process.env }
+      delete env.VITE_FEATURE_RETRO_THEMES
+      const result = execFileSync(process.execPath, [
+        '--input-type=module', '-e',
+        "import {loadEnv} from 'vite'; process.stdout.write(JSON.stringify(loadEnv('production', process.argv[1], 'VITE_')))",
+        dir,
+      ], { cwd: process.cwd(), encoding: 'utf8', env })
+      const loaded = JSON.parse(result)
+      expect(loaded.VITE_FEATURE_RETRO_THEMES).toBe('false')
+      expect(retroThemesBuildEnabled(loaded)).toBe(false)
+      expect(retroThemesBuildEnabled({
+        ...loaded, VITE_FEATURE_RETRO_THEMES: 'true',
+      })).toBe(true)
+      const config = readFileSync('vite.config.js', 'utf8')
+      expect(config).toContain('loadEnv(mode,')
+      expect(config).toContain('retroThemesBuildEnabled({ ...env, ...process.env })')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('aliases @atlas/retro-themes to the enabled or the empty module', () => {
