@@ -1,11 +1,15 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext'
 import { RetroButton, RetroInput, RetroWindow, RetroWorkbench } from '../themes/RetroControls'
 import ThemePicker from '../themes/ThemePicker'
 
 function SetPreset() {
-  const { setTheme } = useTheme()
+  const { setTheme, setAllowedThemes } = useTheme()
+  // The original Windows 95 selection test must represent a deployment
+  // where an administrator has explicitly permitted that theme.
+  useEffect(() => { setAllowedThemes(['dark', 'light', 'win95']) }, [setAllowedThemes])
   return <button onClick={() => setTheme('win95')}>Select Windows 95</button>
 }
 

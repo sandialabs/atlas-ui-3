@@ -10,6 +10,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import SettingsPanel from '../components/SettingsPanel'
 import PromptSelector from '../components/PromptSelector'
 import { ThemeProvider } from '../contexts/ThemeContext'
+import { THEME_REGISTRY } from '../themes/themeRegistry'
 import { useChat } from '../contexts/ChatContext'
 import { OPEN_SETTINGS_EVENT } from '../utils/settingsPanelEvents'
 
@@ -75,6 +76,7 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     vi.clearAllMocks()
     localStorage.clear()
   })
+  afterEach(() => document.getElementById('test-combined-settings-allowlist')?.remove())
 
   it('is titled "Tools and Settings"', () => {
     renderPanel()
@@ -127,6 +129,12 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
   })
 
   it('lets a user choose an MIT Retro Design System theme from General settings', () => {
+    // The catalog is complete, but admins must explicitly permit its retro
+    // styles. This test exercises an all-themes-authorized deployment.
+    const policy = document.createElement('script')
+    policy.id = 'test-combined-settings-allowlist'
+    policy.setAttribute('data-allowed-themes', THEME_REGISTRY.map(entry => entry.id).join(','))
+    document.head.appendChild(policy)
     renderPanel({ initialTab: 'general' })
 
     const windows = screen.getByRole('radio', { name: 'Windows 95' })
