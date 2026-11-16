@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-16
+
+### Features
+- **#1200:** Add `Dockerfile.hardened`, a distroless, nonroot container image assembled from Chainguard Wolfi packages with no shell, package manager, pip or Node.js. Stdio MCP servers are opt-in at build time through `--build-arg ATLAS_STDIO_MCP_SERVERS="calculator ..."`; by default none are shipped. See `docs/admin/hardened-image.md`.
+
+### Fixes
+- **#1193:** A conversation reopened while its agent is still working no longer keeps the "Answer in progress" notice for the rest of the run: the notice is retired once newer tool steps appear, and stays only on a response that is genuinely still streaming.
+- **#1202:** Fix a startup hang when a stdio MCP server exits or stays silent as soon as it is spawned (for example a server listed in `mcp.json` whose script is not in the image). Startup discovery now gives up on the connection after `MCP_DISCOVERY_TIMEOUT` seconds and continues with the other servers.
+
+### Security
+- **#1197:** Added the self-contained assets and controlled outbound connectivity principle to AGENTS.md.
+- **#1205:** Updated the locked Pillow to 13.0.0 and soupsieve to 4.1 (both had open high-severity advisories), and raised the minimum Pillow to 13.0.0. The minimum supported Python is now 3.11.5 (was 3.11.0), because no patched soupsieve installs on 3.11.0-3.11.4.
+
+### Internal
+- **#1201:** Added UI consistency and progressive disclosure design principles to AGENTS.md
+- **#1203:** Backend tests can no longer stall the suite: every test now has a `pytest-timeout` limit, and the WebSocket admission-guard tests use a client whose waits have a real deadline and report what the handler was doing (#1203).
+
 ## [0.12.0] - 2026-11-09
 
 ### Features
