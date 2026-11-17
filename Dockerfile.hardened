@@ -62,7 +62,7 @@ RUN npm run build
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # Builder: Wolfi base with the same python-<minor> package as the final rootfs.
-FROM cgr.dev/chainguard/wolfi-base@sha256:94fa13e26d449f7d78dbcd02d12ea37a0da80d24fcc3e1f17b95d515dec607a7 AS python-build
+FROM cgr.dev/chainguard/wolfi-base@sha256:2c12da5496e21e99003b3db3b9246f025e53d533c4df334205391260f1e8f85b AS python-build
 USER root
 ARG ATLAS_PYTHON_MINOR
 ARG ATLAS_STDIO_MCP_SERVERS
@@ -116,7 +116,7 @@ RUN mkdir -p /skel/logs /skel/runtime/logs /skel/runtime/feedback /skel/runtime/
 # python-<minor>) installed with apk into a directory. apk, busybox and a shell
 # are never installed into it. The apk package database stays so scanners can
 # see the package inventory.
-FROM cgr.dev/chainguard/wolfi-base@sha256:94fa13e26d449f7d78dbcd02d12ea37a0da80d24fcc3e1f17b95d515dec607a7 AS rootfs
+FROM cgr.dev/chainguard/wolfi-base@sha256:2c12da5496e21e99003b3db3b9246f025e53d533c4df334205391260f1e8f85b AS rootfs
 USER root
 ARG ATLAS_PYTHON_MINOR
 # apk exits non-zero because its ldconfig trigger needs a shell inside the new
