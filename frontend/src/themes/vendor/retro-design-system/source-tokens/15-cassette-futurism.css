@@ -1,0 +1,17 @@
+/* Cassette Futurism — design tokens
+   Extracted from styles/15-cassette-futurism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0a0704;
+  --panel: #1a1510;
+  --panel-2: #241d15;
+  --bezel: #3a2f22;
+  --amber: #ffb000;
+  --amber-dim: #8a5c00;
+  --amber-bright: #ffd470;
+  --ink: #d9a85e;
+  --red-warn: #ff4422;
+  --green-ok: #5aff8a;
+  --font: "Orbitron", "Share Tech Mono", "Courier New", monospace;
+  --font-lcd: "VT323", "DS-Digital", monospace;
+}

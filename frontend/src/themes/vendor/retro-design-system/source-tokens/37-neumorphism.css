@@ -1,0 +1,12 @@
+/* Neumorphism — design tokens
+   Extracted from styles/37-neumorphism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #e0e5ec;
+  --ink: #4a5568;
+  --muted: #8a94a6;
+  --accent: #6c8cff;
+  --shadow-dark: #a3b1c6;
+  --shadow-light: #ffffff;
+  --font: "Inter", "SF Pro", "Segoe UI", system-ui, sans-serif;
+}

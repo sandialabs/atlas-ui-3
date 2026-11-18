@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
 from atlas.core.dotenv_policy import dotenv_loading_disabled
+from atlas.core.theme_policy import parse_allowed_themes
 from atlas.core.security_config import validate_capability_secret
 
 logger = logging.getLogger(__name__)
@@ -1179,6 +1180,24 @@ class AppSettings(BaseSettings):
         description="Enable AI-generated follow-up question suggestions after each chat response",
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
+    # Retro Design System theme gallery (issue #1119). Run-time switch; the
+    # catalog must also be in the frontend bundle (VITE_FEATURE_RETRO_THEMES,
+    # build-time, default on). Off hides the gallery and a saved retro theme
+    # falls back to its own Light/Dark base mode.
+    feature_retro_themes_enabled: bool = Field(
+        False,
+        description="Show the 53 Retro Design System themes in Settings (Light/Dark are always available)",
+        validation_alias=AliasChoices("FEATURE_RETRO_THEMES_ENABLED"),
+    )
+    atlas_allowed_themes: str = Field(
+        "light,dark",
+        description="Comma-separated, administrator-permitted theme IDs; Light/Dark are always available",
+        validation_alias=AliasChoices("ATLAS_ALLOWED_THEMES"),
+    )
+
+    @property
+    def allowed_theme_ids(self) -> tuple[str, ...]:
+        return parse_allowed_themes(self.atlas_allowed_themes)
 
     # Origin validation for the main chat WebSocket at /ws. A WS upgrade skips
     # the CORS preflight, so without this check any page the user visits can

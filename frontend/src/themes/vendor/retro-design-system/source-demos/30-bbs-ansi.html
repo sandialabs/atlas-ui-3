@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>30 BBS ANSI Art</title>
+<style>
+  :root {
+    --bg: #000000;
+    --black: #000000;
+    --red: #aa0000;
+    --red-hi: #ff5555;
+    --green: #00aa00;
+    --green-hi: #55ff55;
+    --yellow: #aa5500;
+    --yellow-hi: #ffff55;
+    --blue: #0000aa;
+    --blue-hi: #5555ff;
+    --magenta: #aa00aa;
+    --magenta-hi: #ff55ff;
+    --cyan: #00aaaa;
+    --cyan-hi: #55ffff;
+    --white: #aaaaaa;
+    --white-hi: #ffffff;
+    --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--white-hi);
+    font-family: var(--font);
+    font-size: 18px;
+    padding: 24px 8px;
+    min-height: 100vh;
+    line-height: 1;
+    letter-spacing: 0;
+    image-rendering: pixelated;
+    display: flex;
+    justify-content: center;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent 0 2px, rgba(0,0,0,0.25) 2px 3px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  pre {
+    font-family: var(--font);
+    font-size: 18px;
+    line-height: 1;
+    white-space: pre;
+  }
+  .container { max-width: 800px; }
+  .k  { color: var(--black); }  .K  { color: var(--white); }
+  .r  { color: var(--red); }    .R  { color: var(--red-hi); }
+  .g  { color: var(--green); }  .G  { color: var(--green-hi); }
+  .y  { color: var(--yellow); } .Y  { color: var(--yellow-hi); }
+  .b  { color: var(--blue); }   .B  { color: var(--blue-hi); }
+  .m  { color: var(--magenta);} .M  { color: var(--magenta-hi);}
+  .c  { color: var(--cyan); }   .C  { color: var(--cyan-hi); }
+  .w  { color: var(--white); }  .W  { color: var(--white-hi); }
+  .blink { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.3; } }
+  .cursor {
+    display: inline-block;
+    width: 10px; height: 18px;
+    background: var(--white-hi);
+    vertical-align: text-bottom;
+    animation: blink 0.5s steps(2) infinite;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+<pre>
+<span class="M">  ▄▄</span><span class="m">▄</span><span class="M">▄▄▄▄▄▄▄▄▄▄</span><span class="m">▄</span><span class="M">▄▄  ▄▄▄</span><span class="m">▄</span><span class="M">▄▄▄▄▄▄▄▄▄▄▄▄</span><span class="m">▄</span><span class="M">▄  ▄▄</span><span class="m">▄</span><span class="M">▄▄▄▄▄▄▄▄▄▄▄▄</span><span class="m">▄</span><span class="M">▄▄</span>
+<span class="M">  █</span><span class="C">▓▒░</span><span class="m">█</span><span class="K">████</span><span class="m">█</span><span class="C">░▒▓</span><span class="M">█  █</span><span class="C">▓▒░</span><span class="m">█</span><span class="K">██████████</span><span class="m">█</span><span class="C">░▒▓</span><span class="M">█  █</span><span class="C">▓▒░</span><span class="m">█</span><span class="K">██████████</span><span class="m">█</span><span class="C">░▒▓</span><span class="M">█</span>
+<span class="M">  █</span><span class="C">▓▒</span><span class="m">█</span><span class="K">█</span><span class="Y">▄▄▄▄▄▄</span><span class="K">█</span><span class="m">█</span><span class="C">▒▓</span><span class="M">█  █</span><span class="C">▓▒</span><span class="m">█</span><span class="K">█</span><span class="Y">▄</span><span class="K">█</span><span class="Y">▄▄▄▄▄▄▄▄</span><span class="K">█</span><span class="Y">▄</span><span class="K">█</span><span class="m">█</span><span class="C">▒▓</span><span class="M">█  █</span><span class="C">▓▒</span><span class="m">█</span><span class="K">█</span><span class="Y">▄</span><span class="K">██</span><span class="Y">▄▄▄▄▄▄</span><span class="K">██</span><span class="Y">▄</span><span class="K">█</span><span class="m">█</span><span class="C">▒▓</span><span class="M">█</span>
+<span class="M">  █</span><span class="C">▓</span><span class="m">█</span><span class="K">█</span><span class="Y">█</span><span class="R">▄▄</span><span class="R">▄▄</span><span class="Y">█</span><span class="K">█</span><span class="m">█</span><span class="C">▓</span><span class="M">█  █</span><span class="C">▓</span><span class="m">█</span><span class="K">██</span><span class="Y">▀</span><span class="K">█</span><span class="Y">▀</span><span class="R">▄▄▄▄▄▄</span><span class="Y">▀</span><span class="K">█</span><span class="Y">▀</span><span class="K">██</span><span class="m">█</span><span class="C">▓</span><span class="M">█  █</span><span class="C">▓</span><span class="m">█</span><span class="K">███</span><span class="Y">▀▀</span><span class="R">▄▄▄▄</span><span class="Y">▀▀</span><span class="K">███</span><span class="m">█</span><span class="C">▓</span><span class="M">█</span>
+<span class="M">  █</span><span class="m">█</span><span class="K">███</span><span class="R">▓▓</span><span class="K">███</span><span class="m">█</span><span class="M">█  █</span><span class="m">█</span><span class="K">████</span><span class="R">▀▀▓▓▓▓▀▀</span><span class="K">████</span><span class="m">█</span><span class="M">█  █</span><span class="m">█</span><span class="K">██████</span><span class="R">▓▓</span><span class="K">██████</span><span class="m">█</span><span class="M">█</span>
+<span class="M">  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀</span>
+<span class="C">        .···.     <span class="Y">T H E   N E O N   D R A G O N   B B S</span>     .···.</span>
+<span class="c">    ·· ------- 14400 BAUD · 3 NODES · FIDONET 1:218/4 -------- ··</span>
+
+<span class="Y">╔═══════════════════════════════════════════════════════════════╗</span>
+<span class="Y">║</span>  <span class="C">SysOp</span><span class="W">.....:</span> <span class="G">NovusGFX</span>         <span class="C">Location</span><span class="W">..:</span> <span class="M">Cleveland, OH</span>  <span class="Y">║</span>
+<span class="Y">║</span>  <span class="C">Software</span><span class="W">..:</span> <span class="G">Renegade v1.20</span>   <span class="C">Users</span><span class="W">.....:</span> <span class="M">347</span>            <span class="Y">║</span>
+<span class="Y">║</span>  <span class="C">Online</span><span class="W">....:</span> <span class="G">03:47 EST</span>        <span class="C">Calls Today</span><span class="W">:</span> <span class="M">11</span>             <span class="Y">║</span>
+<span class="Y">╚═══════════════════════════════════════════════════════════════╝</span>
+
+ <span class="R">▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓</span>
+ <span class="R">▓</span>                       <span class="Y">M A I N   M E N U</span>                       <span class="R">▓</span>
+ <span class="R">▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓</span>
+
+   <span class="C">[</span><span class="W">M</span><span class="C">]</span> <span class="G">Message Bases</span>          <span class="C">[</span><span class="W">F</span><span class="C">]</span> <span class="G">File Library</span>
+   <span class="C">[</span><span class="W">D</span><span class="C">]</span> <span class="G">Door Games</span>             <span class="C">[</span><span class="W">C</span><span class="C">]</span> <span class="G">Chat with SysOp</span>
+   <span class="C">[</span><span class="W">U</span><span class="C">]</span> <span class="G">User List</span>              <span class="C">[</span><span class="W">N</span><span class="C">]</span> <span class="G">News &amp; Bulletins</span>
+   <span class="C">[</span><span class="W">Y</span><span class="C">]</span> <span class="G">Your Settings</span>          <span class="C">[</span><span class="W">G</span><span class="C">]</span> <span class="R">Goodbye / Logoff</span>
+
+ <span class="m">─────────────────────────────────────────────────────────────────</span>
+
+ <span class="Y">▓</span> <span class="C">Doors Online</span><span class="W">:</span>   <span class="G">[1]</span> <span class="W">LORD II</span>       <span class="G">[2]</span> <span class="W">Trade Wars 2002</span>
+                <span class="G">[3]</span> <span class="W">BRE</span>           <span class="G">[4]</span> <span class="W">Global War</span>
+
+ <span class="Y">▓</span> <span class="C">Latest Files</span><span class="W">:</span>   <span class="M">IMPHOBIA.ZIP</span>    <span class="W">(</span><span class="Y">1994 · ACiD · 1.2M</span><span class="W">)</span>
+                <span class="M">FUTURE.ZIP</span>      <span class="W">(</span><span class="Y">1995 · iCE  · 640K</span><span class="W">)</span>
+
+ <span class="m">─────────────────────────────────────────────────────────────────</span>
+
+ <span class="C">Command</span><span class="W">:</span> <span class="Y">_<span class="cursor"></span></span>
+
+ <span class="b">[</span><span class="C">Alt-H</span><span class="b">]</span><span class="W">Help</span> <span class="b">[</span><span class="C">Alt-J</span><span class="b">]</span><span class="W">Jump</span> <span class="b">[</span><span class="C">Alt-X</span><span class="b">]</span><span class="W">Hangup</span> <span class="blink"><span class="R">●REC●</span></span> <span class="G">CONNECT 14400</span>
+</pre>
+</div>
+</body>
+</html>

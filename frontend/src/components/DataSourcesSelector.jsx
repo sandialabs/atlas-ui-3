@@ -31,10 +31,10 @@ const DataSourcesSelector = () => {
   // Helper to get badge color
   const getComplianceBadgeColor = (level) => {
     switch (level) {
-      case 'SOC2': return 'bg-red-600 text-white'
-      case 'Internal': return 'bg-yellow-600 text-gray-900'
-      case 'Public': return 'bg-green-600 text-white'
-      default: return 'bg-gray-500 text-gray-50'
+      case 'SOC2': return 'atlas-status-red'
+      case 'Internal': return 'atlas-status-yellow'
+      case 'Public': return 'atlas-status-green'
+      default: return 'atlas-status-neutral'
     }
   }
 
@@ -132,7 +132,7 @@ const DataSourcesSelector = () => {
           <button
             onClick={enableAll}
             disabled={filteredDataSources.length === 0}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-700 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-700 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white disabled:text-gray-50 text-sm font-medium rounded-lg transition-colors"
           >
             <CheckSquare className="w-4 h-4" />
             Enable All

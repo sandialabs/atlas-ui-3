@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>38 Blueprint / CAD</title>
+<style>
+  :root {
+    --bg: #0d3a6b;
+    --bg-dark: #082852;
+    --line: #c0daf4;
+    --line-dim: #6892c4;
+    --ink: #eaf2fb;
+    --red: #ff6b6b;
+    --yellow: #ffe066;
+    --font: "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    background-image:
+      linear-gradient(to right, rgba(192,218,244,0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(192,218,244,0.08) 1px, transparent 1px),
+      linear-gradient(to right, rgba(192,218,244,0.16) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(192,218,244,0.16) 1px, transparent 1px);
+    background-size: 10px 10px, 10px 10px, 50px 50px, 50px 50px;
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 30px;
+    min-height: 100vh;
+    line-height: 1.4;
+    letter-spacing: 1px;
+  }
+  .sheet { max-width: 860px; margin: 0 auto; border: 2px solid var(--line); padding: 20px; background: rgba(8,40,82,0.3); }
+  .title-block { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; border: 2px solid var(--line); margin-bottom: 20px; }
+  .title-block > div { padding: 8px 12px; border-right: 1px solid var(--line-dim); font-family: var(--font-mono); font-size: 11px; }
+  .title-block > div:last-child { border-right: none; }
+  .title-block .lbl { color: var(--line-dim); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 2px; }
+  .title-block .val { color: var(--ink); font-size: 13px; letter-spacing: 1px; }
+  h1 { font-family: var(--font-mono); font-size: 32px; letter-spacing: 6px; text-transform: uppercase; color: var(--ink); margin-bottom: 4px; }
+  h1::before, h1::after { content: "—"; color: var(--line-dim); margin: 0 12px; }
+  h2 { font-family: var(--font-mono); font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--yellow); margin: 20px 0 8px; border-bottom: 1px dashed var(--line-dim); padding-bottom: 4px; }
+  p { font-family: var(--font-mono); line-height: 1.6; color: var(--line); margin-bottom: 6px; }
+  .diagram { height: 280px; border: 1px solid var(--line); margin: 10px 0; position: relative; padding: 20px; }
+  .shape {
+    position: absolute;
+    border: 1.5px solid var(--line);
+  }
+  .rect { top: 40px; left: 40px; width: 180px; height: 120px; }
+  .rect::before { content: ""; position: absolute; top: 20px; left: 20px; width: 140px; height: 80px; border: 1px dashed var(--line-dim); }
+  .circ { top: 70px; right: 60px; width: 120px; height: 120px; border-radius: 50%; }
+  .circ::before { content: "+"; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: var(--red); font-size: 24px; }
+  .dim-h {
+    position: absolute;
+    top: 185px; left: 40px; width: 180px;
+    border-top: 1px solid var(--yellow);
+    text-align: center;
+    padding-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--yellow);
+  }
+  .dim-h::before, .dim-h::after { content: ""; position: absolute; top: -6px; width: 1px; height: 12px; background: var(--yellow); }
+  .dim-h::before { left: 0; } .dim-h::after { right: 0; }
+  .dim-v {
+    position: absolute;
+    top: 40px; left: 10px; height: 120px;
+    border-left: 1px solid var(--yellow);
+    writing-mode: vertical-rl;
+    padding-left: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--yellow);
+  }
+  .dim-v::before, .dim-v::after { content: ""; position: absolute; left: -6px; width: 12px; height: 1px; background: var(--yellow); }
+  .dim-v::before { top: 0; } .dim-v::after { bottom: 0; }
+  .callout { position: absolute; bottom: 20px; right: 20px; border: 1px solid var(--red); border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--red); font-family: var(--font-mono); font-weight: bold; font-size: 13px; }
+  .callout::before { content: ""; position: absolute; top: 50%; right: 100%; width: 40px; height: 1px; background: var(--red); }
+  .btn { font-family: var(--font-mono); font-size: 11px; background: transparent; color: var(--ink); border: 1.5px solid var(--line); padding: 8px 18px; cursor: pointer; letter-spacing: 2px; text-transform: uppercase; }
+  .btn:hover { background: var(--line); color: var(--bg); }
+  .btn-yellow { color: var(--yellow); border-color: var(--yellow); }
+  .btn-red { color: var(--red); border-color: var(--red); }
+  .input { font-family: var(--font-mono); font-size: 13px; background: transparent; color: var(--ink); border: 1.5px solid var(--line); padding: 8px 12px; width: 320px; letter-spacing: 2px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 64px; height: 64px; border: 1.5px solid var(--line); display: inline-block; position: relative; }
+  .swatch::after { content: attr(data-hex); position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px; color: var(--line-dim); }
+  .scale-bar { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--line-dim); margin-top: 10px; }
+  .scale-bar .tick { width: 80px; height: 1px; background: var(--line); position: relative; }
+  .scale-bar .tick::before, .scale-bar .tick::after { content: ""; position: absolute; top: -4px; width: 1px; height: 8px; background: var(--line); }
+  .scale-bar .tick::before { left: 0; } .scale-bar .tick::after { right: 0; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="title-block">
+    <div><div class="lbl">Project</div><div class="val">RETRO DESIGN SYS</div></div>
+    <div><div class="lbl">Drawing №</div><div class="val">RDS-038-A</div></div>
+    <div><div class="lbl">Scale</div><div class="val">1 : 50</div></div>
+    <div><div class="lbl">Date</div><div class="val">2026-04-23</div></div>
+  </div>
+
+  <h1>Blueprint</h1>
+  <p style="text-align:center; color:var(--line-dim);">Technical drawing UI. White ink on cyanotype. Dimension ticks, callouts, title block, hatching.</p>
+
+  <h2>Assembly — Elevation A</h2>
+  <div class="diagram">
+    <div class="shape rect"></div>
+    <div class="shape circ"></div>
+    <div class="dim-h">180.00</div>
+    <div class="dim-v">120.00</div>
+    <div class="callout">1</div>
+  </div>
+
+  <div class="scale-bar">
+    <span>0</span><div class="tick">1m</div><div class="tick">2m</div><div class="tick">3m</div>
+  </div>
+
+  <h2>Parameters</h2>
+  <div class="row"><input class="input" value="WIDTH = 180.00 mm"></div>
+
+  <h2>Controls</h2>
+  <div class="row">
+    <button class="btn btn-yellow">Export DXF</button>
+    <button class="btn">Zoom Fit</button>
+    <button class="btn btn-red">Revert</button>
+    <button class="btn">Layers</button>
+  </div>
+
+  <h2>Line Weights</h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--bg)" data-hex="#0D3A6B"></span>
+    <span class="swatch" style="background:var(--line)" data-hex="#C0DAF4"></span>
+    <span class="swatch" style="background:var(--yellow)" data-hex="#FFE066"></span>
+    <span class="swatch" style="background:var(--red)" data-hex="#FF6B6B"></span>
+  </div>
+</div>
+</body>
+</html>

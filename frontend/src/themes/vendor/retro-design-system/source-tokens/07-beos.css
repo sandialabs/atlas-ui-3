@@ -1,0 +1,17 @@
+/* BeOS — design tokens
+   Extracted from styles/07-beos/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #2a5556;
+  --chrome: #cfcfcf;
+  --chrome-light: #e8e8e8;
+  --chrome-lighter: #ffffff;
+  --chrome-dark: #888888;
+  --chrome-darker: #404040;
+  --yellow: #ffcc00;
+  --yellow-dark: #cc9900;
+  --red-dot: #e04040;
+  --teal: #006666;
+  --ink: #000;
+  --font: "Swiss 721", "Helvetica", "Swis721 BT", sans-serif;
+}

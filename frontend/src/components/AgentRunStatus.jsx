@@ -37,7 +37,7 @@ export default function AgentRunStatus({
       role="group"
       aria-label="Agent run status"
       data-testid="agent-run-status"
-      className="mb-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-blue-500/60 bg-blue-950/60 text-blue-100 flex items-center gap-2 sm:gap-3 min-w-0"
+      className="mb-2 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg border atlas-notice-info flex items-center gap-2 sm:gap-3 min-w-0"
     >
       <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden="true">
         <span className="animate-ping motion-reduce:animate-none absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -49,16 +49,16 @@ export default function AgentRunStatus({
       {/* Only the state text is a live region, so a step change announces
           "Agent is running, step 3" rather than the whole row and its Stop. */}
       <div className="min-w-0 flex-1" role="status" aria-live="polite" aria-atomic="true">
-        <div className="text-xs sm:text-sm font-semibold text-blue-50 max-sm:truncate">
+        <div className="text-xs sm:text-sm font-semibold max-sm:truncate">
           {title}
           {hasStep && !waitingForAnswer && (
-            <span className="font-normal text-blue-200"> · step {step}</span>
+            <span className="font-normal"> · step {step}</span>
           )}
         </div>
         {/* The explanation is screen-reader only on short windows and on phones,
             where it wrapped the row to three lines and repeated what the
             transcript already shows. */}
-        <div className={compact ? 'sr-only' : 'sr-only sm:not-sr-only text-xs text-blue-200'}>{subtitle}</div>
+        <div className={compact ? 'sr-only' : 'sr-only sm:not-sr-only text-xs'}>{subtitle}</div>
       </div>
       {/* Hidden on phones (under sm): there the composer's pinned Stop is the
           single stop control, because this row sits in the capped aux stack

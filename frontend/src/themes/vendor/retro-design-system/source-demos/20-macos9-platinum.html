@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>20 Mac OS 9 Platinum</title>
+<style>
+  :root {
+    --desktop: #808080;
+    --platinum: #dddddd;
+    --platinum-light: #f5f5f5;
+    --platinum-mid: #c5c5c5;
+    --platinum-dark: #858585;
+    --platinum-darker: #555555;
+    --stripe: #a0a0a0;
+    --accent: #3a62ab;
+    --ink: #000;
+    --font: "Charcoal", "Geneva", "Lucida Grande", sans-serif;
+    --font-body: "Geneva", "Lucida Grande", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--desktop);
+    background-image:
+      linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.05) 75%, transparent 75%);
+    background-size: 4px 4px;
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 12px;
+    padding: 30px;
+    min-height: 100vh;
+  }
+  .window {
+    background: var(--platinum);
+    border: 1px solid #000;
+    max-width: 760px;
+    margin-bottom: 24px;
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+    border-radius: 4px 4px 0 0;
+  }
+  .titlebar {
+    height: 18px;
+    background:
+      repeating-linear-gradient(to bottom,
+        var(--platinum-light) 0 1px,
+        var(--platinum) 1px 2px,
+        var(--stripe) 2px 3px,
+        var(--platinum) 3px 4px);
+    border-bottom: 1px solid var(--platinum-darker);
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    position: relative;
+    border-radius: 3px 3px 0 0;
+  }
+  .close-box {
+    width: 12px; height: 12px;
+    background: linear-gradient(135deg, var(--platinum-light), var(--platinum-dark));
+    border: 1px solid var(--platinum-darker);
+    border-radius: 2px;
+    margin-right: 8px;
+    cursor: pointer;
+  }
+  .title {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--platinum);
+    padding: 0 8px;
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: bold;
+  }
+  .zoom-box {
+    width: 12px; height: 12px;
+    background: linear-gradient(135deg, var(--platinum-light), var(--platinum-dark));
+    border: 1px solid var(--platinum-darker);
+    border-radius: 2px;
+    margin-left: auto;
+  }
+  .content { padding: 18px; background: var(--platinum-light); }
+  h1 {
+    font-family: var(--font);
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+  h2 {
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: bold;
+    margin: 16px 0 6px;
+  }
+  p { line-height: 1.5; margin-bottom: 8px; }
+  .btn {
+    font-family: var(--font);
+    font-size: 12px;
+    background: linear-gradient(to bottom, var(--platinum-light), var(--platinum-mid));
+    border: 1px solid var(--platinum-darker);
+    border-radius: 8px;
+    padding: 4px 18px;
+    cursor: pointer;
+    color: var(--ink);
+    min-width: 64px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+  }
+  .btn-default {
+    background: linear-gradient(to bottom, #5a86cf, var(--accent));
+    color: #fff;
+    border-color: #2a4880;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 0 0 2px rgba(58,98,171,0.3);
+    font-weight: bold;
+    animation: throb 1.8s ease-in-out infinite;
+  }
+  @keyframes throb { 50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 0 0 3px rgba(58,98,171,0.6); } }
+  .input {
+    font-family: var(--font-body);
+    font-size: 12px;
+    background: #fff;
+    border: 1px solid var(--platinum-darker);
+    border-top-color: #444;
+    padding: 4px 8px;
+    width: 320px;
+    border-radius: 2px;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .icon-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 10px 0; }
+  .mac-icon { text-align: center; font-size: 11px; }
+  .mac-icon-img {
+    width: 36px; height: 36px;
+    margin: 0 auto 4px;
+    background: linear-gradient(135deg, #f4d77b, #d4a017);
+    border: 1px solid var(--platinum-darker);
+    border-radius: 3px;
+    position: relative;
+  }
+  .mac-icon-img.doc { background: linear-gradient(135deg, #fff, #ccc); }
+  .mac-icon-img.app { background: linear-gradient(135deg, #ffb, #99c); border-radius: 50%; }
+  .mac-icon-img.hd { background: linear-gradient(135deg, #c5dff0, #4f8ecf); }
+  .swatch { width: 54px; height: 54px; border: 1px solid var(--platinum-darker); border-radius: 4px; display: inline-block; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+  .scrollbar {
+    position: absolute;
+    right: 1px; top: 19px; bottom: 0;
+    width: 15px;
+    background: linear-gradient(to right, var(--platinum-dark), var(--platinum), var(--platinum-dark));
+    border-left: 1px solid var(--platinum-darker);
+  }
+  .menu-bar {
+    background: linear-gradient(to bottom, var(--platinum-light), var(--platinum));
+    border-bottom: 1px solid var(--platinum-darker);
+    padding: 2px 10px;
+    font-family: var(--font);
+    font-size: 13px;
+    margin: -30px -30px 20px;
+    display: flex;
+    gap: 14px;
+  }
+  .apple { font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="menu-bar">
+  <span class="apple">🍎</span>
+  <span><b>Finder</b></span>
+  <span>File</span><span>Edit</span><span>View</span><span>Special</span><span>Help</span>
+</div>
+<div class="window">
+  <div class="titlebar">
+    <div class="close-box"></div>
+    <div class="title">Macintosh HD</div>
+    <div class="zoom-box"></div>
+  </div>
+  <div class="content">
+    <h1>Mac OS 9 Platinum</h1>
+    <p>Brushed chrome pinstripes. Charcoal titles. Sherlock. Navigation Services. The last of the classic.</p>
+
+    <h2>Desktop</h2>
+    <div class="icon-grid">
+      <div class="mac-icon"><div class="mac-icon-img hd"></div>Macintosh HD</div>
+      <div class="mac-icon"><div class="mac-icon-img"></div>Documents</div>
+      <div class="mac-icon"><div class="mac-icon-img app"></div>SimpleText</div>
+      <div class="mac-icon"><div class="mac-icon-img doc"></div>ReadMe</div>
+    </div>
+
+    <h2>Find File</h2>
+    <div class="row"><input class="input" value="Sherlock search:"></div>
+
+    <h2>Dialog</h2>
+    <div class="row">
+      <button class="btn btn-default">OK</button>
+      <button class="btn">Cancel</button>
+      <button class="btn">Don't Save</button>
+    </div>
+
+    <h2>Palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--platinum)"></span>
+      <span class="swatch" style="background:var(--platinum-mid)"></span>
+      <span class="swatch" style="background:var(--platinum-dark)"></span>
+      <span class="swatch" style="background:var(--accent)"></span>
+      <span class="swatch" style="background:#f4d77b"></span>
+      <span class="swatch" style="background:#000"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

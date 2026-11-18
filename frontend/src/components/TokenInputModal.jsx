@@ -155,7 +155,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
           </div>
 
           {error && (
-            <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-300 text-sm">
+            <div className="p-3 atlas-notice-danger border rounded-lg text-sm">
               {error}
             </div>
           )}
@@ -164,7 +164,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
         <div className="flex justify-end gap-3 mt-6">
           <button
             onClick={handleClose}
-            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors"
+            className="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 transition-colors text-gray-50"
           >
             Cancel
           </button>
@@ -172,7 +172,7 @@ const TokenInputModal = ({ isOpen, serverName, onClose, onUpload, isLoading, err
             ref={submitRef}
             onClick={handleSubmit}
             disabled={!tokenInput.trim() || isLoading}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50 text-white"
           >
             {isLoading ? (
               <RefreshCw className="w-4 h-4 animate-spin" />

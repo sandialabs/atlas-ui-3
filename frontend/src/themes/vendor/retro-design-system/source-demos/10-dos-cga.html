@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>10 MS-DOS CGA</title>
+<style>
+  :root {
+    --c-black: #000000;
+    --c-blue: #0000aa;
+    --c-blue-bright: #5555ff;
+    --c-green: #00aa00;
+    --c-cyan: #00aaaa;
+    --c-cyan-bright: #55ffff;
+    --c-red: #aa0000;
+    --c-magenta: #aa00aa;
+    --c-brown: #aa5500;
+    --c-gray: #aaaaaa;
+    --c-dgray: #555555;
+    --c-yellow: #ffff55;
+    --c-white: #ffffff;
+    --font: "Perfect DOS VGA 437", "IBM Plex Mono", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--c-blue);
+    color: var(--c-gray);
+    font-family: var(--font);
+    font-size: 18px;
+    padding: 24px;
+    min-height: 100vh;
+    image-rendering: pixelated;
+    line-height: 1.2;
+  }
+  .screen {
+    background: var(--c-blue);
+    border: none;
+    padding: 20px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .titlebar {
+    background: var(--c-gray);
+    color: var(--c-blue);
+    padding: 1px 8px;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--c-dgray);
+  }
+  .win-norton {
+    background: var(--c-blue);
+    color: var(--c-yellow);
+    border: 2px solid var(--c-white);
+    padding: 12px 20px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .win-norton::before {
+    content: "┌";
+    position: absolute; top: -2px; left: -2px;
+  }
+  h1 { color: var(--c-yellow); font-size: 28px; margin-bottom: 8px; font-weight: normal; }
+  h2 { color: var(--c-cyan-bright); font-size: 20px; margin: 16px 0 6px; font-weight: normal; }
+  p { color: var(--c-gray); margin-bottom: 6px; }
+  .ascii-box { font-family: var(--font); white-space: pre; color: var(--c-white); line-height: 1; font-size: 18px; }
+  .bg-cyan { background: var(--c-cyan); color: var(--c-black); padding: 0 6px; }
+  .bg-red { background: var(--c-red); color: var(--c-white); padding: 0 6px; }
+  .bg-gray { background: var(--c-gray); color: var(--c-black); padding: 0 6px; }
+  .bg-white { background: var(--c-white); color: var(--c-black); padding: 0 6px; }
+  .yellow { color: var(--c-yellow); }
+  .white { color: var(--c-white); }
+  .cyan { color: var(--c-cyan-bright); }
+  .green { color: var(--c-green); }
+  .magenta { color: var(--c-magenta); }
+  .btn {
+    font-family: var(--font);
+    font-size: 18px;
+    background: var(--c-gray);
+    color: var(--c-black);
+    border: none;
+    padding: 0 12px;
+    cursor: pointer;
+  }
+  .btn .hot { color: var(--c-red); font-weight: bold; }
+  .btn-selected { background: var(--c-white); color: var(--c-black); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .menubar {
+    background: var(--c-gray);
+    color: var(--c-black);
+    padding: 1px 8px;
+    display: flex;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .menubar span .hot { color: var(--c-red); }
+  .panel {
+    border: 2px solid var(--c-white);
+    padding: 8px 14px;
+    margin: 10px 0;
+    color: var(--c-white);
+  }
+  .file-list { background: var(--c-blue); color: var(--c-white); border: 2px solid var(--c-cyan); padding: 8px; }
+  .file-list .sel { background: var(--c-cyan); color: var(--c-blue); }
+  .palette { display: grid; grid-template-columns: repeat(8, 40px); gap: 2px; margin: 10px 0; }
+  .palette div { height: 40px; border: 1px solid var(--c-black); }
+  .statusbar { background: var(--c-cyan); color: var(--c-black); padding: 0 8px; display: flex; gap: 18px; margin-top: 14px; }
+  .statusbar .hot { color: var(--c-red); font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="menubar">
+    <span><span class="hot">F</span>ile</span>
+    <span><span class="hot">E</span>dit</span>
+    <span><span class="hot">V</span>iew</span>
+    <span><span class="hot">R</span>un</span>
+    <span><span class="hot">H</span>elp</span>
+  </div>
+
+  <div class="win-norton">
+    <pre class="ascii-box">╔══════════════════════════════════════════╗
+║  <span class="white">NORTON COMMANDER 5.0</span>                    ║
+║  <span class="cyan">C:\DOS\</span>                                ║
+╚══════════════════════════════════════════╝</pre>
+
+    <h1>IBM PC / MS-DOS</h1>
+    <p>16-color EGA palette. ANSI box-drawing characters. Fixed 80×25 grid. Function keys down the bottom.</p>
+
+    <h2>PALETTE</h2>
+    <div class="palette">
+      <div style="background:#000"></div><div style="background:#00a"></div><div style="background:#0a0"></div><div style="background:#0aa"></div>
+      <div style="background:#a00"></div><div style="background:#a0a"></div><div style="background:#a50"></div><div style="background:#aaa"></div>
+      <div style="background:#555"></div><div style="background:#55f"></div><div style="background:#5f5"></div><div style="background:#5ff"></div>
+      <div style="background:#f55"></div><div style="background:#f5f"></div><div style="background:#ff5"></div><div style="background:#fff"></div>
+    </div>
+
+    <h2>FILE LIST</h2>
+    <pre class="file-list">   Name         Size   Date
+ <span style="background:var(--c-cyan); color:var(--c-blue)">..\              UP   04-22-26</span>
+ AUTOEXEC.BAT    126   04-22-26
+ CONFIG.SYS      284   04-22-26
+ COMMAND.COM   93,890  04-22-26
+ README.TXT    1,204   04-22-26</pre>
+
+    <h2>DIALOG</h2>
+    <div class="panel">
+      Copy 1 file<br>
+      from <span class="yellow">C:\DOS\*.*</span><br>
+      to <span class="yellow">A:\</span>
+      <div class="row">
+        <button class="btn btn-selected">[ <span class="hot">C</span>opy ]</button>
+        <button class="btn">[ <span class="hot">F</span>10 Tree ]</button>
+        <button class="btn">[ <span class="hot">Esc</span> Cancel ]</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span><span class="hot">1</span>Help</span>
+    <span><span class="hot">2</span>Menu</span>
+    <span><span class="hot">3</span>View</span>
+    <span><span class="hot">4</span>Edit</span>
+    <span><span class="hot">5</span>Copy</span>
+    <span><span class="hot">6</span>RenMov</span>
+    <span><span class="hot">7</span>Mkdir</span>
+    <span><span class="hot">8</span>Delete</span>
+    <span><span class="hot">9</span>PullDn</span>
+    <span><span class="hot">10</span>Quit</span>
+  </div>
+</div>
+</body>
+</html>

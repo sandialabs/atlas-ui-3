@@ -1,0 +1,18 @@
+/* Y2K Chrome Bubble — design tokens
+   Extracted from styles/50-y2k-chrome/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg-1: #d7f0ff;
+  --bg-2: #ffccee;
+  --bg-3: #e8d9ff;
+  --ink: #202030;
+  --chrome-hi: #ffffff;
+  --chrome-mid: #b8c4d8;
+  --chrome-low: #5a6478;
+  --pink: #ff6ab8;
+  --blue: #5ab8ff;
+  --green: #7aff9a;
+  --purple: #9a7aff;
+  --font: "Neue Haas Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Eurostile", "Bank Gothic", "Helvetica Neue", sans-serif;
+}

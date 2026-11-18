@@ -1,0 +1,14 @@
+/* Blueprint / CAD — design tokens
+   Extracted from styles/38-blueprint-cad/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #0d3a6b;
+  --bg-dark: #082852;
+  --line: #c0daf4;
+  --line-dim: #6892c4;
+  --ink: #eaf2fb;
+  --red: #ff6b6b;
+  --yellow: #ffe066;
+  --font: "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+}

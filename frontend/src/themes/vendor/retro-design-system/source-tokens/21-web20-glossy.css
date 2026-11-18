@@ -1,0 +1,18 @@
+/* Web 2.0 Glossy — design tokens
+   Extracted from styles/21-web20-glossy/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #e8f0f7;
+  --panel: #ffffff;
+  --sky-1: #a8d0f0;
+  --sky-2: #d4e8f7;
+  --blue: #2a7ac9;
+  --blue-light: #62a8e8;
+  --blue-dark: #1e5a9c;
+  --orange: #ff8c1a;
+  --orange-dark: #d96f00;
+  --green: #7ab800;
+  --ink: #2a2a2a;
+  --muted: #6a7a8a;
+  --font: "Lucida Grande", "Trebuchet MS", "Helvetica Neue", Arial, sans-serif;
+}

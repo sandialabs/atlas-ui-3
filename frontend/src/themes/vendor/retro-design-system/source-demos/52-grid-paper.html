@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>52 Grid Paper Notebook</title>
+<style>
+  :root {
+    --paper: #fafaf0;
+    --grid: rgba(64, 100, 160, 0.15);
+    --grid-major: rgba(64, 100, 160, 0.3);
+    --margin-red: rgba(200, 80, 80, 0.5);
+    --ink: #1a2847;
+    --pencil: #4a5a6e;
+    --red-ink: #c83030;
+    --green-ink: #2a7a3a;
+    --highlighter: rgba(255, 230, 100, 0.5);
+    --font: "Shadows Into Light", "Architects Daughter", "Comic Sans MS", cursive;
+    --font-neat: "Patrick Hand", "Kalam", cursive;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    background-image:
+      linear-gradient(to right, var(--grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid) 1px, transparent 1px),
+      linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+    background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+    color: var(--ink);
+    font-family: var(--font-neat);
+    font-size: 18px;
+    padding: 60px 40px 40px 80px;
+    min-height: 100vh;
+    line-height: 1.6;
+    position: relative;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0; bottom: 0; left: 60px;
+    width: 2px;
+    background: var(--margin-red);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    top: 0; bottom: 0; left: 54px;
+    width: 2px;
+    background: var(--margin-red);
+    opacity: 0.5;
+  }
+  .page { max-width: 820px; }
+  .date { font-family: var(--font); font-size: 14px; color: var(--pencil); text-align: right; margin-bottom: 20px; transform: rotate(-1deg); }
+  h1 {
+    font-family: var(--font);
+    font-size: 44px;
+    font-weight: 400;
+    color: var(--ink);
+    margin-bottom: 4px;
+    text-decoration: underline;
+    text-decoration-color: var(--red-ink);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+    transform: rotate(-0.5deg);
+  }
+  .sub { font-family: var(--font); font-size: 18px; color: var(--pencil); margin-bottom: 20px; font-style: italic; }
+  h2 {
+    font-family: var(--font);
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--ink);
+    margin: 24px 0 8px;
+    padding: 2px 8px;
+    background: var(--highlighter);
+    display: inline-block;
+    transform: rotate(-0.3deg);
+  }
+  p { line-height: 1.8; margin-bottom: 10px; max-width: 560px; }
+  p em { color: var(--red-ink); font-style: normal; text-decoration: underline wavy var(--red-ink); }
+  .todo { margin: 10px 0; }
+  .todo li { list-style: none; padding-left: 32px; position: relative; margin-bottom: 6px; font-size: 19px; }
+  .todo li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 3px;
+    width: 18px; height: 18px;
+    border: 2px solid var(--ink);
+    border-radius: 2px;
+  }
+  .todo li.done { color: var(--pencil); }
+  .todo li.done::before { background: var(--ink); }
+  .todo li.done::after {
+    content: "✓";
+    position: absolute;
+    left: 2px; top: -2px;
+    color: var(--red-ink);
+    font-size: 24px;
+    font-weight: 700;
+  }
+  .todo li.done { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--red-ink); }
+  .sketch-box {
+    border: 2px solid var(--ink);
+    border-radius: 4px;
+    padding: 14px;
+    margin: 14px 0;
+    transform: rotate(-0.2deg);
+    background: rgba(250,250,240,0.7);
+    position: relative;
+    display: inline-block;
+    min-width: 280px;
+  }
+  .sketch-box::before {
+    content: "";
+    position: absolute;
+    top: -6px; left: -6px;
+    right: 6px; bottom: 6px;
+    border: 1px solid var(--pencil);
+    border-radius: 4px;
+    z-index: -1;
+    opacity: 0.4;
+  }
+  .arrow-note {
+    position: relative;
+    display: inline-block;
+    font-family: var(--font);
+    color: var(--red-ink);
+    font-size: 15px;
+    margin-left: 20px;
+    transform: rotate(-4deg);
+  }
+  .arrow-note::before {
+    content: "↙";
+    font-size: 24px;
+    margin-right: 4px;
+  }
+  .btn {
+    font-family: var(--font);
+    font-size: 18px;
+    background: transparent;
+    color: var(--ink);
+    border: 2px solid var(--ink);
+    border-radius: 20px;
+    padding: 6px 18px;
+    cursor: pointer;
+    transform: rotate(-0.5deg);
+  }
+  .btn:hover { background: var(--highlighter); }
+  .btn-red { color: var(--red-ink); border-color: var(--red-ink); }
+  .input {
+    font-family: var(--font-neat);
+    font-size: 18px;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    border-bottom: 2px solid var(--ink);
+    padding: 4px 0;
+    width: 340px;
+  }
+  .input:focus { outline: none; border-bottom-color: var(--red-ink); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .stars { color: var(--red-ink); font-size: 20px; letter-spacing: 2px; }
+  .diagram {
+    border: 2px solid var(--ink);
+    padding: 20px;
+    margin: 14px 0;
+    max-width: 460px;
+    transform: rotate(-0.3deg);
+    position: relative;
+    background: rgba(250,250,240,0.5);
+  }
+  .diagram .box {
+    display: inline-block;
+    border: 2px solid var(--ink);
+    padding: 8px 18px;
+    font-family: var(--font);
+    font-size: 16px;
+    background: var(--paper);
+    border-radius: 4px;
+  }
+  .diagram .arrow { font-size: 24px; margin: 0 8px; color: var(--ink); }
+  .annotation {
+    color: var(--red-ink);
+    font-family: var(--font);
+    font-size: 14px;
+    font-style: italic;
+    margin-left: 20px;
+    display: inline-block;
+    transform: rotate(-3deg);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="date">Thursday, April 23rd — Page <u>47</u></div>
+
+  <h1>Project notebook</h1>
+  <div class="sub">Scratch thinking. Pencil handwriting. Blue grid. Red margin.</div>
+
+  <h2>TODO today</h2>
+  <ul class="todo">
+    <li class="done">ship commit to main</li>
+    <li class="done">add 20 new design systems <span class="annotation">done early!</span></li>
+    <li>review pull request #47</li>
+    <li>write post about <em>claymorphism</em></li>
+    <li>email Dieter about Rams quote <span class="stars">★★★</span></li>
+  </ul>
+
+  <h2>Architecture sketch</h2>
+  <div class="diagram">
+    <span class="box">client</span>
+    <span class="arrow">→</span>
+    <span class="box">CDN</span>
+    <span class="arrow">→</span>
+    <span class="box">origin</span>
+    <br><br>
+    <span class="arrow-note">cache TTL: 5min</span>
+  </div>
+
+  <h2>Email signup</h2>
+  <div class="row">
+    <input class="input" value="you@notebook.paper">
+    <span class="arrow-note">validate on blur</span>
+  </div>
+
+  <h2>Buttons</h2>
+  <div class="row">
+    <button class="btn">Save draft</button>
+    <button class="btn btn-red">Toss</button>
+    <button class="btn">Pin</button>
+  </div>
+
+  <h2>Notes &amp; questions</h2>
+  <p>The <em>grid paper</em> aesthetic leans into the private, mid-thought moment. It is the <em>notebook</em>, not the final report. Cross-outs are features. Arrows between ideas are features. Two fonts: one blocky, one loose.</p>
+  <p><em>Q:</em> Does every UI need to look <em>finished</em>? The answer is obvious.</p>
+
+  <p style="font-family:var(--font); color:var(--pencil); margin-top:40px; font-size:14px;">— end of page —</p>
+</div>
+</body>
+</html>

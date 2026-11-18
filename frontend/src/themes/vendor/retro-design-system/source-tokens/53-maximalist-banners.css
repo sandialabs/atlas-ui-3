@@ -1,0 +1,11 @@
+/* Maximalist 90s Banner — design tokens
+   Extracted from styles/53-maximalist-banners/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #ff00ff;
+  --bg-2: #00ffff;
+  --bg-3: #ffff00;
+  --ink: #000;
+  --font: "Comic Sans MS", "Trebuchet MS", Verdana, sans-serif;
+  --font-impact: "Impact", "Arial Black", sans-serif;
+}

@@ -72,25 +72,25 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
 
   const renderValue = (value) => {
     if (value === null || value === undefined) {
-      return <span className="text-gray-500 italic">null</span>
+      return <span className="text-gray-400 italic">null</span>
     }
     
     if (typeof value === 'boolean') {
       return (
-        <span className={`font-medium ${value ? 'text-green-400' : 'text-red-400'}`}>
+        <span className={`font-medium ${value ? 'atlas-fg-success' : 'atlas-fg-danger'}`}>
           {value.toString()}
         </span>
       )
     }
     
     if (typeof value === 'number') {
-      return <span className="text-blue-400">{value}</span>
+      return <span className="atlas-fg-info">{value}</span>
     }
     
     if (typeof value === 'string') {
       const isMasked = value === '***MASKED***'
       return (
-        <span className={`${isMasked ? 'text-yellow-400 font-mono' : 'text-gray-300'}`}>
+        <span className={`${isMasked ? 'atlas-fg-warning font-mono' : 'text-gray-300'}`}>
           "{value}"
         </span>
       )
@@ -98,14 +98,14 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
     
     if (Array.isArray(value)) {
       if (value.length === 0) {
-        return <span className="text-gray-500 italic">[]</span>
+        return <span className="text-gray-400 italic">[]</span>
       }
       return (
         <div className="ml-4">
           <span className="text-gray-400">[</span>
           {value.map((item, index) => (
             <div key={index} className="ml-4">
-              <span className="text-gray-500">{index}:</span> {renderValue(item)}
+              <span className="text-gray-400">{index}:</span> {renderValue(item)}
               {index < value.length - 1 && <span className="text-gray-400">,</span>}
             </div>
           ))}
@@ -117,14 +117,14 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
     if (typeof value === 'object') {
       const entries = Object.entries(value)
       if (entries.length === 0) {
-        return <span className="text-gray-500 italic">{}</span>
+        return <span className="text-gray-400 italic">{}</span>
       }
       return (
         <div className="ml-4">
           <span className="text-gray-400">{'{'}</span>
           {entries.map(([objKey, objValue], index) => (
             <div key={objKey} className="ml-4">
-              <span className="text-cyan-400">"{objKey}"</span>
+              <span className="atlas-fg-info">"{objKey}"</span>
               <span className="text-gray-400">: </span>
               {renderValue(objValue)}
               {index < entries.length - 1 && <span className="text-gray-400">,</span>}
@@ -155,11 +155,11 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
             {isValid !== undefined && (
               <div className="flex items-center gap-1">
                 {isValid ? (
-                  <CheckCircle size={16} className="text-green-400" />
+                  <CheckCircle size={16} className="atlas-fg-success" />
                 ) : (
-                  <XCircle size={16} className="text-red-400" />
+                  <XCircle size={16} className="atlas-fg-danger" />
                 )}
-                <span className={`text-sm ${isValid ? 'text-green-400' : 'text-red-400'}`}>
+                <span className={`text-sm ${isValid ? 'atlas-fg-success' : 'atlas-fg-danger'}`}>
                   {isValid ? 'Valid' : 'Invalid/Empty'}
                 </span>
               </div>
@@ -190,7 +190,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-600">
           <div className="flex items-center gap-3">
-            <Settings className="w-6 h-6 text-blue-400" />
+            <Settings className="w-6 h-6 atlas-fg-info" />
             <h2 className="text-xl font-semibold">Configuration Viewer</h2>
           </div>
           <button
@@ -212,7 +212,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
               <button 
                 onClick={loadConfigs}
                 disabled={loading}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded-lg transition-colors"
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded-lg transition-colors text-white"
               >
                 {loading ? 'Loading...' : 'Load Configurations'}
               </button>
@@ -226,7 +226,7 @@ const ConfigViewerModal = ({ isOpen, onClose, addNotification }) => {
                 <button 
                   onClick={loadConfigs}
                   disabled={loading}
-                  className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-500 disabled:bg-gray-700 rounded transition-colors"
+                  className="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-700 disabled:bg-gray-700 rounded transition-colors text-gray-50"
                 >
                   {loading ? 'Refreshing...' : 'Refresh'}
                 </button>
@@ -250,7 +250,7 @@ const ConfigViewerCard = ({ addNotification }) => {
     <>
       <div className="bg-gray-800 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-4">
-          <Settings className="w-6 h-6 text-blue-400" />
+          <Settings className="w-6 h-6 atlas-fg-info" />
           <h2 className="text-lg font-semibold">Configuration Viewer</h2>
         </div>
         
@@ -258,13 +258,13 @@ const ConfigViewerCard = ({ addNotification }) => {
           View all application configurations loaded from the config manager.
         </p>
         
-        <div className="px-3 py-1 rounded text-sm font-medium mb-4 text-green-400 bg-green-900/20">
+        <div className="px-3 py-1 rounded text-sm font-medium mb-4 atlas-notice-success">
           Ready
         </div>
         
         <button 
           onClick={() => setIsModalOpen(true)}
-          className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+          className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors text-white"
         >
           View Configurations
         </button>

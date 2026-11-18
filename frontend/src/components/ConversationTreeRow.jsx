@@ -7,11 +7,11 @@
 // root and for a grandchild.
 
 const RUN_INDICATORS = {
-  queued: { label: 'Queued', dot: 'bg-blue-400', text: 'text-blue-400', pulse: true },
-  running: { label: 'Running', dot: 'bg-green-400', text: 'text-green-400', pulse: true },
-  waiting_for_input: { label: 'Needs approval', dot: 'bg-amber-400', text: 'text-amber-400', pulse: true },
-  failed: { label: 'Failed', dot: 'bg-red-400', text: 'text-red-400', pulse: false },
-  cancelled: { label: 'Stopped', dot: 'bg-gray-500', text: 'text-gray-500', pulse: false },
+  queued: { label: 'Queued', dot: 'bg-blue-400', text: 'atlas-fg-info', pulse: true },
+  running: { label: 'Running', dot: 'bg-green-400', text: 'atlas-fg-success', pulse: true },
+  waiting_for_input: { label: 'Needs approval', dot: 'bg-amber-400', text: 'atlas-fg-warning', pulse: true },
+  failed: { label: 'Failed', dot: 'bg-red-400', text: 'atlas-fg-danger', pulse: false },
+  cancelled: { label: 'Stopped', dot: 'bg-gray-500', text: 'text-gray-400', pulse: false },
 }
 
 export function RunIndicator({ run, count = 0 }) {
@@ -117,7 +117,7 @@ export function ConversationTreeRow({
             <svg
               aria-hidden="true"
               xmlns="http://www.w3.org/2000/svg"
-              className="h-3 w-3 text-gray-600 flex-shrink-0"
+              className="h-3 w-3 atlas-text-gray-600 flex-shrink-0"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -140,13 +140,13 @@ export function ConversationTreeRow({
           )}
         </div>
         {conv.preview && (
-          <div className={`text-xs truncate mt-0.5 ${conv._optimistic ? 'text-blue-400' : 'text-gray-500'}`}>
+          <div className={`text-xs truncate mt-0.5 ${conv._optimistic ? 'atlas-fg-info' : 'text-gray-400'}`}>
             {conv.preview}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
-          <span className="text-xs text-gray-600 whitespace-nowrap">{formatDate(conv.updated_at)}</span>
-          <span className="text-xs text-gray-600 whitespace-nowrap">{conv.message_count} msgs</span>
+          <span className="text-xs atlas-text-gray-600 whitespace-nowrap">{formatDate(conv.updated_at)}</span>
+          <span className="text-xs atlas-text-gray-600 whitespace-nowrap">{conv.message_count} msgs</span>
           {showClassification && classification && (
             <span
               className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"

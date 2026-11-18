@@ -1,0 +1,20 @@
+/* btop / System Monitor — design tokens
+   Extracted from styles/33-btop-meters/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #131424;
+  --panel-bg: #1a1c30;
+  --panel-border: #3b3e5e;
+  --ink: #e8ecff;
+  --muted: #7a82b0;
+  --accent: #00e4ff;
+  --cpu-1: #6de37a;
+  --cpu-2: #e5e56a;
+  --cpu-3: #ff9a44;
+  --cpu-4: #ff4a6a;
+  --mem: #a073ff;
+  --net-up: #6de37a;
+  --net-dn: #ff9a44;
+  --proc-hi: #00e4ff;
+  --font: "Hack", "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+}

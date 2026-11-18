@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>07 BeOS</title>
+<style>
+  :root {
+    --bg: #2a5556;
+    --chrome: #cfcfcf;
+    --chrome-light: #e8e8e8;
+    --chrome-lighter: #ffffff;
+    --chrome-dark: #888888;
+    --chrome-darker: #404040;
+    --yellow: #ffcc00;
+    --yellow-dark: #cc9900;
+    --red-dot: #e04040;
+    --teal: #006666;
+    --ink: #000;
+    --font: "Swiss 721", "Helvetica", "Swis721 BT", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 20% 30%, #3c7072 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, #1d3d3e 0%, transparent 60%);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 12px;
+    padding: 30px;
+    min-height: 100vh;
+  }
+  .window {
+    background: var(--chrome);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+    margin-bottom: 24px;
+    max-width: 680px;
+  }
+  .titlebar {
+    display: flex;
+    height: 22px;
+    align-items: stretch;
+  }
+  .tab {
+    background: var(--yellow);
+    border: 1px solid var(--chrome-darker);
+    border-bottom: none;
+    padding: 3px 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: bold;
+    font-size: 11px;
+    position: relative;
+    box-shadow: inset 0 1px 0 #fff;
+  }
+  .tab::after {
+    content: "";
+    position: absolute;
+    right: -10px; top: 0; bottom: -1px;
+    width: 10px;
+    background: var(--yellow);
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    transform: skewX(30deg);
+    transform-origin: bottom left;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red-dot); border: 1px solid var(--chrome-darker); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.6); }
+  .filler { flex: 1; background: var(--chrome); border: 1px solid var(--chrome-darker); border-bottom: none; border-left: none; }
+  .content { background: var(--chrome-lighter); border: 1px solid var(--chrome-darker); padding: 16px; }
+  h1 { font-size: 24px; margin-bottom: 8px; font-weight: normal; }
+  h2 { font-size: 13px; margin: 14px 0 6px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; color: var(--teal); }
+  p { line-height: 1.5; margin-bottom: 8px; }
+  .btn {
+    font-family: var(--font);
+    font-size: 11px;
+    background: linear-gradient(to bottom, var(--chrome-lighter), var(--chrome));
+    border: 1px solid var(--chrome-darker);
+    border-radius: 10px;
+    padding: 4px 18px;
+    cursor: pointer;
+    box-shadow: inset 0 1px 0 #fff, 1px 1px 0 rgba(0,0,0,0.2);
+  }
+  .btn-default { background: linear-gradient(to bottom, #ffe870, var(--yellow)); border-color: var(--yellow-dark); font-weight: bold; }
+  .input {
+    background: #fff;
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-dark);
+    padding: 3px 6px;
+    font-family: var(--font);
+    font-size: 12px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .swatch { width: 64px; height: 48px; border: 1px solid var(--chrome-darker); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.5); display: inline-block; }
+  .deskbar {
+    position: fixed;
+    top: 30px;
+    right: 30px;
+    width: 140px;
+    background: var(--chrome);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.4);
+  }
+  .deskbar-top {
+    background: var(--yellow);
+    border-bottom: 1px solid var(--chrome-darker);
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: bold;
+  }
+  .deskbar-top .logo { width: 20px; height: 20px; background: var(--red-dot); border-radius: 50%; border: 1px solid var(--chrome-darker); box-shadow: inset 2px 2px 0 rgba(255,255,255,0.5); }
+  .deskbar-item { padding: 4px 10px; border-bottom: 1px solid var(--chrome-dark); font-size: 11px; }
+  .deskbar-item:hover { background: var(--yellow); }
+  .replicant {
+    background: var(--teal);
+    color: var(--chrome-lighter);
+    padding: 6px 10px;
+    border: 1px solid var(--chrome-darker);
+    display: inline-block;
+    font-family: monospace;
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="tab"><span class="dot"></span>Tracker</div>
+    <div class="filler"></div>
+  </div>
+  <div class="content">
+    <h1>BeOS R5</h1>
+    <p>Yellow angled title tab. Swiss chrome. Multithreaded personality. Replicants and the teal-striped media kit everywhere.</p>
+
+    <h2>Palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--yellow)"></span>
+      <span class="swatch" style="background:var(--teal)"></span>
+      <span class="swatch" style="background:var(--red-dot)"></span>
+      <span class="swatch" style="background:var(--chrome)"></span>
+      <span class="swatch" style="background:var(--chrome-darker)"></span>
+    </div>
+
+    <h2>Input</h2>
+    <div class="row"><input class="input" value="/boot/home/Desktop" size="30"></div>
+
+    <h2>Buttons</h2>
+    <div class="row">
+      <button class="btn btn-default">OK</button>
+      <button class="btn">Cancel</button>
+      <button class="btn">Options…</button>
+    </div>
+
+    <h2>Replicants</h2>
+    <div class="row">
+      <div class="replicant">CPU 1: 42%</div>
+      <div class="replicant">CPU 2: 18%</div>
+      <div class="replicant">MEM: 128/256 MB</div>
+    </div>
+  </div>
+</div>
+
+<div class="deskbar">
+  <div class="deskbar-top"><span class="logo"></span>Be</div>
+  <div class="deskbar-item">Tracker</div>
+  <div class="deskbar-item">StyledEdit</div>
+  <div class="deskbar-item">NetPositive</div>
+  <div class="deskbar-item">Terminal</div>
+  <div class="deskbar-item">MediaPlayer</div>
+</div>
+</body>
+</html>

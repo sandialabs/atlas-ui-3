@@ -10,6 +10,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import SettingsPanel from '../components/SettingsPanel'
 import PromptSelector from '../components/PromptSelector'
 import { ThemeProvider } from '../contexts/ThemeContext'
+import { THEME_REGISTRY } from '../themes/themeRegistry'
 import { useChat } from '../contexts/ChatContext'
 import { OPEN_SETTINGS_EVENT } from '../utils/settingsPanelEvents'
 
@@ -75,6 +76,7 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     vi.clearAllMocks()
     localStorage.clear()
   })
+  afterEach(() => document.getElementById('test-combined-settings-allowlist')?.remove())
 
   it('is titled "Tools and Settings"', () => {
     renderPanel()
@@ -124,6 +126,49 @@ describe('SettingsPanel as the combined Tools and Settings panel', () => {
     expect(toggle).toBeInTheDocument()
     fireEvent.click(toggle)
     expect(screen.getByRole('button', { name: /Switch to dark mode/ })).toBeInTheDocument()
+  })
+
+  it('lets a user choose an MIT Retro Design System theme from General settings', () => {
+    // The catalog is complete, but admins must explicitly permit its retro
+    // styles. This test exercises an all-themes-authorized deployment.
+    const policy = document.createElement('script')
+    policy.id = 'test-combined-settings-allowlist'
+    policy.setAttribute('data-allowed-themes', THEME_REGISTRY.map(entry => entry.id).join(','))
+    document.head.appendChild(policy)
+    renderPanel({ initialTab: 'general' })
+
+    const windows = screen.getByRole('radio', { name: 'Windows 95' })
+    const crt = screen.getByRole('radio', { name: 'CRT Phosphor Terminal' })
+    const appearance = screen.getByRole('region', { name: 'Appearance' })
+    expect(appearance.querySelector('.atlas-retro-window-titlebar')).toBeInTheDocument()
+    expect(appearance.querySelector('.atlas-retro-button')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'BBS ANSI Art' })).toBeInTheDocument()
+    expect(windows).not.toBeChecked()
+
+    fireEvent.click(windows)
+    expect(windows).toBeChecked()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'win95')
+    expect(localStorage.getItem('atlas-theme')).toBe('win95')
+
+    fireEvent.click(crt)
+    expect(crt).toBeChecked()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'crt-phosphor')
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light mode' }))
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'light')
+    expect(screen.getByText('Currently using Light theme.')).toBeInTheDocument()
+
+    // The live filter is part of the real General settings panel, not a mock.
+    const themeFilter = screen.getByRole('searchbox', { name: 'Find a theme' })
+    fireEvent.change(themeFilter, { target: { value: 'System 7' } })
+    expect(screen.getAllByRole('radio')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('radio', { name: 'Mac System 7' }))
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear theme filter' }))
+    expect(screen.getAllByRole('radio')).toHaveLength(55)
+    expect(document.documentElement).toHaveAttribute('data-atlas-theme', 'mac7')
   })
 
   it('passes a prompt intent through to the prompt manager', () => {

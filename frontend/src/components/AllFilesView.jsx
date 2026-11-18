@@ -278,25 +278,25 @@ const AllFilesView = () => {
       case 'c':
       case 'go':
       case 'rs':
-        return <Code className="w-4 h-4 text-blue-400" />
+        return <Code className="w-4 h-4 atlas-fg-info" />
       case 'jpg':
       case 'jpeg':
       case 'png':
       case 'gif':
       case 'svg':
       case 'webp':
-        return <Image className="w-4 h-4 text-green-400" />
+        return <Image className="w-4 h-4 atlas-fg-success" />
       case 'json':
       case 'csv':
       case 'xlsx':
       case 'xls':
-        return <Database className="w-4 h-4 text-yellow-400" />
+        return <Database className="w-4 h-4 atlas-fg-warning" />
       case 'pdf':
       case 'doc':
       case 'docx':
       case 'txt':
       case 'md':
-        return <FileText className="w-4 h-4 text-red-400" />
+        return <FileText className="w-4 h-4 atlas-fg-danger" />
       default:
         return <File className="w-4 h-4 text-gray-400" />
     }
@@ -474,7 +474,7 @@ const AllFilesView = () => {
   if (loading) {
     return (
       <div className="text-center py-12">
-        <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-400" />
+        <Loader className="w-8 h-8 animate-spin mx-auto mb-4 atlas-fg-info" />
         <p className="text-gray-400">Loading files...</p>
       </div>
     )
@@ -483,12 +483,12 @@ const AllFilesView = () => {
   if (error) {
     return (
       <div className="text-center py-12">
-        <div className="text-red-400 mb-4">Error loading files</div>
-        <p className="text-gray-500">{error}</p>
+        <div className="atlas-fg-danger mb-4">Error loading files</div>
+        <p className="text-gray-400">{error}</p>
         <button
           type="button"
           onClick={() => fetchAllFiles({ offset: 0, folderId: folderIdRef.current, q: searchRef.current })}
-          className="mt-4 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors"
+          className="mt-4 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-sm transition-colors text-white"
         >
           Try again
         </button>
@@ -523,7 +523,7 @@ const AllFilesView = () => {
         }`}
       >
         {active
-          ? <FolderOpen className="w-4 h-4 text-blue-400 flex-shrink-0" />
+          ? <FolderOpen className="w-4 h-4 atlas-fg-info flex-shrink-0" />
           : <Folder className="w-4 h-4 text-gray-400 flex-shrink-0" />}
         <span className="truncate">{candidate.label}</span>
         {count != null && (
@@ -539,7 +539,7 @@ const AllFilesView = () => {
         <div className={`mb-4 p-3 rounded-lg ${
           notification.type === 'error'
             ? 'bg-red-600 text-white'
-            : 'bg-green-600 text-white'
+            : 'bg-green-700 text-white'
         }`}>
           {notification.message}
         </div>
@@ -550,7 +550,7 @@ const AllFilesView = () => {
           <div className="flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible">
             {SOURCE_FOLDERS.map(renderFolderButton)}
           </div>
-          <div className="hidden sm:block mt-4 mb-1 px-2 text-xs uppercase tracking-wide text-gray-500">
+          <div className="hidden sm:block mt-4 mb-1 px-2 text-xs uppercase tracking-wide text-gray-400">
             By type
           </div>
           <div className="flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible mt-2 sm:mt-0">
@@ -566,7 +566,7 @@ const AllFilesView = () => {
               <button
                 type="button"
                 onClick={() => selectFolder('all')}
-                className="text-blue-400 hover:text-blue-300"
+                className="atlas-fg-info hover:underline"
               >
                 File Library
               </button>
@@ -593,7 +593,7 @@ const AllFilesView = () => {
                 type="button"
                 onClick={handleDeleteAll}
                 disabled={deletingAll}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed text-white"
                 title={
                   partialPage
                     ? 'Delete the files on this page'
@@ -653,7 +653,7 @@ const AllFilesView = () => {
                   onClick={() => toggleSort(key)}
                   className={`px-3 py-1 rounded-lg border transition-colors ${
                     sortBy === key
-                      ? 'border-blue-500 text-blue-400'
+                      ? 'border-blue-500 atlas-fg-info'
                       : 'border-gray-600 text-gray-400 hover:border-gray-500'
                   }`}
                 >
@@ -666,7 +666,7 @@ const AllFilesView = () => {
             </div>
 
             {showPager && (
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-400">
                 Sorting applies to this page
               </p>
             )}
@@ -676,7 +676,7 @@ const AllFilesView = () => {
             <div className="text-gray-400 text-center py-12 px-6">
               {paging || searching ? (
                 <>
-                  <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-400" />
+                  <Loader className="w-8 h-8 animate-spin mx-auto mb-4 atlas-fg-info" />
                   <div className="text-lg mb-4">Loading files...</div>
                 </>
               ) : (
@@ -685,7 +685,7 @@ const AllFilesView = () => {
                   <div className="text-lg mb-4">
                     {filtersActive ? 'No files match your filters' : 'No files found'}
                   </div>
-                  <p className="text-gray-500">
+                  <p className="text-gray-400">
                     {filtersActive
                       ? 'Try another folder, or adjust your search'
                       : 'Files from all sessions will appear here'
@@ -702,7 +702,7 @@ const AllFilesView = () => {
                   className="bg-gray-700 rounded-lg overflow-hidden"
                 >
                   <div className="p-3 flex items-center gap-3">
-                    <div className="bg-gray-600 rounded-lg p-2.5 flex-shrink-0">
+                    <div className="bg-gray-600 rounded-lg p-2.5 flex-shrink-0 text-gray-50">
                       {getFileIcon(file)}
                     </div>
 
@@ -712,7 +712,7 @@ const AllFilesView = () => {
                           {file.filename}
                         </h3>
                         <div className="flex flex-wrap items-center gap-2 text-xs sm:flex-shrink-0">
-                          <span className="px-2 py-1 bg-gray-600 text-gray-300 rounded">
+                          <span className="px-2 py-1 bg-gray-600 rounded text-gray-50">
                             {file.tags?.source === 'user' ? 'Uploaded' : 'Generated'}
                           </span>
                           <span className="text-gray-400">
@@ -731,7 +731,7 @@ const AllFilesView = () => {
                       <button
                         type="button"
                         onClick={() => handleAddToSession(file)}
-                        className="p-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                        className="p-2 rounded-lg bg-purple-600 hover:bg-purple-700 transition-colors text-white"
                         title="Add to session"
                       >
                         <ArrowUpToLine className="w-4 h-4" />
@@ -740,7 +740,7 @@ const AllFilesView = () => {
                       <button
                         type="button"
                         onClick={() => handleDownloadFile(file)}
-                        className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                        className="p-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors text-white"
                         title="Download file"
                       >
                         <Download className="w-4 h-4" />
@@ -749,7 +749,7 @@ const AllFilesView = () => {
                       <button
                         type="button"
                         onClick={() => handleDeleteFile(file)}
-                        className="p-2 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
+                        className="p-2 rounded-lg bg-red-600 hover:bg-red-700 transition-colors text-white"
                         title="Delete file"
                       >
                         <Trash2 className="w-4 h-4" />

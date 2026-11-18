@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>18 PS1 Tech</title>
+<style>
+  :root {
+    --bg: #0a0a10;
+    --chrome: #c0c0c0;
+    --chrome-dark: #606068;
+    --chrome-darker: #2a2a32;
+    --neon-cyan: #00ffff;
+    --neon-purple: #9d4edd;
+    --neon-green: #39ff14;
+    --ink: #e8e8f0;
+    --font: "Eurostile", "Rajdhani", "Share Tech Mono", sans-serif;
+    --font-wide: "Orbitron", "Eurostile Extended", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    background-image:
+      linear-gradient(to bottom, #1a0b2a 0%, #0a0a10 50%, #002a2a 100%),
+      repeating-linear-gradient(to bottom, transparent 0 2px, rgba(0,255,255,0.03) 2px 3px);
+    background-blend-mode: screen;
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 40px;
+    min-height: 100vh;
+    letter-spacing: 1px;
+  }
+  h1 {
+    font-family: var(--font-wide);
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    color: var(--chrome);
+    text-transform: uppercase;
+    text-shadow:
+      0 0 10px var(--neon-cyan),
+      2px 0 0 #ff3060,
+      -2px 0 0 var(--neon-cyan);
+    margin-bottom: 8px;
+    transform: skewX(-8deg);
+  }
+  h2 {
+    font-family: var(--font-wide);
+    font-size: 14px;
+    letter-spacing: 4px;
+    color: var(--neon-cyan);
+    text-transform: uppercase;
+    margin: 20px 0 8px;
+    border-left: 3px solid var(--neon-cyan);
+    padding-left: 10px;
+  }
+  p { line-height: 1.6; color: var(--ink); margin-bottom: 8px; }
+  .panel {
+    background:
+      linear-gradient(135deg, rgba(192,192,192,0.05) 0%, rgba(0,0,0,0.4) 100%);
+    border: 1px solid var(--chrome-dark);
+    border-top-color: var(--chrome);
+    border-left-color: var(--chrome);
+    padding: 22px;
+    margin-bottom: 24px;
+    max-width: 720px;
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px));
+  }
+  .panel::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    width: 30px; height: 30px;
+    border-top: 2px solid var(--neon-cyan);
+    border-left: 2px solid var(--neon-cyan);
+  }
+  .panel::after {
+    content: "";
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 30px; height: 30px;
+    border-bottom: 2px solid var(--neon-purple);
+    border-right: 2px solid var(--neon-purple);
+  }
+  .wireframe {
+    height: 200px;
+    background:
+      linear-gradient(to bottom, var(--bg) 0%, #002a2a 100%),
+      repeating-linear-gradient(to right, transparent 0 40px, rgba(0,255,255,0.3) 40px 41px),
+      repeating-linear-gradient(to bottom, transparent 0 40px, rgba(0,255,255,0.3) 40px 41px);
+    background-blend-mode: screen;
+    border: 1px solid var(--neon-cyan);
+    position: relative;
+    overflow: hidden;
+    margin: 10px 0;
+  }
+  .wireframe::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 120px; height: 120px;
+    transform: translate(-50%, -50%) rotateX(60deg) rotateZ(0deg);
+    background:
+      conic-gradient(from 0deg, var(--neon-cyan), var(--neon-purple), var(--neon-green), var(--neon-cyan));
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    opacity: 0.8;
+    animation: spin 8s linear infinite;
+  }
+  @keyframes spin { to { transform: translate(-50%, -50%) rotateX(60deg) rotateZ(360deg); } }
+  .btn {
+    font-family: var(--font-wide);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    background: linear-gradient(to bottom, var(--chrome), var(--chrome-dark));
+    color: var(--bg);
+    border: none;
+    padding: 10px 22px;
+    cursor: pointer;
+    text-transform: uppercase;
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+    box-shadow: 0 0 12px rgba(0,255,255,0.4);
+    text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+  }
+  .btn-neon {
+    background: transparent;
+    color: var(--neon-cyan);
+    border: 1px solid var(--neon-cyan);
+    text-shadow: 0 0 4px var(--neon-cyan);
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+    padding: 10px 22px;
+  }
+  .input {
+    font-family: var(--font);
+    font-size: 14px;
+    background: transparent;
+    color: var(--neon-cyan);
+    border: 1px solid var(--chrome-dark);
+    border-bottom: 2px solid var(--neon-cyan);
+    padding: 8px 12px;
+    width: 320px;
+    letter-spacing: 2px;
+    text-shadow: 0 0 4px var(--neon-cyan);
+  }
+  .input:focus { outline: none; border-bottom-color: var(--neon-purple); color: var(--neon-purple); text-shadow: 0 0 4px var(--neon-purple); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .shape-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid var(--chrome-dark);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: bold;
+  }
+  .shape-btn.tri { color: #39ff14; }
+  .shape-btn.circ { color: #ff3060; }
+  .shape-btn.sq { color: #ff69b4; }
+  .shape-btn.x { color: #00a0ff; }
+  .swatch { width: 60px; height: 60px; border: 1px solid var(--chrome-dark); display: inline-block; }
+  .hud-strip {
+    display: flex;
+    justify-content: space-between;
+    background: linear-gradient(to right, transparent, rgba(0,255,255,0.1), transparent);
+    padding: 6px 14px;
+    font-family: var(--font-wide);
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: var(--neon-cyan);
+    border-top: 1px solid var(--neon-cyan);
+    border-bottom: 1px solid var(--neon-cyan);
+    margin-bottom: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="hud-strip">
+  <span>◂ MEM CARD 1</span>
+  <span>SYS 2.0</span>
+  <span>NTSC-U</span>
+  <span>NET ACTIVE ▸</span>
+</div>
+
+<h1>TEKKEN // 1999</h1>
+<p>Low-poly dreams. Affine texture warp. Chrome-on-black HUDs. Eurostile Extended. Magenta + cyan + sharp gray.</p>
+
+<div class="panel">
+  <h2>▸ WIREFRAME SCENE</h2>
+  <div class="wireframe"></div>
+
+  <h2>▸ INPUT BUFFER</h2>
+  <div class="row"><input class="input" value="ENTER PILOT NAME"></div>
+
+  <h2>▸ FACE BUTTONS</h2>
+  <div class="row">
+    <div class="shape-btn tri">△</div>
+    <div class="shape-btn circ">○</div>
+    <div class="shape-btn x">✕</div>
+    <div class="shape-btn sq">□</div>
+  </div>
+
+  <h2>▸ COMMAND</h2>
+  <div class="row">
+    <button class="btn">LAUNCH</button>
+    <button class="btn btn-neon">ABORT</button>
+    <button class="btn btn-neon">CONFIG</button>
+  </div>
+
+  <h2>▸ PALETTE</h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--chrome)"></span>
+    <span class="swatch" style="background:var(--neon-cyan)"></span>
+    <span class="swatch" style="background:var(--neon-purple)"></span>
+    <span class="swatch" style="background:var(--neon-green)"></span>
+    <span class="swatch" style="background:#ff3060"></span>
+  </div>
+</div>
+</body>
+</html>

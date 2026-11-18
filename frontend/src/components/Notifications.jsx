@@ -9,7 +9,7 @@ const Notifications = ({ notifications, removeNotification }) => {
           key={notification.id}
           className={`max-w-sm p-4 rounded-lg shadow-lg transition-all duration-300 ${
             notification.type === 'error' ? 'bg-red-600 text-white' :
-            notification.type === 'success' ? 'bg-green-600 text-white' :
+            notification.type === 'success' ? 'bg-green-700 text-white' :
             'bg-blue-600 text-white'
           }`}
         >

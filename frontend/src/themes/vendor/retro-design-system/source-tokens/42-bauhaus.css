@@ -1,0 +1,11 @@
+/* Bauhaus — design tokens
+   Extracted from styles/42-bauhaus/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #f0ebe0;
+  --ink: #0a0a0a;
+  --red: #d32027;
+  --yellow: #f5c518;
+  --blue: #1c4fb5;
+  --font: "Futura", "Futura PT", "Century Gothic", "Avenir Next", sans-serif;
+}

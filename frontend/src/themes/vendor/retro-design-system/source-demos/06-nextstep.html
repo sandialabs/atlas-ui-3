@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>06 NeXTSTEP</title>
+<style>
+  :root {
+    --bg: #555561;
+    --chrome: #a8a8b0;
+    --chrome-dark: #606068;
+    --chrome-darker: #2c2c30;
+    --chrome-light: #d0d0d4;
+    --chrome-lighter: #f0f0f4;
+    --accent: #3c3c40;
+    --ink: #000;
+    --font: "Helvetica Neue", "Helvetica", "Liberation Sans", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 12px;
+    padding: 30px;
+    min-height: 100vh;
+  }
+  .window {
+    background: var(--chrome);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+    margin-bottom: 28px;
+    max-width: 700px;
+  }
+  .titlebar {
+    background: var(--chrome);
+    border-bottom: 1px solid var(--chrome-darker);
+    padding: 4px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: inset 0 1px 0 var(--chrome-lighter), inset 0 -1px 0 var(--chrome-dark);
+  }
+  .title { font-weight: bold; font-size: 12px; }
+  .tbtn-group { display: flex; gap: 6px; }
+  .tbtn {
+    width: 18px; height: 18px;
+    background: var(--chrome-light);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-lighter), inset -1px -1px 0 var(--chrome-dark);
+    font-size: 10px;
+    line-height: 14px;
+    text-align: center;
+  }
+  .content { padding: 18px; background: var(--chrome); }
+  h1 { font-size: 22px; margin-bottom: 8px; font-weight: bold; }
+  h2 { font-size: 13px; margin: 16px 0 8px; font-weight: bold; }
+  p { line-height: 1.5; margin-bottom: 8px; }
+  .btn {
+    font-family: var(--font);
+    font-size: 12px;
+    background: linear-gradient(to bottom, var(--chrome-light), var(--chrome));
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-lighter), inset -1px -1px 0 var(--chrome-dark);
+    padding: 5px 18px;
+    cursor: pointer;
+    font-weight: bold;
+    min-width: 72px;
+  }
+  .btn:active { box-shadow: inset 1px 1px 0 var(--chrome-dark), inset -1px -1px 0 var(--chrome-lighter); }
+  .btn-default {
+    background: linear-gradient(to bottom, var(--chrome-lighter), var(--chrome));
+    border: 2px solid var(--chrome-darker);
+  }
+  .input {
+    background: var(--chrome-lighter);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-dark);
+    padding: 4px 8px;
+    font-family: var(--font);
+    font-size: 12px;
+    width: 100%;
+  }
+  .dock {
+    position: fixed;
+    top: 30px;
+    right: 30px;
+    width: 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .dock-tile {
+    width: 64px; height: 64px;
+    background: var(--chrome);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-lighter), inset -1px -1px 0 var(--chrome-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 10px;
+  }
+  .dock-tile-accent { background: var(--chrome-darker); color: var(--chrome-lighter); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 70px; height: 50px; border: 1px solid var(--chrome-darker); box-shadow: inset 1px 1px 0 rgba(255,255,255,0.3); display: inline-block; }
+  .slider {
+    width: 240px; height: 18px; background: var(--chrome-light);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-dark);
+    position: relative;
+  }
+  .slider::after {
+    content: "";
+    position: absolute;
+    top: -3px;
+    left: 60%;
+    width: 18px;
+    height: 22px;
+    background: linear-gradient(to bottom, var(--chrome-lighter), var(--chrome-dark));
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-lighter);
+  }
+  .scroller {
+    width: 18px; height: 140px;
+    background: var(--chrome-light);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-dark);
+    display: inline-block; vertical-align: top;
+    position: relative;
+  }
+  .scroller::after { content: ""; position: absolute; top: 20%; left: 1px; right: 1px; height: 40px; background: linear-gradient(to right, var(--chrome-lighter), var(--chrome)); border: 1px solid var(--chrome-darker); }
+  .menu {
+    background: var(--chrome);
+    border: 1px solid var(--chrome-darker);
+    box-shadow: inset 1px 1px 0 var(--chrome-lighter), 4px 4px 0 rgba(0,0,0,0.4);
+    width: 180px;
+    display: inline-block;
+    vertical-align: top;
+    margin-right: 20px;
+  }
+  .menu .mtitle { padding: 4px 8px; font-weight: bold; border-bottom: 1px solid var(--chrome-darker); background: linear-gradient(to bottom, var(--chrome-light), var(--chrome)); }
+  .menu .mitem { padding: 4px 14px; border-top: 1px solid var(--chrome-dark); border-bottom: 1px solid var(--chrome-lighter); display: flex; justify-content: space-between; }
+  .menu .mitem:hover { background: var(--chrome-darker); color: var(--chrome-lighter); }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="tbtn-group"><div class="tbtn">×</div></div>
+    <div class="title">Workspace Manager</div>
+    <div class="tbtn-group"><div class="tbtn">−</div></div>
+  </div>
+  <div class="content">
+    <h1>NeXTSTEP</h1>
+    <p>Industrial charcoal. Everything chamfered and bevelled. Display PostScript rendering. Vertical dock in top-right corner.</p>
+
+    <h2>Menu</h2>
+    <div class="menu">
+      <div class="mtitle">Workspace</div>
+      <div class="mitem">Info<span>▸</span></div>
+      <div class="mitem">Print<span>p</span></div>
+      <div class="mitem">Inspector<span>i</span></div>
+      <div class="mitem">Hide<span>h</span></div>
+      <div class="mitem">Quit<span>q</span></div>
+    </div>
+
+    <div style="display:inline-block; vertical-align:top;">
+      <h2>Palette</h2>
+      <div class="row">
+        <span class="swatch" style="background:var(--chrome-darker)"></span>
+        <span class="swatch" style="background:var(--chrome-dark)"></span>
+        <span class="swatch" style="background:var(--chrome)"></span>
+        <span class="swatch" style="background:var(--chrome-light)"></span>
+        <span class="swatch" style="background:var(--chrome-lighter)"></span>
+      </div>
+
+      <h2>Input</h2>
+      <input class="input" value="/Users/next" size="30">
+
+      <h2>Buttons</h2>
+      <div class="row">
+        <button class="btn btn-default">OK</button>
+        <button class="btn">Cancel</button>
+        <button class="btn">Revert</button>
+      </div>
+
+      <h2>Slider + Scroller</h2>
+      <div class="row"><div class="slider"></div><div class="scroller"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="dock">
+  <div class="dock-tile dock-tile-accent">NeXT</div>
+  <div class="dock-tile">File</div>
+  <div class="dock-tile">Mail</div>
+  <div class="dock-tile">Edit</div>
+  <div class="dock-tile">Term</div>
+</div>
+</body>
+</html>

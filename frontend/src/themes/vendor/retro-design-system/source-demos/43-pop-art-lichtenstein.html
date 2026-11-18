@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>43 Pop Art / Lichtenstein</title>
+<style>
+  :root {
+    --paper: #fffef8;
+    --ink: #0a0a0a;
+    --red: #ed1c24;
+    --yellow: #ffde00;
+    --blue: #1b4ea0;
+    --skin: #ffd6c7;
+    --font: "Bungee", "Impact", "Arial Black", sans-serif;
+    --font-serif: "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    background-image: radial-gradient(circle, var(--red) 1.2px, transparent 1.5px);
+    background-size: 8px 8px;
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  .card { background: var(--paper); border: 4px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); padding: 24px; margin-bottom: 24px; position: relative; }
+  h1 { font-family: "Impact", "Arial Black", sans-serif; font-size: 80px; letter-spacing: -2px; line-height: 0.9; text-transform: uppercase; margin-bottom: 10px; }
+  h1 .out { -webkit-text-stroke: 3px var(--ink); color: var(--yellow); }
+  h2 { font-family: "Impact", sans-serif; font-size: 18px; letter-spacing: 3px; text-transform: uppercase; margin: 18px 0 8px; background: var(--ink); color: var(--yellow); padding: 4px 12px; display: inline-block; transform: skewX(-6deg); }
+  .speech-bubble {
+    position: relative;
+    background: var(--paper);
+    border: 4px solid var(--ink);
+    border-radius: 30px / 50%;
+    padding: 20px 30px;
+    font-family: "Impact", sans-serif;
+    font-size: 22px;
+    line-height: 1.2;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    max-width: 380px;
+    margin: 20px 0;
+  }
+  .speech-bubble::after {
+    content: "";
+    position: absolute;
+    bottom: -30px; left: 60px;
+    width: 0; height: 0;
+    border-left: 20px solid transparent;
+    border-right: 10px solid transparent;
+    border-top: 40px solid var(--ink);
+  }
+  .speech-bubble::before {
+    content: "";
+    position: absolute;
+    bottom: -22px; left: 65px;
+    width: 0; height: 0;
+    border-left: 14px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 30px solid var(--paper);
+    z-index: 1;
+  }
+  .speech-bubble i { color: var(--red); font-style: normal; }
+  .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 4px solid var(--ink); margin: 14px 0; }
+  .panel { aspect-ratio: 4/3; border-right: 4px solid var(--ink); background: var(--paper); position: relative; padding: 16px; overflow: hidden; }
+  .panel:last-child { border-right: none; border-left: 0; }
+  .panel:nth-child(n+3) { border-top: 4px solid var(--ink); }
+  .panel.halftone { background-image: radial-gradient(circle, var(--red) 1.5px, transparent 2px); background-size: 7px 7px; background-color: var(--paper); }
+  .panel.halftone-y { background-image: radial-gradient(circle, var(--yellow) 2px, transparent 2.5px); background-size: 7px 7px; background-color: var(--paper); }
+  .panel.blue { background: var(--blue); }
+  .panel.yellow { background: var(--yellow); }
+  .panel .wham { font-family: "Impact", sans-serif; font-size: 60px; color: var(--yellow); -webkit-text-stroke: 4px var(--ink); letter-spacing: -2px; text-transform: uppercase; transform: rotate(-8deg); display: inline-block; }
+  .panel .pow { color: var(--red); -webkit-text-stroke: 4px var(--ink); }
+  .panel .boom { color: var(--paper); -webkit-text-stroke: 4px var(--ink); font-size: 50px; }
+  .panel .caption { position: absolute; top: 10px; left: 10px; right: 10px; font-family: var(--font-serif); font-size: 11px; background: var(--paper); border: 2px solid var(--ink); padding: 4px 8px; text-transform: uppercase; letter-spacing: 1px; }
+  .btn { font-family: "Impact", sans-serif; font-size: 16px; letter-spacing: 2px; text-transform: uppercase; background: var(--yellow); color: var(--ink); border: 3px solid var(--ink); padding: 10px 22px; cursor: pointer; box-shadow: 5px 5px 0 var(--ink); }
+  .btn:hover { transform: translate(-2px,-2px); box-shadow: 7px 7px 0 var(--ink); }
+  .btn-red { background: var(--red); color: var(--paper); }
+  .btn-blue { background: var(--blue); color: var(--paper); }
+  .input { font-family: "Impact", sans-serif; font-size: 16px; letter-spacing: 2px; text-transform: uppercase; background: var(--paper); border: 3px solid var(--ink); padding: 10px 14px; width: 320px; box-shadow: 5px 5px 0 var(--ink); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 70px; height: 70px; border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); display: inline-block; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <h1>WHAAM! <span class="out">POW</span></h1>
+
+    <div class="speech-bubble">
+      I pressed the <i>fire control…</i> and ahead of me rockets blazed through the sky…
+    </div>
+
+    <h2>Comic Panels</h2>
+    <div class="panel-grid">
+      <div class="panel halftone" style="display:flex;align-items:center;justify-content:center;">
+        <div class="caption">Ben-Day dots, 1963.</div>
+        <span class="wham">WHAM!</span>
+      </div>
+      <div class="panel yellow" style="display:flex;align-items:center;justify-content:center;">
+        <span class="wham pow">POW!</span>
+      </div>
+      <div class="panel blue" style="display:flex;align-items:center;justify-content:center;">
+        <span class="wham boom">BOOM!</span>
+      </div>
+      <div class="panel halftone-y" style="display:flex;align-items:center;justify-content:center;">
+        <span class="wham">ZAP!!</span>
+      </div>
+    </div>
+
+    <h2>Controls</h2>
+    <div class="row"><input class="input" value="DRAMA"></div>
+    <div class="row">
+      <button class="btn">OK!</button>
+      <button class="btn btn-red">NO!</button>
+      <button class="btn btn-blue">MAYBE</button>
+    </div>
+
+    <h2>Palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--red)"></span>
+      <span class="swatch" style="background:var(--yellow)"></span>
+      <span class="swatch" style="background:var(--blue)"></span>
+      <span class="swatch" style="background:var(--ink)"></span>
+      <span class="swatch" style="background:var(--paper)"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

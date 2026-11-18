@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>53 Maximalist 90s Banner</title>
+<style>
+  :root {
+    --bg: #ff00ff;
+    --bg-2: #00ffff;
+    --bg-3: #ffff00;
+    --ink: #000;
+    --font: "Comic Sans MS", "Trebuchet MS", Verdana, sans-serif;
+    --font-impact: "Impact", "Arial Black", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background:
+      repeating-linear-gradient(90deg, var(--bg) 0 40px, var(--bg-2) 40px 80px, var(--bg-3) 80px 120px);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 20px 14px;
+    min-height: 100vh;
+  }
+  .page { max-width: 700px; margin: 0 auto; background: #000; border: 4px solid #fff; padding: 10px; color: #fff; }
+  .stripe-rainbow {
+    height: 12px;
+    background: linear-gradient(to right, red, orange, yellow, green, blue, indigo, violet);
+    margin: 6px 0;
+  }
+  h1 {
+    font-family: var(--font-impact);
+    font-size: 54px;
+    text-align: center;
+    background:
+      repeating-linear-gradient(0deg, red 0 8px, yellow 8px 16px, lime 16px 24px, cyan 24px 32px, magenta 32px 40px);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 2px #fff;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin: 8px 0;
+    animation: rainbow 2s linear infinite;
+  }
+  @keyframes rainbow { to { background-position: 0 -40px; } }
+  .marquee {
+    background: #000;
+    color: #ffff00;
+    border: 2px solid #ff00ff;
+    padding: 6px 10px;
+    font-family: var(--font-impact);
+    font-size: 16px;
+    letter-spacing: 2px;
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+    margin: 6px 0;
+  }
+  .marquee-inner { display: inline-block; animation: marquee 20s linear infinite; padding-right: 100%; }
+  @keyframes marquee { to { transform: translateX(-100%); } }
+  .marquee .red { color: #ff4040; } .marquee .cyan { color: #40ffff; } .marquee .lime { color: #40ff40; }
+  .gif-row {
+    display: flex;
+    justify-content: space-around;
+    gap: 6px;
+    background: #c0c0c0;
+    padding: 6px;
+    border: 3px ridge #888;
+    margin: 6px 0;
+  }
+  .gif-88 {
+    width: 88px; height: 31px;
+    border: 1px solid #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-impact);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-align: center;
+    color: #fff;
+    text-shadow: 1px 1px 0 #000;
+    flex-shrink: 0;
+  }
+  .g1 { background: linear-gradient(45deg, #ff0000, #ffff00); }
+  .g2 { background: linear-gradient(to right, #0000ff, #ff00ff); }
+  .g3 { background: #000; color: #00ff00; border-color: #00ff00; }
+  .g4 { background: repeating-linear-gradient(45deg, #ff00ff 0 4px, #00ffff 4px 8px); }
+  .g5 { background: #ffff00; color: #000; text-shadow: none; }
+  .g6 { background: radial-gradient(circle, #fff, #ff00ff); color: #000; text-shadow: none; }
+
+  .visitors {
+    background: #000;
+    border: 3px inset #c0c0c0;
+    color: #00ff00;
+    font-family: "Courier New", monospace;
+    font-size: 24px;
+    padding: 6px 12px;
+    letter-spacing: 6px;
+    text-align: center;
+    margin: 8px auto;
+    width: fit-content;
+  }
+  .visitors .digit {
+    background: linear-gradient(to bottom, #005a00 0%, #00ff00 50%, #00c400 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: inline-block;
+    padding: 0 4px;
+    border-right: 1px solid #005a00;
+  }
+  h2 {
+    font-family: var(--font-impact);
+    font-size: 22px;
+    color: #ffff00;
+    text-shadow: 2px 2px 0 #ff00ff, -2px -2px 0 #00ffff;
+    margin: 16px 0 6px;
+    letter-spacing: 2px;
+    text-align: center;
+  }
+  p { color: #fff; line-height: 1.5; text-align: center; font-size: 14px; margin-bottom: 6px; }
+  p b { color: #ffff00; }
+  .blink { animation: blink 1s steps(2) infinite; color: #ff4040; font-weight: bold; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .webring {
+    background: #fff;
+    color: #000;
+    border: 3px groove #ff00ff;
+    padding: 6px 12px;
+    font-family: var(--font);
+    font-size: 12px;
+    margin: 10px 0;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+  }
+  .webring a { color: #0000ff; text-decoration: underline; }
+  .webring a:visited { color: #990099; }
+  .btn {
+    font-family: var(--font-impact);
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: #ffff00;
+    background: linear-gradient(to bottom, #ff00ff, #aa00aa);
+    border: 3px outset #ff40ff;
+    padding: 6px 14px;
+    cursor: pointer;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .btn:active { border-style: inset; }
+  .input {
+    font-family: var(--font);
+    font-size: 13px;
+    background: #fff;
+    border: 3px inset #c0c0c0;
+    padding: 4px 8px;
+    width: 280px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 8px 0; }
+  .flame {
+    display: inline-block;
+    font-size: 24px;
+    animation: flame 0.3s steps(2) infinite;
+  }
+  @keyframes flame { 50% { transform: scale(1.2) rotate(5deg); } }
+  .under-construction {
+    background: #ffff00;
+    color: #000;
+    border: 4px dashed #000;
+    padding: 10px;
+    font-family: var(--font-impact);
+    text-align: center;
+    font-size: 18px;
+    letter-spacing: 2px;
+    margin: 10px 0;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="stripe-rainbow"></div>
+  <h1>★ MEGA SITE ★</h1>
+  <div class="stripe-rainbow"></div>
+
+  <div class="marquee">
+    <span class="marquee-inner">
+      <span class="red">●</span> BREAKING NEWS <span class="red">●</span> <span class="cyan">SIGN MY GUESTBOOK!!!</span> <span class="lime">✦</span> <span class="red">NEW PAGES EVERY WEEK</span> <span class="cyan">✦ BEST VIEWED IN NETSCAPE 3.0 ✦</span>
+    </span>
+  </div>
+
+  <p><span class="flame">🔥</span> <b>WELCOME</b> to the INTERNET'S MOST EXCITING HOMEPAGE!!! <span class="flame">🔥</span></p>
+
+  <div class="gif-row">
+    <div class="gif-88 g1">HOT!</div>
+    <div class="gif-88 g2">MEGA<br>COOL</div>
+    <div class="gif-88 g3">★ WEB ★<br>RING</div>
+    <div class="gif-88 g4">AWESOME</div>
+    <div class="gif-88 g5">NEW!!!</div>
+    <div class="gif-88 g6">LINK<br>ME</div>
+  </div>
+
+  <div class="visitors">
+    You are visitor<br>
+    <span class="digit">0</span><span class="digit">0</span><span class="digit">8</span><span class="digit">4</span><span class="digit">3</span><span class="digit">9</span><span class="digit">1</span>
+  </div>
+
+  <div class="under-construction">
+    🚧 UNDER CONSTRUCTION 🚧<br>
+    <span class="blink">CHECK BACK SOON!</span>
+  </div>
+
+  <h2>◆ SIGN MY GUESTBOOK ◆</h2>
+  <div class="row"><input class="input" value="YourName@aol.com"></div>
+  <div class="row">
+    <button class="btn">SUBMIT!</button>
+    <button class="btn">CLEAR!</button>
+  </div>
+
+  <div class="webring">
+    ← <a href="#">PREV</a> | <a href="#">RANDOM</a> | <a href="#">LIST</a> | <a href="#">NEXT</a> →
+    <br>
+    <small><b>THE COOL KIDS WEBRING</b></small>
+  </div>
+
+  <p class="blink" style="text-align:center; font-size:16px;">E-MAIL ME!!! → <a href="mailto:cool@aol.com" style="color:cyan;">cool@aol.com</a></p>
+
+  <div class="stripe-rainbow"></div>
+  <p style="font-size:10px;">♫ Now playing: darude.mid &nbsp; | &nbsp; © 1998 <a href="#" style="color:yellow;">Angelfire</a></p>
+</div>
+</body>
+</html>

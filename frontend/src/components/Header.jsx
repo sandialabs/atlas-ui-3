@@ -251,7 +251,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
   }, [agentModeAvailable, agentModeEnabled, setAgentModeEnabled, toast])
 
   return (
-    <header ref={headerRef} className="flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
+    <header ref={headerRef} className="atlas-theme-header flex items-center justify-between p-2 sm:p-4 bg-gray-800 border-b border-gray-700">
       {/* Left section. Deliberately not min-w-0: these are fixed-size icon
           buttons with nothing to truncate, so letting the section shrink below
           them only makes it paint over the right-hand group. The right section
@@ -419,7 +419,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                     setTranscriptDropdownOpen(false)
                   }}
                   title="Opens a plain-text transcript in a new browser tab"
-                  className="w-full text-left px-4 py-2 text-sm font-medium text-blue-300 hover:bg-gray-700 first:rounded-t-lg flex items-center gap-2"
+                  className="w-full text-left px-4 py-2 text-sm font-medium atlas-header-menu-accent hover:bg-gray-700 first:rounded-t-lg flex items-center gap-2"
                 >
                   <ExternalLink className="w-4 h-4" />
                   Open as plain text
@@ -496,7 +496,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
               href={helpExternalUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
+              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors atlas-header-accent"
               title="Help (opens the documentation in a new tab)"
               aria-label="Help (opens the documentation in a new tab)"
             >
@@ -505,7 +505,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
           ) : (
             <button
               onClick={() => navigate('/help')}
-              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-blue-300"
+              className="flex-shrink-0 p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors atlas-header-accent"
               title="Help"
               aria-label="Help"
             >
@@ -607,7 +607,7 @@ const Header = ({ ragPanelOpen, onToggleSidebar, onToggleRag, onToggleFiles, onT
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   messages.length === 0
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-700 hover:bg-gray-600 text-blue-300'
+                    : 'bg-gray-700 hover:bg-gray-600 atlas-header-accent'
                 }`}
               >
                 <ExternalLink className="w-5 h-5" />

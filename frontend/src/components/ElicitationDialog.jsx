@@ -172,8 +172,8 @@ const ElicitationDialog = ({ elicitation }) => {
             disabled={!isValid && fields.length > 0}
             className={`px-4 py-2 rounded-md transition-colors flex items-center gap-2 ${
               isValid || fields.length === 0
-                ? 'bg-green-600 hover:bg-green-500 text-white'
-                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                ? 'bg-green-700 hover:bg-green-800 text-white'
+                : 'bg-gray-600 cursor-not-allowed text-gray-50'
             }`}
           >
             <Check size={16} />
@@ -181,7 +181,7 @@ const ElicitationDialog = ({ elicitation }) => {
           </button>
           <button
             onClick={handleDecline}
-            className="px-4 py-2 rounded-md bg-yellow-600 hover:bg-yellow-500 text-white transition-colors flex items-center gap-2"
+            className="px-4 py-2 rounded-md bg-yellow-600 hover:bg-yellow-500 transition-colors flex items-center gap-2 text-black"
           >
             <Ban size={16} />
             Decline
@@ -258,7 +258,7 @@ const FormField = ({ field, value, onChange }) => {
               type="checkbox"
               checked={value || false}
               onChange={(e) => onChange(e.target.checked)}
-              className="w-5 h-5 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-2 focus:ring-blue-500"
+              className="w-5 h-5 rounded bg-gray-700 border-gray-600 atlas-fg-info focus:ring-2 focus:ring-blue-500"
             />
             <span className="text-gray-300">
               {description || `Enable ${name}`}
@@ -299,7 +299,7 @@ const FormField = ({ field, value, onChange }) => {
     <div>
       <label className="block text-sm font-medium text-gray-300 mb-2">
         {formatFieldName(name)}
-        {required && <span className="text-red-500 ml-1">*</span>}
+        {required && <span className="atlas-fg-danger ml-1">*</span>}
       </label>
       {description && type !== 'boolean' && (
         <p className="text-xs text-gray-400 mb-2">{description}</p>

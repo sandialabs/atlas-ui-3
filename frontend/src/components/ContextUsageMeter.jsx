@@ -18,10 +18,10 @@ const LEVEL_BAR = {
 }
 
 const LEVEL_ICON = {
-  ok: 'text-emerald-400',
-  warn: 'text-amber-400',
-  high: 'text-orange-400',
-  over: 'text-red-400',
+  ok: 'atlas-fg-success',
+  warn: 'atlas-fg-warning',
+  high: 'atlas-fg-alert',
+  over: 'atlas-fg-danger',
 }
 
 const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
@@ -92,7 +92,7 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
         aria-haspopup="dialog"
         aria-label={`${fullLabel}. Estimated context of the next request. Click for details and compaction.`}
         title="Estimated context of the next request. Click for details and compaction."
-        className={`flex items-center gap-1.5 rounded px-2 py-1 max-sm:h-8 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap ${FOCUS_RING}`}
+        className={`flex items-center gap-1.5 rounded px-2 py-1 max-sm:h-8 text-xs text-gray-300 bg-gray-700/70 hover:bg-gray-600 whitespace-nowrap hover:text-gray-50 ${FOCUS_RING}`}
         data-testid="context-usage-meter"
       >
         {isCompacting
@@ -178,12 +178,12 @@ const ContextUsageMeter = ({ contextCompaction, disabled = false }) => {
             <button
               type="submit"
               disabled={disabled || isCompacting}
-              className={`self-end rounded px-3 py-1 bg-sky-700 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white ${FOCUS_RING}`}
+              className={`self-end rounded px-3 py-1 bg-sky-700 hover:bg-sky-800 disabled:opacity-50 disabled:cursor-not-allowed text-white ${FOCUS_RING}`}
               data-testid="compact-now"
             >
               {isCompacting ? 'Compacting...' : 'Compact'}
             </button>
-            <p className="text-gray-500">
+            <p className="text-gray-400">
               Older messages are summarized into a checkpoint; the full transcript is kept. You can also type /compact.
             </p>
           </form>

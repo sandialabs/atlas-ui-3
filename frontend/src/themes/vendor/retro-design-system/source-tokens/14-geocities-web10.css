@@ -1,0 +1,14 @@
+/* GeoCities Web 1.0 — design tokens
+   Extracted from styles/14-geocities-web10/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --ink: #000;
+  --link: #0000ee;
+  --visited: #551a8b;
+  --hotpink: #ff3399;
+  --lime: #00ff00;
+  --yellow: #ffff00;
+  --red: #ff0000;
+  --cyan: #00ffff;
+  --font: "Comic Sans MS", "Times New Roman", serif;
+}

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>02 Windows 95</title>
+<style>
+  :root {
+    --bg: #008080;
+    --chrome: #c0c0c0;
+    --chrome-light: #dfdfdf;
+    --chrome-lighter: #ffffff;
+    --chrome-dark: #808080;
+    --chrome-darker: #000000;
+    --ink: #000;
+    --title: #000080;
+    --title-text: #fff;
+    --select: #000080;
+    --font: "MS Sans Serif", "Pixelated MS Sans Serif", Tahoma, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 11px;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  .window {
+    background: var(--chrome);
+    border-top: 2px solid var(--chrome-lighter);
+    border-left: 2px solid var(--chrome-lighter);
+    border-right: 2px solid var(--chrome-darker);
+    border-bottom: 2px solid var(--chrome-darker);
+    box-shadow: inset -1px -1px 0 var(--chrome-dark), inset 1px 1px 0 var(--chrome);
+    padding: 3px;
+    margin-bottom: 20px;
+    max-width: 720px;
+  }
+  .titlebar {
+    background: linear-gradient(to right, var(--title), #1084d0);
+    color: var(--title-text);
+    padding: 2px 4px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .titlebar-btns { display: flex; gap: 2px; }
+  .tbtn {
+    background: var(--chrome);
+    border-top: 1px solid var(--chrome-lighter);
+    border-left: 1px solid var(--chrome-lighter);
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    width: 16px; height: 14px;
+    font-size: 9px;
+    line-height: 10px;
+    color: var(--ink);
+    text-align: center;
+  }
+  .menubar { background: var(--chrome); padding: 2px 0; border-bottom: 1px solid var(--chrome-dark); display: flex; gap: 4px; }
+  .menubar span { padding: 2px 8px; cursor: default; }
+  .menubar span:hover { background: var(--title); color: #fff; }
+  .content { padding: 12px; background: var(--chrome); }
+  h1 { font-size: 18px; margin-bottom: 8px; }
+  h2 { font-size: 12px; margin: 14px 0 6px; font-weight: bold; }
+  p { line-height: 1.4; margin-bottom: 6px; }
+  .fieldset {
+    border: 1px groove var(--chrome-light);
+    padding: 10px 12px;
+    margin: 8px 0;
+  }
+  .fieldset legend { background: var(--chrome); padding: 0 4px; font-weight: bold; }
+  .btn {
+    font-family: var(--font);
+    font-size: 11px;
+    background: var(--chrome);
+    border-top: 1px solid var(--chrome-lighter);
+    border-left: 1px solid var(--chrome-lighter);
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    box-shadow: inset -1px -1px 0 var(--chrome-dark), inset 1px 1px 0 var(--chrome);
+    padding: 4px 14px;
+    min-width: 75px;
+    cursor: pointer;
+  }
+  .btn:active {
+    border-top: 1px solid var(--chrome-darker);
+    border-left: 1px solid var(--chrome-darker);
+    border-right: 1px solid var(--chrome-lighter);
+    border-bottom: 1px solid var(--chrome-lighter);
+    box-shadow: inset 1px 1px 0 var(--chrome-dark);
+  }
+  .input {
+    background: #fff;
+    border-top: 1px solid var(--chrome-dark);
+    border-left: 1px solid var(--chrome-dark);
+    border-right: 1px solid var(--chrome-lighter);
+    border-bottom: 1px solid var(--chrome-lighter);
+    padding: 3px 4px;
+    font-family: var(--font);
+    font-size: 11px;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .swatch { width: 50px; height: 50px; display: inline-block; }
+  .tab-strip { display: flex; gap: 2px; margin-top: 10px; }
+  .tab {
+    background: var(--chrome);
+    border-top: 1px solid var(--chrome-lighter);
+    border-left: 1px solid var(--chrome-lighter);
+    border-right: 1px solid var(--chrome-darker);
+    padding: 4px 12px;
+    position: relative;
+    top: 1px;
+  }
+  .tab.active { background: var(--chrome); font-weight: bold; border-bottom: 1px solid var(--chrome); top: 0; padding-top: 6px; }
+  .taskbar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--chrome);
+    border-top: 2px solid var(--chrome-lighter);
+    padding: 2px 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+  }
+  .start-btn {
+    background: var(--chrome);
+    border-top: 1px solid var(--chrome-lighter);
+    border-left: 1px solid var(--chrome-lighter);
+    border-right: 1px solid var(--chrome-darker);
+    border-bottom: 1px solid var(--chrome-darker);
+    padding: 2px 8px;
+    font-weight: bold;
+    font-size: 11px;
+  }
+  .progress { border-top: 1px solid var(--chrome-dark); border-left: 1px solid var(--chrome-dark); border-right: 1px solid var(--chrome-lighter); border-bottom: 1px solid var(--chrome-lighter); height: 20px; background: #fff; padding: 2px; }
+  .progress-bar { height: 100%; width: 60%; background: var(--title); display: flex; gap: 2px; }
+  .progress-bar span { display: block; width: 8px; height: 100%; background: var(--title); border-right: 2px solid var(--chrome-lighter); }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar"><span>Welcome - Windows 95</span><div class="titlebar-btns"><button class="tbtn">_</button><button class="tbtn">□</button><button class="tbtn">✕</button></div></div>
+  <div class="menubar"><span><u>F</u>ile</span><span><u>E</u>dit</span><span><u>V</u>iew</span><span><u>H</u>elp</span></div>
+  <div class="content">
+    <h1>System Properties</h1>
+    <p>Pure 3D bevel chrome. Raised and sunken edges define every surface. MS Sans Serif renders everything.</p>
+
+    <div class="tab-strip"><span class="tab active">General</span><span class="tab">Device Manager</span><span class="tab">Performance</span></div>
+    <fieldset class="fieldset">
+      <legend>Colors</legend>
+      <div class="row">
+        <span class="swatch" style="background:#008080"></span>
+        <span class="swatch" style="background:#000080"></span>
+        <span class="swatch" style="background:#c0c0c0"></span>
+        <span class="swatch" style="background:#808080"></span>
+        <span class="swatch" style="background:#ffffff;border:1px solid #000"></span>
+        <span class="swatch" style="background:#ff0000"></span>
+        <span class="swatch" style="background:#ffff00"></span>
+      </div>
+    </fieldset>
+
+    <fieldset class="fieldset">
+      <legend>Input</legend>
+      <div class="row">
+        <label>Name:</label><input class="input" value="My Computer" size="30">
+      </div>
+    </fieldset>
+
+    <fieldset class="fieldset">
+      <legend>Copy Progress</legend>
+      <div class="progress"><div class="progress-bar"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+    </fieldset>
+
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn">OK</button>
+      <button class="btn">Cancel</button>
+      <button class="btn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="taskbar">
+  <button class="start-btn">⊞ Start</button>
+  <span style="flex:1"></span>
+  <span style="border:1px inset var(--chrome-dark); padding: 2px 8px;">12:00 PM</span>
+</div>
+</body>
+</html>

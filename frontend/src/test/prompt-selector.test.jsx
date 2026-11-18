@@ -70,7 +70,7 @@ describe('PromptSelector', () => {
       fireEvent.click(button)
 
       const defaultOption = screen.getByText('Use the standard system prompt without customization').closest('button')
-      expect(defaultOption).toHaveClass('bg-blue-900/30')
+      expect(defaultOption).toHaveClass('atlas-notice-info')
     })
 
     it('should show checkmark on Default Prompt when active', () => {
@@ -178,7 +178,7 @@ describe('PromptSelector', () => {
       fireEvent.click(button)
 
       const promptButton = screen.getByText('A test prompt').closest('button')
-      expect(promptButton).toHaveClass('bg-blue-900/30')
+      expect(promptButton).toHaveClass('atlas-notice-info')
     })
 
     it('should show prompt description', () => {
@@ -278,8 +278,8 @@ describe('PromptSelector', () => {
       const promptOne = screen.getByText('First prompt').closest('button')
       const promptTwo = screen.getByText('Second prompt').closest('button')
       
-      expect(promptOne).toHaveClass('bg-blue-900/30')
-      expect(promptTwo).not.toHaveClass('bg-blue-900/30')
+      expect(promptOne).toHaveClass('atlas-notice-info')
+      expect(promptTwo).not.toHaveClass('atlas-notice-info')
     })
 
     it('should show Clear All button with count', () => {

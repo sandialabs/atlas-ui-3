@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>15 Cassette Futurism</title>
+<style>
+  :root {
+    --bg: #0a0704;
+    --panel: #1a1510;
+    --panel-2: #241d15;
+    --bezel: #3a2f22;
+    --amber: #ffb000;
+    --amber-dim: #8a5c00;
+    --amber-bright: #ffd470;
+    --ink: #d9a85e;
+    --red-warn: #ff4422;
+    --green-ok: #5aff8a;
+    --font: "Orbitron", "Share Tech Mono", "Courier New", monospace;
+    --font-lcd: "VT323", "DS-Digital", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(ellipse at center, #1a1510 0%, #0a0704 60%, #000 100%);
+    color: var(--amber);
+    font-family: var(--font);
+    font-size: 13px;
+    padding: 40px;
+    min-height: 100vh;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent 0 2px, rgba(0,0,0,0.4) 2px 3px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.8) 100%);
+    pointer-events: none;
+    z-index: 11;
+  }
+  .terminal {
+    background: var(--panel);
+    border: 4px solid var(--bezel);
+    border-radius: 14px;
+    padding: 20px;
+    max-width: 780px;
+    box-shadow:
+      inset 0 0 80px rgba(255,176,0,0.08),
+      inset 0 2px 0 rgba(255,176,0,0.1),
+      0 20px 60px rgba(0,0,0,0.8);
+    position: relative;
+  }
+  .terminal::before {
+    content: "";
+    position: absolute;
+    top: -12px; left: 30px; right: 30px;
+    height: 6px;
+    background: linear-gradient(to bottom, #4a3a26, #1a1510);
+    border-radius: 2px;
+  }
+  h1 {
+    font-family: var(--font);
+    font-size: 28px;
+    color: var(--amber-bright);
+    text-shadow: 0 0 6px var(--amber), 0 0 12px var(--amber-dim);
+    margin-bottom: 6px;
+    letter-spacing: 4px;
+  }
+  h2 {
+    font-size: 13px;
+    color: var(--amber);
+    margin: 18px 0 8px;
+    border-bottom: 1px solid var(--bezel);
+    padding-bottom: 4px;
+    letter-spacing: 2px;
+  }
+  p { line-height: 1.6; color: var(--ink); margin-bottom: 8px; text-transform: none; letter-spacing: 0.5px; font-family: var(--font-lcd); font-size: 16px; }
+  .status-bar {
+    display: flex;
+    gap: 14px;
+    font-size: 11px;
+    background: var(--bg);
+    border: 1px solid var(--bezel);
+    padding: 6px 12px;
+    margin-bottom: 14px;
+    border-radius: 4px;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+  }
+  .status-bar span { display: inline-flex; align-items: center; gap: 6px; }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+  .led.ok { background: var(--green-ok); box-shadow: 0 0 4px var(--green-ok); }
+  .led.warn { background: var(--red-warn); box-shadow: 0 0 4px var(--red-warn); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.3; } }
+  .panel-inset {
+    background: var(--bg);
+    border: 2px solid var(--bezel);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 8px 0;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.6);
+  }
+  .btn {
+    font-family: var(--font);
+    font-size: 11px;
+    background:
+      linear-gradient(to bottom, #3a2f22, #1e180f);
+    color: var(--amber);
+    border: 2px solid var(--bezel);
+    border-top-color: #5a4a36;
+    border-radius: 4px;
+    padding: 8px 18px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    text-shadow: 0 0 4px var(--amber-dim);
+    box-shadow: inset 0 1px 0 rgba(255,200,100,0.1), 0 2px 4px rgba(0,0,0,0.6);
+  }
+  .btn:hover { color: var(--amber-bright); text-shadow: 0 0 6px var(--amber); border-top-color: var(--amber-dim); }
+  .btn-warn { color: var(--red-warn); }
+  .btn-ok { color: var(--green-ok); }
+  .input {
+    font-family: var(--font-lcd);
+    font-size: 18px;
+    background: var(--bg);
+    color: var(--amber-bright);
+    border: 2px solid var(--bezel);
+    border-radius: 3px;
+    padding: 6px 12px;
+    width: 400px;
+    text-shadow: 0 0 4px var(--amber);
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+    letter-spacing: 2px;
+  }
+  .input:focus { outline: none; border-color: var(--amber); box-shadow: inset 0 0 10px rgba(0,0,0,0.8), 0 0 8px var(--amber-dim); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .gauge {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 30px;
+  }
+  .gauge div {
+    width: 8px;
+    background: var(--amber);
+    box-shadow: 0 0 4px var(--amber);
+  }
+  .gauge div:nth-child(n+7) { background: var(--red-warn); box-shadow: 0 0 4px var(--red-warn); }
+  .readout {
+    font-family: var(--font-lcd);
+    font-size: 32px;
+    color: var(--amber-bright);
+    text-shadow: 0 0 8px var(--amber);
+    letter-spacing: 4px;
+  }
+  .ascii-art { font-family: var(--font-lcd); font-size: 14px; color: var(--amber-dim); white-space: pre; line-height: 1.1; }
+  .brand { font-size: 10px; color: var(--amber-dim); letter-spacing: 4px; }
+</style>
+</head>
+<body>
+<div class="terminal">
+  <div class="brand">WEYLAND-YUTANI SYSTEMS // MU/TH/UR 6000</div>
+  <h1>MOTHER</h1>
+  <p>Amber phosphor on scorched brown. Chunky buttons with milled ridges. Yesterday's tomorrow. Analog warning lights. The ship is listening.</p>
+
+  <div class="status-bar">
+    <span><span class="led ok"></span>LIFE SUPPORT</span>
+    <span><span class="led ok"></span>NAV</span>
+    <span><span class="led"></span>COMMS 73%</span>
+    <span><span class="led warn"></span>HULL BREACH</span>
+  </div>
+
+  <h2>// TELEMETRY</h2>
+  <div class="panel-inset">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <div class="brand">VELOCITY KPS</div>
+        <div class="readout">00847.23</div>
+      </div>
+      <div>
+        <div class="brand">HEADING</div>
+        <div class="readout">203°14'</div>
+      </div>
+      <div>
+        <div class="brand">O2 PSI</div>
+        <div class="readout">14.7</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>// INPUT</h2>
+  <div class="row"><input class="input" value="CMD: QUERY SPECIMEN-07"></div>
+
+  <h2>// CONTROLS</h2>
+  <div class="row">
+    <button class="btn btn-ok">ENGAGE</button>
+    <button class="btn">STANDBY</button>
+    <button class="btn btn-warn">PURGE</button>
+    <button class="btn">OVERRIDE</button>
+  </div>
+
+  <h2>// POWER</h2>
+  <div class="panel-inset">
+    <div class="gauge">
+      <div style="height:20%"></div><div style="height:30%"></div><div style="height:40%"></div><div style="height:55%"></div><div style="height:65%"></div><div style="height:75%"></div><div style="height:85%"></div><div style="height:92%"></div><div style="height:98%"></div><div style="height:100%"></div>
+    </div>
+  </div>
+
+<pre class="ascii-art">
+    ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+    NOSTROMO // REG 180924609 // CLASS M
+    ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+</pre>
+</div>
+</body>
+</html>

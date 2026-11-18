@@ -1,0 +1,15 @@
+/* Claymorphism — design tokens
+   Extracted from styles/39-claymorphism/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #f0e9ff;
+  --ink: #3a2e5c;
+  --muted: #7c6ba8;
+  --pink: #ffb3d1;
+  --purple: #c9a8ff;
+  --blue: #9ec8ff;
+  --mint: #a8f0d0;
+  --yellow: #ffe58a;
+  --orange: #ffb38a;
+  --font: "Nunito", "SF Pro Rounded", "Helvetica Neue", system-ui, sans-serif;
+}

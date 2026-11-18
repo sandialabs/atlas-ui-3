@@ -1,8 +1,11 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import crypto from 'crypto'
 import { readFileSync } from 'fs'
 import { execSync } from 'child_process'
+import { retroThemesBuildEnabled, retroThemesModulePath } from './src/themes/retro/retroThemesBuildFlag.js'
+import { readRetroCssSources, retroCssPlugin, retroCssVersion } from './src/themes/retro/retroCssPlugin.js'
 
 // Configure crypto to use FIPS-compliant algorithms if FIPS mode is enabled
 // This wrapper ensures we use SHA-256 instead of MD4/MD5 which are disabled in FIPS
@@ -24,6 +27,7 @@ const logViteEnv = () => {
     VITE_FEATURE_POWERED_BY_ATLAS: process.env.VITE_FEATURE_POWERED_BY_ATLAS,
     VITE_FEATURE_ANIMATED_LOGO: process.env.VITE_FEATURE_ANIMATED_LOGO,
     VITE_FEATURE_RAG_CITATIONS: process.env.VITE_FEATURE_RAG_CITATIONS,
+    VITE_FEATURE_RETRO_THEMES: process.env.VITE_FEATURE_RETRO_THEMES,
     VITE_WELCOME_MESSAGE: process.env.VITE_WELCOME_MESSAGE,
   }
 
@@ -33,8 +37,6 @@ const logViteEnv = () => {
   }
   console.log('')
 }
-
-logViteEnv()
 
 // Read app version: env var (Docker) -> atlas/version.py (local dev) -> 'unknown'
 function getAppVersion() {
@@ -59,8 +61,24 @@ function getGitHash() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ mode }) => {
+  // Resolve the documented build flag from Vite's .env/.env.local files;
+  // explicit process/Docker build arguments take precedence.
+  const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'VITE_')
+  const retroThemesEnabled = retroThemesBuildEnabled({ ...env, ...process.env })
+  process.env.VITE_FEATURE_RETRO_THEMES = String(retroThemesEnabled)
+  process.env.VITE_RETRO_CSS_VERSION = retroThemesEnabled
+    ? retroCssVersion(readRetroCssSources()) : ''
+  logViteEnv()
+  console.log('[atlas-ui-3] Retro themes ' +
+    (retroThemesEnabled ? 'included in' : 'compiled out of') + ' this build\n')
+  return {
+  plugins: [react(), retroCssPlugin(retroThemesEnabled)],
+  resolve: {
+    alias: {
+      '@atlas/retro-themes': retroThemesModulePath(retroThemesEnabled),
+    },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(getAppVersion()),
     __GIT_HASH__: JSON.stringify(getGitHash()),
@@ -105,4 +123,4 @@ export default defineConfig({
       }
     }
   }
-})
+}})

@@ -1,0 +1,19 @@
+/* MS-DOS CGA — design tokens
+   Extracted from styles/10-dos-cga/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --c-black: #000000;
+  --c-blue: #0000aa;
+  --c-blue-bright: #5555ff;
+  --c-green: #00aa00;
+  --c-cyan: #00aaaa;
+  --c-cyan-bright: #55ffff;
+  --c-red: #aa0000;
+  --c-magenta: #aa00aa;
+  --c-brown: #aa5500;
+  --c-gray: #aaaaaa;
+  --c-dgray: #555555;
+  --c-yellow: #ffff55;
+  --c-white: #ffffff;
+  --font: "Perfect DOS VGA 437", "IBM Plex Mono", "Courier New", monospace;
+}

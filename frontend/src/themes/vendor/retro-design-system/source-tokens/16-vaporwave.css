@@ -1,0 +1,15 @@
+/* Vaporwave — design tokens
+   Extracted from styles/16-vaporwave/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --pink: #ff71ce;
+  --cyan: #01cdfe;
+  --purple: #b967ff;
+  --green: #05ffa1;
+  --yellow: #fffb96;
+  --bg: #1a0b2e;
+  --grid: #ff00e5;
+  --ink: #f8f8ff;
+  --font-jp: "MS PGothic", "Noto Serif JP", serif;
+  --font: "Times New Roman", "Hiragino Mincho Pro", serif;
+}
