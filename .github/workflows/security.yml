@@ -35,21 +35,32 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
-    # Python dependency scanning with Safety
+    # Audit the installed project environment without the deprecated Safety check CLI.
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install safety bandit semgrep
         pip install -e ".[dev]"
+        pip install pip-audit
 
-    - name: Python Safety Check
-      continue-on-error: true
+    - name: Python Dependency Audit
       run: |
-        timeout 120 safety check --json --output safety-report.json || true
-        if [ -f safety-report.json ]; then
-          echo "Safety vulnerabilities found. Check the report:"
-          cat safety-report.json
+        set +e
+        timeout 120 pip-audit --local --format json --output pip-audit-report.json
+        audit_status=$?
+        set -e
+        # Exit 1 means vulnerabilities; scanner errors/timeouts must not be swallowed.
+        if [ "$audit_status" -gt 1 ] || [ ! -s pip-audit-report.json ]; then
+          echo "::error::pip-audit failed (exit $audit_status) or report missing"
+          exit 1
         fi
+        python - <<'PY'
+        import json
+        with open("pip-audit-report.json", encoding="utf-8") as report:
+            data = json.load(report)
+        if not isinstance(data.get("dependencies"), list):
+            raise SystemExit("pip-audit report missing dependencies array")
+        print("pip-audit report validated")
+        PY
 
     # Node.js dependency scanning with npm audit
     - name: Install Node.js dependencies
@@ -65,6 +76,14 @@ jobs:
           echo "NPM vulnerabilities found. Check the report:"
           cat npm-audit-report.json
         fi
+        python - <<'PY'
+        import json
+        with open("npm-audit-report.json", encoding="utf-8") as report:
+            data = json.load(report)
+        if not isinstance(data.get("metadata", {}).get("vulnerabilities"), dict):
+            raise SystemExit("npm audit report missing vulnerability metadata")
+        print("npm audit report validated")
+        PY
 
     # Advanced dependency scanning with Snyk (requires SNYK_TOKEN)
     # - name: Run Snyk to check for vulnerabilities
@@ -92,7 +111,7 @@ jobs:
       with:
         name: dependency-scan-reports
         path: |
-          safety-report.json
+          pip-audit-report.json
           frontend/npm-audit-report.json
 
   sast-scan:
@@ -285,28 +304,32 @@ jobs:
         echo "# Security Scan Summary" > security-summary.md
         echo "" >> security-summary.md
 
-        # --- Python Dependencies (Safety) ---
-        echo "### Python Dependencies (Safety)" >> security-summary.md
-        REPORT="dependency-scan-reports/safety-report.json"
-        if [ -f "$REPORT" ] && [ -s "$REPORT" ]; then
-          VULN_COUNT=$(jq '[.vulnerabilities // [] | length] | add // 0' "$REPORT" 2>/dev/null || echo "0")
-          if [ "$VULN_COUNT" -gt 0 ] 2>/dev/null; then
-            echo "**$VULN_COUNT vulnerabilities found**" >> security-summary.md
-            echo "" >> security-summary.md
-            echo "| Package | Installed | Vuln ID | Severity | Description |" >> security-summary.md
-            echo "|---------|-----------|---------|----------|-------------|" >> security-summary.md
-            jq -r '.vulnerabilities[]? | "| \(.package_name // "?") | \(.analyzed_version // "?") | \(.vulnerability_id // "?") | \(.severity // "?") | \(.advisory[0:80] // "?") |"' "$REPORT" 2>/dev/null >> security-summary.md || true
-          else
-            echo "No known vulnerabilities found." >> security-summary.md
-          fi
+        # --- Python Dependencies (pip-audit) ---
+        echo "### Python Dependencies (pip-audit)" >> security-summary.md
+        REPORT="dependency-scan-reports/pip-audit-report.json"
+        if [ ! -s "$REPORT" ]; then
+          echo "::error::Python dependency audit report unavailable"
+          exit 1
+        fi
+        VULN_COUNT=$(jq '[.dependencies[]?.vulns[]?] | length' "$REPORT")
+        if [ "$VULN_COUNT" -gt 0 ]; then
+          echo "**$VULN_COUNT vulnerabilities found**" >> security-summary.md
+          echo "" >> security-summary.md
+          echo "| Package | Installed | Advisory | Fix Versions |" >> security-summary.md
+          echo "|---------|-----------|----------|--------------|" >> security-summary.md
+          jq -r '.dependencies[] | . as $dep | .vulns[]? | "| \($dep.name) | \($dep.version) | \(.id) | \(.fix_versions | join(", ")) |"' "$REPORT" >> security-summary.md
         else
-          echo "Report not available." >> security-summary.md
+          echo "No known vulnerabilities found." >> security-summary.md
         fi
         echo "" >> security-summary.md
 
         # --- Node.js Dependencies (npm audit) ---
         echo "### Node.js Dependencies (npm audit)" >> security-summary.md
-        REPORT="dependency-scan-reports/npm-audit-report.json"
+        REPORT="dependency-scan-reports/frontend/npm-audit-report.json"
+        if [ ! -s "$REPORT" ]; then
+          echo "::error::Node.js dependency audit report unavailable"
+          exit 1
+        fi
         if [ -f "$REPORT" ] && [ -s "$REPORT" ]; then
           TOTAL=$(jq '.metadata.vulnerabilities // {} | to_entries | map(.value) | add // 0' "$REPORT" 2>/dev/null || echo "0")
           if [ "$TOTAL" -gt 0 ] 2>/dev/null; then
