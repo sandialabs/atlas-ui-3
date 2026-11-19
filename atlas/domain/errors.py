@@ -24,6 +24,17 @@ class ValidationError(DomainError):
     pass
 
 
+class ConversationMetadataUnreadableError(DomainError):
+    """A stored conversation's metadata could not be decoded.
+
+    Raised instead of treating the record as empty, so absent-looking state
+    (no pinned team prompt, revision zero) is never inferred from it.
+    """
+
+    def __init__(self, message: str = "The conversation's stored settings could not be read."):
+        super().__init__(message, code="conversation_metadata_unreadable")
+
+
 class SessionError(DomainError):
     """Session-related error."""
     pass

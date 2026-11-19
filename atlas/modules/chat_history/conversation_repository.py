@@ -35,6 +35,16 @@ from atlas.domain.conversation_lineage import (
     parent_conversation_id_from_metadata,
 )
 from atlas.domain.conversation_origin import carry_recorded_origin, origin_fields
+from atlas.domain.conversation_prompt_pin import (
+    PIN_METADATA_KEY,
+    apply_pin_change,
+    carry_stored_pin,
+    new_record_pin,
+    pin_fields_readable,
+    pin_state,
+    recover_unreadable_metadata,
+)
+from atlas.domain.errors import ConversationMetadataUnreadableError
 
 from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
 
@@ -49,6 +59,24 @@ class ConversationRepository:
 
     def _get_session(self) -> Session:
         return self._session_factory()
+
+    @staticmethod
+    def _owned_conversation(session: Session, conversation_id: str, user_email: str):
+        """The user's conversation row, locked for update on PostgreSQL.
+
+        Saves and pin clears read-modify-write the metadata blob; the row
+        lock serializes them so neither can overwrite the other's change
+        (issue #1169). DuckDB has no row locks; there a concurrent writer
+        fails the commit instead of interleaving.
+        """
+        query = session.query(ConversationRecord).filter(
+            ConversationRecord.id == conversation_id,
+            ConversationRecord.user_email == user_email,
+        )
+        bind = session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.first()
 
     def _visible_parent_ids(
         self,
@@ -154,10 +182,7 @@ class ConversationRepository:
         """
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
-            existing = session.query(ConversationRecord).filter(
-                ConversationRecord.id == conversation_id,
-                ConversationRecord.user_email == user_email,
-            ).first()
+            existing = self._owned_conversation(session, conversation_id, user_email)
 
             if existing:
                 # Count the rows rather than trusting ``message_count``: the
@@ -194,16 +219,33 @@ class ConversationRepository:
                     )
                     return None
 
+                # A stored pin or pin revision that is malformed is unreadable
+                # (issue #1169): carrying it through would read it as "no pin"
+                # and silently write an unpinned record over it.
+                stored_for_pin = _load_metadata(existing.metadata_json)
+                if isinstance(stored_for_pin, dict) and not pin_fields_readable(stored_for_pin):
+                    # No client-supplied value in the message (the id came
+                    # from the frame).
+                    logger.error(
+                        "Refusing to save a conversation: its stored team-prompt "
+                        "pin is malformed. This turn was not persisted."
+                    )
+                    return None
+
                 existing.title = title or existing.title
                 existing.model = model or existing.model
                 existing.updated_at = datetime.now(timezone.utc)
                 existing.message_count = len(messages)
                 if metadata:
+                    stored_metadata = _load_metadata(existing.metadata_json)
                     # The launch origin (issue #1187) is fixed at creation:
                     # the stored record decides it for every later save.
-                    metadata = carry_recorded_origin(
-                        _load_metadata(existing.metadata_json), metadata
-                    )
+                    metadata = carry_recorded_origin(stored_metadata, metadata)
+                    # The pin is never written by a save (issue #1169): it is
+                    # changed only by change_prompt_pin / clear_prompt_pin,
+                    # so a session holding an older pin cannot restore,
+                    # replace or drop the stored one.
+                    metadata = carry_stored_pin(stored_metadata, metadata)
                     existing.metadata_json = json.dumps(metadata)
 
                 # Delete old messages
@@ -240,6 +282,9 @@ class ConversationRepository:
                     )
                     return None
 
+                if metadata:
+                    # A new record takes the creating session's pin.
+                    metadata = new_record_pin(metadata)
                 conv = ConversationRecord(
                     id=conversation_id,
                     user_email=user_email,
@@ -412,11 +457,24 @@ class ConversationRepository:
                 messages.append(msg_data)
 
             conv_metadata = {}
+            metadata_unreadable = False
             if conv.metadata_json:
                 try:
                     conv_metadata = json.loads(conv.metadata_json)
                 except json.JSONDecodeError:
                     logger.warning("Corrupt metadata_json for conversation %s", conv.id)
+                    metadata_unreadable = True
+                if conv_metadata is None:
+                    conv_metadata = {}  # a stored JSON null is empty metadata
+                if not isinstance(conv_metadata, dict):
+                    # Valid JSON of the wrong shape is no more readable.
+                    conv_metadata = {}
+                    metadata_unreadable = True
+                elif not pin_fields_readable(conv_metadata):
+                    # A malformed pin is not "no pin" (issue #1169). The rest
+                    # of the record stays readable; the pin state is unknown.
+                    logger.warning("Malformed team-prompt pin in conversation %s", conv.id)
+                    metadata_unreadable = True
 
             lineage = self._lineage_fields_by_id(
                 session, user_email, {conv.id: conv_metadata}
@@ -438,6 +496,10 @@ class ConversationRepository:
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
                 "message_count": conv.message_count,
                 "metadata": conv_metadata,
+                # The stored metadata could not be decoded, so ``metadata`` is
+                # a placeholder: callers must not read "no pin" (or any other
+                # absent record) from it (issue #1169).
+                **({"metadata_unreadable": True} if metadata_unreadable else {}),
                 "messages": messages,
                 "tags": self._get_tag_names(session, conv.id),
                 # Classification reads the *raw* blob so an unreadable one
@@ -737,6 +799,101 @@ class ConversationRepository:
             session.commit()
             return True
 
+    def get_conversation_metadata(
+        self, conversation_id: str, user_email: str
+    ) -> Optional[Dict[str, Any]]:
+        """The metadata of one of the user's conversations, without its messages.
+
+        Returns ``{}`` for a conversation with no metadata and None when the
+        user owns no such conversation. Raises
+        ``ConversationMetadataUnreadableError`` when the stored blob is not a
+        JSON object: an unreadable record must never read as "no pin"
+        (issue #1169). Active sessions use it to follow pin changes.
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            row = session.query(ConversationRecord.metadata_json).filter(
+                ConversationRecord.id == conversation_id,
+                ConversationRecord.user_email == user_email,
+            ).first()
+            if row is None:
+                return None
+            return _readable_metadata(row[0])
+
+    def change_prompt_pin(
+        self,
+        conversation_id: str,
+        user_email: str,
+        expected_revision: Optional[int],
+        pin: Optional[Dict[str, Any]],
+        history_entry: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Compare-and-set a conversation's team-prompt pin (issue #1169).
+
+        Under the row lock (``SELECT ... FOR UPDATE`` on PostgreSQL; DuckDB
+        fails a conflicting concurrent commit instead): applies ``pin``
+        (None clears it) when the stored pin revision equals
+        ``expected_revision`` (None: unconditionally), appending
+        ``history_entry`` and bumping the revision. Returns
+        ``{"status": "ok" | "unchanged" | "conflict", "state": <stored pin
+        state after the call>}``, or None when the user owns no such
+        conversation. Raises ``ConversationMetadataUnreadableError`` for an
+        unreadable blob, which is left untouched.
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            conv = self._owned_conversation(session, conversation_id, user_email)
+            if not conv:
+                return None
+            current = _readable_metadata(conv.metadata_json)
+            status, updated = apply_pin_change(current, expected_revision, pin, history_entry)
+            if status == "ok":
+                conv.metadata_json = json.dumps(updated)
+                session.commit()
+            return {"status": status, "state": pin_state(updated)}
+
+    def clear_prompt_pin(
+        self, conversation_id: str, user_email: str
+    ) -> Optional[Dict[str, Any]]:
+        """Clear a conversation's pinned team-library prompt (owner DELETE).
+
+        Unconditional (no expected revision), under the row lock, bumping the
+        pin revision so every session sees the change on its next turn. The
+        pin history is kept. Returns ``{"prompt_library": <removed pin>}``
+        (empty when none was stored), or None when the user owns no such
+        conversation.
+
+        A record whose pin state is unreadable (invalid JSON, not an object,
+        or a malformed pin or revision) refuses every turn and save, so this
+        explicit owner action is how it is recovered: under the same lock,
+        ``recover_unreadable_metadata`` resets the pin state without guessing
+        a pin and keeps everything else (see there). The result then says
+        ``{"recovered": True}``. Nothing from the damaged pin is audited or
+        logged: it cannot be trusted.
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            conv = self._owned_conversation(session, conversation_id, user_email)
+            if not conv:
+                return None
+            try:
+                current = _readable_metadata(conv.metadata_json)
+            except ConversationMetadataUnreadableError:
+                now = datetime.now(timezone.utc)
+                conv.metadata_json = json.dumps(
+                    recover_unreadable_metadata(conv.metadata_json, int(now.timestamp()), now.isoformat())
+                )
+                session.commit()
+                # No identifiers or content: the owner's request is the audit.
+                logger.warning("An owner reset a conversation's unreadable team-prompt state")
+                return {"recovered": True}
+            removed = pin_state(current)["pin"]
+            status, updated = apply_pin_change(current, None, None, None)
+            if status == "ok":
+                conv.metadata_json = json.dumps(updated)
+                session.commit()
+            return {PIN_METADATA_KEY: removed} if removed else {}
+
     def stamp_legacy_classification(
         self,
         level: Optional[str],
@@ -823,6 +980,26 @@ class ConversationRepository:
 
 
 _MISSING = object()
+
+
+def _readable_metadata(metadata_json: Optional[str]) -> Dict[str, Any]:
+    """Stored metadata as a dict; ``{}`` only for genuinely empty metadata.
+
+    A blob that is not valid JSON, is JSON but not an object, or carries a
+    malformed team-prompt pin or pin revision (``pin_fields_readable``) raises
+    ``ConversationMetadataUnreadableError`` (the message names no content).
+    """
+    if not metadata_json:
+        return {}
+    try:
+        value = json.loads(metadata_json)
+    except (json.JSONDecodeError, TypeError):
+        raise ConversationMetadataUnreadableError() from None
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or not pin_fields_readable(value):
+        raise ConversationMetadataUnreadableError()
+    return value
 
 
 def _load_metadata(metadata_json: Optional[str]) -> Any:

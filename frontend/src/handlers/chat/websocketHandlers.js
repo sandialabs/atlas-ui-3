@@ -252,6 +252,7 @@ export function cleanupStreamState() {
  * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
  * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
  * @param {Function} [deps.onConversationSaved] - Called with the id when the conversation on screen is persisted.
+ * @param {Function} [deps.onPromptPinState] - Called with a frame carrying the stored team-prompt pin and its revision (issue #1169).
  * @param {Function} [deps.onContextUsage] - Receives `context_usage` estimates (issue #877).
  * @param {Function} [deps.onContextCompaction] - Receives `context_compaction` progress frames (issue #877).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
@@ -284,6 +285,7 @@ export function createWebSocketHandler(deps) {
     retrySteer,
     onRunStatus,
     onConversationSaved,
+    onPromptPinState,
     onContextUsage,
     onContextCompaction,
   } = deps
@@ -866,6 +868,9 @@ export function createWebSocketHandler(deps) {
           if (data.conversation_id && typeof onConversationSaved === 'function') {
             onConversationSaved(data.conversation_id)
           }
+          if (typeof onPromptPinState === 'function' && 'prompt_library_pin_revision' in data) {
+            onPromptPinState(data)
+          }
           break
         }
         case 'token_stream': {
@@ -960,6 +965,11 @@ export function createWebSocketHandler(deps) {
               return kept
             })
             break
+          }
+          // The conversation's team prompt changed elsewhere (issue #1169):
+          // adopt the stored selection, then report the refusal as usual.
+          if (data.error_type === 'prompt_pin_conflict' && typeof onPromptPinState === 'function') {
+            onPromptPinState(data)
           }
           setIsThinking(false)
           clearAgentRunning()

@@ -257,6 +257,12 @@ async def chat_completions(request: Request):
         "model": completion_request.model,
         "had_authorization": received_token is not None,
         "authorization_token": received_token,
+        # The system prompt that reached the model, so tests can prove which
+        # prompt a turn actually ran with (prompt library, issue #1169).
+        "system_prompt": next(
+            (m.content for m in completion_request.messages if m.role == "system" and isinstance(m.content, str)),
+            None,
+        ),
     })
 
     # Generate mock response

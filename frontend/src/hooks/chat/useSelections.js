@@ -29,6 +29,39 @@ export const isPersonaKey = key => typeof key === 'string' && key.startsWith(PER
 export const personaKey = id => `${PERSONA_PREFIX}${id}`
 export const personaIdFromKey = key => (isPersonaKey(key) ? key.slice(PERSONA_PREFIX.length) : null)
 
+// Prefix for a team prompt-library entry (issue #1169). The key names the
+// entry and the version the user chose: `libprompt:<promptId>@<versionId>`,
+// or `@latest` to follow the newest published version. Only this reference
+// crosses the wire (as `library_prompt`); the server resolves the text after
+// re-checking access, so library prompts are never MCP selected_prompts and
+// never inline custom_system_prompt text.
+export const LIBRARY_PROMPT_PREFIX = 'libprompt:'
+export const LIBRARY_LATEST = 'latest'
+
+export const isLibraryPromptKey = key => typeof key === 'string' && key.startsWith(LIBRARY_PROMPT_PREFIX)
+export const libraryPromptKey = (promptId, versionId = null) =>
+  `${LIBRARY_PROMPT_PREFIX}${promptId}@${versionId || LIBRARY_LATEST}`
+export const parseLibraryPromptKey = key => {
+  if (!isLibraryPromptKey(key)) return null
+  const body = key.slice(LIBRARY_PROMPT_PREFIX.length)
+  const at = body.lastIndexOf('@')
+  const promptId = at >= 0 ? body.slice(0, at) : body
+  const version = at >= 0 ? body.slice(at + 1) : LIBRARY_LATEST
+  if (!promptId) return null
+  return { promptId, versionId: !version || version === LIBRARY_LATEST ? null : version }
+}
+
+// A library draft being tested in chat before it is published. The editor's
+// own text is sent inline (it is the editor's to send, exactly like a private
+// custom prompt), and the key is never persisted across reloads.
+export const LIBRARY_DRAFT_PREFIX = 'libdraft:'
+export const isLibraryDraftKey = key => typeof key === 'string' && key.startsWith(LIBRARY_DRAFT_PREFIX)
+export const libraryDraftKey = promptId => `${LIBRARY_DRAFT_PREFIX}${promptId}`
+
+// Keys that replace the system prompt and are never MCP prompts.
+export const isNonMcpPromptKey = key =>
+  isUserPromptKey(key) || isPersonaKey(key) || isLibraryPromptKey(key) || isLibraryDraftKey(key)
+
 // Whether an active persona survives a switch of the compliance filter. The
 // picker hides a persona whose level the filter does not allow and the server
 // refuses to resolve it, so keeping such a persona selected would silently
@@ -163,7 +196,7 @@ export function useSelections(user) {
     // User-authored prompts (issue #153) and personas (issue #880) are not MCP
     // prompts and must NOT be added here, or they'd leak into the MCP
     // selected_prompts payload.
-    if (promptKey && !isUserPromptKey(promptKey) && !isPersonaKey(promptKey) && !promptsRaw.includes(promptKey)) {
+    if (promptKey && !isNonMcpPromptKey(promptKey) && !promptsRaw.includes(promptKey)) {
       setPromptsRaw(prev => [...prev, promptKey])
     }
   }, [setActivePromptKey, promptsRaw, setPromptsRaw])
@@ -184,7 +217,8 @@ export function useSelections(user) {
   // selection dimension is a single-file change.
 
   const snapshotSelections = useCallback(() => ({
-    active_prompt_key: activePromptKey || null,
+    // A draft under test is transient; a workspace never captures it.
+    active_prompt_key: (activePromptKey && !isLibraryDraftKey(activePromptKey)) ? activePromptKey : null,
     selected_tools: toArray(selectedTools),
     selected_prompts: toArray(selectedPrompts),
     selected_data_sources: toArray(selectedDataSources),
@@ -207,7 +241,7 @@ export function useSelections(user) {
     // An MCP active prompt must also be loaded, mirroring makePromptActive.
     // User prompts and personas are not MCP prompts, so they stay out of the
     // selected_prompts set.
-    if (promptKey && !isUserPromptKey(promptKey) && !isPersonaKey(promptKey)) {
+    if (promptKey && !isNonMcpPromptKey(promptKey)) {
       setPromptsRaw(prev => (prev.includes(promptKey) ? prev : [...prev, promptKey]))
     }
   }, [setToolsRaw, setPromptsRaw, setDataSourcesRaw, setRagEnabled, setActivePromptKey])

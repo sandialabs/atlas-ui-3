@@ -66,6 +66,12 @@ def _live_metadata(session) -> Dict[str, Any]:
     launch_origin = origin_for_run_source(session.context.get(ORIGIN_METADATA_KEY))
     if launch_origin:
         metadata[ORIGIN_METADATA_KEY] = launch_origin
+    # The team-prompt pin the run is executing with, its history and revision
+    # (issue #1169), in the stored shape. Without them a client opening the
+    # live view reads "no team prompt" and its next turn would clear the pin.
+    from atlas.application.chat import prompt_library_turn
+
+    metadata.update(prompt_library_turn.pin_metadata(session.context))
     return metadata
 
 
