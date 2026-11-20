@@ -12,6 +12,10 @@
 #   3. A run launched on a discovered gateway model completes, and the chat
 #      request reached the proxy with that team's header.
 #   4. Affected backend unit suites (launch discovery, gateways, agent runs).
+#   5. Multi-replica harness, required because the change touches
+#      atlas/application/chat/runs/ and atlas/routes/agent_run_routes.py.
+#      Skip it with ATLAS_PR1228_SKIP_MULTIREPLICA=1 when no container
+#      runtime is available.
 # All prompts are synthetic placeholders.
 set -uo pipefail
 
@@ -190,6 +194,15 @@ echo "== affected backend unit suites"
         tests/test_litellm_gateway.py tests/test_agent_runs_api.py
 )
 print_result $? "backend unit tests (affected suites)"
+
+echo ""
+if [ "${ATLAS_PR1228_SKIP_MULTIREPLICA:-0}" = "1" ]; then
+    echo "== multi-replica harness SKIPPED (ATLAS_PR1228_SKIP_MULTIREPLICA=1)"
+else
+    echo "== multi-replica harness (two real replicas on shared Redis and PostgreSQL)"
+    bash test/multireplica_tests.sh
+    print_result $? "multi-replica harness"
+fi
 
 echo ""
 echo "Passed: $PASSED | Failed: $FAILED"
