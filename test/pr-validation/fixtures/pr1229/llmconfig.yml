@@ -1,0 +1,20 @@
+# PR #1229: LiteLLM gateway picker order and default team/model, all in
+# llmconfig.yml. __MOCK_LITELLM_PORT__ is substituted by the validation script.
+# In the mock, test@test.com is in Alpha and Beta; bob@example.com is in Beta
+# and Gamma (not Alpha).
+model_picker_order: gateways_first
+
+models:
+  static-model:
+    model_name: "openai/gpt-4o"
+    model_url: "http://127.0.0.1:9/v1"
+    api_key: "sk-unused"
+    description: "Static model (fallback for non-members)"
+
+litellm_gateways:
+  enterprise:
+    base_url: "http://127.0.0.1:__MOCK_LITELLM_PORT__"
+    api_key: "sk-mock-litellm-master"
+    display_name: "Enterprise LiteLLM"
+    default_team: "team-alpha-7f3a"
+    default_model: "claude-sonnet"

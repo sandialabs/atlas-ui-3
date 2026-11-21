@@ -23,6 +23,7 @@ const ModelSelector = () => {
   const {
     models = [],
     llmGateways = [],
+    modelPickerOrder = 'models_first',
     user,
     currentModel,
     setCurrentModel,
@@ -84,6 +85,22 @@ const ModelSelector = () => {
   // The selected model can sit outside the filter (a persisted choice, or no
   // compliant replacement existed when the level changed). The list no longer
   // shows it, so flag it on the button instead of leaving it looking normal.
+  // llmconfig.yml `model_picker_order: gateways_first` puts the LiteLLM team
+  // pickers above the static models.
+  const gatewaysFirst = modelPickerOrder === 'gateways_first'
+  const gatewaySections = visibleGateways.map(gateway => (
+    <GatewayModelPicker
+      key={gateway.name}
+      gateway={gateway}
+      currentModel={currentModel}
+      onSelect={handleModelSelect}
+      user={user}
+      isModelVisible={isGatewayModelVisible}
+      showCompliance={complianceEnabled}
+      complianceLevels={complianceLevels}
+      placement={gatewaysFirst ? 'before_models' : 'after_models'}
+    />
+  ))
   const currentOutsideFilter = complianceFiltering && !!currentObj &&
     !isComplianceAccessible(complianceLevelFilter, classificationsOf(currentObj))
   const buttonTitle = currentModel
@@ -126,6 +143,7 @@ const ModelSelector = () => {
         <>
           <div className="fixed inset-0 z-40" onClick={() => { setDropdownOpen(false); setExpandedModelInfo(null) }} />
           <div className="composer-toolbar-popover absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50 max-h-[28rem] overflow-y-auto">
+            {gatewaysFirst && gatewaySections}
             {listedModels.length === 0 && llmGateways.length === 0 ? (
               <div className="px-4 py-2 text-gray-400 text-sm">No models available</div>
             ) : visibleListedModels.length === 0 && visibleGateways.length === 0 ? (
@@ -220,18 +238,7 @@ const ModelSelector = () => {
                 )
               })
             )}
-            {visibleGateways.map(gateway => (
-              <GatewayModelPicker
-                key={gateway.name}
-                gateway={gateway}
-                currentModel={currentModel}
-                onSelect={handleModelSelect}
-                user={user}
-                isModelVisible={isGatewayModelVisible}
-                showCompliance={complianceEnabled}
-                complianceLevels={complianceLevels}
-              />
-            ))}
+            {!gatewaysFirst && gatewaySections}
           </div>
         </>
       )}

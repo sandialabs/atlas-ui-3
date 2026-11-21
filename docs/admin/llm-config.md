@@ -193,6 +193,21 @@ their LiteLLM teams, then one of that team's models, and every request carries
 the team in `x-litellm-team-id`. See
 [Enterprise LiteLLM Team Gateways](litellm-team-gateways.md).
 
+## Picker Order and Default Model
+
+Two top-level keys shape the model picker:
+
+```yaml
+model_picker_order: gateways_first   # LiteLLM gateways above static models; default models_first
+default_model: "gpt-4.1"             # a static model name or <gateway>::<team_id>::<model_id>
+```
+
+`default_model` is the model a user with no saved pick starts on; unset, it is
+the first static model (the order of `models` in this file). Gateways may also
+set `default_team` and `default_model`. See
+[Defaults and picker order](litellm-team-gateways.md#defaults-and-picker-order)
+for the full resolution order and fallbacks.
+
 ## Per-User API Keys (2026-02-08)
 
 Models can be configured to require users to bring their own API keys instead of using system-managed environment variables. This is useful when admins want to provide curated model endpoints but let individual users supply their own credentials.
