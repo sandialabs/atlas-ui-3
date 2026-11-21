@@ -53,6 +53,12 @@ litellm_gateways:
     api_key: "sk-mock-litellm-master"
     model_defaults:
       supports_tools: false
+    # Optional: start new sessions on Project Alpha's gpt-4o-mini (members
+    # only; others fall back to the first static model).
+    default_team: "team-alpha-7f3a"
+    default_model: "gpt-4o-mini"
+# Optional: list the gateway above the static models in the picker.
+model_picker_order: gateways_first
 
 # 4. Chat through a team model from the CLI (test@test.com is in Alpha and Beta)
 atlas-chat "hello" --model "enterprise::team-beta-19c2::llama-3.3-70b"

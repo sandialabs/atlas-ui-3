@@ -7,7 +7,7 @@ model key (``<gateway>::<team_id>::<model_id>``) sent with each chat turn; see
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -15,18 +15,27 @@ from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.domain.errors import AuthorizationError, LLMAuthenticationError, LLMServiceError
 from atlas.infrastructure.app_factory import app_factory
-from atlas.modules.config.litellm_gateway_models import build_gateway_model_key, is_key_safe_part
+from atlas.modules.config.litellm_gateway_models import (
+    build_gateway_model_key,
+    is_key_safe_part,
+    resolve_gateway_ref,
+)
 from atlas.modules.config.models import LiteLLMGatewayConfig
+from atlas.modules.llm.default_model_resolver import resolve_default_model
 from atlas.modules.llm.litellm_gateway_client import SIGN_IN_REQUIRED, get_gateway_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/llm/gateways", tags=["llm-gateways"])
+# Not gateway-specific: the starting model may be a static model too.
+default_model_router = APIRouter(prefix="/api/llm", tags=["llm-gateways"])
 
 # Tells the model picker where a fresh sign-in starts, so a delegated-token
 # failure offers a recovery link instead of a dead-end error.
 SIGN_IN_HEADER = "X-Atlas-Sign-In"
 OIDC_SIGN_IN_PATH = "/auth/oidc/login"
+
+PICKER_ORDERS = ("models_first", "gateways_first")
 
 async def build_gateway_summaries(llm_config: Any, current_user: str, app_settings: Any) -> List[Dict[str, Any]]:
     """Gateways the user may use, in the shape ``/api/config`` returns them."""
@@ -40,6 +49,13 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
             "description": gateway.description,
             **gateway.default_capabilities(),
         }
+        # llmconfig.yml defaults: the picker preselects default_team, and a
+        # fresh session may start on the default team model (resolved per
+        # user by GET /api/llm/default-model).
+        if gateway.default_team:
+            summary["default_team_id"] = gateway.default_team
+        if gateway.default_model:
+            summary["default_model_id"] = gateway.default_model
         # Each allowlisted model's own capabilities (its entry over the
         # defaults above), so the client shows and gates a saved selection by
         # its model, not the gateway.
@@ -80,6 +96,31 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
                 summary["model_classifications"] = [gateway.model_allowed_data_classifications("")]
         summaries.append(summary)
     return summaries
+
+
+async def model_picker_config(llm_config: Any, current_user: str) -> Dict[str, Any]:
+    """The llmconfig.yml picker settings ``/api/config`` returns.
+
+    ``default_model`` is reported only when this user may use it: a static
+    model their groups allow, or a key on a gateway they may use (team
+    membership is checked per user by ``GET /api/llm/default-model``).
+    """
+    order = getattr(llm_config, "model_picker_order", None)
+    if order not in PICKER_ORDERS:
+        order = "models_first"
+    name = getattr(llm_config, "default_model", None)
+    visible: Optional[str] = None
+    if isinstance(name, str) and name:
+        static = (getattr(llm_config, "models", None) or {}).get(name)
+        if static is not None:
+            visible = name if await is_model_allowed(static, current_user) else None
+        else:
+            ref = resolve_gateway_ref(llm_config, name)
+            gateways = getattr(llm_config, "litellm_gateways", None) or {}
+            gateway = gateways.get(ref.gateway) if ref else None
+            if gateway is not None and await is_model_allowed(gateway, current_user):
+                visible = name
+    return {"model_picker_order": order, "default_model": visible}
 
 
 async def _authorized_gateway(gateway_name: str, current_user: str) -> LiteLLMGatewayConfig:
@@ -174,3 +215,17 @@ async def list_gateway_models(
         "team_label": team.label,
         "models": models,
     }
+
+
+@default_model_router.get("/default-model")
+async def get_default_model(current_user: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """The model the current user starts on when they have no saved pick.
+
+    ``model`` is a static model name, a gateway model key, or null (nothing
+    usable: a gateway-only deployment whose defaults the user cannot use).
+    ``source`` is ``configured`` (llmconfig.yml ``default_model`` or a
+    gateway's ``default_team``/``default_model``) or ``first_model``.
+    """
+    llm_config = app_factory.get_config_manager().llm_config
+    resolved = await resolve_default_model(llm_config, current_user)
+    return {"model": resolved.model, "source": resolved.source}
