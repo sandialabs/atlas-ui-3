@@ -123,14 +123,18 @@ class ReasoningAccumulator:
     def _add_detail(self, item: Any) -> None:
         # OpenRouter streams reasoning_details as fragments of indexed items:
         # fragments sharing an index (and type) are one item whose text
-        # arrives in pieces. Items without an index are complete on their own.
+        # arrives in pieces. Without an index, fragments sharing an id (and
+        # type) are merged the same way; an item with neither is complete on
+        # its own.
         if not isinstance(item, dict):
             return
-        index = item.get("index")
-        if index is None:
+        if item.get("index") is not None:
+            slot_key: Any = ("index", item["index"], item.get("type"))
+        elif item.get("id"):
+            slot_key = ("id", item["id"], item.get("type"))
+        else:
             self._details.append(dict(item))
             return
-        slot_key = (index, item.get("type"))
         slot = self._detail_slots.get(slot_key)
         if slot is None:
             slot = dict(item)
@@ -168,8 +172,17 @@ class ReasoningAccumulator:
             self._thinking_parts.append(thinking)
         signature = block.get("signature")
         if isinstance(signature, str) and signature:
-            self._signature = signature
-            self._flush_thinking()
+            if not self._thinking_parts:
+                # Signature ahead of its text: hold it for the text to come.
+                self._signature = signature
+            elif self._signature:
+                # Text already has a held signature, so this one starts the
+                # next block.
+                self._flush_thinking()
+                self._signature = signature
+            else:
+                self._signature = signature
+                self._flush_thinking()
 
     def fields(self) -> Dict[str, Any]:
         """The accumulated reasoning, in the shape :func:`extract_reasoning` returns."""
@@ -199,6 +212,45 @@ def reasoning_text_for_estimate(message: Dict[str, Any]) -> str:
         elif value:
             parts.append(json.dumps(value, default=str))
     return "\n".join(parts)
+
+
+def reattach_reasoning(
+    rewritten: List[Any], original: List[Dict[str, Any]],
+) -> List[Any]:
+    """Restore reasoning a message rewrite dropped (e.g. a PreLlmCall hook).
+
+    Hooks see messages without reasoning, so a hook that returns rewritten
+    messages returns them without it, and the model would reject the call
+    again. Each assistant tool-call message that lost its reasoning gets back
+    the reasoning of the original message carrying the same tool-call id.
+    """
+    by_call_id: Dict[str, Dict[str, Any]] = {}
+    for msg in original or []:
+        if not isinstance(msg, dict):
+            continue
+        fields = {k: msg[k] for k in REASONING_MESSAGE_KEYS if k in msg}
+        if not fields:
+            continue
+        for call in msg.get("tool_calls") or []:
+            call_id = _field(call, "id")
+            if call_id:
+                by_call_id[call_id] = fields
+    if not by_call_id:
+        return rewritten
+    restored: List[Any] = []
+    for msg in rewritten:
+        if (
+            isinstance(msg, dict)
+            and msg.get("tool_calls")
+            and not any(k in msg for k in REASONING_MESSAGE_KEYS)
+        ):
+            for call in msg["tool_calls"]:
+                fields = by_call_id.get(_field(call, "id"))
+                if fields:
+                    msg = {**msg, **fields}
+                    break
+        restored.append(msg)
+    return restored
 
 
 def strip_reasoning(message: Dict[str, Any]) -> Dict[str, Any]:

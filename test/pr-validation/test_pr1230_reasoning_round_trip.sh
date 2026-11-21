@@ -99,10 +99,10 @@ grep -rq "$REASONING_MARK" "$WORK/logs" 2>/dev/null && LEAK=1
 print_result $LEAK "reasoning text absent from CLI output and app logs"
 
 print_header "Check 5: unit tests"
-python -m pytest atlas/tests/test_reasoning_round_trip.py -q -p no:cacheprovider > "$WORK/pytest.log" 2>&1
+python -m pytest atlas/tests/test_reasoning_round_trip.py atlas/tests/test_reasoning_capture.py -q -p no:cacheprovider > "$WORK/pytest.log" 2>&1
 PT_RC=$?
 tail -1 "$WORK/pytest.log"
-print_result $PT_RC "test_reasoning_round_trip.py"
+print_result $PT_RC "test_reasoning_round_trip.py + test_reasoning_capture.py"
 
 echo ""
 echo "Passed: $PASSED  Failed: $FAILED"

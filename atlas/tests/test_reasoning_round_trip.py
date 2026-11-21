@@ -14,7 +14,6 @@ and fine-tune capture.
 """
 
 import logging
-from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -35,15 +34,9 @@ from litellm.types.utils import (
 
 from atlas.application.chat.agent.agentic_loop import AgenticLoop
 from atlas.application.chat.agent.protocols import AgentContext
-from atlas.application.chat.capture.capture_context import _sanitize_messages
 from atlas.domain.messages.models import ConversationHistory, ToolResult
 from atlas.interfaces.llm import LLMResponse
 from atlas.modules.llm.litellm_caller import LiteLLMCaller
-from atlas.modules.llm.reasoning_capture import (
-    ReasoningAccumulator,
-    extract_reasoning,
-    strip_reasoning,
-)
 from atlas.tests.test_tools_mode_iteration import (
     ScriptedToolsLLM,
     _config,
@@ -226,89 +219,6 @@ class TestAgentLoopWithoutReasoning:
         }
 
 
-# -- Capture helpers -----------------------------------------------------
-
-class TestExtractReasoning:
-
-    def test_litellm_message(self):
-        msg = LiteLLMMessage(content="hi", reasoning_content=REASONING)
-        assert extract_reasoning(msg) == {"reasoning_content": REASONING}
-
-    def test_reasoning_details_and_thinking_blocks(self):
-        msg = SimpleNamespace(
-            reasoning_content=None,
-            reasoning_details=DETAILS,
-            thinking_blocks=[{"type": "thinking", "thinking": "t", "signature": "sig"}],
-        )
-        assert extract_reasoning(msg) == {
-            "reasoning_details": DETAILS,
-            "thinking_blocks": [{"type": "thinking", "thinking": "t", "signature": "sig"}],
-        }
-
-    def test_nothing_present(self):
-        assert extract_reasoning(SimpleNamespace(content="x")) == {}
-        assert extract_reasoning(None) == {}
-
-
-class TestReasoningAccumulator:
-
-    def test_concatenates_reasoning_content(self):
-        acc = ReasoningAccumulator()
-        for piece in ("a", "b", None, "c"):
-            acc.observe(SimpleNamespace(reasoning_content=piece))
-        assert acc.fields() == {"reasoning_content": "abc"}
-
-    def test_merges_reasoning_details_by_index(self):
-        acc = ReasoningAccumulator()
-        acc.observe({"reasoning_details": [{"type": "reasoning.text", "index": 0, "text": "Hel"}]})
-        acc.observe({"reasoning_details": [{"type": "reasoning.text", "index": 0, "text": "lo", "signature": "s"}]})
-        acc.observe({"reasoning_details": [{"type": "reasoning.encrypted", "index": 1, "data": "blob"}]})
-        assert acc.fields() == {"reasoning_details": [
-            {"type": "reasoning.text", "index": 0, "text": "Hello", "signature": "s"},
-            {"type": "reasoning.encrypted", "index": 1, "data": "blob"},
-        ]}
-
-    def test_thinking_blocks_need_a_signature(self):
-        acc = ReasoningAccumulator()
-        acc.observe({"thinking_blocks": [{"type": "thinking", "thinking": "step 1 "}]})
-        acc.observe({"thinking_blocks": [{"type": "thinking", "thinking": "step 2"}]})
-        acc.observe({"thinking_blocks": [{"type": "thinking", "signature": "sig-1"}]})
-        acc.observe({"thinking_blocks": [{"type": "redacted_thinking", "data": "enc"}]})
-        acc.observe({"thinking_blocks": [{"type": "thinking", "thinking": "unsigned"}]})
-        assert acc.fields() == {"thinking_blocks": [
-            {"type": "thinking", "thinking": "step 1 step 2", "signature": "sig-1"},
-            {"type": "redacted_thinking", "data": "enc"},
-        ]}
-
-    def test_reset_discards_a_failed_attempt(self):
-        acc = ReasoningAccumulator()
-        acc.observe({"reasoning_content": "stale"})
-        acc.reset()
-        acc.observe({"reasoning_content": "fresh"})
-        assert acc.fields() == {"reasoning_content": "fresh"}
-
-
-class TestReasoningStaysInternal:
-
-    def test_llm_response_repr_hides_reasoning(self):
-        response = LLMResponse(content="x", reasoning={"reasoning_content": REASONING})
-        assert REASONING not in repr(response)
-
-    def test_capture_strips_reasoning(self):
-        captured = _sanitize_messages([{
-            "role": "assistant", "content": None,
-            "tool_calls": [{"id": "1", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
-            "reasoning_content": REASONING,
-            "reasoning_details": DETAILS,
-            "thinking_blocks": [{"type": "thinking", "thinking": "t", "signature": "s"}],
-        }])
-        assert set(captured[0]) == {"role", "content", "tool_calls"}
-
-    def test_strip_reasoning_returns_same_object_when_absent(self):
-        msg = {"role": "user", "content": "hi"}
-        assert strip_reasoning(msg) is msg
-
-
 @pytest.mark.asyncio
 async def test_streaming_retry_does_not_mix_reasoning_across_attempts():
     """A stream that fails before any token is retried from scratch; reasoning
@@ -370,14 +280,63 @@ async def test_tools_mode_continuation_round_carries_reasoning():
     assert assistant["reasoning_content"] == REASONING
 
 
-def test_token_estimates_count_reasoning():
-    """Reasoning sent back within a turn is part of the request, so the
-    context-window and compaction estimates must count it."""
-    from atlas.application.chat.context.compaction_engine import approx_tokens
-    from atlas.modules.llm.token_estimation import _text_only_messages
+# -- Review follow-ups -------------------------------------------------
 
-    plain = {"role": "assistant", "content": "x", "tool_calls": [{"id": "1"}]}
-    with_reasoning = {**plain, "reasoning_content": "r" * 4000}
-    assert approx_tokens(with_reasoning) >= approx_tokens(plain) + 900
-    stripped, _ = _text_only_messages([with_reasoning])
-    assert "r" * 4000 in stripped[0]["content"]
+def test_steered_text_only_fold_carries_reasoning():
+    """The steered fold (#824) appends an assistant message mid-turn, so it
+    must carry the reasoning too, while the history row stays text only."""
+    from atlas.application.chat.agent.agentic_loop import _fold_text_only_as_intermediate
+
+    messages: List[Dict[str, Any]] = []
+    context = AgentContext(session_id=uuid4(), user_email="u@x", files={}, history=ConversationHistory())
+    response = LLMResponse(content="Working on it.", reasoning={"reasoning_content": REASONING})
+
+    _fold_text_only_as_intermediate(messages, context, response, step=1)
+
+    assert messages == [{"role": "assistant", "content": "Working on it.", "reasoning_content": REASONING}]
+    row = context.history.messages[0]
+    assert row.content == "Working on it."
+    assert REASONING not in repr(row.metadata)
+
+
+@pytest.mark.asyncio
+async def test_pre_llm_hook_never_sees_reasoning_and_rewrite_keeps_it():
+    """PreLlmCall hooks may forward their envelope to an external service, so
+    the reasoning is stripped from it; a hook rewrite then gets it put back."""
+    from atlas.hooks.manager import HookOutcome
+
+    seen: Dict[str, Any] = {}
+
+    class Manager:
+        def has_hooks(self, event):
+            return True
+
+        async def run_event(self, event, payload, session_context=None):
+            seen["payload"] = payload
+            rewritten = [dict(m) for m in payload["messages"]]
+            rewritten[0]["content"] = "[redacted]"
+            return HookOutcome(verdict="modify", payload={"messages": rewritten}, fired=True, modified=True)
+
+    provider = StrictReasoningProvider(streaming=False)
+    provider.requests.append([])  # skip the tool-call reply: go straight to the strict check
+    messages = [
+        {"role": "user", "content": "Weather in Albuquerque?"},
+        {
+            "role": "assistant", "content": None, "reasoning_content": REASONING,
+            "tool_calls": [{"id": "call-1", "type": "function",
+                            "function": {"name": "weather_get", "arguments": TOOL_ARGS}}],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "sunny"},
+    ]
+    caller = _caller()
+    with patch("atlas.modules.llm.litellm_caller.get_hook_manager", return_value=Manager()), \
+            patch("atlas.modules.llm.litellm_caller.acompletion", provider):
+        response = await caller.call_with_tools("reasoner", messages, [{"type": "function"}])
+
+    assert REASONING not in repr(seen["payload"])
+    assert response.content == "It is sunny."
+    sent = provider.requests[-1]
+    assert sent[0]["content"] == "[redacted]"
+    assert sent[1]["reasoning_content"] == REASONING
+    # The caller's own list is untouched by the strip.
+    assert messages[1]["reasoning_content"] == REASONING
