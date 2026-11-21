@@ -1,6 +1,6 @@
 # Enterprise LiteLLM Team Gateways
 
-Last updated: 2026-10-31
+Last updated: 2026-11-20
 
 Some deployments reach their models through an enterprise
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) where access and
@@ -25,11 +25,12 @@ entry nor a gateway still fails validation. A gateway that is configured but
 unreachable (or rejects the credentials) is a discovery-time failure reported
 by the model picker and chat errors -- not a configuration-validation error.
 
-One limitation: sub-conversation launches (`atlas_launch_subagent` and the agent-runs
-REST API) enumerate statically configured models, so a gateway-only deployment
-refuses launch discovery with a message asking for a static model. A gateway
-model names a LiteLLM team, which only the signed-in user's proxy session can
-enumerate, so child runs cannot yet be pointed at one.
+Sub-conversation launches (`atlas_discover_subagent_options`,
+`atlas_launch_subagent` and the agent-runs REST API) offer gateway models too
+(issue #1227): discovery lists every model of every team the gateway reports for
+the user, as `<gateway>::<team_id>::<model_id>` names, the same set the model
+picker offers. A gateway that is unreachable or refuses the user's credential is
+skipped (logged as a warning) so the other models stay launchable.
 
 ## Configuration
 
@@ -272,8 +273,10 @@ completion. Validate that path in staging before relying on it.
   request reaches LiteLLM. With a shared service key this check is what keeps
   users inside their teams, so removing a user from a team takes effect within
   `discovery_cache_seconds`.
-- **Not yet covered:** `atlas_launch_subagent` sub-conversations choose from the
-  statically configured models only.
+- **Subagents:** `atlas_discover_subagent_options` lists the user's team models
+  alongside the static ones, filtered by the same groups, team membership,
+  allowlist and (at the turn's compliance level) data classifications as the
+  picker, so a subagent can run on any model the user can chat with.
 - **Access control** (`groups`) and **compliance** (`compliance_level`) apply
   to every gateway model exactly as they do to configured models. A gateway a
   user may not use is absent from `/api/config` and its endpoints answer 404.

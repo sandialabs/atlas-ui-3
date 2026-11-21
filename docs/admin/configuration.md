@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-11-11
+Last updated: 2026-11-20
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -115,6 +115,11 @@ tool (issue #925). A subagent is a sub-conversation: the model supplies a `works
 `model` and a `prompt`; the call returns the new conversation's id and a run id immediately
 and does not wait for it to finish. The child's transcript is its own conversation in the
 user's history.
+
+`atlas_discover_subagent_options` returns the models the main chat model picker offers the
+user: the static `models` their groups allow plus the team models of each Enterprise LiteLLM
+gateway they may use (issue #1227). With compliance levels enabled, only models approved for the
+conversation's current level are listed, since launching on any other is refused.
 
 #### Tool names and the deprecated aliases
 
