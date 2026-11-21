@@ -20,6 +20,7 @@ from atlas.core.telemetry import set_attrs, start_span
 from atlas.domain.errors import LLMBadRequestError, LLMEmptyStreamError, LLMMalformedToolCallError
 
 from .models import LLMResponse, split_provider
+from .reasoning_capture import ReasoningAccumulator
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
 from .tool_call_guard import (
     partition_tool_calls_by_json_validity,
@@ -483,6 +484,10 @@ class LiteLLMStreamingMixin:
             waited = 0.0
             accumulated_content = ""
             accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
+            # Reasoning is collected but never yielded, logged or put on the
+            # span: it only rides on the final LLMResponse so the agent loop
+            # can send it back with the tool-call message (issue #1230).
+            reasoning = ReasoningAccumulator()
             chunk_count = 0
             try:
                 total_chars = sum(len(str(msg.get('content', ''))) for msg in messages)
@@ -525,6 +530,8 @@ class LiteLLMStreamingMixin:
                             delta = choice.delta if choice is not None else None
                             if not delta:
                                 continue
+
+                            reasoning.observe(delta)
 
                             # Yield text content as it arrives
                             if delta.content:
@@ -590,6 +597,7 @@ class LiteLLMStreamingMixin:
                         # two different provider responses.
                         accumulated_content = ""
                         accumulated_tool_calls = {}
+                        reasoning.reset()
                         chunk_count = 0
                         finish_reason = None
                         attempt += 1
@@ -664,6 +672,7 @@ class LiteLLMStreamingMixin:
                     model_used=model_name,
                     dropped_tool_calls=dropped_tool_calls or None,
                     dropped_tool_calls_truncated=dropped_were_truncated,
+                    reasoning=reasoning.fields(),
                 )
 
             except Exception as exc:

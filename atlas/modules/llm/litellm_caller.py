@@ -63,6 +63,7 @@ from atlas.modules.config.models import LLMConfig, lookup_model_config
 from .litellm_gateway_client import get_gateway_client, mint_delegated_llm_token
 from .litellm_streaming import KNOWN_FINISH_REASONS, LiteLLMStreamingMixin
 from .models import LLMResponse, PlainCompletion, split_provider
+from .reasoning_capture import extract_reasoning
 from .retry_config import _llm_retry_settings, _retry_backoff_delay
 from .usage_tracking import record_response_usage
 
@@ -1738,6 +1739,9 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 model_used=model_name,
                 dropped_tool_calls=dropped_tool_calls or None,
                 dropped_tool_calls_truncated=dropped_were_truncated,
+                # Sent back on the follow-up request of this turn (#1230);
+                # never logged or persisted.
+                reasoning=extract_reasoning(message),
             )
 
         except HookBlockedError:
