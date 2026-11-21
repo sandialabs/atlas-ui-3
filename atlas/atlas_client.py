@@ -31,21 +31,32 @@ class ChatResult:
         }
 
 
-def _default_model_name(llm_config) -> str:
+async def _default_model_name(llm_config, user_email: Optional[str] = None) -> str:
     """The model chat() runs on when the caller names none.
 
-    The first statically configured model. An Enterprise LiteLLM gateway
-    deployment has no static model to default to -- a gateway model names a
-    team, so there is nothing to guess -- and neither has an empty config, so
-    both raise instead of silently trying a hardcoded model name (issue #1134).
+    The same choice the model picker makes for a user with no saved pick
+    (``atlas.modules.llm.default_model_resolver``): llmconfig.yml's
+    ``default_model``, then each LiteLLM gateway's ``default_team`` /
+    ``default_model`` when ``user_email`` is in that team and the team offers
+    the model, then the first static model. With no usable default and no
+    static model -- a gateway-only deployment without defaults for this user,
+    or an empty config -- it raises instead of silently trying a hardcoded
+    model name (issue #1134).
     """
+    from atlas.modules.llm.default_model_resolver import resolve_default_model
+
+    resolved = await resolve_default_model(llm_config, user_email)
+    if resolved.model:
+        return resolved.model
     models = getattr(llm_config, "models", None) or {}
     if models:
+        # Group checks hid every static model from this identity; keep the
+        # pre-default behavior and let the chat turn report the refusal.
         return next(iter(models))
     raise ValueError(
-        "No static models are configured, so chat() needs an explicit "
-        "model argument (a configured model name, or a gateway model "
-        "key of the form <gateway>::<team_id>::<model_id>)"
+        "No default model is usable and no static models are configured, so "
+        "chat() needs an explicit model argument (a configured model name, or "
+        "a gateway model key of the form <gateway>::<team_id>::<model_id>)"
     )
 
 
@@ -144,12 +155,15 @@ class AtlasClient:
         if session_id is None:
             session_id = uuid4()
 
-        if model is None:
-            model = _default_model_name(self._factory.get_config_manager().llm_config)
-
+        cfg = self._factory.get_config_manager()
         if user_email is None:
-            cfg = self._factory.get_config_manager()
-            user_email = cfg.app_settings.test_user or "cli@atlas.local"
+            app_settings = getattr(cfg, "app_settings", None)
+            user_email = getattr(app_settings, "test_user", None) or "cli@atlas.local"
+
+        if model is None:
+            # Resolved for this identity: a gateway default applies only when
+            # the user is in its team.
+            model = await _default_model_name(cfg.llm_config, user_email)
 
         event_publisher = CLIEventPublisher(streaming=streaming, quiet=quiet)
         chat_service = self._factory.create_chat_service(connection=None)

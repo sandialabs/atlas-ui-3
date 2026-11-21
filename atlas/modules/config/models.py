@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 
 from atlas.modules.config.litellm_gateway_models import (
     GATEWAY_KEY_SEPARATOR,
+    build_gateway_model_key,
     is_key_safe_part,
     resolve_gateway_ref,
 )
@@ -443,6 +444,13 @@ class LiteLLMGatewayConfig(BaseModel):
     # ModelConfig fields applied to every discovered model (max_tokens,
     # temperature, supports_tools, supports_vision, pass_user_as_customer_id...).
     model_defaults: Dict[str, Any] = Field(default_factory=dict)
+    # The team preselected in the picker for a user who has not chosen one,
+    # and (with default_model) the team model a fresh session starts on. Used
+    # only when the user is a member of the team and the team offers the
+    # model; otherwise Atlas falls back to the next default. See
+    # docs/admin/litellm-team-gateways.md#defaults-and-picker-order.
+    default_team: Optional[str] = None
+    default_model: Optional[str] = None
 
     # Fields that identify or authorize the model; they come from the gateway
     # itself, so a model_defaults entry for them would be silently misleading.
@@ -469,6 +477,30 @@ class LiteLLMGatewayConfig(BaseModel):
     def validate_model_defaults(cls, v):
         validate_gateway_model_settings(v, "model_defaults")
         return v
+
+    @model_validator(mode="after")
+    def validate_defaults(self):
+        if self.default_team is not None and not is_key_safe_part(self.default_team):
+            raise ValueError(
+                f"default_team must be a non-empty LiteLLM team id without {GATEWAY_KEY_SEPARATOR!r}"
+            )
+        if self.default_model is not None:
+            if not self.default_model.strip():
+                raise ValueError("default_model must be a non-empty LiteLLM model id")
+            if self.default_team is None:
+                # A model id alone does not say which team to bill.
+                raise ValueError("default_model requires default_team")
+            if not self.allows_model(self.default_model):
+                raise ValueError(
+                    f"default_model {self.default_model!r} is not in this gateway's models allowlist"
+                )
+        return self
+
+    def default_model_key(self, gateway_name: str) -> Optional[str]:
+        """The gateway model key a fresh session starts on, if configured."""
+        if not (self.default_team and self.default_model):
+            return None
+        return build_gateway_model_key(gateway_name, self.default_team, self.default_model)
 
     @model_validator(mode="after")
     def validate_auth(self):
@@ -608,6 +640,15 @@ class LLMConfig(BaseModel):
     # Enterprise LiteLLM proxies with team-scoped model selection, keyed by a
     # short gateway name that prefixes the gateway's model keys.
     litellm_gateways: Dict[str, LiteLLMGatewayConfig] = Field(default_factory=dict)
+    # Where the LiteLLM gateway sections sit in the model picker:
+    # "models_first" (static models on top, the default) or "gateways_first".
+    model_picker_order: Literal["models_first", "gateways_first"] = "models_first"
+    # The model a user starts on when they have no saved pick of their own: a
+    # static model name or a gateway model key (<gateway>::<team_id>::<model_id>).
+    # Unset (or not usable by the user), the gateways' default_team/
+    # default_model and then the first static model apply. See
+    # configured_default_models().
+    default_model: Optional[str] = None
 
     @field_validator('models', mode='before')
     @classmethod
@@ -650,6 +691,46 @@ class LLMConfig(BaseModel):
                     f"'{gateway_name}' model keys; rename the model or the gateway"
                 )
         return self
+
+    @model_validator(mode="after")
+    def validate_default_model(self):
+        """A top-level default_model must name something this file offers.
+
+        Caught at load so a typo does not silently start every user on the
+        first model instead.
+        """
+        name = self.default_model
+        if name is None:
+            return self
+        if not name.strip():
+            raise ValueError("default_model must not be empty")
+        if name in self.models:
+            return self
+        if resolve_gateway_ref(self, name) is not None:
+            return self
+        raise ValueError(
+            f"default_model {name!r} is neither a configured model nor a "
+            f"<gateway>{GATEWAY_KEY_SEPARATOR}<team_id>{GATEWAY_KEY_SEPARATOR}<model_id> key "
+            "for a configured gateway (and its models allowlist)"
+        )
+
+    def configured_default_models(self) -> List[str]:
+        """The configured starting models, most preferred first.
+
+        The top-level default_model, then each gateway's default team model in
+        file order. Each still needs a per-user check (``groups`` for a static
+        model; team membership and the team's models for a gateway model);
+        when none passes, a user starts on the first static model they may
+        use. Duplicates are dropped.
+        """
+        candidates: List[str] = []
+        if self.default_model:
+            candidates.append(self.default_model)
+        for name, gateway in self.litellm_gateways.items():
+            key = gateway.default_model_key(name)
+            if key:
+                candidates.append(key)
+        return list(dict.fromkeys(candidates))
 
     @model_validator(mode="after")
     def warn_on_litellm_tags_override(self):

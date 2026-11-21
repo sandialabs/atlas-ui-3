@@ -59,9 +59,44 @@ function writeSavedModel(user, model) {
   }
 }
 
-function defaultModelOf(cfg) {
-  const first = cfg.models?.[0]
-  return first ? (first.name || first) : ''
+/**
+ * The static model a user starts on without a saved pick: llmconfig.yml's
+ * `default_model` when it names a static model this user is offered, else the
+ * first static model. A gateway-key default needs a membership check, so it
+ * is resolved by the server (fetchServerDefaultModel), never here.
+ */
+export function defaultModelOf(cfg) {
+  const names = (cfg.models || []).map(m => m?.name || m).filter(Boolean)
+  if (cfg.default_model && names.includes(cfg.default_model)) return cfg.default_model
+  return names[0] || ''
+}
+
+/**
+ * Whether llmconfig.yml names a LiteLLM gateway default this user might start
+ * on: a top-level `default_model` gateway key, or a gateway with both
+ * `default_team` and `default_model`. Only the server can tell whether the
+ * user is in that team and the team offers the model.
+ */
+export function hasGatewayDefault(cfg) {
+  const gateways = cfg.llm_gateways || []
+  if (parseGatewayModelKey(cfg.default_model, gateways)) return true
+  return gateways.some(g => g?.default_team_id && g?.default_model_id)
+}
+
+/**
+ * The server's choice of starting model for the signed-in user
+ * (GET /api/llm/default-model): a model name, '' when nothing is usable, or
+ * null when the request failed (the caller falls back to defaultModelOf).
+ */
+export async function fetchServerDefaultModel() {
+  try {
+    const res = await fetch('/api/llm/default-model')
+    if (!res.ok) return null
+    const body = await res.json()
+    return typeof body?.model === 'string' ? body.model : ''
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -120,7 +155,7 @@ function readCachedConfig() {
 const SAFE_CACHE_FIELDS = [
   'app_name', 'models', 'features', 'file_extraction', 'file_upload',
   'banner_enabled', 'agent_mode_available', 'agent_max_steps', 'help',
-  'context_compaction'
+  'context_compaction', 'model_picker_order'
 ]
 
 // Context meter and compaction controls (issue #877). Shown only once the
@@ -172,6 +207,13 @@ export function useChatConfig() {
   // Enterprise LiteLLM gateways whose models are chosen by team (see
   // utils/gatewayModels.js); their models are not part of `models`.
   const [llmGateways, setLlmGateways] = useState(cached.current?.llm_gateways || [])
+  // llmconfig.yml `model_picker_order`: whether the gateway sections sit
+  // above ('gateways_first') or below ('models_first') the static models.
+  const [modelPickerOrder, setModelPickerOrder] = useState(
+    cached.current?.model_picker_order || 'models_first'
+  )
+  // llmconfig.yml top-level `default_model`, when this user may use it.
+  const [defaultModel, setDefaultModel] = useState('')
   const [tools, setTools] = useState([])
   const [prompts, setPrompts] = useState([])
   const [dataSources, setDataSources] = useState([])
@@ -240,6 +282,8 @@ export function useChatConfig() {
     setAppName(cfg.app_name || 'Chat UI')
     setModels(cfg.models || [])
     setLlmGateways(cfg.llm_gateways || [])
+    setModelPickerOrder(cfg.model_picker_order === 'gateways_first' ? 'gateways_first' : 'models_first')
+    setDefaultModel(typeof cfg.default_model === 'string' ? cfg.default_model : '')
     setUser(cfg.user || 'Unknown')
     userRef.current = cfg.user || 'Unknown'
     setFeatures(prev => ({ ...DEFAULT_FEATURES, ...(cfg.features || prev) }))
@@ -363,6 +407,10 @@ export function useChatConfig() {
   // #1134; restoredForUserRef alone cannot, because a user who had nothing
   // to restore and then picked manually never marks it).
   const modelOwnerRef = useRef(null)
+  // The user a server default-model lookup is in flight for, and the config
+  // the latest restore pass saw (read once that lookup returns).
+  const defaultLookupRef = useRef(null)
+  const startCfgRef = useRef({})
   useEffect(() => {
     // Runs once per user once the config names at least one model source:
     // static models, or in a gateway-only deployment the gateways, whose
@@ -384,21 +432,48 @@ export function useChatConfig() {
     if (!models.length && !llmGateways.length) return
     if (restoredForUserRef.current === user) return
 
+    const cfg = { models, llm_gateways: llmGateways, default_model: defaultModel }
+    startCfgRef.current = cfg
+    const applyStart = (model) => {
+      restoredForUserRef.current = user
+      modelOwnerRef.current = user
+      setCurrentModel(model)
+      currentModelRef.current = model
+      writeSavedModel(user, model)
+    }
+
+    // The user's own saved pick wins while the config still offers it.
     const saved = readSavedModel(user)
-    const model = resolveStartingModel(saved, { models, llm_gateways: llmGateways })
-    if (!model) {
-      // Nothing resolves for this user yet: no saved model and no static
-      // default to fall back on (a gateway-only deployment where they have
-      // not picked a team model). Leave the restore un-done so a later
-      // config refresh can still resolve one.
+    if (saved && resolveStartingModel(saved, cfg) === saved) {
+      applyStart(saved)
       return
     }
-    restoredForUserRef.current = user
-    modelOwnerRef.current = user
-    setCurrentModel(model)
-    currentModelRef.current = model
-    writeSavedModel(user, model)
-  }, [user, models, llmGateways])
+    if (!hasGatewayDefault(cfg)) {
+      const model = defaultModelOf(cfg)
+      // With no static default either (a gateway-only deployment where they
+      // have not picked a team model), leave the restore un-done so a later
+      // config refresh can still resolve one.
+      if (model) applyStart(model)
+      return
+    }
+    // llmconfig.yml names a LiteLLM team default. Only the server can tell
+    // whether this user is in that team and the team offers the model, so
+    // ask it; it falls back through the other defaults to the first static
+    // model itself. One lookup per user at a time: a config refresh while it
+    // is in flight must not start another.
+    if (defaultLookupRef.current === user) return
+    defaultLookupRef.current = user
+    ;(async () => {
+      const serverModel = await fetchServerDefaultModel()
+      if (defaultLookupRef.current === user) defaultLookupRef.current = null
+      // Superseded: another account signed in, the restore already ran, or
+      // the user picked a model while the lookup was in flight.
+      if (userRef.current !== user || restoredForUserRef.current === user) return
+      if (modelOwnerRef.current === user && currentModelRef.current) return
+      const model = serverModel || defaultModelOf(startCfgRef.current)
+      if (model) applyStart(model)
+    })()
+  }, [user, models, llmGateways, defaultModel])
 
   // A saved team-gateway model stays only while the user is still in that
   // team; otherwise fall back to the default model. Keyed on the selected
@@ -417,13 +492,23 @@ export function useChatConfig() {
       // Ownership decides whose selection this is, so a manually picked
       // team model is re-checked exactly like a restored one.
       if (modelOwnerRef.current !== user || currentModelRef.current !== currentModel) return
-      const fallback = defaultModelOf({ models })
+      // Fall back to the configured default: a LiteLLM team default the
+      // server confirms for this user, else the static default.
+      const cfg = { models, llm_gateways: llmGateways, default_model: defaultModel }
+      let fallback = ''
+      if (hasGatewayDefault(cfg)) {
+        const serverModel = await fetchServerDefaultModel()
+        if (token !== membershipCheckRef.current) return
+        if (modelOwnerRef.current !== user || currentModelRef.current !== currentModel) return
+        if (serverModel && serverModel !== currentModel) fallback = serverModel
+      }
+      if (!fallback) fallback = defaultModelOf(cfg)
       setCurrentModel(fallback)
       currentModelRef.current = fallback
       modelOwnerRef.current = user
       writeSavedModel(user, fallback)
     })()
-  }, [user, currentModel, models, llmGateways])
+  }, [user, currentModel, models, llmGateways, defaultModel])
 
   // The current gateway model joins the list so every "look up the current
   // model's capabilities" call site finds it like any configured model.
@@ -437,6 +522,8 @@ export function useChatConfig() {
     user,
     models: modelsWithGateway,
     llmGateways,
+    modelPickerOrder,
+    defaultModel,
     tools,
     prompts,
     dataSources,

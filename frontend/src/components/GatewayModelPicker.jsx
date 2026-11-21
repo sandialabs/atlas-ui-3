@@ -71,12 +71,23 @@ const LoadError = ({ prefix, error }) => (
  * model key, which carries the team to the backend with every chat turn.
  * `isModelVisible` (optional) hides models outside the active compliance
  * filter; each model carries its own level when the admin set one.
+ *
+ * The team shown first is, in order: the team of the selected model, the
+ * user's last pick on this gateway, then llmconfig.yml's `default_team`
+ * (`gateway.default_team_id`) -- each only while the gateway still lists it
+ * for the user. `default_model_id` is marked as the default in its team.
+ * `placement` is 'before_models' when llmconfig.yml puts gateways first.
  */
-const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisible, showCompliance, complianceLevels }) => {
+const GatewayModelPicker = ({
+  gateway, currentModel, onSelect, user, isModelVisible, showCompliance, complianceLevels,
+  placement = 'after_models',
+}) => {
   const current = parseGatewayModelKey(currentModel, [gateway])
   const [teams, setTeams] = useState(null)
   const [teamsError, setTeamsError] = useState(null)
-  const [teamId, setTeamId] = useState(current?.teamId || lastTeamFor(gateway.name, user))
+  const [teamId, setTeamId] = useState(
+    current?.teamId || lastTeamFor(gateway.name, user) || gateway.default_team_id || ''
+  )
   const [models, setModels] = useState(null)
   const [modelsError, setModelsError] = useState(null)
   // Bumped by the refresh button; asks the backend to bypass its cache.
@@ -91,12 +102,17 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
         if (cancelled) return
         const list = body?.teams || []
         setTeams(list)
-        // Drop a remembered team the user no longer belongs to.
-        setTeamId(prev => (list.some(t => t.team_id === prev) ? prev : ''))
+        // Drop a remembered team the user no longer belongs to; the
+        // configured default team takes its place when the user is in it.
+        setTeamId(prev => {
+          if (list.some(t => t.team_id === prev)) return prev
+          const fallback = gateway.default_team_id
+          return fallback && list.some(t => t.team_id === fallback) ? fallback : ''
+        })
       })
       .catch(err => { if (!cancelled) setTeamsError(err) })
     return () => { cancelled = true }
-  }, [base, refreshCount])
+  }, [base, refreshCount, gateway.default_team_id])
 
   useEffect(() => {
     if (!teamId || !teams) {
@@ -132,7 +148,11 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
   const shownModels = models && isModelVisible ? models.filter(isModelVisible) : models
 
   return (
-    <div className="border-t border-gray-600 px-3 py-2 space-y-2" data-testid={`gateway-${gateway.name}`}>
+    <div
+      className={`${placement === 'before_models' ? 'border-b' : 'border-t'} border-gray-600 px-3 py-2 space-y-2`}
+      data-testid={`gateway-${gateway.name}`}
+      data-placement={placement}
+    >
       <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-300">
         <Users className="w-3.5 h-3.5 text-purple-400" />
         <span className="truncate">{gateway.display_name || gateway.name}</span>
@@ -197,6 +217,8 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
             <div className="rounded border border-gray-700">
               {shownModels.map(model => {
                 const selected = model.name === currentModel
+                const isDefault = !!gateway.default_model_id &&
+                  teamId === gateway.default_team_id && model.model_id === gateway.default_model_id
                 // The team's models listing gives each model's capabilities;
                 // the gateway's defaults cover an older backend that doesn't.
                 const vision = model.supports_vision ?? gateway.supports_vision
@@ -215,7 +237,14 @@ const GatewayModelPicker = ({ gateway, currentModel, onSelect, user, isModelVisi
                     {/* Same layout as the flat model list: the name wraps at
                         full width, classifications go below (issue #1055). */}
                     <span className="flex items-start gap-2">
-                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{model.label || model.model_id}</span>
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                        {model.label || model.model_id}
+                        {isDefault && (
+                          <span className="ml-1 text-[10px] uppercase tracking-wide text-gray-400" data-testid="gateway-default-model">
+                            default
+                          </span>
+                        )}
+                      </span>
                       <span className="flex items-center gap-1 flex-shrink-0 mt-0.5">
                         <CapabilityIcons vision={vision} tools={tools} />
                       </span>

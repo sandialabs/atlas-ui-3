@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-11-06
+Last updated: 2026-11-21
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -192,6 +192,21 @@ When models live behind an enterprise LiteLLM proxy organized by team, add a
 their LiteLLM teams, then one of that team's models, and every request carries
 the team in `x-litellm-team-id`. See
 [Enterprise LiteLLM Team Gateways](litellm-team-gateways.md).
+
+## Picker Order and Default Model
+
+Two top-level keys shape the model picker:
+
+```yaml
+model_picker_order: gateways_first   # LiteLLM gateways above static models; default models_first
+default_model: "gpt-4.1"             # a static model name or <gateway>::<team_id>::<model_id>
+```
+
+`default_model` is the model a user with no saved pick starts on; unset, it is
+the first static model (the order of `models` in this file). Gateways may also
+set `default_team` and `default_model`. See
+[Defaults and picker order](litellm-team-gateways.md#defaults-and-picker-order)
+for the full resolution order and fallbacks.
 
 ## Per-User API Keys (2026-02-08)
 

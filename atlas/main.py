@@ -144,6 +144,7 @@ from atlas.routes.globus_auth_routes import api_router as globus_api_router
 from atlas.routes.globus_auth_routes import browser_router as globus_browser_router
 from atlas.routes.health_routes import router as health_router
 from atlas.routes.help_routes import router as help_router
+from atlas.routes.litellm_gateway_routes import default_model_router as llm_default_model_router
 from atlas.routes.litellm_gateway_routes import router as litellm_gateway_router
 from atlas.routes.llm_auth_routes import router as llm_auth_router
 from atlas.routes.mcp_auth_routes import router as mcp_auth_router
@@ -1705,6 +1706,7 @@ app.include_router(feedback_router)
 app.include_router(capture_router)
 app.include_router(llm_auth_router)
 app.include_router(litellm_gateway_router)
+app.include_router(llm_default_model_router)
 app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(agent_run_router)

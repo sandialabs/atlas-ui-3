@@ -268,21 +268,21 @@ class TestDefaultModelSelection:
                 "b": {"model_name": "openai/gpt-4o", "model_url": "https://x", "api_key": "k"},
             }
         )
-        assert _default_model_name(config) == "a"
+        assert asyncio.run(_default_model_name(config)) == "a"
 
     def test_gateway_only_has_no_default(self):
         config = LLMConfig(models={}, litellm_gateways={"enterprise": {
             "base_url": "https://litellm.example.gov", "api_key": "k",
         }})
         with pytest.raises(ValueError) as excinfo:
-            _default_model_name(config)
+            asyncio.run(_default_model_name(config))
         message = str(excinfo.value)
         assert "explicit" in message
         assert "<gateway>::<team_id>::<model_id>" in message
 
     def test_empty_config_has_no_default(self):
         with pytest.raises(ValueError):
-            _default_model_name(LLMConfig(models={}))
+            asyncio.run(_default_model_name(LLMConfig(models={})))
 
     def test_headless_chat_reports_the_gateway_key_form(self, monkeypatch):
         """The error reaches a chat() caller, not just the helper's unit test."""
@@ -367,7 +367,7 @@ class TestCliListModelsGatewayBranch:
 
         assert asyncio.run(chat_cli_list_models(json_output=True)) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert set(payload) == {"models", "litellm_gateways"}
+        assert set(payload) == {"models", "litellm_gateways", "default_model", "model_picker_order"}
         assert isinstance(payload["models"], list) and isinstance(payload["litellm_gateways"], list)
 
     def test_atlas_chat_cli_neither_source_exits_1(self, monkeypatch, tmp_path, capsys):
