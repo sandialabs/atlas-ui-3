@@ -478,6 +478,13 @@ class LiteLLMGatewayConfig(BaseModel):
         validate_gateway_model_settings(v, "model_defaults")
         return v
 
+    @field_validator("default_team", "default_model", mode="before")
+    @classmethod
+    def strip_defaults(cls, v):
+        # A padded id would build a key that never matches and silently
+        # disable the default; a blank one is refused below.
+        return v.strip() if isinstance(v, str) else v
+
     @model_validator(mode="after")
     def validate_defaults(self):
         if self.default_team is not None and not is_key_safe_part(self.default_team):
@@ -691,6 +698,11 @@ class LLMConfig(BaseModel):
                     f"'{gateway_name}' model keys; rename the model or the gateway"
                 )
         return self
+
+    @field_validator("default_model", mode="before")
+    @classmethod
+    def strip_default_model(cls, v):
+        return v.strip() if isinstance(v, str) else v
 
     @model_validator(mode="after")
     def validate_default_model(self):

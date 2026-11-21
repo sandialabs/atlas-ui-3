@@ -19,6 +19,7 @@ The model picker reads the result from ``GET /api/llm/default-model``;
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -77,7 +78,17 @@ async def _gateway_default_team_label(
             type(exc).__name__,
         )
         return None
-    return team.label if ref.model_id in model_ids else None
+    if ref.model_id not in model_ids:
+        # The team exists for the user but does not offer the model: a typo
+        # or a stale default, worth a visible signal for the operator.
+        logger.warning(
+            "Configured default model %s skipped: team %s does not offer model %s",
+            sanitize_for_logging(model_key),
+            sanitize_for_logging(ref.team_id),
+            sanitize_for_logging(ref.model_id),
+        )
+        return None
+    return team.label
 
 
 async def resolve_default_model(
@@ -88,16 +99,33 @@ async def resolve_default_model(
     """The model ``user_email`` starts on (see the module docstring)."""
     static_models = getattr(llm_config, "models", None) or {}
     configured = getattr(llm_config, "configured_default_models", None)
-    for name in configured() if callable(configured) else []:
+    candidates = configured() if callable(configured) else []
+    # A static top-level default_model the user may use wins outright; no
+    # gateway needs to be asked.
+    if candidates and candidates[0] in static_models:
+        if await is_model_allowed(static_models[candidates[0]], user_email, auth_check):
+            return DefaultModel(candidates[0], SOURCE_CONFIGURED)
+    # Probe every gateway candidate at once, so per-gateway discovery
+    # timeouts do not stack; the first usable one in preference order wins.
+    gateway_candidates = [name for name in candidates if name not in static_models]
+    labels = dict(zip(
+        gateway_candidates,
+        await asyncio.gather(*(
+            _gateway_default_team_label(llm_config, name, user_email, auth_check)
+            for name in gateway_candidates
+        )),
+    ))
+    for name in candidates:
         static = static_models.get(name)
         if static is not None:
             if await is_model_allowed(static, user_email, auth_check):
                 return DefaultModel(name, SOURCE_CONFIGURED)
             continue
-        team_label = await _gateway_default_team_label(llm_config, name, user_email, auth_check)
-        if team_label is not None:
-            return DefaultModel(name, SOURCE_CONFIGURED, team_label)
+        if labels.get(name) is not None:
+            return DefaultModel(name, SOURCE_CONFIGURED, labels[name])
     for name, model_config in static_models.items():
         if await is_model_allowed(model_config, user_email, auth_check):
             return DefaultModel(name, SOURCE_FIRST_MODEL)
+    if candidates or static_models:
+        logger.info("No configured or static default model is usable for this user")
     return DefaultModel(None, None)

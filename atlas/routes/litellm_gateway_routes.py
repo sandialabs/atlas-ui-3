@@ -51,7 +51,10 @@ async def build_gateway_summaries(llm_config: Any, current_user: str, app_settin
         }
         # llmconfig.yml defaults: the picker preselects default_team, and a
         # fresh session may start on the default team model (resolved per
-        # user by GET /api/llm/default-model).
+        # user by GET /api/llm/default-model). These are the configured ids,
+        # sent to every user of the gateway whether or not they are in the
+        # team; they grant nothing (membership is checked on every listing
+        # and call) and are documented as not access-controlled.
         if gateway.default_team:
             summary["default_team_id"] = gateway.default_team
         if gateway.default_model:
@@ -102,8 +105,10 @@ async def model_picker_config(llm_config: Any, current_user: str) -> Dict[str, A
     """The llmconfig.yml picker settings ``/api/config`` returns.
 
     ``default_model`` is reported only when this user may use it: a static
-    model their groups allow, or a key on a gateway they may use (team
-    membership is checked per user by ``GET /api/llm/default-model``).
+    model their groups allow, or a key on a gateway they may use. Team
+    membership is not checked here (that needs a LiteLLM call); a gateway key
+    is a configured value that grants nothing, and ``GET
+    /api/llm/default-model`` checks membership before anyone starts on it.
     """
     order = getattr(llm_config, "model_picker_order", None)
     if order not in PICKER_ORDERS:

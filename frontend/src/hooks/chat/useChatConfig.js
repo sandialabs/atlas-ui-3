@@ -50,10 +50,27 @@ function readSavedModel(user) {
   }
 }
 
-function writeSavedModel(user, model) {
+// Set while the saved model is one Atlas chose (a configured default or a
+// fallback), not one the user picked. Such a model is re-resolved on the next
+// load, so a later default -- or a team default whose lookup failed this
+// time -- still reaches users who never chose a model themselves.
+const AUTO_MODEL_KEY = 'chatui-current-model-auto'
+
+function savedModelIsAuto(user) {
+  if (!isKnownUser(user)) return false
+  try {
+    return localStorage.getItem(userStorageKey(AUTO_MODEL_KEY, user)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSavedModel(user, model, { auto = false } = {}) {
   if (!isKnownUser(user)) return
   try {
     localStorage.setItem(userStorageKey(CURRENT_MODEL_KEY, user), model)
+    if (auto) localStorage.setItem(userStorageKey(AUTO_MODEL_KEY, user), '1')
+    else localStorage.removeItem(userStorageKey(AUTO_MODEL_KEY, user))
   } catch (e) {
     console.warn('Failed to save current model to localStorage:', e)
   }
@@ -418,6 +435,10 @@ export function useChatConfig() {
   // the latest restore pass saw (read once that lookup returns).
   const defaultLookupRef = useRef(null)
   const startCfgRef = useRef({})
+  // Whether the displayed model was chosen by Atlas (a default or fallback)
+  // rather than picked by the user; only such a selection may be upgraded
+  // when the server's default-model lookup answers.
+  const autoSelectedRef = useRef(false)
   useEffect(() => {
     // Runs once per user once the config names at least one model source:
     // static models, or in a gateway-only deployment the gateways, whose
@@ -441,44 +462,52 @@ export function useChatConfig() {
 
     const cfg = { models, llm_gateways: llmGateways, default_model: defaultModel }
     startCfgRef.current = cfg
-    const applyStart = (model) => {
+    const applyStart = (model, auto) => {
       restoredForUserRef.current = user
       modelOwnerRef.current = user
+      autoSelectedRef.current = auto
       setCurrentModel(model)
       currentModelRef.current = model
-      writeSavedModel(user, model)
+      writeSavedModel(user, model, { auto })
     }
 
     // The user's own saved pick wins while the config still offers it.
     const saved = readSavedModel(user)
-    if (saved && resolveStartingModel(saved, cfg) === saved) {
-      applyStart(saved)
+    const savedOffered = !!saved && resolveStartingModel(saved, cfg) === saved
+    const savedIsAuto = savedOffered && savedModelIsAuto(user)
+    if (savedOffered && !savedIsAuto) {
+      applyStart(saved, false)
       return
     }
-    if (!hasGatewayDefault(cfg)) {
-      const model = defaultModelOf(cfg)
-      // With no static default either (a gateway-only deployment where they
-      // have not picked a team model), leave the restore un-done so a later
-      // config refresh can still resolve one.
-      if (model) applyStart(model)
-      return
-    }
+    // No pick of their own: start at once on a model, so the composer is
+    // usable immediately -- the default Atlas chose last time (re-checked
+    // below when it may have changed), else the static default.
+    const immediate = savedIsAuto && (hasGatewayDefault(cfg) || saved === defaultModelOf(cfg))
+      ? saved
+      : defaultModelOf(cfg)
+    if (immediate) applyStart(immediate, true)
+    // With no static default either (a gateway-only deployment where they
+    // have not picked a team model), the restore stays un-done so a later
+    // config refresh can still resolve one.
+    if (!hasGatewayDefault(cfg)) return
     // llmconfig.yml names a LiteLLM team default. Only the server can tell
     // whether this user is in that team and the team offers the model, so
-    // ask it; it falls back through the other defaults to the first static
-    // model itself. One lookup per user at a time: a config refresh while it
-    // is in flight must not start another.
+    // ask it (it falls back through the other defaults itself) and upgrade
+    // the selection when it answers. One lookup per user at a time: a config
+    // refresh while it is in flight must not start another.
     if (defaultLookupRef.current === user) return
     defaultLookupRef.current = user
     ;(async () => {
       const serverModel = await fetchServerDefaultModel(user)
       if (defaultLookupRef.current === user) defaultLookupRef.current = null
-      // Superseded: another account signed in, the restore already ran, or
-      // the user picked a model while the lookup was in flight.
-      if (userRef.current !== user || restoredForUserRef.current === user) return
-      if (modelOwnerRef.current === user && currentModelRef.current) return
+      // Superseded: another account signed in, or the user picked a model
+      // while the lookup was in flight.
+      if (userRef.current !== user) return
+      if (restoredForUserRef.current === user && !autoSelectedRef.current) return
       const model = serverModel || defaultModelOf(startCfgRef.current)
-      if (model) applyStart(model)
+      if (!model) return
+      if (restoredForUserRef.current === user && model === currentModelRef.current) return
+      applyStart(model, true)
     })()
   }, [user, models, llmGateways, defaultModel])
 
@@ -513,7 +542,8 @@ export function useChatConfig() {
       setCurrentModel(fallback)
       currentModelRef.current = fallback
       modelOwnerRef.current = user
-      writeSavedModel(user, fallback)
+      autoSelectedRef.current = true
+      writeSavedModel(user, fallback, { auto: true })
     })()
   }, [user, currentModel, models, llmGateways, defaultModel])
 
@@ -545,8 +575,10 @@ export function useChatConfig() {
       setCurrentModel(model)
       currentModelRef.current = model
       // The selection now belongs to whoever picked it, so a refresh that
-      // switches users can drop it instead of carrying it over.
+      // switches users can drop it instead of carrying it over. It is the
+      // user's own pick, so no default lookup may replace it.
       modelOwnerRef.current = userRef.current
+      autoSelectedRef.current = false
       writeSavedModel(userRef.current, model)
     },
     agentModeAvailable,

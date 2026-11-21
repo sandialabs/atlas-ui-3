@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, renderHook } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, renderHook, act } from '@testing-library/react'
 import ModelSelector from '../components/ModelSelector'
 import { useChat } from '../contexts/ChatContext'
 import {
@@ -212,6 +212,57 @@ describe('useChatConfig starting model from llmconfig.yml', () => {
     release()
     await new Promise(r => setTimeout(r, 10))
     expect(result.current.currentModel).toBe('static-b')
+  })
+
+  it('shows the static default at once and upgrades it when the server answers', async () => {
+    let release
+    defaultModelResponse = () => new Promise(resolve => {
+      release = () => resolve({ ok: true, json: async () => ({ model: ALPHA_KEY }) })
+    })
+    mockFetch(config())
+    const { result } = renderHook(() => useChatConfig())
+    // Usable before the LiteLLM lookup returns.
+    await waitFor(() => expect(result.current.currentModel).toBe('static-a'))
+    await waitFor(() => expect(calledDefaultEndpoint()).toBe(true))
+    release()
+    await waitFor(() => expect(result.current.currentModel).toBe(ALPHA_KEY))
+  })
+
+  it('does not let one failed lookup pin the fallback: the next load retries', async () => {
+    defaultModelResponse = () => ({ ok: false, json: async () => ({}) })
+    mockFetch(config())
+    const first = renderHook(() => useChatConfig())
+    await waitFor(() => expect(calledDefaultEndpoint()).toBe(true))
+    await waitFor(() => expect(first.result.current.currentModel).toBe('static-a'))
+    expect(localStorage.getItem(`chatui-current-model-auto:${USER}`)).toBe('1')
+    first.unmount()
+
+    defaultModelResponse = () => ({ ok: true, json: async () => ({ model: ALPHA_KEY }) })
+    mockFetch(config())
+    const second = renderHook(() => useChatConfig())
+    await waitFor(() => expect(second.result.current.currentModel).toBe(ALPHA_KEY))
+  })
+
+  it('keeps an explicit pick across loads and never re-resolves it', async () => {
+    mockFetch(config())
+    const first = renderHook(() => useChatConfig())
+    await waitFor(() => expect(first.result.current.currentModel).toBe(ALPHA_KEY))
+    act(() => first.result.current.setCurrentModel('static-b'))
+    expect(localStorage.getItem(`chatui-current-model-auto:${USER}`)).toBeNull()
+    first.unmount()
+
+    mockFetch(config())
+    const second = renderHook(() => useChatConfig())
+    await waitFor(() => expect(second.result.current.currentModel).toBe('static-b'))
+    expect(calledDefaultEndpoint()).toBe(false)
+  })
+
+  it('follows a changed static default for a user who never picked a model', async () => {
+    localStorage.setItem(`chatui-current-model:${USER}`, 'static-a')
+    localStorage.setItem(`chatui-current-model-auto:${USER}`, '1')
+    mockFetch(config({ llm_gateways: [GATEWAY], default_model: 'static-b' }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(result.current.currentModel).toBe('static-b'))
   })
 
   it('moves a saved team model the user lost access to onto the configured default', async () => {

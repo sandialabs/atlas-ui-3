@@ -144,6 +144,22 @@ class TestConfigFields:
                 default_team=ALPHA, default_model="claude-sonnet", models=["gpt-4o-mini"],
             )})
 
+    def test_surrounding_whitespace_is_stripped(self):
+        config = _config(
+            gateways={"enterprise": _gateway(default_team=f"  {ALPHA} ", default_model=" gpt-4o-mini\n")},
+            default_model="  static-b ",
+        )
+        gateway = config.litellm_gateways["enterprise"]
+        assert (gateway.default_team, gateway.default_model) == (ALPHA, "gpt-4o-mini")
+        assert config.default_model == "static-b"
+        assert config.configured_default_models() == ["static-b", f"enterprise::{ALPHA}::gpt-4o-mini"]
+
+    @pytest.mark.parametrize("field", ["default_team", "default_model"])
+    def test_blank_gateway_defaults_are_refused(self, field):
+        values = {"default_team": ALPHA, "default_model": "gpt-4o-mini", field: "   "}
+        with pytest.raises(ValidationError):
+            _config(gateways={"enterprise": _gateway(**values)})
+
     def test_candidates_in_preference_order_without_duplicates(self):
         config = _config(
             gateways={
@@ -256,6 +272,68 @@ class TestResolveDefaultModel:
         )
         resolved = asyncio.run(resolve_default_model(config, "test@test.com", _everyone_in_groups))
         assert resolved.model == "static-a"
+
+    def test_a_team_without_the_model_logs_a_warning(self, caplog):
+        config = _config(gateways={"enterprise": _gateway(default_team=BETA, default_model="gpt-4o-mini")})
+        with caplog.at_level("WARNING", logger="atlas.modules.llm.default_model_resolver"):
+            assert _resolve(config, "test@test.com").model == "static-a"
+        assert any(
+            "does not offer model gpt-4o-mini" in record.getMessage() and record.levelname == "WARNING"
+            for record in caplog.records
+        )
+
+    def test_nothing_usable_is_logged(self, caplog):
+        config = _config(models={}, gateways={"enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini")})
+        with caplog.at_level("INFO", logger="atlas.modules.llm.default_model_resolver"):
+            assert _resolve(config, "bob@example.com").model is None
+        assert any("No configured or static default model is usable" in r.getMessage() for r in caplog.records)
+
+    def test_gateway_defaults_are_probed_concurrently(self):
+        import time as _time
+
+        # The first gateway's default team is not the user's, so a sequential
+        # probe would wait for it before trying the second.
+        config = _config(gateways={
+            "enterprise": _gateway(default_team=GAMMA, default_model="gpt-4o-mini"),
+            "second": _gateway(default_team=ALPHA, default_model="gpt-4o-mini"),
+        })
+        delay = 0.4
+
+        async def slow(request):
+            await asyncio.sleep(delay)
+            if request.url.path.endswith("team/list"):
+                return httpx.Response(200, json=[{"team_id": ALPHA, "team_alias": "Alpha"}])
+            return httpx.Response(200, json={"data": [{"id": "gpt-4o-mini"}]})
+
+        for name, gateway in config.litellm_gateways.items():
+            litellm_gateway_client._clients[name] = (
+                gateway, LiteLLMGatewayClient(name, gateway, transport=httpx.MockTransport(slow)),
+            )
+        started = _time.monotonic()
+        resolved = asyncio.run(resolve_default_model(config, "test@test.com", _everyone_in_groups))
+        elapsed = _time.monotonic() - started
+        assert resolved.model == f"second::{ALPHA}::gpt-4o-mini"
+        # Sequential: 1 call (refused) + 2 calls = 3 * delay; concurrent: 2 * delay.
+        assert elapsed < 2.6 * delay, elapsed
+
+    def test_a_usable_static_default_asks_no_gateway(self):
+        config = _config(
+            gateways={"enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini")},
+            default_model="static-b",
+        )
+        calls = []
+
+        def record(request):
+            calls.append(request.url.path)
+            return httpx.Response(500)
+
+        gateway = config.litellm_gateways["enterprise"]
+        litellm_gateway_client._clients["enterprise"] = (
+            gateway, LiteLLMGatewayClient("enterprise", gateway, transport=httpx.MockTransport(record)),
+        )
+        resolved = asyncio.run(resolve_default_model(config, "test@test.com", _everyone_in_groups))
+        assert resolved.model == "static-b"
+        assert calls == []
 
     def test_group_restricted_defaults_are_skipped(self):
         models = {"static-a": {**STATIC, "groups": ["admins"]}, "static-b": STATIC}
