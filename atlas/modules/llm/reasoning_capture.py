@@ -29,6 +29,7 @@ fine-tune capture. Later turns do not need it, because earlier turns' tool-call
 messages are display-only rows that are never replayed to the model.
 """
 
+import json
 from typing import Any, Dict, List, Optional
 
 # The message keys that carry reasoning. Code that copies messages somewhere
@@ -182,6 +183,22 @@ class ReasoningAccumulator:
         if self._blocks:
             fields["thinking_blocks"] = [dict(b) for b in self._blocks]
         return fields
+
+
+def reasoning_text_for_estimate(message: Dict[str, Any]) -> str:
+    """Serialized reasoning on ``message``, for token estimates only.
+
+    Reasoning sent back within a turn is part of the request, so context
+    window and compaction estimates must count it. Never log the result.
+    """
+    parts = []
+    for key in REASONING_MESSAGE_KEYS:
+        value = message.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+        elif value:
+            parts.append(json.dumps(value, default=str))
+    return "\n".join(parts)
 
 
 def strip_reasoning(message: Dict[str, Any]) -> Dict[str, Any]:

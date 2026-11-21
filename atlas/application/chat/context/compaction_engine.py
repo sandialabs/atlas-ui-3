@@ -24,6 +24,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from atlas.modules.llm.reasoning_capture import reasoning_text_for_estimate
 from atlas.modules.llm.token_estimation import HEURISTIC_CHARS_PER_TOKEN, IMAGE_TOKENS
 
 from .compaction_summarizer import (
@@ -112,6 +113,8 @@ def approx_tokens(message: Dict[str, Any]) -> int:
         tokens += int(len(str(content)) / HEURISTIC_CHARS_PER_TOKEN)
     if message.get("tool_calls"):
         tokens += int(len(json.dumps(message["tool_calls"], default=str)) / HEURISTIC_CHARS_PER_TOKEN)
+    # Reasoning returned within a turn (#1230) is part of the request too.
+    tokens += int(len(reasoning_text_for_estimate(message)) / HEURISTIC_CHARS_PER_TOKEN)
     return tokens + 4
 
 

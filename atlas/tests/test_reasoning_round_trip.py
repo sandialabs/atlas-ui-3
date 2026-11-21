@@ -368,3 +368,16 @@ async def test_tools_mode_continuation_round_carries_reasoning():
     follow_up = llm.seen_messages[1]
     assistant = next(m for m in follow_up if m.get("role") == "assistant" and m.get("tool_calls"))
     assert assistant["reasoning_content"] == REASONING
+
+
+def test_token_estimates_count_reasoning():
+    """Reasoning sent back within a turn is part of the request, so the
+    context-window and compaction estimates must count it."""
+    from atlas.application.chat.context.compaction_engine import approx_tokens
+    from atlas.modules.llm.token_estimation import _text_only_messages
+
+    plain = {"role": "assistant", "content": "x", "tool_calls": [{"id": "1"}]}
+    with_reasoning = {**plain, "reasoning_content": "r" * 4000}
+    assert approx_tokens(with_reasoning) >= approx_tokens(plain) + 900
+    stripped, _ = _text_only_messages([with_reasoning])
+    assert "r" * 4000 in stripped[0]["content"]
