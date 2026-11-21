@@ -112,9 +112,11 @@ for path in ("/api/config/shell", "/api/config"):
           gw.get("default_team_id") == "team-alpha-7f3a" and gw.get("default_model_id") == "claude-sonnet", gw)
 
 member = get("/api/llm/default-model")
-check("team member starts on the gateway default", member == {"model": KEY, "source": "configured"}, member)
+check("team member starts on the gateway default",
+      member == {"model": KEY, "source": "configured", "team_label": "Project Alpha"}, member)
 outsider = get("/api/llm/default-model", user="bob@example.com")
-check("non-member falls back to the static model", outsider == {"model": "static-model", "source": "first_model"}, outsider)
+check("non-member falls back to the static model",
+      outsider == {"model": "static-model", "source": "first_model", "team_label": None}, outsider)
 
 async def chat():
     import websockets

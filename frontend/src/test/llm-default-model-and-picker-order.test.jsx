@@ -21,7 +21,7 @@ import {
   hasGatewayDefault,
   fetchServerDefaultModel,
 } from '../hooks/chat/useChatConfig'
-import { rememberLastTeam } from '../utils/gatewayModels'
+import { rememberLastTeam, teamLabelFor } from '../utils/gatewayModels'
 
 vi.mock('../contexts/ChatContext')
 vi.mock('../contexts/MarketplaceContext', () => ({ useOptionalMarketplace: () => null }))
@@ -141,9 +141,14 @@ describe('useChatConfig starting model from llmconfig.yml', () => {
   })
 
   it('starts a fresh session on the default LiteLLM team model the server confirms', async () => {
+    defaultModelResponse = () => ({ ok: true, json: async () => (
+      { model: ALPHA_KEY, source: 'configured', team_label: 'Project Alpha' }) })
     mockFetch(config())
     const { result } = renderHook(() => useChatConfig())
     await waitFor(() => expect(result.current.currentModel).toBe(ALPHA_KEY))
+    // The picker names the team, not its id.
+    expect(teamLabelFor('enterprise', 'team-alpha', USER)).toBe('Project Alpha')
+    expect(result.current.models.find(m => m.name === ALPHA_KEY).display_name).toBe('gpt-4o-mini (Project Alpha)')
     expect(localStorage.getItem(`chatui-current-model:${USER}`)).toBe(ALPHA_KEY)
     // The selected team model joins the model list like any configured model.
     expect(result.current.models.some(m => m.name === ALPHA_KEY)).toBe(true)

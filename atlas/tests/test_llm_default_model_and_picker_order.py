@@ -345,19 +345,23 @@ class TestDefaultModelRoute:
         state["config"] = _config(gateways={"enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini")})
         response = client.get("/api/llm/default-model")
         assert response.status_code == 200
-        assert response.json() == {"model": f"enterprise::{ALPHA}::gpt-4o-mini", "source": "configured"}
+        assert response.json() == {
+            "model": f"enterprise::{ALPHA}::gpt-4o-mini", "source": "configured", "team_label": "Project Alpha",
+        }
 
     def test_non_member_falls_back(self, default_model_client):
         client, state = default_model_client
         state["user"] = "bob@example.com"
         state["config"] = _config(gateways={"enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini")})
-        assert client.get("/api/llm/default-model").json() == {"model": "static-a", "source": "first_model"}
+        assert client.get("/api/llm/default-model").json() == {
+            "model": "static-a", "source": "first_model", "team_label": None,
+        }
 
     def test_nothing_usable(self, default_model_client):
         client, state = default_model_client
         state["user"] = "bob@example.com"
         state["config"] = _config(models={}, gateways={"enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini")})
-        assert client.get("/api/llm/default-model").json() == {"model": None, "source": None}
+        assert client.get("/api/llm/default-model").json() == {"model": None, "source": None, "team_label": None}
 
 
 # -- /api/config and /api/config/shell -------------------------------------------

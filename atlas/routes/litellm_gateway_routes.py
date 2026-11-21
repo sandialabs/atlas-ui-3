@@ -225,7 +225,8 @@ async def get_default_model(current_user: str = Depends(get_current_user)) -> Di
     usable: a gateway-only deployment whose defaults the user cannot use).
     ``source`` is ``configured`` (llmconfig.yml ``default_model`` or a
     gateway's ``default_team``/``default_model``) or ``first_model``.
+    ``team_label`` names the LiteLLM team of a gateway model (else null).
     """
     llm_config = app_factory.get_config_manager().llm_config
     resolved = await resolve_default_model(llm_config, current_user)
-    return {"model": resolved.model, "source": resolved.source}
+    return {"model": resolved.model, "source": resolved.source, "team_label": resolved.team_label}

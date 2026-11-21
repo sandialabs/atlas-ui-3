@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { parseGatewayModelKey, withGatewayModel } from '../../utils/gatewayModels'
+import { parseGatewayModelKey, rememberTeamLabel, withGatewayModel } from '../../utils/gatewayModels'
 import { isKnownUser, userStorageKey } from '../../utils/userStorage'
 
 const DEFAULT_FEATURES = {
@@ -87,13 +87,20 @@ export function hasGatewayDefault(cfg) {
  * The server's choice of starting model for the signed-in user
  * (GET /api/llm/default-model): a model name, '' when nothing is usable, or
  * null when the request failed (the caller falls back to defaultModelOf).
+ * For a team model, the team's label is remembered for `user` so the picker
+ * names the team rather than its id.
  */
-export async function fetchServerDefaultModel() {
+export async function fetchServerDefaultModel(user) {
   try {
     const res = await fetch('/api/llm/default-model')
     if (!res.ok) return null
     const body = await res.json()
-    return typeof body?.model === 'string' ? body.model : ''
+    const model = typeof body?.model === 'string' ? body.model : ''
+    const ref = parseGatewayModelKey(model)
+    if (ref && typeof body?.team_label === 'string' && body.team_label) {
+      rememberTeamLabel(ref.gateway, ref.teamId, body.team_label, user)
+    }
+    return model
   } catch {
     return null
   }
@@ -464,7 +471,7 @@ export function useChatConfig() {
     if (defaultLookupRef.current === user) return
     defaultLookupRef.current = user
     ;(async () => {
-      const serverModel = await fetchServerDefaultModel()
+      const serverModel = await fetchServerDefaultModel(user)
       if (defaultLookupRef.current === user) defaultLookupRef.current = null
       // Superseded: another account signed in, the restore already ran, or
       // the user picked a model while the lookup was in flight.
@@ -497,7 +504,7 @@ export function useChatConfig() {
       const cfg = { models, llm_gateways: llmGateways, default_model: defaultModel }
       let fallback = ''
       if (hasGatewayDefault(cfg)) {
-        const serverModel = await fetchServerDefaultModel()
+        const serverModel = await fetchServerDefaultModel(user)
         if (token !== membershipCheckRef.current) return
         if (modelOwnerRef.current !== user || currentModelRef.current !== currentModel) return
         if (serverModel && serverModel !== currentModel) fallback = serverModel

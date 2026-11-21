@@ -46,33 +46,38 @@ class DefaultModel:
     # "configured" (a default_model / gateway default passed), "first_model"
     # (fallback to the first static model the user may use), or None.
     source: Optional[str]
+    # The LiteLLM team's display label, for a gateway model.
+    team_label: Optional[str] = None
 
 
-async def _gateway_default_usable(
+async def _gateway_default_team_label(
     llm_config: Any, model_key: str, user_email: Optional[str], auth_check: Optional[AuthCheckFunc]
-) -> bool:
+) -> Optional[str]:
+    """The team's label when the gateway default is usable by the user, else None."""
     from atlas.modules.llm.litellm_gateway_client import get_gateway_client
 
     ref = resolve_gateway_ref(llm_config, model_key)
     if ref is None:
-        return False
+        return None
     gateway = llm_config.litellm_gateways[ref.gateway]
     if not await is_model_allowed(gateway, user_email, auth_check):
-        return False
+        return None
     client = get_gateway_client(ref.gateway, gateway)
     try:
-        # list_models() confirms membership first (require_team), so a user
-        # outside the team is refused before any model listing.
+        # A user outside the team is refused here, before any model listing.
+        team = await client.require_team(user_email, ref.team_id)
         model_ids = await client.list_models(user_email, ref.team_id)
     except _GATEWAY_ERRORS as exc:
+        # The gateway client already logs the refusal with its details; say
+        # only which configured default was skipped (config data, not user
+        # input).
         logger.info(
-            "Default model %s not usable for %s: %s",
+            "Configured default model %s skipped: %s",
             sanitize_for_logging(model_key),
-            sanitize_for_logging(user_email or ""),
-            sanitize_for_logging(str(exc)),
+            type(exc).__name__,
         )
-        return False
-    return ref.model_id in model_ids
+        return None
+    return team.label if ref.model_id in model_ids else None
 
 
 async def resolve_default_model(
@@ -89,8 +94,9 @@ async def resolve_default_model(
             if await is_model_allowed(static, user_email, auth_check):
                 return DefaultModel(name, SOURCE_CONFIGURED)
             continue
-        if await _gateway_default_usable(llm_config, name, user_email, auth_check):
-            return DefaultModel(name, SOURCE_CONFIGURED)
+        team_label = await _gateway_default_team_label(llm_config, name, user_email, auth_check)
+        if team_label is not None:
+            return DefaultModel(name, SOURCE_CONFIGURED, team_label)
     for name, model_config in static_models.items():
         if await is_model_allowed(model_config, user_email, auth_check):
             return DefaultModel(name, SOURCE_FIRST_MODEL)
