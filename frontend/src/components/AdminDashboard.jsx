@@ -70,9 +70,9 @@ const AdminDashboard = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'healthy': return 'text-green-400 bg-green-900/20'
-      case 'warning': return 'text-yellow-400 bg-yellow-900/20'
-      case 'error': return 'text-red-400 bg-red-900/20'
+      case 'healthy': return 'atlas-notice-success'
+      case 'warning': return 'atlas-notice-warning'
+      case 'error': return 'atlas-notice-danger'
       default: return 'text-gray-400 bg-gray-800'
     }
   }
@@ -92,12 +92,12 @@ const AdminDashboard = () => {
     return (
       <div className="min-h-full bg-gray-900 text-gray-200 flex items-center justify-center">
         <div className="text-center max-w-md">
-          <Shield className="w-16 h-16 text-red-400 mx-auto mb-4" />
+          <Shield className="w-16 h-16 atlas-fg-danger mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Access Denied</h2>
           <p className="text-gray-400 mb-6">{error}</p>
           <button 
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 mx-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+            className="flex items-center gap-2 mx-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors text-white"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Chat
@@ -127,11 +127,11 @@ const AdminDashboard = () => {
 
         {/* Backend disconnected banner */}
         {!isConnected && (
-          <div className="flex items-center gap-3 px-4 py-3 mb-6 bg-red-900/30 border border-red-600/40 rounded-lg text-red-300">
+          <div className="flex items-center gap-3 px-4 py-3 mb-6 border rounded-lg atlas-notice-danger">
             <WifiOff className="w-5 h-5 flex-shrink-0" />
             <div>
               <span className="font-medium">Backend disconnected</span>
-              <span className="text-red-400 ml-2 text-sm">Dashboard data may be stale. The connection will retry automatically.</span>
+              <span className="atlas-fg-danger ml-2 text-sm">Dashboard data may be stale. The connection will retry automatically.</span>
             </div>
           </div>
         )}
@@ -152,7 +152,7 @@ const AdminDashboard = () => {
           {/* System Logs */}
           <div className="bg-gray-800 rounded-lg p-6">
             <div className="flex items-center gap-3 mb-4">
-              <Eye className="w-6 h-6 text-cyan-400" />
+              <Eye className="w-6 h-6 atlas-fg-info" />
               <h2 className="text-lg font-semibold">System Logs</h2>
             </div>
             <p className="text-gray-400 mb-4">View application logs with enhanced filtering and better UX.</p>
@@ -161,7 +161,7 @@ const AdminDashboard = () => {
             </div>
             <button
               onClick={() => navigate('/admin/logview')}
-              className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
+              className="w-full px-4 py-2 bg-cyan-700 hover:bg-cyan-800 rounded-lg transition-colors text-white"
             >
               View Logs
             </button>
@@ -170,7 +170,7 @@ const AdminDashboard = () => {
           {/* Telemetry */}
           <div className="bg-gray-800 rounded-lg p-6">
             <div className="flex items-center gap-3 mb-4">
-              <BarChart3 className="w-6 h-6 text-emerald-400" />
+              <BarChart3 className="w-6 h-6 atlas-fg-success" />
               <h2 className="text-lg font-semibold">Telemetry</h2>
             </div>
             <p className="text-gray-400 mb-4">
@@ -181,7 +181,7 @@ const AdminDashboard = () => {
             </div>
             <button
               onClick={() => navigate('/admin/telemetry')}
-              className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+              className="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors text-white"
             >
               View Telemetry
             </button>

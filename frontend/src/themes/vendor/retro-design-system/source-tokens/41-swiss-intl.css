@@ -1,0 +1,11 @@
+/* Swiss Style — design tokens
+   Extracted from styles/41-swiss-intl/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #f4f3ee;
+  --ink: #0a0a0a;
+  --red: #e63946;
+  --muted: #6a6a6a;
+  --line: #0a0a0a;
+  --font: "Helvetica Neue", "Akzidenz-Grotesk", Helvetica, Arial, sans-serif;
+}

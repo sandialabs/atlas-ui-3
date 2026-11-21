@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>14 GeoCities Web 1.0</title>
+<style>
+  :root {
+    --ink: #000;
+    --link: #0000ee;
+    --visited: #551a8b;
+    --hotpink: #ff3399;
+    --lime: #00ff00;
+    --yellow: #ffff00;
+    --red: #ff0000;
+    --cyan: #00ffff;
+    --font: "Comic Sans MS", "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #000;
+    background-image:
+      radial-gradient(1px 1px at 20px 30px, #fff, transparent),
+      radial-gradient(1px 1px at 80px 80px, #fff, transparent),
+      radial-gradient(2px 2px at 140px 50px, #fff, transparent),
+      radial-gradient(1px 1px at 200px 100px, #fff, transparent),
+      radial-gradient(1px 1px at 260px 40px, #fff, transparent),
+      radial-gradient(2px 2px at 320px 120px, #fff, transparent),
+      radial-gradient(1px 1px at 380px 80px, #fff, transparent);
+    background-size: 400px 160px;
+    color: var(--yellow);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 0;
+    min-height: 100vh;
+    text-align: center;
+  }
+  .page { max-width: 800px; margin: 0 auto; padding: 20px; }
+  h1 {
+    font-family: "Impact", "Comic Sans MS", sans-serif;
+    font-size: 56px;
+    background: linear-gradient(to right, var(--hotpink), var(--yellow), var(--lime), var(--cyan), var(--hotpink));
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 3px 3px 0 #000;
+    animation: rainbow 3s linear infinite;
+    letter-spacing: 2px;
+  }
+  @keyframes rainbow { 0% { background-position: 0 0; } 100% { background-position: 200% 0; } }
+  h2 {
+    font-size: 28px;
+    color: var(--hotpink);
+    text-shadow: 2px 2px 0 var(--yellow);
+    margin: 20px 0 10px;
+  }
+  p { color: #fff; line-height: 1.6; margin-bottom: 10px; text-align: left; }
+  .marquee {
+    background: var(--red);
+    color: var(--yellow);
+    padding: 4px 0;
+    font-weight: bold;
+    font-size: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    border-top: 3px ridge #fff;
+    border-bottom: 3px ridge #fff;
+    margin: 12px 0;
+  }
+  .marquee span { display: inline-block; padding-left: 100%; animation: scroll 20s linear infinite; }
+  @keyframes scroll { to { transform: translateX(-100%); } }
+  .construction {
+    background: repeating-linear-gradient(45deg, var(--yellow) 0 14px, var(--ink) 14px 28px);
+    padding: 8px;
+    margin: 14px 0;
+  }
+  .construction-inner {
+    background: #000;
+    color: var(--yellow);
+    padding: 10px;
+    font-weight: bold;
+    font-size: 18px;
+  }
+  .beveled-btn {
+    font-family: "Times New Roman", serif;
+    font-size: 16px;
+    background: linear-gradient(135deg, #b0b0b0, #808080);
+    color: #000;
+    border: 3px outset #c0c0c0;
+    padding: 6px 18px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  .beveled-btn:active { border-style: inset; }
+  .hit-counter {
+    background: #000;
+    color: var(--lime);
+    font-family: "Courier New", monospace;
+    font-size: 28px;
+    padding: 6px 12px;
+    border: 3px ridge #888;
+    display: inline-block;
+    letter-spacing: 4px;
+    font-weight: bold;
+  }
+  .webring {
+    background: #000;
+    border: 2px ridge var(--hotpink);
+    padding: 10px;
+    margin: 14px 0;
+    display: inline-block;
+  }
+  .webring a { color: var(--cyan); text-decoration: underline; margin: 0 8px; font-weight: bold; }
+  .webring a:visited { color: var(--hotpink); }
+  .rule-rainbow {
+    height: 6px;
+    background: linear-gradient(to right, var(--red), var(--yellow), var(--lime), var(--cyan), var(--hotpink));
+    border: none;
+    margin: 14px 0;
+  }
+  .guestbook {
+    background: #fffacd;
+    color: #000;
+    border: 4px ridge var(--hotpink);
+    padding: 14px;
+    text-align: left;
+    margin: 14px 0;
+  }
+  .guestbook input, .guestbook textarea {
+    font-family: var(--font);
+    font-size: 14px;
+    background: #fff;
+    border: 2px inset #808080;
+    padding: 3px 6px;
+    width: 100%;
+    margin-bottom: 6px;
+  }
+  .badge {
+    display: inline-block;
+    background: linear-gradient(to bottom, var(--hotpink), #990066);
+    border: 3px ridge var(--yellow);
+    color: var(--yellow);
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: bold;
+    margin: 4px;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .blink { animation: blinker 1s steps(2) infinite; }
+  @keyframes blinker { 50% { opacity: 0; } }
+  .flame {
+    display: inline-block;
+    width: 30px; height: 30px;
+    background: radial-gradient(circle at 50% 80%, var(--yellow) 0%, var(--red) 40%, transparent 70%);
+    clip-path: polygon(50% 0, 100% 60%, 80% 100%, 50% 80%, 20% 100%, 0 60%);
+  }
+  a { color: var(--cyan); font-weight: bold; }
+  a:visited { color: var(--hotpink); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>~ASHLEY'S HOMEPAGE~</h1>
+
+  <div class="marquee"><span>★ WELCOME TO MY CORNER OF THE WEB!!! ★ SIGN MY GUESTBOOK!!! ★ BEST VIEWED IN NETSCAPE 4.0 AT 800×600 ★ <span class="blink">NEW!!</span> ★</span></div>
+
+  <div class="construction">
+    <div class="construction-inner">🚧 UNDER CONSTRUCTION 🚧 <span class="blink">♦</span> CHECK BACK SOON!!! <span class="blink">♦</span></div>
+  </div>
+
+  <hr class="rule-rainbow">
+
+  <h2>ABOUT ME</h2>
+  <p>✨ Hi! This is my homepage. I built it in Notepad on my 486. I love Star Trek, Pogs, and my dog Fluffy. Click around but don't right-click!!!</p>
+
+  <h2>MY HIT COUNTER</h2>
+  <div class="hit-counter">00042069</div>
+  <p style="text-align:center; color:var(--lime);">You are visitor number above!</p>
+
+  <hr class="rule-rainbow">
+
+  <h2>GUESTBOOK</h2>
+  <div class="guestbook">
+    <label><strong>Name:</strong><input value="Cool Netizen"></label>
+    <label><strong>Email:</strong><input value="geocities@rocketmail.com"></label>
+    <label><strong>Message:</strong><textarea rows="3">Awesome page!!!</textarea></label>
+    <button class="beveled-btn">SIGN IT!</button>
+    <button class="beveled-btn">Clear</button>
+  </div>
+
+  <h2>MY WEBRING</h2>
+  <div class="webring">
+    ← <a>Prev</a> | <a>Random</a> | <a>List Sites</a> | <a>Next</a> →
+  </div>
+
+  <h2>AWARDS</h2>
+  <div>
+    <span class="badge">COOL SITE!</span>
+    <span class="badge">NETSCAPE NOW</span>
+    <span class="badge">TOP 5%</span>
+    <span class="badge">GEEK APPROVED</span>
+    <span class="flame"></span><span class="flame"></span><span class="flame"></span>
+  </div>
+
+  <hr class="rule-rainbow">
+  <p style="text-align:center;"><span class="blink" style="color:var(--yellow)">★ THANKS FOR VISITING ★</span></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>49 Glitch / Databend</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --ink: #f0f0f0;
+    --red: #ff004d;
+    --cyan: #00f4ff;
+    --green: #00ff8c;
+    --yellow: #ffe600;
+    --magenta: #ff00ae;
+    --font: "Space Mono", "JetBrains Mono", "IBM Plex Mono", "Courier New", monospace;
+    --font-heading: "Space Grotesk", "Helvetica Neue", Impact, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 30px;
+    min-height: 100vh;
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background:
+      repeating-linear-gradient(to bottom, transparent 0 2px, rgba(255,255,255,0.03) 2px 3px);
+    pointer-events: none;
+    z-index: 100;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    top: 30%; left: 0; right: 0;
+    height: 40px;
+    background: repeating-linear-gradient(to right, var(--cyan) 0 2px, var(--magenta) 2px 4px, transparent 4px 20px);
+    mix-blend-mode: screen;
+    opacity: 0.3;
+    pointer-events: none;
+    animation: slide 8s steps(40) infinite;
+    z-index: 5;
+  }
+  @keyframes slide {
+    0%   { transform: translateX(-10%); }
+    100% { transform: translateX(110%); }
+  }
+  .page { max-width: 820px; margin: 0 auto; position: relative; z-index: 1; }
+  h1 {
+    font-family: var(--font-heading);
+    font-size: 96px;
+    font-weight: 900;
+    letter-spacing: -4px;
+    text-transform: uppercase;
+    line-height: 0.9;
+    margin-bottom: 8px;
+    position: relative;
+    color: var(--ink);
+  }
+  h1::before, h1::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+  h1::before { color: var(--red); transform: translate(-4px, 0); mix-blend-mode: screen; clip-path: polygon(0 0, 100% 0, 100% 30%, 0 30%); animation: glitch 3s steps(2) infinite; }
+  h1::after { color: var(--cyan); transform: translate(4px, 0); mix-blend-mode: screen; clip-path: polygon(0 70%, 100% 70%, 100% 100%, 0 100%); animation: glitch 3s steps(2) infinite reverse; }
+  @keyframes glitch {
+    0%, 90%, 100% { transform: translate(0, 0); }
+    92% { transform: translate(-8px, 2px); }
+    94% { transform: translate(6px, -2px); }
+    96% { transform: translate(-4px, 0); }
+  }
+  .sub { font-size: 16px; color: var(--cyan); letter-spacing: 8px; text-transform: uppercase; margin-bottom: 30px; text-shadow: 2px 0 0 var(--red), -2px 0 0 var(--cyan); }
+  h2 { font-family: var(--font-heading); font-size: 14px; font-weight: 900; letter-spacing: 4px; text-transform: uppercase; margin: 24px 0 10px; border-left: 4px solid var(--red); padding-left: 10px; color: var(--yellow); }
+  p { line-height: 1.7; margin-bottom: 8px; }
+  .card { border: 1px solid var(--ink); padding: 20px; margin-bottom: 20px; background: rgba(20,20,20,0.6); position: relative; }
+  .card::before {
+    content: "";
+    position: absolute;
+    top: 20%; left: -2px;
+    width: 6px; height: 30%;
+    background: var(--red);
+  }
+  .corrupted-img {
+    height: 260px;
+    background:
+      repeating-linear-gradient(to bottom,
+        var(--red) 0 4px, var(--cyan) 4px 8px, var(--ink) 8px 20px,
+        var(--magenta) 20px 24px, #555 24px 40px,
+        var(--green) 40px 44px, #222 44px 70px,
+        var(--yellow) 70px 74px, #888 74px 100px,
+        var(--cyan) 100px 108px, #333 108px 140px,
+        var(--red) 140px 144px, #666 144px 180px,
+        var(--magenta) 180px 188px, #111 188px 220px,
+        var(--ink) 220px 224px, #444 224px 260px);
+    border: 1px solid var(--ink);
+    margin: 10px 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .corrupted-img::before {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; left: 30%;
+    width: 80px;
+    background: linear-gradient(to right, transparent 0%, var(--ink) 20%, var(--red) 40%, var(--cyan) 60%, var(--green) 80%, transparent 100%);
+    mix-blend-mode: screen;
+    transform: translateX(-40px);
+    animation: shear 3s steps(3) infinite;
+  }
+  @keyframes shear {
+    0%, 100% { transform: translateX(-40px); }
+    33% { transform: translateX(200px); }
+    66% { transform: translateX(400px); }
+  }
+  .corrupted-img::after {
+    content: "IMG_4782.JPG  ▓▓▒░  HEX: ff00 af0b de4a  ░▒▓▓  CORRUPT CHUNK AT OFFSET 0x4A21F";
+    position: absolute;
+    bottom: 10px; left: 10px;
+    font-family: var(--font);
+    font-size: 11px;
+    color: var(--cyan);
+    background: var(--bg);
+    padding: 3px 6px;
+    letter-spacing: 1px;
+  }
+  .hex-dump {
+    font-family: var(--font);
+    font-size: 11px;
+    color: var(--green);
+    background: #050505;
+    padding: 10px 14px;
+    border: 1px solid var(--green);
+    line-height: 1.4;
+    overflow-x: auto;
+    margin: 10px 0;
+  }
+  .hex-dump .addr { color: var(--cyan); }
+  .hex-dump .bad { background: var(--red); color: var(--bg); }
+  .btn { font-family: var(--font); font-size: 12px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; background: transparent; color: var(--ink); border: 1px solid var(--ink); padding: 10px 22px; cursor: pointer; position: relative; }
+  .btn::before {
+    content: attr(data-text);
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--red);
+    mix-blend-mode: screen;
+    transform: translate(2px, 0);
+    clip-path: polygon(0 0, 100% 0, 100% 40%, 0 40%);
+  }
+  .btn:hover::before { animation: glitch 0.4s steps(2) 3; }
+  .btn-red { color: var(--red); border-color: var(--red); }
+  .btn-cyan { color: var(--cyan); border-color: var(--cyan); }
+  .input { font-family: var(--font); font-size: 14px; background: transparent; color: var(--green); border: 1px solid var(--green); padding: 10px 12px; width: 340px; letter-spacing: 2px; }
+  .input:focus { outline: none; border-color: var(--red); color: var(--red); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 64px; height: 64px; border: 1px solid var(--ink); display: inline-block; }
+  .error-line { font-family: var(--font); font-size: 12px; color: var(--red); background: rgba(255,0,77,0.1); padding: 6px 10px; margin: 4px 0; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1 data-text="GLITCH">GLITCH</h1>
+  <div class="sub">◂◂ D A T A B E N D ▸▸</div>
+
+  <div class="card">
+    <p>RGB channels mis-shift. JPEG chunks corrupt mid-decode. The image is still readable, but wrong. Chromatic aberration is a feature, not a bug. We celebrate the artifact.</p>
+  </div>
+
+  <div class="card">
+    <h2>▸ Corrupted asset</h2>
+    <div class="corrupted-img"></div>
+  </div>
+
+  <div class="card">
+    <h2>▸ Hex dump</h2>
+    <div class="hex-dump">
+<span class="addr">00004A10</span>  48 65 6c 6c 6f 2c 20 77 6f 72 6c 64 21 0a 00 <span class="bad">ff</span>  Hello, world!..<span class="bad">.</span><br>
+<span class="addr">00004A20</span>  <span class="bad">ff d8 ff e0 00 10 4a 46</span> 49 46 00 01 01 01 00 48  <span class="bad">......JF</span>IF.....H<br>
+<span class="addr">00004A30</span>  00 48 00 00 ff db 00 43 <span class="bad">de ad be ef ca fe ba be</span>  .H.....C<span class="bad">........</span><br>
+<span class="addr">00004A40</span>  09 0a 0a 0c 0a 09 0c 10 <span class="bad">00 00 00 00 00 00 00 00</span>  ........<span class="bad">........</span><br>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="error-line">ERR_CORRUPTED_CONTENT · chunk boundary mismatch at 0x4A32 — continuing in salvage mode</div>
+    <div class="error-line">WARN · color profile invalid · assuming sRGB IEC61966-2.1</div>
+
+    <h2>▸ Input</h2>
+    <div class="row"><input class="input" value="./databend.py --amplitude 0.7"></div>
+
+    <h2>▸ Transport</h2>
+    <div class="row">
+      <button class="btn" data-text="BEND">BEND</button>
+      <button class="btn btn-cyan" data-text="SHIFT">SHIFT</button>
+      <button class="btn btn-red" data-text="CORRUPT">CORRUPT</button>
+    </div>
+
+    <h2>▸ Palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--red)"></span>
+      <span class="swatch" style="background:var(--cyan)"></span>
+      <span class="swatch" style="background:var(--green)"></span>
+      <span class="swatch" style="background:var(--magenta)"></span>
+      <span class="swatch" style="background:var(--yellow)"></span>
+      <span class="swatch" style="background:var(--bg); border-color:var(--ink);"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

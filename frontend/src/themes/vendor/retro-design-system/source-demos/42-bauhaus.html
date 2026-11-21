@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>42 Bauhaus</title>
+<style>
+  :root {
+    --paper: #f0ebe0;
+    --ink: #0a0a0a;
+    --red: #d32027;
+    --yellow: #f5c518;
+    --blue: #1c4fb5;
+    --font: "Futura", "Futura PT", "Century Gothic", "Avenir Next", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    padding: 40px;
+    min-height: 100vh;
+    line-height: 1.4;
+  }
+  .page { max-width: 880px; margin: 0 auto; }
+  .hdr { display: flex; justify-content: space-between; border-bottom: 4px solid var(--ink); padding-bottom: 6px; margin-bottom: 20px; font-size: 11px; letter-spacing: 4px; text-transform: uppercase; font-weight: 700; }
+  h1 {
+    font-family: var(--font);
+    font-weight: 700;
+    font-size: 88px;
+    letter-spacing: -2px;
+    text-transform: uppercase;
+    line-height: 0.9;
+    margin-bottom: 6px;
+  }
+  h1 .b { color: var(--blue); }
+  h1 .r { color: var(--red); }
+  h1 .y { color: var(--yellow); -webkit-text-stroke: 2px var(--ink); }
+  .sub { font-size: 18px; letter-spacing: 6px; text-transform: uppercase; margin-bottom: 30px; }
+  h2 { font-size: 12px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; margin: 24px 0 10px; }
+  p { margin-bottom: 8px; line-height: 1.6; }
+  .composition {
+    height: 320px;
+    position: relative;
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    margin: 10px 0 20px;
+    overflow: hidden;
+  }
+  .circle-red { position: absolute; top: 30px; left: 30px; width: 180px; height: 180px; background: var(--red); border-radius: 50%; }
+  .square-blue { position: absolute; bottom: 20px; left: 120px; width: 140px; height: 140px; background: var(--blue); }
+  .tri-yellow {
+    position: absolute;
+    top: 40px;
+    right: 80px;
+    width: 0; height: 0;
+    border-left: 100px solid transparent;
+    border-right: 100px solid transparent;
+    border-bottom: 180px solid var(--yellow);
+  }
+  .bar-black { position: absolute; top: 0; bottom: 0; right: 40px; width: 6px; background: var(--ink); }
+  .diag-line { position: absolute; top: 50%; left: 0; width: 100%; height: 3px; background: var(--ink); transform: rotate(-15deg); transform-origin: left; }
+  .grid-shapes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 2px solid var(--ink); }
+  .grid-shapes > div { aspect-ratio: 1; border-right: 2px solid var(--ink); display: flex; align-items: center; justify-content: center; }
+  .grid-shapes > div:last-child { border-right: none; }
+  .g1 { background: var(--red); }
+  .g2 { background: var(--yellow); }
+  .g3 { background: var(--blue); }
+  .g4 { background: var(--paper); }
+  .g-circle { width: 60%; height: 60%; border-radius: 50%; background: var(--ink); }
+  .g-sq { width: 60%; height: 60%; background: var(--paper); }
+  .g-tri { width: 0; height: 0; border-left: 40px solid transparent; border-right: 40px solid transparent; border-bottom: 70px solid var(--paper); }
+  .g-plus { width: 50%; height: 10px; background: var(--ink); position: relative; }
+  .g-plus::before { content: ""; position: absolute; left: 50%; top: -25px; transform: translateX(-50%); width: 10px; height: 60px; background: var(--ink); }
+  .btn { font-family: var(--font); font-weight: 700; font-size: 13px; letter-spacing: 3px; text-transform: uppercase; background: var(--ink); color: var(--paper); border: none; padding: 12px 26px; cursor: pointer; }
+  .btn-red { background: var(--red); }
+  .btn-blue { background: var(--blue); }
+  .btn-yellow { background: var(--yellow); color: var(--ink); }
+  .input { font-family: var(--font); font-weight: 500; font-size: 16px; background: transparent; border: none; border-bottom: 3px solid var(--ink); padding: 8px 0; width: 320px; letter-spacing: 2px; text-transform: uppercase; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 70px; height: 70px; display: inline-block; border: 2px solid var(--ink); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hdr">
+    <span>Staatliches Bauhaus</span>
+    <span>Weimar · Dessau · Berlin</span>
+    <span>1919 — 1933</span>
+  </div>
+
+  <h1><span class="b">FORM</span> <span class="r">UND</span><br><span class="y">FUNKTION</span></h1>
+  <div class="sub">◯ ▢ △ &nbsp; P R I M I T I V E S</div>
+
+  <div class="composition">
+    <div class="circle-red"></div>
+    <div class="square-blue"></div>
+    <div class="tri-yellow"></div>
+    <div class="bar-black"></div>
+    <div class="diag-line"></div>
+  </div>
+
+  <h2>Primitives</h2>
+  <div class="grid-shapes">
+    <div class="g1"><div class="g-circle"></div></div>
+    <div class="g2"><div class="g-sq"></div></div>
+    <div class="g3"><div class="g-tri"></div></div>
+    <div class="g4"><div class="g-plus"></div></div>
+  </div>
+
+  <h2>Input</h2>
+  <div class="row"><input class="input" value="Dessau 1926"></div>
+
+  <h2>Buttons</h2>
+  <div class="row">
+    <button class="btn btn-red">Kreis</button>
+    <button class="btn btn-blue">Quadrat</button>
+    <button class="btn btn-yellow">Dreieck</button>
+    <button class="btn">Abbrechen</button>
+  </div>
+
+  <h2>Palette</h2>
+  <div class="row">
+    <span class="swatch" style="background:var(--red)"></span>
+    <span class="swatch" style="background:var(--yellow)"></span>
+    <span class="swatch" style="background:var(--blue)"></span>
+    <span class="swatch" style="background:var(--ink)"></span>
+    <span class="swatch" style="background:var(--paper)"></span>
+  </div>
+</div>
+</body>
+</html>

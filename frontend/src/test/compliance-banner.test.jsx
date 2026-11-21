@@ -138,3 +138,25 @@ describe('ComplianceBanner', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 })
+
+
+// The shell classification marking must remain independent of every themed
+// desktop/background, including saturated and highly decorative presets.
+describe('classification marking is independent of the active UI theme', () => {
+  it.each(['dark', 'light', 'windows-xp-luna', 'dos-cga', 'vaporwave', 'maximalist-banners'])(
+    'keeps the same CUI marking and solid contrast region under %s', id => {
+      document.documentElement.setAttribute('data-atlas-theme', id)
+      setChat({ activeComplianceFilter: 'CUI' })
+      const { container, unmount } = render(<ComplianceBanner />)
+      const el = banner()
+      expect(el).toHaveAttribute('role', 'status')
+      expect(el).toHaveAttribute('aria-label', 'Compliance classification: CONTROLLED UNCLASSIFIED INFORMATION')
+      expect(el.style.backgroundColor).toBe('rgb(80, 43, 133)')
+      expect(screen.getByText('CONTROLLED UNCLASSIFIED INFORMATION').style.color)
+        .toBe('rgb(255, 255, 255)')
+      expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(2)
+      unmount()
+      document.documentElement.removeAttribute('data-atlas-theme')
+    },
+  )
+})

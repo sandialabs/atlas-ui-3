@@ -11,11 +11,11 @@ const ConversationLoadMore = ({ hasMore, loading, error, onLoadMore }) => {
   if (error) {
     return (
       <div className="px-3 py-2 border-t border-gray-700 flex flex-col items-center gap-1">
-        <p className="text-xs text-red-400" role="alert">{error}</p>
+        <p className="text-xs atlas-fg-danger" role="alert">{error}</p>
         <button
           onClick={onLoadMore}
           disabled={loading}
-          className="w-full text-xs px-2 py-1.5 text-blue-400 hover:bg-blue-900/30 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full text-xs px-2 py-1.5 atlas-fg-info hover:bg-gray-700 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {loading ? 'Retrying...' : 'Retry'}
         </button>
@@ -29,19 +29,19 @@ const ConversationLoadMore = ({ hasMore, loading, error, onLoadMore }) => {
         <button
           onClick={onLoadMore}
           disabled={loading}
-          className="w-full text-xs px-2 py-1.5 text-blue-400 hover:bg-blue-900/30 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full text-xs px-2 py-1.5 atlas-fg-info hover:bg-gray-700 rounded transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {loading ? 'Loading older conversations...' : 'Load more'}
         </button>
         {loading && (
-          <span className="text-xs text-gray-500" role="status">Fetching the next page...</span>
+          <span className="text-xs text-gray-400" role="status">Fetching the next page...</span>
         )}
       </div>
     )
   }
 
   return (
-    <div className="px-3 py-2 border-t border-gray-700 text-center text-xs text-gray-500">
+    <div className="px-3 py-2 border-t border-gray-700 text-center text-xs text-gray-400">
       All conversations loaded
     </div>
   )

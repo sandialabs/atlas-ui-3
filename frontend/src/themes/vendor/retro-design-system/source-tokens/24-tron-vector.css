@@ -1,0 +1,15 @@
+/* Tron Vector — design tokens
+   Extracted from styles/24-tron-vector/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #000008;
+  --grid: #0a1a3a;
+  --cyan: #00e4ff;
+  --cyan-dim: #007a8a;
+  --cyan-bright: #a0f4ff;
+  --orange: #ff7a00;
+  --red: #ff2040;
+  --ink: #00e4ff;
+  --font: "Orbitron", "Eurostile", "Share Tech Mono", monospace;
+  --font-mono: "Share Tech Mono", "Courier New", monospace;
+}

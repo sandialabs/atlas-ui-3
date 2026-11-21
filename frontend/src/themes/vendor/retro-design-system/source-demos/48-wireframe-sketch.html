@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>48 Wireframe / Balsamiq Sketch</title>
+<style>
+  :root {
+    --paper: #fbfaf4;
+    --ink: #2a2a2a;
+    --light: #b0b0b0;
+    --muted: #8a8a8a;
+    --hi: #d4d1c4;
+    --font-hand: "Kalam", "Comic Sans MS", "Marker Felt", cursive;
+    --font: "Kalam", "Comic Sans MS", cursive;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    background-image:
+      repeating-linear-gradient(to right, transparent 0 19px, rgba(0,0,0,0.02) 19px 20px),
+      repeating-linear-gradient(to bottom, transparent 0 19px, rgba(0,0,0,0.02) 19px 20px);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 16px;
+    padding: 30px;
+    min-height: 100vh;
+    line-height: 1.4;
+  }
+  .page { max-width: 860px; margin: 0 auto; }
+  .mockup {
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: 20px;
+    margin-bottom: 24px;
+    border-radius: 3px;
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.05);
+    position: relative;
+  }
+  .mockup::before {
+    content: attr(data-label);
+    position: absolute;
+    top: -14px;
+    left: 20px;
+    background: var(--paper);
+    padding: 0 8px;
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  h1 { font-family: var(--font-hand); font-size: 40px; font-weight: 700; margin-bottom: 4px; border-bottom: 3px dashed var(--ink); padding-bottom: 4px; display: inline-block; }
+  .sub { color: var(--muted); margin-bottom: 16px; font-style: italic; }
+  h2 { font-family: var(--font-hand); font-size: 18px; font-weight: 700; margin: 18px 0 8px; text-decoration: underline; text-decoration-style: wavy; text-underline-offset: 3px; }
+  p { line-height: 1.7; margin-bottom: 8px; }
+  .browser-chrome {
+    border: 2px solid var(--ink);
+    border-radius: 6px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  .browser-bar {
+    background: var(--hi);
+    border-bottom: 2px solid var(--ink);
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot-sm { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--ink); background: var(--paper); }
+  .url-bar { flex: 1; border: 1.5px solid var(--ink); border-radius: 12px; background: var(--paper); padding: 3px 10px; font-family: var(--font-hand); font-size: 13px; color: var(--muted); }
+  .browser-body { padding: 20px; min-height: 200px; }
+  .placeholder-box {
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    position: relative;
+    padding: 10px;
+    margin: 8px 0;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .placeholder-box.image {
+    min-height: 120px;
+  }
+  .placeholder-box.image::before, .placeholder-box.image::after {
+    content: "";
+    position: absolute;
+    background: var(--ink);
+  }
+  .placeholder-box.image::before {
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(to bottom right, transparent calc(50% - 1px), var(--ink) 50%, transparent calc(50% + 1px)),
+                linear-gradient(to bottom left, transparent calc(50% - 1px), var(--ink) 50%, transparent calc(50% + 1px));
+    opacity: 0.4;
+  }
+  .placeholder-box.image::after {
+    display: none;
+  }
+  .placeholder-box .lbl { position: relative; z-index: 1; background: var(--paper); padding: 2px 8px; }
+  .lorem-lines { padding: 4px 0; }
+  .lorem-lines .line { height: 8px; background: var(--ink); border-radius: 4px; margin-bottom: 10px; }
+  .lorem-lines .line.w100 { width: 100%; } .lorem-lines .line.w85 { width: 85%; } .lorem-lines .line.w70 { width: 70%; } .lorem-lines .line.w50 { width: 50%; } .lorem-lines .line.w30 { width: 30%; }
+  .btn-sketch {
+    font-family: var(--font-hand);
+    font-size: 16px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 2px solid var(--ink);
+    padding: 8px 20px;
+    cursor: pointer;
+    border-radius: 18px;
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+  .btn-sketch:hover { background: var(--hi); }
+  .btn-sketch.primary { background: var(--ink); color: var(--paper); }
+  .input-sketch {
+    font-family: var(--font-hand);
+    font-size: 15px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 2px solid var(--ink);
+    padding: 8px 12px;
+    width: 320px;
+    border-radius: 4px;
+  }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .arrow {
+    display: inline-block;
+    font-family: var(--font-hand);
+    color: var(--muted);
+    font-size: 13px;
+    font-style: italic;
+    transform: rotate(-8deg);
+    margin-left: 10px;
+  }
+  .swatch { width: 64px; height: 64px; border: 2px solid var(--ink); border-radius: 4px; display: inline-block; box-shadow: 2px 2px 0 var(--ink); }
+  .annotation {
+    font-family: var(--font-hand);
+    color: #c44;
+    font-size: 13px;
+    font-style: italic;
+    border: 1.5px dashed #c44;
+    padding: 4px 8px;
+    display: inline-block;
+    transform: rotate(-2deg);
+    margin: 6px 0;
+  }
+  .tab-bar { display: flex; gap: 4px; margin-bottom: -2px; }
+  .tab {
+    padding: 6px 14px;
+    border: 2px solid var(--ink);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: var(--paper);
+    font-family: var(--font-hand);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .tab.active { background: var(--hi); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Landing Page — v3</h1>
+  <div class="sub">last revised by <u>alex</u> · tues morning · 3 stickies resolved</div>
+
+  <div class="mockup" data-label="screen 1 · hero">
+    <div class="tab-bar">
+      <div class="tab active">Tab 1</div>
+      <div class="tab">Tab 2</div>
+      <div class="tab">+</div>
+    </div>
+    <div class="browser-chrome">
+      <div class="browser-bar">
+        <div class="dot-sm"></div><div class="dot-sm"></div><div class="dot-sm"></div>
+        <div class="url-bar">example.com/home</div>
+      </div>
+      <div class="browser-body">
+        <div class="placeholder-box image"><span class="lbl">[ logo ]</span></div>
+        <div class="lorem-lines">
+          <div class="line w85"></div>
+          <div class="line w100"></div>
+          <div class="line w70"></div>
+        </div>
+        <div class="row">
+          <button class="btn-sketch primary">Get started</button>
+          <button class="btn-sketch">Learn more</button>
+          <span class="arrow">← primary CTA</span>
+        </div>
+        <div class="placeholder-box image" style="min-height:140px;"><span class="lbl">[ product screenshot ]</span></div>
+      </div>
+    </div>
+    <div class="annotation">TODO: replace with real product shot by Friday.</div>
+  </div>
+
+  <div class="mockup" data-label="screen 2 · form">
+    <h2>Sign up</h2>
+    <div class="row"><input class="input-sketch" value="name@example.com"> <span class="arrow">← needs validation</span></div>
+    <div class="row"><input class="input-sketch" value="••••••••"></div>
+    <div class="row">
+      <button class="btn-sketch primary">Create account</button>
+      <button class="btn-sketch">Cancel</button>
+    </div>
+
+    <h2>Notes</h2>
+    <ul style="padding-left:24px;">
+      <li>confirm copy with legal</li>
+      <li>A/B test CTA color</li>
+      <li>add "Continue with Google" above fold?</li>
+    </ul>
+
+    <h2>Palette (placeholder)</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--paper)"></span>
+      <span class="swatch" style="background:var(--hi)"></span>
+      <span class="swatch" style="background:var(--muted)"></span>
+      <span class="swatch" style="background:var(--ink)"></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

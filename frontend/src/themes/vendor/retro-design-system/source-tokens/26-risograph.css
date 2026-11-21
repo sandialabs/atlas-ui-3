@@ -1,0 +1,16 @@
+/* Risograph Print — design tokens
+   Extracted from styles/26-risograph/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #f3efe4;
+  --paper-dark: #e6dfcb;
+  --fluoro-pink: #ff4fa5;
+  --fluoro-pink-light: #ffb8db;
+  --riso-blue: #0078b4;
+  --riso-blue-light: #6ca8d4;
+  --riso-yellow: #f6d800;
+  --riso-green: #00a03c;
+  --ink: #1a1a1a;
+  --font: "Helvetica Neue", "Akzidenz-Grotesk", "Arial", sans-serif;
+  --font-serif: "Times New Roman", "Garamond", serif;
+}

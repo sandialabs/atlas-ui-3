@@ -428,7 +428,7 @@ describe('Canvas panel copy (#1151)', () => {
 
     expect(mockWriteText).toHaveBeenCalledWith('# Atlas report\n\nGenerated **summary**.')
     expect(copyButton.title).toBe('Copied to clipboard')
-    expect(copyButton.className).toContain('bg-green-600')
+    expect(copyButton.className).toContain('bg-green-700')
 
     // Feedback is temporary.
     await act(async () => {

@@ -1,0 +1,15 @@
+/* IBM 3270 Mainframe — design tokens
+   Extracted from styles/27-ibm-3270/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #000000;
+  --turquoise: #00d4d4;
+  --green: #00d400;
+  --white: #e4e4e4;
+  --red: #ff3030;
+  --yellow: #ffe84a;
+  --blue: #4a9cff;
+  --pink: #ff7aa8;
+  --dim: #005a5a;
+  --font: "IBM 3270", "PxPlus 3270", "VT323", "Courier New", monospace;
+}

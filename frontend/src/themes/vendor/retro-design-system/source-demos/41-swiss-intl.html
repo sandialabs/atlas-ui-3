@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>41 Swiss Style</title>
+<style>
+  :root {
+    --paper: #f4f3ee;
+    --ink: #0a0a0a;
+    --red: #e63946;
+    --muted: #6a6a6a;
+    --line: #0a0a0a;
+    --font: "Helvetica Neue", "Akzidenz-Grotesk", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font);
+    font-weight: 400;
+    font-size: 15px;
+    padding: 60px 60px 40px;
+    min-height: 100vh;
+    line-height: 1.4;
+  }
+  .page { max-width: 960px; margin: 0 auto; display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+  .hdr { grid-column: 1 / -1; display: flex; justify-content: space-between; border-bottom: 2px solid var(--ink); padding-bottom: 8px; margin-bottom: 20px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  h1 { grid-column: 1 / 13; font-family: var(--font); font-weight: 700; font-size: 120px; line-height: 0.9; letter-spacing: -4px; margin-bottom: 0; }
+  h1 .red { color: var(--red); }
+  .big-sub { grid-column: 1 / 9; font-size: 22px; font-weight: 400; line-height: 1.3; margin-top: 20px; }
+  .sidebar { grid-column: 9 / 13; font-size: 13px; line-height: 1.5; color: var(--muted); margin-top: 20px; border-left: 2px solid var(--ink); padding-left: 14px; }
+  .red-bar { grid-column: 1 / -1; height: 20px; background: var(--red); margin: 30px 0 10px; }
+  .section { grid-column: span 6; }
+  .section.full { grid-column: 1 / -1; }
+  h2 { font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; margin: 20px 0 10px; border-top: 1px solid var(--ink); padding-top: 6px; }
+  h2 .num { color: var(--red); margin-right: 12px; }
+  p { margin-bottom: 8px; }
+  .btn { font-family: var(--font); font-size: 13px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; background: var(--ink); color: var(--paper); border: none; padding: 10px 22px; cursor: pointer; }
+  .btn:hover { background: var(--red); }
+  .btn-red { background: var(--red); color: var(--paper); }
+  .btn-outline { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  .btn-outline:hover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .input { font-family: var(--font); font-size: 15px; background: transparent; color: var(--ink); border: none; border-bottom: 1px solid var(--ink); padding: 8px 0; width: 320px; }
+  .input:focus { outline: none; border-bottom-color: var(--red); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .swatch { width: 70px; height: 70px; display: inline-block; }
+  .grid-meta { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--ink); }
+  .grid-meta > div { padding: 16px; border-right: 1px solid var(--ink); font-size: 12px; }
+  .grid-meta > div:last-child { border-right: none; }
+  .grid-meta .num { font-size: 40px; font-weight: 700; line-height: 1; display: block; margin-bottom: 4px; }
+  .grid-meta .num.red { color: var(--red); }
+  .diag { grid-column: 1 / -1; height: 6px; background: var(--red); margin: 20px 0; transform: skewX(-30deg); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hdr">
+    <span>No. 41</span>
+    <span>Zürich · Basel · Ulm</span>
+    <span>Swiss Style · Int'l Typographic</span>
+    <span>2026</span>
+  </div>
+
+  <h1>Form<br>follows<br><span class="red">function.</span></h1>
+
+  <div class="big-sub">Helvetica. Strict grid. Red accent. Asymmetric balance. No ornament. The International Typographic Style — Zürich 1957.</div>
+
+  <div class="sidebar">
+    Josef Müller-Brockmann. Max Huber. Emil Ruder. Armin Hofmann.<br><br>
+    The grid is not a cage. It is the instrument that makes order audible.
+  </div>
+
+  <div class="red-bar"></div>
+
+  <div class="section full">
+    <div class="grid-meta">
+      <div><span class="num red">1957</span>Year established</div>
+      <div><span class="num">12</span>Column grid</div>
+      <div><span class="num">8pt</span>Baseline</div>
+      <div><span class="num red">1</span>Accent color</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2><span class="num">01</span>Typography</h2>
+    <p>One typeface. Two weights. Three sizes. Set tightly. Left-aligned. Flush left, ragged right.</p>
+    <div class="row"><input class="input" value="Neue Haas Grotesk"></div>
+  </div>
+
+  <div class="section">
+    <h2><span class="num">02</span>Action</h2>
+    <p>Minimum interface. Maximum affordance. Buttons label their function directly.</p>
+    <div class="row">
+      <button class="btn">Continue</button>
+      <button class="btn btn-outline">Back</button>
+      <button class="btn btn-red">Delete</button>
+    </div>
+  </div>
+
+  <div class="section full">
+    <h2><span class="num">03</span>Palette</h2>
+    <div class="row">
+      <span class="swatch" style="background:var(--ink)"></span>
+      <span class="swatch" style="background:var(--red)"></span>
+      <span class="swatch" style="background:var(--paper); border:1px solid var(--ink);"></span>
+      <span class="swatch" style="background:var(--muted)"></span>
+    </div>
+  </div>
+
+  <div class="diag"></div>
+</div>
+</body>
+</html>

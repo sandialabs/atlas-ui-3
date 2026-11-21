@@ -242,6 +242,10 @@ async def get_config_shell(
             "globus_auth": app_settings.feature_globus_auth_enabled,
             "oidc_auth": app_settings.feature_oidc_auth_enabled,
             "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
+            # Retro theme gallery (issue #1119); the bundle must also ship it
+            # (VITE_FEATURE_RETRO_THEMES build flag).
+            "retro_themes": app_settings.feature_retro_themes_enabled,
+            "allowed_themes": list(app_settings.allowed_theme_ids),
             "finetune_capture": app_settings.feature_finetune_capture_enabled,
             # Whether the data sources imply the built-in search tool in a
             # turn that also carries an MCP server's tool (issue #1102).
@@ -565,6 +569,10 @@ async def get_config(
             "globus_auth": app_settings.feature_globus_auth_enabled,
             "oidc_auth": app_settings.feature_oidc_auth_enabled,
             "followup_suggestions": app_settings.feature_followup_suggestions_enabled,
+            # Retro theme gallery (issue #1119); the bundle must also ship it
+            # (VITE_FEATURE_RETRO_THEMES build flag).
+            "retro_themes": app_settings.feature_retro_themes_enabled,
+            "allowed_themes": list(app_settings.allowed_theme_ids),
             "finetune_capture": app_settings.feature_finetune_capture_enabled,
             # Whether the data sources imply the built-in search tool in a
             # turn that also carries an MCP server's tool (issue #1102).

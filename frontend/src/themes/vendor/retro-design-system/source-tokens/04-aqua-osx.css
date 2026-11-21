@@ -1,0 +1,15 @@
+/* Mac OS X Aqua — design tokens
+   Extracted from styles/04-aqua-osx/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #b8c9e0;
+  --chrome: linear-gradient(to bottom, #e8e8e8, #c8c8c8);
+  --pinstripe: repeating-linear-gradient(to bottom, rgba(255,255,255,0.7) 0 1px, rgba(220,220,230,0.7) 1px 2px);
+  --aqua-blue: #4d90fe;
+  --aqua-blue-deep: #2057c2;
+  --jelly-red: radial-gradient(circle at 30% 30%, #ff9a8a, #ff4b2b 40%, #b21808);
+  --jelly-yellow: radial-gradient(circle at 30% 30%, #ffee8a, #ffbe2b 40%, #b28008);
+  --jelly-green: radial-gradient(circle at 30% 30%, #b5f28a, #59c42b 40%, #1f7008);
+  --ink: #1a1a1a;
+  --font: "Lucida Grande", "Helvetica Neue", sans-serif;
+}

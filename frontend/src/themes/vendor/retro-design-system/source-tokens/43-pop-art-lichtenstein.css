@@ -1,0 +1,13 @@
+/* Pop Art / Lichtenstein — design tokens
+   Extracted from styles/43-pop-art-lichtenstein/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #fffef8;
+  --ink: #0a0a0a;
+  --red: #ed1c24;
+  --yellow: #ffde00;
+  --blue: #1b4ea0;
+  --skin: #ffd6c7;
+  --font: "Bungee", "Impact", "Arial Black", sans-serif;
+  --font-serif: "Courier New", monospace;
+}

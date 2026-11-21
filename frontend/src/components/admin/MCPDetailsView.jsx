@@ -25,7 +25,7 @@ const MCPDetailsView = ({ content }) => {
           <span className="text-xs text-gray-400 font-mono">{configPath}</span>
         </div>
         {serverNames.length === 0 ? (
-          <div className="p-4 text-gray-500 text-sm">No servers configured.</div>
+          <div className="p-4 text-gray-400 text-sm">No servers configured.</div>
         ) : (
           serverNames.map((name, idx) => {
             const highlighted = hljs.highlight(
@@ -37,7 +37,7 @@ const MCPDetailsView = ({ content }) => {
                 <div className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-700/50">
                   <span className={`inline-block w-2 h-2 rounded-full ${
                     connectedSet.has(name) ? 'bg-green-400' :
-                    failedServers[name]?.auth_required ? 'bg-yellow-400' :
+                    failedServers[name]?.auth_required ? 'bg-yellow-400 text-black' :
                     failedServers[name] ? 'bg-red-400' : 'bg-gray-500'
                   }`} />
                   <span className="font-mono text-sm font-semibold text-gray-200">{name}</span>
@@ -63,17 +63,17 @@ const MCPDetailsView = ({ content }) => {
           const prompts = promptCounts[name] || 0
           return (
             <div key={name} className={`p-3 rounded-lg border ${
-              isConnected ? 'border-green-700/60 bg-green-900/10' :
-              failure?.auth_required ? 'border-yellow-700/60 bg-yellow-900/10' :
-              failure ? 'border-red-700/60 bg-red-900/10' :
+              isConnected ? 'atlas-notice-success' :
+              failure?.auth_required ? 'atlas-notice-warning' :
+              failure ? 'atlas-notice-danger' :
               'border-gray-600 bg-gray-800/50'
             }`}>
               <div className="flex items-center justify-between mb-1">
                 <span className="font-mono text-sm font-semibold text-gray-200">{name}</span>
                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                  isConnected ? 'bg-green-900/60 text-green-300' :
-                  failure?.auth_required ? 'bg-yellow-900/60 text-yellow-300' :
-                  failure ? 'bg-red-900/60 text-red-300' :
+                  isConnected ? 'atlas-notice-success' :
+                  failure?.auth_required ? 'atlas-notice-warning' :
+                  failure ? 'atlas-notice-danger' :
                   'bg-gray-700 text-gray-400'
                 }`}>
                   {isConnected ? 'Connected' : failure?.auth_required ? 'OAuth auth required' : failure ? 'Failed' : 'Unknown'}
@@ -87,18 +87,18 @@ const MCPDetailsView = ({ content }) => {
               {failure && (
                 <div className="mt-2 space-y-1">
                   {failure.error && (
-                    <div className="text-xs text-red-300 bg-red-900/30 px-2 py-1 rounded font-mono break-all">
+                    <div className="text-xs px-2 py-1 rounded font-mono break-all atlas-notice-danger">
                       {failure.error}
                     </div>
                   )}
                   {failure.attempt_count > 1 && (
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-gray-400">
                       {failure.attempt_count} attempts
                     </div>
                   )}
                 </div>
               )}
-              <div className="mt-1 text-xs text-gray-500">
+              <div className="mt-1 text-xs text-gray-400">
                 {servers[name]?.type || servers[name]?.transport || 'stdio'}
                 {servers[name]?.url ? ` - ${servers[name].url}` : ''}
               </div>

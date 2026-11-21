@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>34 Commodore 64 BASIC</title>
+<style>
+  :root {
+    --border: #9692d9;
+    --bg: #443ec4;
+    --bg-dark: #2e2898;
+    --text: #a8a0ff;
+    --text-hi: #c8c0ff;
+    --white: #ffffff;
+    --red: #e04040;
+    --green: #4aff4a;
+    --yellow: #fff84a;
+    --cyan: #4afaff;
+    --orange: #ff9a3a;
+    --font: "C64 Pro", "Commodore 64", "Px437 PETSCII", "Press Start 2P", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--border); }
+  body {
+    color: var(--text-hi);
+    font-family: var(--font);
+    font-size: 18px;
+    min-height: 100vh;
+    padding: 40px;
+    line-height: 1.2;
+    image-rendering: pixelated;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  .screen {
+    background: var(--bg);
+    padding: 40px 28px;
+    width: 100%;
+    max-width: 820px;
+    box-shadow: 0 0 0 40px var(--border);
+    position: relative;
+  }
+  .screen::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent 0 2px, rgba(0,0,0,0.08) 2px 3px);
+    pointer-events: none;
+  }
+  pre {
+    font-family: var(--font);
+    font-size: 20px;
+    line-height: 1.25;
+    white-space: pre;
+    color: var(--text-hi);
+    letter-spacing: 2px;
+  }
+  .boot { text-align: center; margin-bottom: 6px; }
+  .cursor-block {
+    display: inline-block;
+    width: 14px; height: 18px;
+    background: var(--text-hi);
+    vertical-align: text-bottom;
+    animation: blink 0.5s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .ready { color: var(--text-hi); }
+  .list-line { color: var(--text-hi); }
+  .list-kw { color: var(--white); }
+  .hi { color: var(--white); }
+  .r { color: var(--red); }
+  .g { color: var(--green); }
+  .y { color: var(--yellow); }
+  .c { color: var(--cyan); }
+  .o { color: var(--orange); }
+  .w { color: var(--white); }
+
+  .petscii-art {
+    color: var(--white);
+    font-size: 22px;
+    letter-spacing: 0;
+    text-align: center;
+    margin: 14px 0;
+  }
+
+  .sprite-box {
+    display: grid;
+    grid-template-columns: repeat(12, 16px);
+    gap: 0;
+    margin: 10px auto;
+    width: fit-content;
+    image-rendering: pixelated;
+  }
+  .sprite-box div { width: 16px; height: 16px; }
+  .sp0 { background: var(--bg); }
+  .sp1 { background: var(--white); }
+  .sp2 { background: var(--red); }
+  .sp3 { background: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="screen">
+<pre class="boot">    ****  COMMODORE 64 BASIC V2  ****
+
+ 64K RAM SYSTEM  38911 BASIC BYTES FREE
+
+<span class="ready">READY.</span>
+<span class="hi">LOAD "$",8</span>
+
+SEARCHING FOR $
+LOADING
+READY.
+<span class="hi">LIST</span>
+
+<span class="list-line">10 <span class="list-kw">REM</span>  * RETRO DESIGN SYSTEM *
+20 <span class="list-kw">POKE</span> 53280,6<span>:</span><span class="list-kw">POKE</span> 53281,6
+30 <span class="list-kw">PRINT</span> <span class="hi">CHR$</span>(147)
+40 <span class="list-kw">FOR</span> I=1 <span class="list-kw">TO</span> 10
+50 <span class="list-kw">PRINT</span> <span class="hi">"HELLO, "</span>;
+60 <span class="list-kw">PRINT</span> <span class="hi">"WORLD!"</span>
+70 <span class="list-kw">NEXT</span> I
+80 <span class="list-kw">GOTO</span> 40</span>
+
+<span class="ready">READY.</span>
+<span class="hi">RUN</span>
+</pre>
+
+<div class="petscii-art">
+<span class="r">♥</span><span class="y">♦</span><span class="c">♣</span><span class="g">♠</span> <span class="w">┌──────────────────┐</span> <span class="g">♠</span><span class="c">♣</span><span class="y">♦</span><span class="r">♥</span><br>
+<span class="w">   │</span> <span class="y">◆ READY PLAYER 1 ◆</span> <span class="w">│</span><br>
+<span class="w">   └──────────────────┘</span><br>
+<span class="o">▞▚▞▚▞▚▞▚▞▚▞▚▞▚▞▚▞▚▞▚▞▚</span>
+</div>
+
+<div class="sprite-box">
+  <div class="sp0"></div><div class="sp0"></div><div class="sp0"></div><div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div><div class="sp0"></div><div class="sp0"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp1"></div><div class="sp1"></div><div class="sp3"></div><div class="sp3"></div><div class="sp1"></div><div class="sp1"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp1"></div><div class="sp2"></div><div class="sp3"></div><div class="sp3"></div><div class="sp1"></div><div class="sp2"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp2"></div><div class="sp2"></div><div class="sp2"></div><div class="sp2"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp2"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp2"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div>
+  <div class="sp0"></div><div class="sp0"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp3"></div><div class="sp0"></div><div class="sp0"></div>
+</div>
+
+<pre>HELLO, WORLD!
+HELLO, WORLD!
+HELLO, WORLD!
+
+<span class="r">?SYNTAX  ERROR  IN 80</span>
+<span class="ready">READY.</span>
+<span class="hi">POKE 53280,</span><span class="w">0</span>
+<span class="ready">READY.</span>
+<span class="hi">?PEEK(</span><span class="w">53280</span><span class="hi">)</span>
+ <span class="w">0</span>
+
+<span class="ready">READY.</span>
+<span class="cursor-block"></span>
+</pre>
+
+<pre style="margin-top:18px; font-size:14px; color:var(--text);">
+ <span class="c">F1</span>=RUN   <span class="c">F3</span>=LOAD  <span class="c">F5</span>=SAVE  <span class="c">F7</span>=LIST
+ <span class="c">RUN/STOP</span>+<span class="c">RESTORE</span>=BREAK   <span class="c">C=</span>+<span class="c">SHIFT</span>=CHARSET
+</pre>
+</div>
+</body>
+</html>

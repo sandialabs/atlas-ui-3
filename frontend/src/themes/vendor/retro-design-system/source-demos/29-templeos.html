@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>29 TempleOS</title>
+<style>
+  :root {
+    --bg: #0000aa;
+    --text: #ffffff;
+    --red: #ff0000;
+    --yellow: #ffff00;
+    --green: #00ff00;
+    --cyan: #00ffff;
+    --magenta: #ff00ff;
+    --orange: #ffaa00;
+    --black: #000000;
+    --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 18px;
+    padding: 24px;
+    min-height: 100vh;
+    line-height: 1.2;
+    image-rendering: pixelated;
+  }
+  pre {
+    font-family: var(--font);
+    font-size: 18px;
+    line-height: 1.15;
+    white-space: pre;
+    letter-spacing: 0;
+  }
+  .divine {
+    text-align: center;
+    font-size: 32px;
+    color: var(--yellow);
+    margin: 8px 0 14px;
+    text-shadow: 0 0 1px var(--yellow);
+    animation: rainbow 4s linear infinite;
+  }
+  @keyframes rainbow {
+    0%   { color: var(--red); }
+    14%  { color: var(--orange); }
+    28%  { color: var(--yellow); }
+    42%  { color: var(--green); }
+    57%  { color: var(--cyan); }
+    71%  { color: #4080ff; }
+    85%  { color: var(--magenta); }
+    100% { color: var(--red); }
+  }
+  .panel {
+    border: 2px solid var(--text);
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--bg);
+  }
+  .r { color: var(--red); }
+  .y { color: var(--yellow); }
+  .g { color: var(--green); }
+  .c { color: var(--cyan); }
+  .m { color: var(--magenta); }
+  .o { color: var(--orange); }
+  .w { color: var(--text); }
+  .ctr { text-align: center; }
+  .taskbar {
+    background: var(--text);
+    color: var(--bg);
+    padding: 4px 10px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+  }
+  .rainbow-word {
+    display: inline-block;
+  }
+  .rainbow-word span:nth-child(1) { color: var(--red); }
+  .rainbow-word span:nth-child(2) { color: var(--orange); }
+  .rainbow-word span:nth-child(3) { color: var(--yellow); }
+  .rainbow-word span:nth-child(4) { color: var(--green); }
+  .rainbow-word span:nth-child(5) { color: var(--cyan); }
+  .rainbow-word span:nth-child(6) { color: #4080ff; }
+  .rainbow-word span:nth-child(7) { color: var(--magenta); }
+  .rainbow-word span:nth-child(8) { color: var(--red); }
+  .rainbow-word span:nth-child(9) { color: var(--orange); }
+  .rainbow-word span:nth-child(10){ color: var(--yellow); }
+  .cursor {
+    display: inline-block;
+    width: 10px; height: 16px;
+    background: var(--text);
+    vertical-align: text-bottom;
+    animation: cblink 0.5s steps(2) infinite;
+  }
+  @keyframes cblink { 50% { opacity: 0; } }
+  .container { max-width: 900px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="taskbar">
+    <span>File Edit Compile Run Debug Help</span>
+    <span>Mem:512M  CPU 100%</span>
+    <span>14:23 2024</span>
+  </div>
+
+  <div class="divine">♰ &nbsp; TempleOS V5.03 &nbsp; ♰</div>
+
+<pre class="ctr"><span class="y">                          ▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+                      ▄▀</span><span class="r">▓▓▓▓▓▓▓▓▓▓▓▓▓▓</span><span class="y">▀▄
+                    ▄</span><span class="r">▓</span><span class="y">▀▀</span><span class="r">▓▓▓▓▓▓▓▓▓▓▓▓</span><span class="y">▀▀</span><span class="r">▓</span><span class="y">▄
+                   ▀</span><span class="r">▓▓</span><span class="y">█</span><span class="r">▓▓▓▓</span><span class="y">██████</span><span class="r">▓▓▓▓</span><span class="y">█</span><span class="r">▓▓</span><span class="y">▀
+                   &nbsp;</span><span class="r">▓▓▓</span><span class="y">██</span><span class="r">▓▓▓</span><span class="y">████</span><span class="r">▓▓▓</span><span class="y">██</span><span class="r">▓▓▓
+                     </span><span class="r">▀▓▓</span><span class="y">██████████</span><span class="r">▓▓▀
+                        </span><span class="y">▀▀▀▀▀▀▀▀</span></pre>
+
+  <div class="panel">
+    <pre><span class="y">God:</span> <span class="c">An Exclusive Operating System</span>
+<span class="y">16-color.</span> <span class="g">640x480.</span> <span class="m">Single address space.</span> <span class="r">No networking.</span>
+<span class="o">HolyC</span> everywhere. <span class="c">Divinely simple.</span></pre>
+  </div>
+
+  <div class="panel">
+    <pre><span class="g">&gt;</span> <span class="y">Cat("::/Kernel/KMain.HC");</span>
+<span class="c">// HolyC kernel entry point
+</span><span class="m">U0</span> <span class="y">KMain</span>() {
+  <span class="y">AdamLog</span>(<span class="g">"Adam task started\n"</span>);
+  <span class="m">Seth</span>;
+  <span class="y">PopUp</span>(<span class="g">"Be Blessed\n"</span>);
+  <span class="m">while</span> (<span class="c">TRUE</span>) {
+    <span class="y">Yield</span>;
+  }
+}
+<span class="g">&gt;</span> <span class="y">Dir;</span>
+<span class="c">::/Doc</span>       <span class="c">::/Home</span>     <span class="c">::/Kernel</span>
+<span class="c">::/Compiler</span>  <span class="c">::/Demo</span>     <span class="c">::/Adam</span>
+<span class="g">&gt;</span> <span class="y">GodSong</span>();  <span class="o">// 7-word random from Scripture</span>
+<span class="rainbow-word"><span>A</span><span> </span><span>S</span><span>T</span><span>R</span><span>O</span><span>N</span><span>G</span><span> </span><span>M</span></span><span class="y">AN IS BLESSED THROUGH HIS STRENGTH</span>
+<span class="g">&gt;</span><span class="cursor"></span></pre>
+  </div>
+
+  <div class="panel" style="border-color:var(--yellow);">
+    <pre class="ctr"><span class="y">╔══════════════════════════════════════╗
+║</span>   <span class="r">T</span><span class="o">H</span><span class="y">E</span>  <span class="g">T</span><span class="c">E</span><span class="m">M</span><span class="y">P</span><span class="r">L</span><span class="o">E</span>  <span class="y">O</span><span class="g">F</span>  <span class="c">G</span><span class="y">O</span><span class="r">D</span>   <span class="y">║
+╚══════════════════════════════════════╝</span></pre>
+  </div>
+
+<pre><span class="y">[F1]</span><span class="w">Help   </span><span class="y">[F2]</span><span class="w">Save  </span><span class="y">[F3]</span><span class="w">Open   </span><span class="y">[F5]</span><span class="w">Run   </span><span class="y">[F7]</span><span class="w">Dbg   </span><span class="y">[F10]</span><span class="w">Menu</span></pre>
+
+</div>
+</body>
+</html>

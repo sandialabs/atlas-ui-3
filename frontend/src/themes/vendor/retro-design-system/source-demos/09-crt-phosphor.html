@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>09 CRT Phosphor Terminal</title>
+<style>
+  :root {
+    --bg: #001a00;
+    --ink: #33ff33;
+    --ink-dim: #1a8a1a;
+    --ink-bright: #aaffaa;
+    --amber: #ffb400;
+    --font: "VT323", "IBM Plex Mono", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #000;
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 20px;
+    padding: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  .crt {
+    min-height: 100vh;
+    padding: 40px;
+    background:
+      radial-gradient(ellipse at center, rgba(0,40,0,0.3) 0%, rgba(0,0,0,0.9) 100%),
+      var(--bg);
+    position: relative;
+    text-shadow: 0 0 4px var(--ink), 0 0 10px var(--ink);
+  }
+  .crt::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.3) 2px 3px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  .crt::after {
+    content: "";
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.7) 100%);
+    pointer-events: none;
+    z-index: 11;
+  }
+  h1 { font-size: 48px; margin-bottom: 8px; font-weight: normal; text-shadow: 0 0 6px var(--ink), 0 0 16px var(--ink); }
+  h2 { font-size: 24px; margin: 24px 0 10px; color: var(--ink-bright); }
+  p { line-height: 1.4; margin-bottom: 8px; }
+  .prompt::before { content: "> "; color: var(--ink-bright); }
+  .dim { color: var(--ink-dim); }
+  .bright { color: var(--ink-bright); }
+  .amber { color: var(--amber); text-shadow: 0 0 4px var(--amber), 0 0 10px var(--amber); }
+  .cursor {
+    display: inline-block;
+    width: 12px; height: 20px;
+    background: var(--ink);
+    box-shadow: 0 0 8px var(--ink);
+    animation: blink 1s steps(2) infinite;
+    vertical-align: middle;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .box {
+    border: 2px solid var(--ink);
+    padding: 12px 16px;
+    margin: 12px 0;
+    box-shadow: 0 0 8px rgba(51,255,51,0.3);
+  }
+  .btn {
+    font-family: var(--font);
+    font-size: 20px;
+    background: transparent;
+    color: var(--ink);
+    border: 2px solid var(--ink);
+    padding: 4px 16px;
+    cursor: pointer;
+    text-transform: uppercase;
+    text-shadow: 0 0 4px var(--ink);
+  }
+  .btn:hover { background: var(--ink); color: var(--bg); text-shadow: none; }
+  .btn-alt { color: var(--amber); border-color: var(--amber); text-shadow: 0 0 4px var(--amber); }
+  .input {
+    font-family: var(--font);
+    font-size: 20px;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    border-bottom: 2px solid var(--ink);
+    padding: 2px 0;
+    width: 400px;
+    outline: none;
+    text-shadow: 0 0 4px var(--ink);
+  }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .ascii-art { font-size: 16px; line-height: 1.1; letter-spacing: 2px; }
+  .bar {
+    height: 20px;
+    background: var(--bg);
+    border: 2px solid var(--ink);
+    position: relative;
+    width: 400px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .bar::after {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 60%;
+    background: repeating-linear-gradient(to right, var(--ink) 0 8px, var(--bg) 8px 10px);
+    box-shadow: 0 0 8px var(--ink);
+  }
+  table { width: 100%; max-width: 600px; border-collapse: collapse; }
+  th, td { border: 1px solid var(--ink); padding: 4px 10px; text-align: left; }
+  th { color: var(--ink-bright); }
+</style>
+</head>
+<body>
+<div class="crt">
+<pre class="ascii-art bright">
+  ╔══════════════════════════════════════════╗
+  ║   SYSTEM /// PHOSPHOR MAINFRAME v3.1     ║
+  ║   BOOT SEQUENCE COMPLETE                 ║
+  ╚══════════════════════════════════════════╝
+</pre>
+<h1>GREEN SCREEN</h1>
+<p class="dim">CRT phosphor glow. Scanlines. Bloom. Monospace. The machine is listening.</p>
+
+<div class="box">
+  <div class="prompt">login: <span class="bright">operator</span></div>
+  <div class="prompt">password: <span class="bright">********</span></div>
+  <div>AUTH OK — 3 NEW MESSAGES</div>
+  <div><span class="amber">WARNING:</span> SECTOR 7 OFFLINE</div>
+</div>
+
+<h2>// INPUT</h2>
+<div class="row">
+  <input class="input" value="RUN MAINPROC.EXE"><span class="cursor"></span>
+</div>
+
+<h2>// CONTROLS</h2>
+<div class="row">
+  <button class="btn">[ EXECUTE ]</button>
+  <button class="btn">[ ABORT ]</button>
+  <button class="btn btn-alt">[ OVERRIDE ]</button>
+</div>
+
+<h2>// PROGRESS</h2>
+<div class="bar"></div>
+<div class="dim">LOADING... 60% — 4.2 KB/s</div>
+
+<h2>// DATA</h2>
+<table>
+  <tr><th>ID</th><th>PROCESS</th><th>STATUS</th></tr>
+  <tr><td>001</td><td>MAINPROC</td><td class="bright">RUNNING</td></tr>
+  <tr><td>002</td><td>IO-WATCHER</td><td class="bright">RUNNING</td></tr>
+  <tr><td>003</td><td>SECTOR7</td><td class="amber">OFFLINE</td></tr>
+  <tr><td>004</td><td>KERNEL</td><td class="dim">IDLE</td></tr>
+</table>
+</div>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>27 IBM 3270 Mainframe</title>
+<style>
+  :root {
+    --bg: #000000;
+    --turquoise: #00d4d4;
+    --green: #00d400;
+    --white: #e4e4e4;
+    --red: #ff3030;
+    --yellow: #ffe84a;
+    --blue: #4a9cff;
+    --pink: #ff7aa8;
+    --dim: #005a5a;
+    --font: "IBM 3270", "PxPlus 3270", "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0a;
+    background-image: radial-gradient(ellipse at center, #0f0f0f 0%, #000 80%);
+    color: var(--green);
+    font-family: var(--font);
+    font-size: 18px;
+    padding: 30px;
+    min-height: 100vh;
+    letter-spacing: 1px;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(to bottom, transparent 0 2px, rgba(0,212,0,0.04) 2px 3px);
+    pointer-events: none;
+    z-index: 10;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.6) 100%);
+    pointer-events: none;
+    z-index: 11;
+  }
+  .terminal {
+    background: var(--bg);
+    border: 4px solid #222;
+    border-radius: 8px;
+    max-width: 840px;
+    margin: 0 auto;
+    padding: 24px;
+    box-shadow: inset 0 0 60px rgba(0,212,0,0.1);
+    position: relative;
+  }
+  pre {
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.2;
+    white-space: pre;
+    color: var(--green);
+    text-shadow: 0 0 4px currentColor;
+  }
+  .screen { min-height: 520px; position: relative; }
+  .t { color: var(--turquoise); }
+  .g { color: var(--green); }
+  .w { color: var(--white); }
+  .r { color: var(--red); }
+  .y { color: var(--yellow); }
+  .b { color: var(--blue); }
+  .p { color: var(--pink); }
+  .d { color: var(--dim); }
+  .hi { background: var(--turquoise); color: var(--bg); }
+  .inp {
+    display: inline-block;
+    min-width: 200px;
+    border-bottom: 1px solid var(--green);
+    color: var(--white);
+    text-shadow: 0 0 4px var(--white);
+  }
+  .cursor {
+    display: inline-block;
+    width: 10px;
+    height: 18px;
+    background: var(--green);
+    vertical-align: middle;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .header {
+    color: var(--turquoise);
+    text-shadow: 0 0 4px currentColor;
+    margin-bottom: 10px;
+  }
+  .oia {
+    border-top: 1px solid var(--green);
+    margin-top: 14px;
+    padding-top: 6px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--white);
+    text-shadow: 0 0 3px currentColor;
+  }
+  .oia .sys { color: var(--turquoise); }
+  .field-label { color: var(--turquoise); }
+  .field-val { color: var(--green); }
+  .protected { color: var(--white); }
+</style>
+</head>
+<body>
+<div class="terminal">
+<pre class="screen">
+<span class="t">═══════════════════════════════════════════════════════════════════════</span>
+<span class="t">  CICS/ESA   </span><span class="w">SIGN ON TO CICS APPLID: CICSPROD</span><span class="t">                     </span>
+<span class="t">═══════════════════════════════════════════════════════════════════════</span>
+
+  <span class="field-label">Userid  </span>  ===&gt; <span class="inp">TBRENNAN </span>
+  <span class="field-label">Password</span>  ===&gt; <span class="inp">********</span>
+  <span class="field-label">Language</span>  ===&gt; <span class="field-val">EN</span>   <span class="d">(EN=English, FR=French, DE=German)</span>
+  <span class="field-label">New Pwd </span>  ===&gt; <span class="d">________</span>
+  <span class="field-label">Group ID</span>  ===&gt; <span class="field-val">SYSPROG </span>
+
+  <span class="t">─────────────────────────────────────────────────────────────────────</span>
+
+  <span class="y">DFHCE3549</span> <span class="w">Sign-on is complete (Language ENU).</span>
+
+  <span class="field-label">Transaction</span> ===&gt; <span class="inp">CEMT INQ TASK</span><span class="cursor"></span>
+
+  <span class="t">─── ACTIVE TASKS ───────────────────────────────────────────────────</span>
+  <span class="g">Tas(0000047) Tra(CESN) Fac(L001   ) Sus Tas Pri( 255 )</span>
+  <span class="g">            Sta(U) Use(TBRENNAN ) Uow(BAB5C3F1)</span>
+  <span class="g">Tas(0000048) Tra(CEMT) Fac(L002   ) Run Tas Pri( 255 )</span>
+  <span class="g">            Sta(U) Use(SYSTEM   ) Uow(BAB5C400)</span>
+  <span class="g">Tas(0000051) Tra(PAY1) Fac(L003   ) Sus Pgm Pri( 010 )</span>
+  <span class="r">            *** ABEND AEI0 *** Program check, Divide by zero</span>
+
+  <span class="t">─── PF KEYS ────────────────────────────────────────────────────────</span>
+  <span class="w">PF1</span>=Help  <span class="w">PF2</span>=Cancel <span class="w">PF3</span>=Exit   <span class="w">PF5</span>=Submit  <span class="w">PF7</span>=Back
+  <span class="w">PF8</span>=Fwd   <span class="w">PF9</span>=Msg    <span class="w">PF10</span>=Left  <span class="w">PF11</span>=Right <span class="w">PF12</span>=Retrv
+</pre>
+<div class="oia">
+  <span><span class="sys">4B</span> <span style="color:var(--green)">X SYSTEM</span></span>
+  <span style="color:var(--turquoise)">IBM 3279-S3G</span>
+  <span>ROW 023 COL 014</span>
+  <span style="color:var(--yellow)">INSERT</span>
+  <span style="color:var(--green)">NUM</span>
+  <span style="color:var(--turquoise)">14:23:07</span>
+</div>
+</div>
+</body>
+</html>

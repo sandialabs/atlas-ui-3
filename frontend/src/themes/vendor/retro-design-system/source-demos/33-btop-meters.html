@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>33 btop / System Monitor</title>
+<style>
+  :root {
+    --bg: #131424;
+    --panel-bg: #1a1c30;
+    --panel-border: #3b3e5e;
+    --ink: #e8ecff;
+    --muted: #7a82b0;
+    --accent: #00e4ff;
+    --cpu-1: #6de37a;
+    --cpu-2: #e5e56a;
+    --cpu-3: #ff9a44;
+    --cpu-4: #ff4a6a;
+    --mem: #a073ff;
+    --net-up: #6de37a;
+    --net-dn: #ff9a44;
+    --proc-hi: #00e4ff;
+    --font: "Hack", "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 16px;
+    min-height: 100vh;
+    line-height: 1.3;
+  }
+  pre {
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.25;
+    white-space: pre;
+    color: var(--ink);
+    margin: 0;
+  }
+  .dashboard {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 10px;
+  }
+  .panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 12px;
+    position: relative;
+  }
+  .panel h2 {
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .panel h2 .meta { color: var(--muted); font-weight: normal; font-size: 11px; letter-spacing: 1px; }
+  .cpu-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 30px;
+  }
+  .cpu-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .cpu-row .core { color: var(--muted); width: 52px; }
+  .cpu-row .bar {
+    flex: 1;
+    height: 14px;
+    background: #0d0f1c;
+    border: 1px solid var(--panel-border);
+    position: relative;
+    overflow: hidden;
+  }
+  .cpu-row .fill {
+    height: 100%;
+    background: linear-gradient(to right, var(--cpu-1) 0%, var(--cpu-2) 50%, var(--cpu-3) 75%, var(--cpu-4) 100%);
+  }
+  .cpu-row .pct { width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  .pct-hi { color: var(--cpu-4); }
+  .pct-md { color: var(--cpu-3); }
+  .pct-lo { color: var(--cpu-1); }
+
+  .graph {
+    height: 80px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    background: #0d0f1c;
+    border: 1px solid var(--panel-border);
+    padding: 2px;
+    margin-top: 8px;
+  }
+  .graph div {
+    flex: 1;
+    background: linear-gradient(to top, var(--cpu-1), var(--cpu-2), var(--cpu-3), var(--cpu-4));
+  }
+
+  .mem-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+  .mem-row .label { width: 70px; color: var(--muted); }
+  .mem-row .bar {
+    flex: 1;
+    height: 12px;
+    background: #0d0f1c;
+    border: 1px solid var(--panel-border);
+  }
+  .mem-row .fill { height: 100%; background: var(--mem); }
+  .mem-row .fill.swap { background: var(--cpu-3); }
+  .mem-row .fill.disk { background: var(--accent); }
+  .mem-row .val { width: 120px; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+  table.proc {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.proc th {
+    text-align: left;
+    color: var(--accent);
+    border-bottom: 1px solid var(--panel-border);
+    padding: 4px 6px;
+    font-weight: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  table.proc td { padding: 3px 6px; font-variant-numeric: tabular-nums; }
+  table.proc tr.sel td { background: rgba(0, 228, 255, 0.1); color: var(--proc-hi); }
+  table.proc .cmd { color: var(--cpu-1); }
+  table.proc .user { color: var(--muted); }
+  table.proc .cpu-v { color: var(--cpu-3); }
+
+  .net-stats {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 13px;
+  }
+  .net-stats .up { color: var(--net-up); }
+  .net-stats .dn { color: var(--net-dn); }
+  .net-graph {
+    display: flex;
+    gap: 2px;
+    height: 50px;
+    align-items: flex-end;
+    margin-top: 6px;
+    padding: 2px;
+    background: #0d0f1c;
+    border: 1px solid var(--panel-border);
+  }
+  .net-graph div {
+    flex: 1;
+    background: var(--net-up);
+    opacity: 0.8;
+  }
+  .net-graph div.dn { background: var(--net-dn); }
+
+  .header-bar {
+    max-width: 1100px;
+    margin: 0 auto 10px;
+    padding: 6px 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+  .header-bar .title { color: var(--accent); font-weight: bold; letter-spacing: 3px; }
+  .header-bar .meta { color: var(--muted); }
+  .header-bar .hot { color: var(--cpu-4); }
+  .sparkline {
+    display: inline-flex;
+    gap: 1px;
+    align-items: flex-end;
+    height: 16px;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+  .sparkline div { width: 3px; background: var(--cpu-1); }
+
+  .pan-2 { grid-column: 1 / 2; }
+  .pan-3 { grid-column: 2 / 3; grid-row: 2 / 3; }
+  .pan-4 { grid-column: 1 / 3; }
+</style>
+</head>
+<body>
+<div class="header-bar">
+  <span class="title">▲ btop++ 1.3.2</span>
+  <span class="meta">↑ 14d 03:47:12 · load 1.82 2.04 1.91</span>
+  <span class="meta">Thu Apr 23 14:23:07</span>
+  <span><span class="hot">●</span> 67.3°C</span>
+</div>
+
+<div class="dashboard">
+  <div class="panel">
+    <h2><span>◤ CPU · AMD Ryzen 9 7950X</span><span class="meta">16c/32t · avg 42%</span></h2>
+    <div class="cpu-grid">
+      <div class="cpu-row"><span class="core">core-0</span><div class="bar"><div class="fill" style="width:78%"></div></div><span class="pct pct-md">78%</span></div>
+      <div class="cpu-row"><span class="core">core-8</span><div class="bar"><div class="fill" style="width:22%"></div></div><span class="pct pct-lo">22%</span></div>
+      <div class="cpu-row"><span class="core">core-1</span><div class="bar"><div class="fill" style="width:34%"></div></div><span class="pct pct-lo">34%</span></div>
+      <div class="cpu-row"><span class="core">core-9</span><div class="bar"><div class="fill" style="width:91%"></div></div><span class="pct pct-hi">91%</span></div>
+      <div class="cpu-row"><span class="core">core-2</span><div class="bar"><div class="fill" style="width:47%"></div></div><span class="pct pct-lo">47%</span></div>
+      <div class="cpu-row"><span class="core">core-10</span><div class="bar"><div class="fill" style="width:12%"></div></div><span class="pct pct-lo">12%</span></div>
+      <div class="cpu-row"><span class="core">core-3</span><div class="bar"><div class="fill" style="width:58%"></div></div><span class="pct pct-md">58%</span></div>
+      <div class="cpu-row"><span class="core">core-11</span><div class="bar"><div class="fill" style="width:45%"></div></div><span class="pct pct-lo">45%</span></div>
+      <div class="cpu-row"><span class="core">core-4</span><div class="bar"><div class="fill" style="width:19%"></div></div><span class="pct pct-lo">19%</span></div>
+      <div class="cpu-row"><span class="core">core-12</span><div class="bar"><div class="fill" style="width:82%"></div></div><span class="pct pct-hi">82%</span></div>
+      <div class="cpu-row"><span class="core">core-5</span><div class="bar"><div class="fill" style="width:61%"></div></div><span class="pct pct-md">61%</span></div>
+      <div class="cpu-row"><span class="core">core-13</span><div class="bar"><div class="fill" style="width:40%"></div></div><span class="pct pct-lo">40%</span></div>
+      <div class="cpu-row"><span class="core">core-6</span><div class="bar"><div class="fill" style="width:27%"></div></div><span class="pct pct-lo">27%</span></div>
+      <div class="cpu-row"><span class="core">core-14</span><div class="bar"><div class="fill" style="width:53%"></div></div><span class="pct pct-md">53%</span></div>
+      <div class="cpu-row"><span class="core">core-7</span><div class="bar"><div class="fill" style="width:71%"></div></div><span class="pct pct-md">71%</span></div>
+      <div class="cpu-row"><span class="core">core-15</span><div class="bar"><div class="fill" style="width:88%"></div></div><span class="pct pct-hi">88%</span></div>
+    </div>
+    <div class="graph">
+      <div style="height:42%"></div><div style="height:60%"></div><div style="height:35%"></div><div style="height:72%"></div><div style="height:44%"></div><div style="height:58%"></div><div style="height:81%"></div><div style="height:92%"></div><div style="height:78%"></div><div style="height:65%"></div><div style="height:38%"></div><div style="height:50%"></div><div style="height:40%"></div><div style="height:55%"></div><div style="height:68%"></div><div style="height:83%"></div><div style="height:96%"></div><div style="height:74%"></div><div style="height:52%"></div><div style="height:47%"></div><div style="height:63%"></div><div style="height:77%"></div><div style="height:82%"></div><div style="height:69%"></div><div style="height:58%"></div><div style="height:44%"></div><div style="height:36%"></div><div style="height:48%"></div><div style="height:60%"></div><div style="height:72%"></div><div style="height:85%"></div><div style="height:70%"></div>
+    </div>
+  </div>
+
+  <div class="panel pan-3">
+    <h2><span>◤ MEM + DISK</span><span class="meta">64 GB · NVMe</span></h2>
+    <div class="mem-row"><span class="label">RAM</span><div class="bar"><div class="fill" style="width:62%"></div></div><span class="val">39.6 / 64 GB</span></div>
+    <div class="mem-row"><span class="label">Swap</span><div class="bar"><div class="fill swap" style="width:8%"></div></div><span class="val">1.3 / 16 GB</span></div>
+    <div class="mem-row"><span class="label">/</span><div class="bar"><div class="fill disk" style="width:47%"></div></div><span class="val">468 / 1 TB</span></div>
+    <div class="mem-row"><span class="label">/home</span><div class="bar"><div class="fill disk" style="width:73%"></div></div><span class="val">1.4 / 2 TB</span></div>
+
+    <h2 style="margin-top:14px;"><span>◤ NETWORK</span><span class="meta">wlp3s0</span></h2>
+    <div class="net-stats">
+      <span>▲ up <span class="up">1.2 MB/s</span></span>
+      <span>▼ dn <span class="dn">8.4 MB/s</span></span>
+    </div>
+    <div class="net-graph">
+      <div style="height:30%"></div><div style="height:45%"></div><div style="height:60%"></div><div style="height:35%" class="dn"></div><div style="height:55%" class="dn"></div><div style="height:72%" class="dn"></div><div style="height:50%"></div><div style="height:40%"></div><div style="height:68%" class="dn"></div><div style="height:80%" class="dn"></div><div style="height:65%" class="dn"></div><div style="height:48%"></div><div style="height:38%"></div><div style="height:55%" class="dn"></div><div style="height:72%" class="dn"></div><div style="height:85%" class="dn"></div><div style="height:60%"></div><div style="height:42%"></div><div style="height:50%" class="dn"></div><div style="height:65%" class="dn"></div>
+    </div>
+  </div>
+
+  <div class="panel pan-4">
+    <h2><span>◤ PROCESSES</span><span class="meta">sort by %cpu · 247 total · 3 running</span></h2>
+    <table class="proc">
+      <thead>
+        <tr><th>PID</th><th>PROGRAM</th><th>USER</th><th>PRI</th><th>VIRT</th><th>RES</th><th>%CPU ↓</th><th>%MEM</th><th>TIME+</th></tr>
+      </thead>
+      <tbody>
+        <tr class="sel"><td>4821</td><td class="cmd">node</td><td class="user">novus</td><td>20</td><td>2.8G</td><td>620M</td><td class="cpu-v">87.3</td><td>2.4</td><td>1:23:47</td></tr>
+        <tr><td>3104</td><td class="cmd">chromium</td><td class="user">novus</td><td>20</td><td>4.2G</td><td>1.1G</td><td class="cpu-v">54.2</td><td>4.3</td><td>0:42:18</td></tr>
+        <tr><td>2018</td><td class="cmd">code</td><td class="user">novus</td><td>20</td><td>3.1G</td><td>890M</td><td class="cpu-v">31.8</td><td>3.5</td><td>2:14:02</td></tr>
+        <tr><td>7240</td><td class="cmd">claude</td><td class="user">novus</td><td>20</td><td>1.8G</td><td>420M</td><td class="cpu-v">18.6</td><td>1.6</td><td>0:08:33</td></tr>
+        <tr><td>1420</td><td class="cmd">systemd</td><td class="user">root</td><td>20</td><td>184M</td><td>21M</td><td>0.9</td><td>0.1</td><td>14d 0:42</td></tr>
+        <tr><td>8901</td><td class="cmd">btop</td><td class="user">novus</td><td>20</td><td>92M</td><td>14M</td><td>0.4</td><td>0.0</td><td>0:00:47</td></tr>
+        <tr><td>0521</td><td class="cmd">pipewire</td><td class="user">novus</td><td>20</td><td>142M</td><td>18M</td><td>0.2</td><td>0.0</td><td>14d 1:08</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:10px; font-size:11px; color:var(--muted); letter-spacing:1px;">
+      [q]uit [h]elp [↑↓]sel [F2]opts [F5]sort [F9]kill [Ctrl-f]filter
+    </div>
+  </div>
+</div>
+</body>
+</html>

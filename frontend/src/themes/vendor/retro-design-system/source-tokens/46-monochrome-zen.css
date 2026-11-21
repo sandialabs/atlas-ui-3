@@ -1,0 +1,10 @@
+/* Monochrome Zen — design tokens
+   Extracted from styles/46-monochrome-zen/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #fafaf7;
+  --ink: #0a0a0a;
+  --rule: rgba(10,10,10,0.15);
+  --font: "Söhne", "Inter", "Helvetica Neue", sans-serif;
+  --font-serif: "Lyon", "Times New Roman", Garamond, serif;
+}

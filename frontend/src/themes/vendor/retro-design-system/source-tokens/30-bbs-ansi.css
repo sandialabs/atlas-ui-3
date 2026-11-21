@@ -1,0 +1,22 @@
+/* BBS ANSI Art — design tokens
+   Extracted from styles/30-bbs-ansi/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --bg: #000000;
+  --black: #000000;
+  --red: #aa0000;
+  --red-hi: #ff5555;
+  --green: #00aa00;
+  --green-hi: #55ff55;
+  --yellow: #aa5500;
+  --yellow-hi: #ffff55;
+  --blue: #0000aa;
+  --blue-hi: #5555ff;
+  --magenta: #aa00aa;
+  --magenta-hi: #ff55ff;
+  --cyan: #00aaaa;
+  --cyan-hi: #55ffff;
+  --white: #aaaaaa;
+  --white-hi: #ffffff;
+  --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+}

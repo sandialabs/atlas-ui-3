@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>31 Midnight Commander</title>
+<style>
+  :root {
+    --bg: #0000aa;
+    --panel: #0000aa;
+    --panel-border: #aaaaaa;
+    --text: #aaaaaa;
+    --text-hi: #ffffff;
+    --yellow: #ffff55;
+    --cyan: #55ffff;
+    --selected-bg: #00aaaa;
+    --selected-fg: #000000;
+    --dir-fg: #ffffff;
+    --exec-fg: #55ff55;
+    --link-fg: #ff55ff;
+    --statusbar-bg: #aaaaaa;
+    --statusbar-fg: #000000;
+    --funcbar-bg: #00aaaa;
+    --funcbar-fg: #000000;
+    --funcbar-num: #ffffff;
+    --font: "Px437 IBM VGA 8x16", "Perfect DOS VGA 437", "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #000;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 18px;
+    padding: 0;
+    min-height: 100vh;
+    line-height: 1.2;
+    image-rendering: pixelated;
+  }
+  pre {
+    font-family: var(--font);
+    font-size: 18px;
+    line-height: 1.1;
+    white-space: pre;
+    margin: 0;
+  }
+  .mc {
+    background: var(--panel);
+    padding: 8px 12px;
+    min-height: 100vh;
+  }
+  .menu-bar {
+    background: var(--statusbar-bg);
+    color: var(--statusbar-fg);
+    padding: 2px 12px;
+    margin: -8px -12px 4px;
+    display: flex;
+    gap: 18px;
+    font-weight: bold;
+  }
+  .menu-bar .hk { color: var(--red, #aa0000); }
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .t { color: var(--cyan); }
+  .w { color: var(--text-hi); }
+  .y { color: var(--yellow); }
+  .d { color: var(--dir-fg); font-weight: bold; }
+  .x { color: var(--exec-fg); }
+  .l { color: var(--link-fg); }
+  .sel {
+    background: var(--selected-bg);
+    color: var(--selected-fg);
+    display: inline-block;
+    width: 100%;
+  }
+  .hotkey {
+    background: var(--funcbar-num);
+    color: var(--black, #000);
+  }
+  .statusbar {
+    background: var(--statusbar-bg);
+    color: var(--statusbar-fg);
+    padding: 1px 8px;
+    margin: 4px -12px 0;
+  }
+  .cmdline {
+    padding: 4px 0;
+    color: var(--text-hi);
+  }
+  .cmdline .prompt { color: var(--cyan); }
+  .cursor {
+    display: inline-block;
+    width: 10px; height: 16px;
+    background: var(--text-hi);
+    vertical-align: text-bottom;
+    animation: blink 0.5s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .funcbar {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    background: var(--panel);
+    margin: 0 -12px -8px;
+    border-top: 1px solid var(--text);
+  }
+  .funcbar .fkey {
+    padding: 2px 4px;
+    font-size: 16px;
+    color: var(--text);
+    text-align: left;
+    white-space: nowrap;
+  }
+  .funcbar .fkey .n {
+    color: var(--text-hi);
+    margin-right: 2px;
+    font-weight: bold;
+  }
+  .funcbar .fkey-body {
+    background: var(--funcbar-bg);
+    color: var(--funcbar-fg);
+    padding: 0 4px;
+  }
+</style>
+</head>
+<body>
+<div class="mc">
+  <div class="menu-bar">
+    <span><span class="hk">L</span>eft</span>
+    <span><span class="hk">F</span>ile</span>
+    <span><span class="hk">C</span>ommand</span>
+    <span><span class="hk">O</span>ptions</span>
+    <span><span class="hk">R</span>ight</span>
+  </div>
+
+<pre class="t">┌&lt;- /home/nov                 .[^]&gt;─┐┌&lt;- /etc                      .[^]&gt;─┐
+│<span class="w">.n    Name             Size  </span><span class="y">MTime</span>    ││<span class="w">.n    Name             Size  </span><span class="y">MTime</span>    │
+│<span class="d">/..                  UP--DIR Apr 22</span>   ││<span class="d">/..                  UP--DIR Jan 15</span>   │
+│<span class="sel"><span class="d">/Documents           </span><span style="color:#000">   4096 Apr 22</span>  </span>││<span class="d">/ssh                    4096 Feb 10</span>   │
+│<span class="d">/Downloads              4096 Apr 22</span>   ││<span class="d">/systemd                4096 Mar 01</span>   │
+│<span class="d">/Music                  4096 Mar 15</span>   ││<span class="d">/X11                    4096 Feb 10</span>   │
+│<span class="d">/Pictures               4096 Apr 20</span>   ││ fstab                   742 Feb 10   │
+│<span class="x">.bashrc</span>                 3771 Apr 22   ││ hostname                  8 Feb 10   │
+│<span class="l">.config -&gt; /var/conf</span>    &nbsp;  17 Mar 01   ││ hosts                   221 Feb 10   │
+│ .gitconfig              412 Apr 20   ││ passwd                 2584 Apr 20   │
+│<span class="x">.profile</span>                 807 Feb 10   ││<span class="x">profile</span>                  654 Feb 10   │
+│ .vimrc                 1824 Apr 15   ││ resolv.conf              98 Apr 22   │
+│ notes.txt               912 Apr 22   ││ shadow                 1632 Apr 22   │
+│ README.md              4217 Apr 21   ││ shells                  101 Feb 10   │
+│                                      ││                                      │
+│                                      ││                                      │
+└─<span class="w">.bashrc</span>              3771 Apr 22 14 ┘└─ fstab                 742 Feb 10 12┘</pre>
+
+  <div class="statusbar">Hint: Use mc -b if you have problems with function keys.</div>
+
+  <div class="cmdline">
+    <span class="prompt">[novus@caveland ~]$</span> <span>ls -la | grep .md</span><span class="cursor"></span>
+  </div>
+
+  <div class="funcbar">
+    <div class="fkey"><span class="n">1</span><span class="fkey-body">Help  </span></div>
+    <div class="fkey"><span class="n">2</span><span class="fkey-body">Menu  </span></div>
+    <div class="fkey"><span class="n">3</span><span class="fkey-body">View  </span></div>
+    <div class="fkey"><span class="n">4</span><span class="fkey-body">Edit  </span></div>
+    <div class="fkey"><span class="n">5</span><span class="fkey-body">Copy  </span></div>
+    <div class="fkey"><span class="n">6</span><span class="fkey-body">RenMov</span></div>
+    <div class="fkey"><span class="n">7</span><span class="fkey-body">Mkdir </span></div>
+    <div class="fkey"><span class="n">8</span><span class="fkey-body">Delete</span></div>
+    <div class="fkey"><span class="n">9</span><span class="fkey-body">PullDn</span></div>
+    <div class="fkey"><span class="n">10</span><span class="fkey-body">Quit</span></div>
+  </div>
+</div>
+</body>
+</html>

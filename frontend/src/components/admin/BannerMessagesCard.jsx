@@ -45,9 +45,9 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'healthy': return 'text-green-400 bg-green-900/20'
-      case 'warning': return 'text-yellow-400 bg-yellow-900/20'
-      case 'error': return 'text-red-400 bg-red-900/20'
+      case 'healthy': return 'atlas-notice-success'
+      case 'warning': return 'atlas-notice-warning'
+      case 'error': return 'atlas-notice-danger'
       default: return 'text-gray-400 bg-gray-800'
     }
   }
@@ -55,13 +55,13 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
   return (
     <div className="bg-gray-800 rounded-lg p-6">
       <div className="flex items-center gap-3 mb-4">
-        <MessageSquare className="w-6 h-6 text-blue-400" />
+        <MessageSquare className="w-6 h-6 atlas-fg-info" />
         <h2 className="text-lg font-semibold">Banner Messages</h2>
       </div>
       <p className="text-gray-400 mb-4">Manage messages displayed at the top of the chat interface.</p>
       
       {!loading && !bannerEnabled && (
-        <div id="banner-disabled-warning" className="flex items-start gap-2 px-3 py-2 mb-4 bg-yellow-900/20 border border-yellow-600/30 rounded text-sm text-yellow-400">
+        <div id="banner-disabled-warning" className="flex items-start gap-2 px-3 py-2 mb-4 border rounded text-sm atlas-notice-warning">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>Banner feature is currently disabled. Enable BANNER_ENABLED in configuration to use this feature.</span>
         </div>
@@ -82,7 +82,7 @@ const BannerMessagesCard = ({ openModal, addNotification }) => {
         aria-label={!bannerEnabled && !loading ? 'Manage Banners - Feature is disabled' : undefined}
         className={`w-full px-4 py-2 rounded-lg transition-colors ${
           bannerEnabled && !loading
-            ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+            ? 'bg-blue-600 hover:bg-blue-700 cursor-pointer text-white'
             : 'bg-gray-600 cursor-not-allowed opacity-50'
         }`}
       >

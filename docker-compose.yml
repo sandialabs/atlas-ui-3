@@ -122,6 +122,10 @@ services:
       # External agent-runs REST API (#1105); also set AGENT_RUNS_API_KEY to enable
       - FEATURE_AGENT_RUNS_API_ENABLED=false
       - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
+      # Retro Design System theme gallery (#1119); bundle needs VITE_FEATURE_RETRO_THEMES
+      # The same-name boolean default is validated by test_docker_env_sync.py.
+      - FEATURE_RETRO_THEMES_ENABLED=${FEATURE_RETRO_THEMES_ENABLED:-false}
+      - ATLAS_ALLOWED_THEMES=${ATLAS_ALLOWED_THEMES:-light,dark}
       - FEATURE_FINETUNE_CAPTURE_ENABLED=false
       
       # Tool approval configuration

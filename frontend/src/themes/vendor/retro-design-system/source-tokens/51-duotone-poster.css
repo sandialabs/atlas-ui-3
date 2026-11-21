@@ -1,0 +1,10 @@
+/* Duotone Poster — design tokens
+   Extracted from styles/51-duotone-poster/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --paper: #f4ead3;
+  --spot-1: #ff3a38;
+  --spot-2: #1a1a3a;
+  --font: "Futura", "Helvetica Neue", "Akzidenz-Grotesk", sans-serif;
+  --font-display: "Futura", "Impact", "Helvetica Neue", sans-serif;
+}

@@ -1,0 +1,16 @@
+/* Mac OS 9 Platinum — design tokens
+   Extracted from styles/20-macos9-platinum/index.html. Generated; do not edit by hand.
+   Regenerate: node scripts/build-tokens.mjs */
+:root {
+  --desktop: #808080;
+  --platinum: #dddddd;
+  --platinum-light: #f5f5f5;
+  --platinum-mid: #c5c5c5;
+  --platinum-dark: #858585;
+  --platinum-darker: #555555;
+  --stripe: #a0a0a0;
+  --accent: #3a62ab;
+  --ink: #000;
+  --font: "Charcoal", "Geneva", "Lucida Grande", sans-serif;
+  --font-body: "Geneva", "Lucida Grande", sans-serif;
+}
