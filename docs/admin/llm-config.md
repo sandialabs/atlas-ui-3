@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-11-06
+Last updated: 2026-11-21
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -468,6 +468,19 @@ reasoning_effort to 'none'.
 So a GPT-5.6 entry with `supports_tools: true` and no `reasoning_effort` is unusable in agent mode: the request is rejected before any generation. The same setting also makes these models accept the non-default `temperature` ATLAS always sends, which they otherwise reject on its own. Adding `reasoning_effort: "none"` turns reasoning off for that model — a deliberate trade, and worth saying so in the model's `model_card`, since users pick models from that text.
 
 The alternative the error text offers, routing tool calls to `/v1/responses`, is not a drop-in for ATLAS today: that endpoint rejects the unconditional `temperature` these callers send.
+
+### Reasoning round-trip within a tool-using turn
+
+Some reasoning models, or the providers serving them, require the reasoning the model produced alongside a tool call to be sent back on the next request of the same turn. Without it they reject the follow-up call after the tool runs:
+
+```
+The assistant turn at messages[2] is missing its reasoning. ... Send it back in
+'reasoning_content', or set allow_missing_thinking=true to skip this check.
+```
+
+ATLAS handles this automatically for every model; there is nothing to configure (issue #1230). When an LLM response carries reasoning, on the streaming or the non-streaming path, ATLAS attaches it to the assistant tool-call message it adds to the request for the rest of that turn, in agent mode and in standard tools mode. Three shapes are carried back unchanged: `reasoning_content` (plain reasoning text, which LiteLLM also uses for providers that return `reasoning`), OpenRouter's `reasoning_details`, and LiteLLM's signed `thinking_blocks` (Anthropic extended thinking, Gemini thought signatures). A model that returns no reasoning gets exactly the request it got before.
+
+The reasoning is model-internal working state and stays inside the turn. It is not saved to conversation history, not shown in the UI, not written to logs, diagnostics or telemetry spans, and stripped from fine-tune capture. `PreLlmCall` hooks receive the messages without it, since a hook may forward its envelope to an external policy service; when a hook rewrites the messages, ATLAS puts each tool-call message's reasoning back, matched by tool-call id, so the rewrite does not bring back the provider's 400. Later turns do not need it: an earlier turn's tool-call messages are display-only history rows that are never replayed to the model, so every request a later turn sends contains only the assistant tool-call messages of that turn.
 
 ## Vision Image Support (2026-03-23)
 

@@ -304,11 +304,12 @@ class AgenticLoop(AgentLoopProtocol):
             # but litellm needs dicts when re-sending messages to the LLM --
             # otherwise the tool_calls serialize to an empty array and providers
             # like OpenAI reject the follow-up call (breaking multi-step chains).
-            messages.append({
-                "role": "assistant",
-                "content": llm_response.content,
-                "tool_calls": [_to_tool_call_dict(tc) for tc in tool_calls],
-            })
+            # The message also carries the model's reasoning: reasoning models
+            # that require it back reject the next call without it (#1230).
+            # It lives only on this in-memory list for the rest of the turn.
+            messages.append(llm_response.assistant_message(
+                [_to_tool_call_dict(tc) for tc in tool_calls],
+            ))
             if llm_response.content and llm_response.content.strip():
                 # The loop is the single owner of narration persistence: write
                 # the intermediate assistant text straight into history (before
@@ -708,7 +709,10 @@ def _fold_text_only_as_intermediate(
     content = llm_response.content or ""
     if not content:
         return
-    messages.append({"role": "assistant", "content": content})
+    # Same reasoning round-trip as a tool-call step (issue #1230).
+    message = llm_response.assistant_message()
+    message["content"] = content
+    messages.append(message)
     context.history.add_message(Message(
         role=MessageRole.ASSISTANT,
         content=content,
