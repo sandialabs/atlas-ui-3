@@ -316,6 +316,54 @@ class TestResolveDefaultModel:
         # Sequential: 1 call (refused) + 2 calls = 3 * delay; concurrent: 2 * delay.
         assert elapsed < 2.6 * delay, elapsed
 
+    def test_a_slow_lower_priority_gateway_does_not_hold_the_answer(self):
+        import time as _time
+
+        config = _config(gateways={
+            "enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini"),
+            "second": _gateway(default_team=ALPHA, default_model="gpt-4o-mini"),
+        })
+
+        def fast(request):
+            if request.url.path.endswith("team/list"):
+                return httpx.Response(200, json=[{"team_id": ALPHA, "team_alias": "Alpha"}])
+            return httpx.Response(200, json={"data": [{"id": "gpt-4o-mini"}]})
+
+        async def hang(request):
+            await asyncio.sleep(5)
+            return httpx.Response(503)
+
+        for name, handler in (("enterprise", fast), ("second", hang)):
+            gateway = config.litellm_gateways[name]
+            litellm_gateway_client._clients[name] = (
+                gateway, LiteLLMGatewayClient(name, gateway, transport=httpx.MockTransport(handler)),
+            )
+        started = _time.monotonic()
+        resolved = asyncio.run(resolve_default_model(config, "test@test.com", _everyone_in_groups))
+        assert resolved.model == f"enterprise::{ALPHA}::gpt-4o-mini"
+        assert _time.monotonic() - started < 2
+
+    def test_an_unexpected_probe_failure_is_a_skip(self, monkeypatch, caplog):
+        from atlas.modules.llm import default_model_resolver
+
+        config = _config(gateways={
+            "enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini"),
+            "second": _gateway(default_team=ALPHA, default_model="claude-sonnet"),
+        })
+        _install_mock_clients(config)
+        real = default_model_resolver._gateway_default_team_label
+
+        async def flaky(llm_config, model_key, user_email, auth_check):
+            if model_key.startswith("enterprise::"):
+                raise RuntimeError("unexpected")
+            return await real(llm_config, model_key, user_email, auth_check)
+
+        monkeypatch.setattr(default_model_resolver, "_gateway_default_team_label", flaky)
+        with caplog.at_level("WARNING", logger="atlas.modules.llm.default_model_resolver"):
+            resolved = asyncio.run(resolve_default_model(config, "test@test.com", _everyone_in_groups))
+        assert resolved.model == f"second::{ALPHA}::claude-sonnet"
+        assert any("unexpected RuntimeError" in r.getMessage() for r in caplog.records)
+
     def test_a_usable_static_default_asks_no_gateway(self):
         config = _config(
             gateways={"enterprise": _gateway(default_team=ALPHA, default_model="gpt-4o-mini")},

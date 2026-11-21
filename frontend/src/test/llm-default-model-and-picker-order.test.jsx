@@ -214,6 +214,24 @@ describe('useChatConfig starting model from llmconfig.yml', () => {
     expect(result.current.currentModel).toBe('static-b')
   })
 
+  it('keeps a pick made during the lookup in a gateway-only deployment', async () => {
+    let release
+    defaultModelResponse = () => new Promise(resolve => {
+      release = () => resolve({ ok: true, json: async () => ({ model: ALPHA_KEY }) })
+    })
+    mockFetch(config({ models: [] }))
+    const { result } = renderHook(() => useChatConfig())
+    await waitFor(() => expect(calledDefaultEndpoint()).toBe(true))
+    // No static default to apply first: nothing is selected yet.
+    expect(result.current.currentModel).toBe('')
+    act(() => result.current.setCurrentModel('enterprise::team-beta::llama'))
+    release()
+    await new Promise(r => setTimeout(r, 10))
+    expect(result.current.currentModel).toBe('enterprise::team-beta::llama')
+    expect(localStorage.getItem(`chatui-current-model:${USER}`)).toBe('enterprise::team-beta::llama')
+    expect(localStorage.getItem(`chatui-current-model-auto:${USER}`)).toBeNull()
+  })
+
   it('shows the static default at once and upgrades it when the server answers', async () => {
     let release
     defaultModelResponse = () => new Promise(resolve => {

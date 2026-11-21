@@ -91,6 +91,28 @@ async def _gateway_default_team_label(
     return team.label
 
 
+async def _safe_gateway_probe(
+    llm_config: Any, model_key: str, user_email: Optional[str], auth_check: Optional[AuthCheckFunc]
+) -> Optional[str]:
+    """``_gateway_default_team_label``, with any unexpected failure a skip.
+
+    A default is a convenience: one gateway failing in an unforeseen way must
+    not fail the whole lookup (and the other gateways' answers) with a 500.
+    """
+    try:
+        return await _gateway_default_team_label(llm_config, model_key, user_email, auth_check)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning(
+            "Configured default model %s skipped: unexpected %s",
+            sanitize_for_logging(model_key),
+            type(exc).__name__,
+        )
+        logger.debug("Default model probe failure", exc_info=True)
+        return None
+
+
 async def resolve_default_model(
     llm_config: Any,
     user_email: Optional[str],
@@ -106,23 +128,28 @@ async def resolve_default_model(
         if await is_model_allowed(static_models[candidates[0]], user_email, auth_check):
             return DefaultModel(candidates[0], SOURCE_CONFIGURED)
     # Probe every gateway candidate at once, so per-gateway discovery
-    # timeouts do not stack; the first usable one in preference order wins.
-    gateway_candidates = [name for name in candidates if name not in static_models]
-    labels = dict(zip(
-        gateway_candidates,
-        await asyncio.gather(*(
-            _gateway_default_team_label(llm_config, name, user_email, auth_check)
-            for name in gateway_candidates
-        )),
-    ))
-    for name in candidates:
-        static = static_models.get(name)
-        if static is not None:
-            if await is_model_allowed(static, user_email, auth_check):
-                return DefaultModel(name, SOURCE_CONFIGURED)
-            continue
-        if labels.get(name) is not None:
-            return DefaultModel(name, SOURCE_CONFIGURED, labels[name])
+    # timeouts do not stack. Results are consumed in preference order: the
+    # first usable candidate wins and the probes still running are cancelled,
+    # so a slow lower-priority gateway cannot hold the answer.
+    probes = {
+        name: asyncio.ensure_future(_safe_gateway_probe(llm_config, name, user_email, auth_check))
+        for name in candidates
+        if name not in static_models
+    }
+    try:
+        for name in candidates:
+            static = static_models.get(name)
+            if static is not None:
+                if await is_model_allowed(static, user_email, auth_check):
+                    return DefaultModel(name, SOURCE_CONFIGURED)
+                continue
+            team_label = await probes[name]
+            if team_label is not None:
+                return DefaultModel(name, SOURCE_CONFIGURED, team_label)
+    finally:
+        for probe in probes.values():
+            if not probe.done():
+                probe.cancel()
     for name, model_config in static_models.items():
         if await is_model_allowed(model_config, user_email, auth_check):
             return DefaultModel(name, SOURCE_FIRST_MODEL)

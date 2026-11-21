@@ -501,9 +501,12 @@ export function useChatConfig() {
       const serverModel = await fetchServerDefaultModel(user)
       if (defaultLookupRef.current === user) defaultLookupRef.current = null
       // Superseded: another account signed in, or the user picked a model
-      // while the lookup was in flight.
+      // while the lookup was in flight. A pick sets modelOwnerRef and clears
+      // autoSelectedRef in setCurrentModel, so this holds even in a
+      // gateway-only deployment where no default was applied first (the
+      // restore is then still un-done).
       if (userRef.current !== user) return
-      if (restoredForUserRef.current === user && !autoSelectedRef.current) return
+      if (modelOwnerRef.current === user && !autoSelectedRef.current && currentModelRef.current) return
       const model = serverModel || defaultModelOf(startCfgRef.current)
       if (!model) return
       if (restoredForUserRef.current === user && model === currentModelRef.current) return
