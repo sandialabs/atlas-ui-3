@@ -1002,11 +1002,20 @@ async def _resumed_conversation_unconfirmed(chat_service, session_id) -> bool:
     return bool(session is not None and session.context.get(_RESUMED_CONVERSATION_KEY))
 
 
-async def _confirm_resumed_conversation(chat_service, session_id) -> None:
-    """Clear the marker: a server-mode turn has been admitted on this session."""
+async def _confirm_resumed_conversation(chat_service, session_id, start_empty=False) -> None:
+    """Clear the marker: a server-mode turn has been admitted on this session.
+
+    ``start_empty`` is set when the turn was given a fresh conversation id. Its
+    history is dropped first: anything in it came from off-record frames sent
+    since the resume, and those must reach neither the model nor, through the
+    save that follows, the new conversation's record. Attached files live in
+    the session context and stay.
+    """
     try:
         session = await chat_service.session_repository.get(session_id)
         if session is not None and session.context.pop(_RESUMED_CONVERSATION_KEY, None):
+            if start_empty:
+                session.history.messages.clear()
             await _persist_session(chat_service, session)
     except Exception:
         # Best effort: the turn is already admitted, and nothing here may stop
@@ -2492,6 +2501,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # session and the marker as they were. Off-record frames and
                 # frames steering a run neither read nor clear the marker.
                 resumed_server_frame = resumed_marker_pending and not turn_is_off_record(data)
+                resumed_fresh_id = False
                 if resumed_server_frame:
                     try:
                         resumed_unconfirmed = await _resumed_conversation_unconfirmed(
@@ -2512,6 +2522,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
                     if resumed_unconfirmed and turn_conversation_id is None:
                         turn_conversation_id = str(uuid4())
+                        resumed_fresh_id = True
                         logger.info(
                             "Resumed session %s: chat frame names no conversation, "
                             "starting a new one",
@@ -2584,7 +2595,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     run_record.note_auto_approve(data)
                     if resumed_server_frame:
                         resumed_marker_pending = False
-                        await _confirm_resumed_conversation(chat_service, session_id)
+                        await _confirm_resumed_conversation(
+                            chat_service, session_id, start_empty=resumed_fresh_id
+                        )
                 except ConcurrencyLimitError as e:
                     await websocket.send_json({
                         "type": "error",

@@ -19,6 +19,7 @@ from atlas.application.chat.runs import reset_run_registry
 from atlas.application.chat.runs.registry import ConcurrencyLimitError
 from atlas.application.chat.service import ChatService
 from atlas.domain.errors import SessionStoreUnavailableError
+from atlas.domain.messages.models import Message, MessageRole
 from atlas.domain.sessions.models import Session
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
@@ -55,7 +56,11 @@ def mock_app_factory(repo, seen):
         seen.append({
             "session_conversation": context.get("conversation_id"),
             "frame_conversation": kwargs.get("conversation_id"),
+            "history_len": len(session.history.messages) if session is not None else 0,
         })
+        if session is not None:
+            # What a real turn leaves behind: its own exchange.
+            session.history.add_message(Message(role=MessageRole.USER, content=kwargs.get("content")))
         return {}
 
     with patch("main.app_factory") as factory, patch.object(
@@ -158,6 +163,9 @@ def test_off_record_first_frame_keeps_the_rule_armed(mock_app_factory, repo, see
         _chat(ws, seen, 2)
     assert seen[0]["frame_conversation"] in (None, OLD)
     assert _new_conversation(seen[1])
+    # The off-record exchange must not travel into the new, saved conversation.
+    assert seen[0]["history_len"] == 0
+    assert seen[1]["history_len"] == 0
 
 
 def test_steer_frame_without_a_run_leaves_the_marker(mock_app_factory, repo, seen):

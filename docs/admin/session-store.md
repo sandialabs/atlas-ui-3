@@ -154,6 +154,8 @@ resume is:
   send its `conversation_id` on every chat frame.
 - Unsaved frames (incognito or browser-only save mode) keep the session's
   history and do not consume the rule; it stays armed for the next saved frame.
+  That saved frame's fresh conversation starts with empty history, so the
+  unsaved exchanges neither reach the model nor enter the stored record.
   Steer frames and frames refused before a turn starts (oversized upload, run
   limit) do not consume it either.
 - A resumed session whose conversation is not in the store yet (a New Chat
