@@ -578,6 +578,33 @@ async def test_a_slow_admission_keeps_its_reservation_alive(factory, shared_stor
     assert len(renewals) >= 2
 
 
+async def test_a_failed_handle_write_is_retried_so_the_key_still_replays(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
+    original = shared_store.complete
+    attempts = []
+
+    async def flaky_complete(slot, handle):
+        attempts.append(1)
+        if len(attempts) <= 2:
+            return False  # Redis blip right after the run was admitted
+        return await original(slot, handle)
+
+    shared_store.complete = flaky_complete
+    body = {**LAUNCH, "idempotency_key": "blip-1"}
+    async with _client(factory) as client:
+        first = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        await asyncio.sleep(0.2)
+        reset_run_registry()  # another replica
+        retry = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert first.status_code == 202
+    assert len(attempts) == 3
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == first.json()["run_id"]
+
+
 async def test_shared_store_concurrent_requests_launch_once(factory, shared_store):
     body = {**LAUNCH, "idempotency_key": "xrep-2"}
     async with _client(factory) as client:

@@ -186,7 +186,7 @@ class RedisIdempotencyStore:
         items = [_text(item) for item in raw]
         return None, _entry_from_fields(dict(zip(items[::2], items[1::2])))
 
-    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> None:
+    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> bool:
         try:
             await self._complete(
                 keys=[
@@ -206,11 +206,13 @@ class RedisIdempotencyStore:
             )
         except Exception as exc:
             # The run exists; failing the request now would invite a retry
-            # that launches it twice. The pending TTL bounds the exposure.
+            # that launches it twice. The caller retries the write.
             self._unavailable(exc)
             logger.warning(
                 "Could not record the run handle for an idempotency key: %s", type(exc).__name__
             )
+            return False
+        return True
 
     async def renew(self, slot: IdempotencySlot) -> None:
         try:

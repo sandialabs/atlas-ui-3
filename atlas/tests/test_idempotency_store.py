@@ -204,7 +204,7 @@ async def test_redis_down_on_complete_and_release_is_best_effort(server):
     slot, _ = await store.reserve(USER, "be", "fp")
     store._complete = _boom
     store._release = _boom
-    await store.complete(slot, HANDLE)  # must not raise
+    assert await store.complete(slot, HANDLE) is False  # reported, not raised
     await store.release(slot)
 
 

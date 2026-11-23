@@ -35,12 +35,15 @@ import functools
 import hashlib
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
 from atlas.application.chat.runs.follow_up import _revalidate_saved_workspace
 from atlas.application.chat.runs.idempotency import (
+    IDEMPOTENCY_COMPLETE_RETRY_SECONDS,
+    IDEMPOTENCY_PENDING_TTL_SECONDS,
     IDEMPOTENCY_RENEW_INTERVAL_SECONDS,
     IdempotencyEntry,
     IdempotencySlot,
@@ -252,8 +255,38 @@ async def _release(
     store = get_idempotency_store()
     if handle is None:
         await store.release(slot)
-    else:
-        await store.complete(slot, handle)
+    elif not await store.complete(slot, handle):
+        _complete_later(slot, handle)
+
+
+# Strong references: asyncio keeps only weak ones to running tasks.
+_deferred_completions: Set["asyncio.Task[None]"] = set()
+
+
+def _complete_later(slot: IdempotencySlot, handle: Dict[str, Any]) -> None:
+    """Keep retrying to record the run handle after a failed write.
+
+    The run was admitted, but its record is still pending in the store; if it
+    were left to lapse, a client retry would launch the run a second time.
+    """
+    task = asyncio.ensure_future(_retry_complete(slot, handle))
+    _deferred_completions.add(task)
+    task.add_done_callback(_deferred_completions.discard)
+
+
+async def _retry_complete(slot: IdempotencySlot, handle: Dict[str, Any]) -> None:
+    store = get_idempotency_store()
+    deadline = time.monotonic() + IDEMPOTENCY_PENDING_TTL_SECONDS
+    while time.monotonic() < deadline:
+        await asyncio.sleep(IDEMPOTENCY_COMPLETE_RETRY_SECONDS)
+        await store.renew(slot)
+        if await store.complete(slot, handle):
+            return
+    logger.error(
+        "Could not record the run handle for run %s's idempotency key; a retry "
+        "of that request may launch it again",
+        handle.get("run_id"),
+    )
 
 
 # ---------------------------------------------------------------------------
