@@ -453,3 +453,11 @@ def test_child_found_beyond_the_listing_limit(repo):
     assert [c["id"] for c in found] == ["kid-204"]
     assert [c["id"] for c in repo.list_child_conversations("parent", USER, child_ref="kid-203")] == ["kid-203"]
     assert repo.list_child_conversations("parent", USER, child_ref="nope") == []
+
+
+def test_later_save_keeps_launch_run_id(repo):
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent", "launch_run_id": "run-1"})
+
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent"})
+
+    assert repo.get_conversation("kid", USER)["metadata"]["launch_run_id"] == "run-1"

@@ -201,9 +201,17 @@ class ConversationRepository:
                 if metadata:
                     # The launch origin (issue #1187) is fixed at creation:
                     # the stored record decides it for every later save.
-                    metadata = carry_recorded_origin(
-                        _load_metadata(existing.metadata_json), metadata
+                    stored_metadata = _load_metadata(existing.metadata_json)
+                    metadata = carry_recorded_origin(stored_metadata, metadata)
+                    # The launching run id (issue #1222) is fixed at creation
+                    # too: a save from a session that never loaded it (an
+                    # explicit restore) must not erase it.
+                    recorded_run = (
+                        stored_metadata.get("launch_run_id")
+                        if isinstance(stored_metadata, dict) else None
                     )
+                    if recorded_run and not metadata.get("launch_run_id"):
+                        metadata["launch_run_id"] = recorded_run
                     existing.metadata_json = json.dumps(metadata)
 
                 # Delete old messages
