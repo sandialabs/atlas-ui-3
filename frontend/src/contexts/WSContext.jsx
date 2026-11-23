@@ -63,7 +63,12 @@ export const WSProvider = ({ children }) => {
         const pending = pendingNavigationRef.current
         if (pending) {
           pendingNavigationRef.current = null
-          wsRef.current.send(JSON.stringify(pending))
+          try {
+            wsRef.current.send(JSON.stringify(pending))
+          } catch {
+            // Keep it for the next open; the connected state still gets set.
+            pendingNavigationRef.current = pending
+          }
         }
         setIsConnected(true)
         setConnectionStatus('Connected')
@@ -114,7 +119,8 @@ export const WSProvider = ({ children }) => {
     }
   }
 
-  // Returns true if the message was handed to an open socket, false otherwise.
+  // Returns true if the message was handed to an open socket, 'queued' if it is a
+  // navigation frame held for the next open, false otherwise (dropped).
   // Callers use the return value to avoid leaving the UI in a "waiting" state
   // (e.g. an eternal "Thinking..." spinner) when the socket is disconnected.
   const sendMessage = (message) => {
@@ -123,7 +129,11 @@ export const WSProvider = ({ children }) => {
       return true
     }
     if (NAVIGATION_FRAME_TYPES.includes(message?.type)) {
+      // Kept for the next open, so this is not an error. 'queued' is truthy but
+      // not `true`: the frame has not reached the server yet.
       pendingNavigationRef.current = message
+      console.warn('WebSocket is not connected; queued', message.type, 'for the next open')
+      return 'queued'
     }
     console.error('WebSocket is not connected, readyState:', wsRef.current?.readyState)
     return false

@@ -71,7 +71,7 @@ describe('navigation frames sent while disconnected', () => {
     act(() => {
       sent = probe.sendMessage({ type: 'reset_session' })
     })
-    expect(sent).toBe(false)
+    expect(sent).toBe('queued')
     expect(first.sent).toEqual([])
 
     const second = reconnect()
@@ -114,10 +114,27 @@ describe('navigation frames sent while disconnected', () => {
     expect(first.sent).toEqual([frame])
   })
 
+  it('keeps the frame and still marks the socket connected when send throws on open', () => {
+    const first = FakeWebSocket.instances[0]
+    act(() => probe.sendMessage({ type: 'reset_session' }))
+    const realSend = first.send.bind(first)
+    first.send = () => {
+      throw new Error('socket closing')
+    }
+    act(() => first.open())
+    expect(probe.isConnected).toBe(true)
+
+    first.send = realSend
+    const second = reconnect()
+    expect(second.sent).toEqual([{ type: 'reset_session' }])
+  })
+
   it('does not queue chat frames', () => {
+    let sent
     act(() => {
-      probe.sendMessage({ type: 'chat', content: 'lost' })
+      sent = probe.sendMessage({ type: 'chat', content: 'lost' })
     })
+    expect(sent).toBe(false)
     const first = FakeWebSocket.instances[0]
     act(() => first.open())
     expect(first.sent).toEqual([])

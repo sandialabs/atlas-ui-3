@@ -958,68 +958,58 @@ _RUN_SESSION_MARKER = "tracked_run_session"
 RESUME_SESSION_PARAM = "resume_session"
 
 # Set on a resumed session whose carried conversation the new connection has
-# not yet confirmed (issue #1217); cleared by the first chat frame.
+# not yet confirmed (issue #1217); cleared once a server-mode turn is admitted.
 _RESUMED_CONVERSATION_KEY = "resumed_conversation_unconfirmed"
 
 
-def _conversation_is_stored(chat_service, conversation_id) -> bool:
-    """True when the conversation store already holds ``conversation_id``."""
+async def _conversation_may_be_stored(chat_service, conversation_id) -> bool:
+    """Whether overwriting ``conversation_id`` is possible, answered fail closed.
+
+    False only when there is nothing to overwrite: no conversation store at
+    all, or a store that answers and has no record. A record of any owner, a
+    failing lookup, or a store that cannot answer ownership questions all
+    count as "may be stored". Failing closed is cheap here: the marker only
+    makes an id-less server-mode frame start a new conversation under a fresh
+    id (the session is left as it is), so a wrong "stored" costs a chat that
+    would have continued in an unsaved conversation a new id, while a wrong
+    "not stored" risks saving over a real one. The owner is deliberately not
+    compared with the user: a record owned by anyone else is one this session
+    must not write into either.
+    """
     repository = getattr(chat_service, "conversation_repository", None)
-    lookup = getattr(repository, "get_conversation_owner", None)
-    if not conversation_id or not callable(lookup):
+    if repository is None:
         return False
+    lookup = getattr(repository, "get_conversation_owner", None)
+    if not conversation_id:
+        return False
+    if not callable(lookup):
+        return True
     try:
-        return lookup(str(conversation_id)) is not None
+        # Synchronous store query: keep it off the event loop.
+        return await asyncio.to_thread(lookup, str(conversation_id)) is not None
     except Exception:
         logger.warning("Could not check whether a resumed conversation is stored", exc_info=True)
-        return False
+        return True
 
 
-async def _settle_resumed_conversation(
-    chat_service, session_id, user_email, run_registry, data, frame_conversation_id, tracked_run
-) -> Optional[dict]:
-    """Decide, on the first chat frame after a resume, which conversation it is in.
+async def _resumed_conversation_unconfirmed(chat_service, session_id) -> bool:
+    """True while a resumed session's carried conversation is not yet confirmed.
 
-    A client that clicked New Chat while its socket was down never delivered
-    ``reset_session``, so the resumed session still names the old conversation
-    and the next turn would run in, and be saved over, it. The rule: a
-    server-mode frame that names no conversation, arriving on a resumed session
-    that carries one, is a new chat. The client sends the id of every
-    conversation it has opened (the server told it the id in ``run_started`` /
-    ``conversation_saved``), so a continuation always names it, and a frame
-    that does names it, which hydrates from the store as before. Frames that are
-    not saved (incognito, browser-only) keep the session's own history, and a
-    frame steering a running turn is untouched.
-
-    The marker is consumed by the first chat frame whatever it carries, so the
-    rule never applies to later frames on the connection. Returns an error
-    frame to send if the session could not be reset, else None.
+    Raises ``DomainError`` when the session store is unavailable; the caller
+    answers the frame with an error instead of ending the socket.
     """
     session = await chat_service.session_repository.get(session_id)
-    if session is None or not session.context.get(_RESUMED_CONVERSATION_KEY):
-        return None
-    if tracked_run is None and frame_conversation_id is None and not turn_is_off_record(data):
-        old_conv_id = session.context.get("conversation_id")
-        logger.info(
-            "Resumed session %s: chat frame names no conversation, starting a new one "
-            "instead of continuing %s",
-            sanitize_for_logging(str(session_id)),
-            sanitize_for_logging(str(old_conv_id)),
-        )
-        try:
-            await chat_service.handle_reset_session(
-                session_id=session_id,
-                user_email=user_email,
-                preserve_conversation_resources=(
-                    run_registry.active_for_conversation(old_conv_id, user_email) is not None
-                ),
-            )
-        except DomainError as e:
-            return {"type": "error", "message": e.message, "error_type": "domain"}
-        return None
-    session.context.pop(_RESUMED_CONVERSATION_KEY, None)
-    await _persist_session(chat_service, session)
-    return None
+    return bool(session is not None and session.context.get(_RESUMED_CONVERSATION_KEY))
+
+
+async def _confirm_resumed_conversation(chat_service, session_id) -> None:
+    """Clear the marker: a server-mode turn has been admitted on this session."""
+    try:
+        session = await chat_service.session_repository.get(session_id)
+        if session is not None and session.context.pop(_RESUMED_CONVERSATION_KEY, None):
+            await _persist_session(chat_service, session)
+    except DomainError:
+        logger.warning("Could not clear the resumed-conversation marker", exc_info=True)
 
 
 async def _resume_connection_session(chat_service, requested, user_email):
@@ -1080,11 +1070,12 @@ async def _resume_connection_session(chat_service, requested, user_email):
     # The conversation this session carries was bound by the previous
     # connection. The client may have started a new chat while disconnected, in
     # which case its reset_session frame was lost (issue #1217). The first
-    # server-mode chat frame decides: see _settle_resumed_conversation.
-    # Only a conversation the store already holds can be overwritten, so a chat
+    # server-mode chat frame decides: an id-less one starts a new conversation
+    # (see the turn_conversation_id logic in the chat handler). Only a
+    # conversation the store may already hold can be overwritten, so a chat
     # that has not been saved yet (a New Chat awaiting its first message, with
     # files already attached to it) is left to continue.
-    if session.context.get("incognito") is not True and _conversation_is_stored(
+    if session.context.get("incognito") is not True and await _conversation_may_be_stored(
         chat_service, session.context.get("conversation_id")
     ):
         session.context[_RESUMED_CONVERSATION_KEY] = True
@@ -2291,13 +2282,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     # turn this connection is already running.
                     bound_runs = run_registry.active_bound_to(session_id)
                     tracked_run = bound_runs[0] if bound_runs else None
-                settle_error = await _settle_resumed_conversation(
-                    chat_service, session_id, user_email, run_registry, data,
-                    frame_conversation_id, tracked_run,
-                )
-                if settle_error is not None:
-                    await websocket.send_json(settle_error)
-                    continue
                 if tracked_run is not None:
                     # A chat or steer frame must not rewrite the switch on a
                     # run that is already going. A second tab, or a steer the
@@ -2487,6 +2471,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 turn_conversation_id = frame_conversation_id
                 if turn_conversation_id is None and is_agent_turn:
                     turn_conversation_id = str(uuid4())
+                # Issue #1217: a server-mode frame that names no conversation,
+                # first on a resumed session that still carries a stored one,
+                # is a new chat whose reset_session was lost. Give it a fresh
+                # id rather than let it run in, and save over, the old one.
+                # Nothing is written here: a frame refused below leaves the
+                # session and the marker as they were. Off-record frames and
+                # frames steering a run neither read nor clear the marker.
+                resumed_server_frame = not turn_is_off_record(data)
+                if resumed_server_frame:
+                    try:
+                        resumed_unconfirmed = await _resumed_conversation_unconfirmed(
+                            chat_service, session_id
+                        )
+                    except DomainError as e:
+                        await websocket.send_json(
+                            {"type": "error", "message": e.message, "error_type": "domain"}
+                        )
+                        continue
+                    if resumed_unconfirmed and turn_conversation_id is None:
+                        turn_conversation_id = str(uuid4())
+                        logger.info(
+                            "Resumed session %s: chat frame names no conversation, "
+                            "starting a new one",
+                            sanitize_for_logging(str(session_id)),
+                        )
+                    resumed_server_frame = resumed_unconfirmed
                 if turn_conversation_id:
                     data["conversation_id"] = turn_conversation_id
 
@@ -2550,6 +2560,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Record the switch before the task can call a tool.
                     # The run keeps this after the socket closes.
                     run_record.note_auto_approve(data)
+                    if resumed_server_frame:
+                        await _confirm_resumed_conversation(chat_service, session_id)
                 except ConcurrencyLimitError as e:
                     await websocket.send_json({
                         "type": "error",

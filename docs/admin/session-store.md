@@ -137,12 +137,27 @@ old connection that is still finishing cannot reach it.
 A resumed session still names the conversation its previous connection was in,
 but the client may have started a new chat while it was disconnected. The
 client replays a `reset_session` or `restore_conversation` it could not send as
-soon as the socket reopens. As a backstop for any lost reset, the first chat
-frame on a resumed session whose conversation is already stored, if it is
-saved to the server and names no `conversation_id`, is treated as a new chat: the session is reset exactly as
-`reset_session` does, instead of running in and saving over the old
-conversation. A frame that names the conversation continues it, and unsaved
-(incognito or browser-only) frames keep the session's history.
+soon as the socket reopens (`sendMessage` returns `'queued'` for such a frame
+instead of `false`).
+
+As a backstop for any lost reset, the wire contract for `chat` frames after a
+resume is:
+
+- If the resumed session's conversation may already be stored (a record of any
+  owner, or a store that cannot be checked), the first saved (`save_mode:
+  "server"`) chat frame that names no `conversation_id` starts a new
+  conversation under a fresh id, announced in `run_started`. The old
+  conversation is not touched. The session itself is not reset, so files
+  attached to it stay.
+- A frame that names the conversation continues it, hydrated from the store as
+  before. Any client that continues a saved conversation after a reconnect must
+  send its `conversation_id` on every chat frame.
+- Unsaved frames (incognito or browser-only save mode) keep the session's
+  history and do not consume the rule; it stays armed for the next saved frame.
+  Steer frames and frames refused before a turn starts (oversized upload, run
+  limit) do not consume it either.
+- A resumed session whose conversation is not in the store yet (a New Chat
+  awaiting its first message) is not marked and continues as it was.
 
 Resuming stamps the new connection as the session's owner and writes it, so
 the old connection's late teardown leaves it alone, and its stale copy can no
