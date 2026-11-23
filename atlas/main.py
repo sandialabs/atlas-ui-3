@@ -962,6 +962,19 @@ RESUME_SESSION_PARAM = "resume_session"
 _RESUMED_CONVERSATION_KEY = "resumed_conversation_unconfirmed"
 
 
+def _conversation_is_stored(chat_service, conversation_id) -> bool:
+    """True when the conversation store already holds ``conversation_id``."""
+    repository = getattr(chat_service, "conversation_repository", None)
+    lookup = getattr(repository, "get_conversation_owner", None)
+    if not conversation_id or not callable(lookup):
+        return False
+    try:
+        return lookup(str(conversation_id)) is not None
+    except Exception:
+        logger.warning("Could not check whether a resumed conversation is stored", exc_info=True)
+        return False
+
+
 async def _settle_resumed_conversation(
     chat_service, session_id, user_email, run_registry, data, frame_conversation_id, tracked_run
 ) -> Optional[dict]:
@@ -1068,7 +1081,12 @@ async def _resume_connection_session(chat_service, requested, user_email):
     # connection. The client may have started a new chat while disconnected, in
     # which case its reset_session frame was lost (issue #1217). The first
     # server-mode chat frame decides: see _settle_resumed_conversation.
-    if session.context.get("conversation_id") and session.context.get("incognito") is not True:
+    # Only a conversation the store already holds can be overwritten, so a chat
+    # that has not been saved yet (a New Chat awaiting its first message, with
+    # files already attached to it) is left to continue.
+    if session.context.get("incognito") is not True and _conversation_is_stored(
+        chat_service, session.context.get("conversation_id")
+    ):
         session.context[_RESUMED_CONVERSATION_KEY] = True
     if not await chat_service.persist_session(session, adopt=True):
         return None

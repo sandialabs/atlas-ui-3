@@ -24,6 +24,13 @@ USER = "alice@example.com"
 OLD = "conv-old"
 
 
+class _StoredConversations:
+    """Just enough of the conversation store: ``OLD`` is saved, nothing else is."""
+
+    def get_conversation_owner(self, conversation_id):
+        return USER if conversation_id == OLD else None
+
+
 @pytest.fixture
 def repo():
     return InMemorySessionRepository()
@@ -71,6 +78,7 @@ def mock_app_factory(repo, seen):
                 connection=MagicMock(),
                 config_manager=MagicMock(),
                 session_repository=repo,
+                conversation_repository=_StoredConversations(),
             )
 
         factory.create_chat_service.side_effect = _service
@@ -78,9 +86,9 @@ def mock_app_factory(repo, seen):
     reset_run_registry()
 
 
-def _previous_session(repo):
+def _previous_session(repo, conversation_id=OLD):
     session = Session(id=uuid4(), user_email=USER, active=False)
-    session.context["conversation_id"] = OLD
+    session.context["conversation_id"] = conversation_id
     asyncio.run(repo.create(session))
     return session
 
@@ -145,4 +153,14 @@ def test_fresh_connection_chat_is_untouched(mock_app_factory, repo, seen):
     with TestClient(app).websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
         _chat(ws, seen, 1)
     assert len(seen) == 1
+    assert seen[0]["marker"] is None
+
+
+def test_unsaved_new_chat_is_not_reset_on_resume(mock_app_factory, repo, seen):
+    """A New Chat awaiting its first message (files may be attached) carries on."""
+    session = _previous_session(repo, conversation_id="conv-not-saved-yet")
+    with _connect(session) as ws:
+        assert ws.receive_json()["resumed"] is True
+        _chat(ws, seen, 1)
+    assert seen[0]["session_conversation"] == "conv-not-saved-yet"
     assert seen[0]["marker"] is None
