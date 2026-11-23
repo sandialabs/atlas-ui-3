@@ -1830,17 +1830,23 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// and asking for its ended run) on an interval. The reply replaces the
 	// tracker; a remote run that has ended is then terminal or absent.
 	const hasRemoteRun = Object.values(runs.runsByConversation).some(r => isRunActive(r) && r.detached === true)
-	useEffect(() => {
-		if (!isConnected || !hasRemoteRun || !config.features?.chat_history) return
-		const timer = setInterval(() => {
-			sendMessageRef.current?.({
-				type: 'list_runs',
-				conversation_id: activeConversationIdRef.current || undefined,
-				watch_end: true,
-			})
-		}, REMOTE_RUN_POLL_MS)
-		return () => clearInterval(timer)
-	}, [isConnected, hasRemoteRun, config.features?.chat_history])
+	const pollRemoteRuns = useCallback(async () => {
+		const sent = sendMessageRef.current?.({
+			type: 'list_runs',
+			conversation_id: activeConversationIdRef.current || undefined,
+			watch_end: true,
+		})
+		// An unsent frame is a failed attempt: the hook backs off with jitter.
+		if (!sent) throw new Error('list_runs not sent')
+	}, [])
+	usePollingWithBackoff(pollRemoteRuns, {
+		normalInterval: REMOTE_RUN_POLL_MS,
+		backoffBase: REMOTE_RUN_POLL_MS,
+		maxBackoffDelay: LIVE_REFRESH_MAX_BACKOFF_MS,
+		pauseWhenHidden: true,
+		enabled: !!(isConnected && hasRemoteRun && config.features?.chat_history),
+		deps: [],
+	})
 
 	// The remote run on screen ended: stop the running state, close tool rows
 	// that never reported, and read the stored conversation. The saved turn can
@@ -1857,6 +1863,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (!watched) return
 		remoteWatchRef.current = null
 		if (watched !== id) return
+		// Sending a turn bumps this; a read that predates it must not replace
+		// the transcript the new turn is building.
+		const generation = reconnectResyncGenerationRef.current
 		const finish = async () => {
 			cleanupStreamState()
 			streamEnd()
@@ -1874,7 +1883,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
 				try {
 					const data = await fetchConversationRecord(id)
-					if (activeConversationIdRef.current !== id || data?.id !== id || data.error) return
+					if (reconnectResyncGenerationRef.current !== generation ||
+						activeConversationIdRef.current !== id || data?.id !== id || data.error) return
 					// A newer turn already holds the conversation: its own tracking
 					// takes over, and this record is not the final one.
 					if (data.run_elsewhere === true || data.in_flight === true) return
