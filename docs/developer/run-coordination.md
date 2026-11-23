@@ -351,9 +351,19 @@ or a restart, still finds its children:
    `parent_conversation_id` and `launch_run_id` (the run id the launch
    returned). `ConversationRepository.list_child_conversations` finds them by
    parent and user, and the reply is the conversation's last assistant message.
-   A child found only this way reports status `finished`: how its last run
-   ended is not stored. A child stored before `launch_run_id` existed is
-   addressed by its conversation id.
+   The launch path records how the launching run ended (`launch_status`,
+   `launch_depth`) and how the newest run ended (`latest_status`) on the child's
+   conversation, before the run's status is published. A lookup by the launch
+   run id reports `launch_status`; a lookup by conversation id reports
+   `latest_status`, so a failed follow-up is not shown as the launch's
+   success. A child with no recorded outcome (stored before this, or its
+   replica died first) is reported `failed` with an error saying so, never
+   assumed successful; its last saved reply is still returned. A child stored
+   before `launch_run_id` existed is addressed by its conversation id. The
+   stored children are read in full (up to 5000 per parent conversation), not
+   just the first page. When shared state cannot be read, the listing returns
+   the children this replica holds flagged `partial` (or is refused when it
+   holds none).
 
 Authorization is the registry path's: a caller sees only children of its own
 conversation that its own user owns, and an unknown run, another user's run and

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Metadata the launch path records on a sub-conversation (issue #1222). Fixed
 # per conversation: a later save that does not carry them keeps the stored ones.
-LAUNCH_RECORD_KEYS = ("launch_run_id", "launch_status", "launch_depth")
+LAUNCH_RECORD_KEYS = ("launch_run_id", "launch_status", "launch_depth", "latest_status")
 _CHILD_SCAN_PAGE = 200
 
 
@@ -457,8 +457,11 @@ class ConversationRepository:
     ) -> bool:
         """Record how a launched run ended on its stored conversation (issue #1222).
 
-        Merges ``launch_status`` and ``launch_depth`` into the metadata and
-        touches nothing else. Returns whether a conversation of this user was
+        Merges ``latest_status`` (the newest run's outcome) and, for the
+        launching run, ``launch_status`` and ``launch_depth`` into the
+        metadata and touches nothing else. Fails closed (returns ``False``)
+        when the stored metadata cannot be decoded: rewriting it would destroy
+        the classification record it holds. Returns whether a conversation of this user was
         found. Later saves keep both (``LAUNCH_RECORD_KEYS``).
         """
         user_email = normalize_user_email(user_email)
@@ -470,14 +473,19 @@ class ConversationRepository:
             if row is None:
                 return False
             metadata = _load_metadata(row.metadata_json)
-            if not isinstance(metadata, dict):
-                metadata = {}
-            # Only the launching run's outcome is kept: a later follow-up
-            # must not replace how the run the launch handed back ended.
-            if run_id and metadata.get("launch_run_id") not in (None, "", run_id):
-                return True
-            metadata["launch_status"] = status
-            metadata["launch_depth"] = max(1, int(depth or 1))
+            if row.metadata_json and not isinstance(metadata, dict):
+                logger.warning(
+                    "Not recording a launch outcome on %s: its metadata cannot be decoded",
+                    conversation_id,
+                )
+                return False
+            metadata = metadata or {}
+            metadata["latest_status"] = status
+            # The launching run's own outcome stays: a later follow-up must
+            # not replace how the run the launch handed back ended.
+            if not run_id or metadata.get("launch_run_id") in (None, "", run_id):
+                metadata["launch_status"] = status
+                metadata["launch_depth"] = max(1, int(depth or 1))
             row.metadata_json = json.dumps(metadata)
             session.commit()
             return True

@@ -181,3 +181,36 @@ def test_another_user_cannot_read_the_child(cluster):
     unknown = _observe_on_b(cluster, intruder, None, "no-such-run")[1]
     # A foreign run and an unknown one are refused in the same words.
     assert REFUSAL in json.dumps(unknown), unknown
+
+
+def _forget_recorded_outcome(cluster, conversation_id):
+    """What a child saved before outcomes were recorded (or whose owner died) looks like."""
+    import psycopg
+
+    with psycopg.connect(cluster.infra.postgres_url, autocommit=True) as conn:
+        conn.execute(
+            "UPDATE conversations SET metadata_json = ((metadata_json::jsonb) - 'launch_status' "
+            "- 'latest_status' - 'launch_depth')::text WHERE id = %s",
+            (conversation_id,),
+        )
+
+
+def test_unrecorded_outcome_is_never_reported_as_success(cluster):
+    user = cluster.new_user()
+    parent_conversation, launched = _launch_on_a(
+        cluster, user, directive("kidlost", sleep=1, steps=1, words=3).replace(" ", ",")
+    )
+    child_run = launched["run_id"]
+    _wait_record(cluster, child_run, terminal=True)
+    assert launched["conversation_id"] in cluster.conversation_ids(cluster.b, user)
+    _forget_run_record(cluster, child_run)
+    _forget_recorded_outcome(cluster, launched["conversation_id"])
+
+    runs, result = _observe_on_b(cluster, user, parent_conversation, child_run)
+
+    listed = runs["runs"][0]
+    assert listed["conversation_id"] == launched["conversation_id"], runs
+    assert listed["status"] == "failed" and "not recorded" in listed["error"], runs
+    assert result["status"] == "failed" and "not recorded" in result["error"], result
+    # The reply is still readable.
+    assert "FINAL[kidlost]" in result["result"], result

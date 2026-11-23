@@ -1023,11 +1023,27 @@ def get_child_runs(context: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
 async def list_child_runs(
     context: Optional[Dict[str, Any]], factory: Any = None
 ) -> List[Dict[str, Any]]:
+    """The children of the caller's conversation; raises when the list would be partial."""
+    runs, partial = await list_child_runs_partial(context, factory)
+    if partial:
+        raise LaunchRefused(
+            "The sub-conversations could not be listed right now. Try again.", code="unavailable"
+        )
+    return runs
+
+
+async def list_child_runs_partial(
+    context: Optional[Dict[str, Any]], factory: Any = None
+) -> "tuple[List[Dict[str, Any]], bool]":
     """``atlas_get_subagent_runs``: local children, then those only shared state knows.
 
     Another replica's live children and children whose run records are gone
     come from the shared run records and the stored conversations
     (``shared_children.py``), under the same user-and-conversation scope.
+    Returns ``(runs, partial)``: when shared state cannot be read the local
+    children are still returned, flagged partial, so the caller can say the
+    list may be incomplete. With no local child to return it raises instead,
+    because an empty list would read as "no children".
     """
     from atlas.application.chat.runs.context import get_current_run
     from atlas.application.chat.runs.shared_children import SharedStateUnavailable, shared_child_runs
@@ -1037,7 +1053,7 @@ async def list_child_runs(
     user_email = (context or {}).get("user_email")
     current = get_current_run()
     if not user_email or current is None:
-        return runs
+        return runs, False
     try:
         runs.extend(
             await shared_child_runs(
@@ -1048,11 +1064,13 @@ async def list_child_runs(
             )
         )
     except SharedStateUnavailable as error:
-        # A short list would read as "no such children".
-        raise LaunchRefused(
-            "The sub-conversations could not be listed right now. Try again.", code="unavailable"
-        ) from error
-    return runs
+        if not runs:
+            # A short list would read as "no such children".
+            raise LaunchRefused(
+                "The sub-conversations could not be listed right now. Try again.", code="unavailable"
+            ) from error
+        return runs, True
+    return runs, False
 
 
 _NOT_A_CHILD = "That run is not a sub-conversation of this conversation."
@@ -1238,7 +1256,14 @@ async def execute_observation_tool(
         arguments = {}
     try:
         if tool_name == GET_RUNS_TOOL_NAME:
-            payload = {"runs": await list_child_runs(context, (context or {}).get("factory"))}
+            runs, partial = await list_child_runs_partial(context, (context or {}).get("factory"))
+            payload = {"runs": runs}
+            if partial:
+                payload["partial"] = True
+                payload["warning"] = (
+                    "Shared state could not be read, so children launched elsewhere "
+                    "or earlier may be missing from this list. Try again."
+                )
         elif tool_name == RESULT_TOOL_NAME:
             payload = await get_child_result(
                 arguments.get("run_id"), context, (context or {}).get("factory")

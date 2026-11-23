@@ -44,7 +44,12 @@ TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 # recorded outcome, or its replica died before writing it). Reported as
 # ``failed``, the status an interrupted run gets, so it is never taken for a
 # success.
-UNRECORDED_OUTCOME_ERROR = "The run's outcome was not recorded."
+UNRECORDED_OUTCOME_ERROR = (
+    "How this run ended was not recorded, so it is reported as failed rather "
+    "than assumed successful. Its last saved reply, if any, is still returned."
+)
+# Upper bound on the stored children read for one parent conversation.
+MAX_STORED_CHILDREN = 5000
 
 
 def record_read_failure(exc: BaseException, op: str) -> None:
@@ -61,11 +66,19 @@ def record_read_failure(exc: BaseException, op: str) -> None:
         logger.debug("recording a shared read failure failed", exc_info=True)
 
 
-def outcome_from_metadata(metadata: Any) -> Optional[str]:
-    """The terminal status recorded on a stored child, or ``None``."""
+def outcome_from_metadata(metadata: Any, *, latest: bool = False) -> Optional[str]:
+    """The terminal status recorded on a stored child, or ``None``.
+
+    ``launch_status`` is how the launching run ended and answers for a lookup
+    by that run's id. ``latest_status`` is how the newest run of the
+    conversation ended (a follow-up included) and answers for the
+    sub-conversation itself.
+    """
     if not isinstance(metadata, dict):
         return None
-    status = metadata.get("launch_status")
+    status = metadata.get("latest_status") if latest else None
+    if status not in TERMINAL_STATUSES:
+        status = metadata.get("launch_status")
     return status if status in TERMINAL_STATUSES else None
 
 
@@ -130,7 +143,7 @@ def _public_run(view: Dict[str, Any]) -> Dict[str, Any]:
 def _public_stored(child: Dict[str, Any]) -> Dict[str, Any]:
     """A run listed from its stored conversation alone."""
     metadata = child.get("metadata")
-    outcome = outcome_from_metadata(metadata)
+    outcome = outcome_from_metadata(metadata, latest=True)
     depth = metadata.get("launch_depth") if isinstance(metadata, dict) else None
     return {
         "run_id": launch_run_id_from_metadata(metadata),
@@ -162,7 +175,7 @@ async def _stored_children(
     try:
         if child_ref:
             return await asyncio.to_thread(lister, parent_id, user_email, child_ref=child_ref)
-        return await asyncio.to_thread(lister, parent_id, user_email)
+        return await asyncio.to_thread(lister, parent_id, user_email, limit=MAX_STORED_CHILDREN)
     except Exception as exc:
         raise SharedStateUnavailable(type(exc).__name__) from exc
 
@@ -273,7 +286,7 @@ async def find_shared_child(
             "view": await _live_view(conversation_id, user_email),
             "conversation_id": conversation_id,
             "by_run_id": False,
-            "outcome": outcome_from_metadata(by_conversation.get("metadata")),
+            "outcome": outcome_from_metadata(by_conversation.get("metadata"), latest=True),
         }
     return None
 

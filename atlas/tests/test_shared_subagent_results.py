@@ -478,7 +478,7 @@ async def test_stored_child_reports_recorded_outcome(cluster, store):
     assert runs["r-failed"]["status"] == "failed" and runs["r-failed"]["depth"] == 2
     # No recorded outcome: never shown as a success, and its depth defaults to a direct child.
     assert runs["r-old"]["status"] == "failed"
-    assert runs["r-old"]["error"] == "The run's outcome was not recorded."
+    assert "not recorded" in runs["r-old"]["error"]
     assert runs["r-old"]["depth"] == 1
     assert (await get_child_result("r-failed", context, factory))["result"] is None
     assert (await get_child_result("r-failed", context, factory))["status"] == "failed"
@@ -618,3 +618,100 @@ async def test_follow_up_outcome_keeps_launch_outcome(repo):
     await _record_outcome(chat_service, follow_up, RunStatus.FAILED)
 
     assert repo.get_conversation("kid", USER)["metadata"]["launch_status"] == "completed"
+
+
+async def test_all_stored_children_are_listed(repo):
+    control_bus.set_run_control_bus(None)
+    reset_run_registry()
+    _save(repo, "parent-conv", USER)
+    for i in range(230):
+        _save(repo, f"kid-{i:03}", USER, {
+            "parent_conversation_id": "parent-conv", "launch_run_id": f"run-{i:03}",
+            "launch_status": "completed",
+        })
+    set_current_run("turn-2", "parent-conv")
+
+    runs = await list_child_runs({"user_email": USER}, SimpleNamespace(conversation_repository=repo))
+
+    assert len(runs) == 230
+    assert {r["run_id"] for r in runs} == {f"run-{i:03}" for i in range(230)}
+    result = await get_child_result("run-229", {"user_email": USER}, SimpleNamespace(conversation_repository=repo))
+    assert result["conversation_id"] == "kid-229" and result["result"] == "done"
+    clear_current_run()
+    reset_run_registry()
+
+
+def test_undecodable_metadata_is_not_rewritten(repo):
+    from atlas.modules.chat_history.models import ConversationRecord
+
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent"})
+    with repo._get_session() as session:
+        session.query(ConversationRecord).filter(ConversationRecord.id == "kid").update(
+            {"metadata_json": "{not json"}
+        )
+        session.commit()
+
+    assert repo.record_launch_outcome("kid", USER, "completed", 1, "run-1") is False
+
+    with repo._get_session() as session:
+        assert session.query(ConversationRecord).filter(
+            ConversationRecord.id == "kid"
+        ).one().metadata_json == "{not json"
+
+
+async def test_conversation_lookup_uses_latest_outcome(cluster, store):
+    store.add("failed-follow-up", USER, "parent-conv", launch_run_id="r1", status="completed")
+    store.rows["failed-follow-up"]["metadata"]["latest_status"] = "failed"
+    store.add("good-follow-up", USER, "parent-conv", launch_run_id="r2", status="failed")
+    store.rows["good-follow-up"]["metadata"]["latest_status"] = "completed"
+    context, factory = _on_replica_b(store)
+
+    assert (await get_child_result("failed-follow-up", context, factory))["status"] == "failed"
+    assert (await get_child_result("good-follow-up", context, factory))["status"] == "completed"
+    assert (await get_child_result("good-follow-up", context, factory))["result"] == "stored answer"
+    # The launch run id keeps the launch run's own outcome.
+    assert (await get_child_result("r1", context, factory))["status"] == "completed"
+    assert (await get_child_result("r2", context, factory))["status"] == "failed"
+    listed = {r["conversation_id"]: r["status"] for r in await list_child_runs(context, factory)}
+    assert listed == {"failed-follow-up": "failed", "good-follow-up": "completed"}
+
+
+async def test_follow_up_outcome_is_the_latest(repo):
+    from atlas.application.chat.runs.launcher import _record_outcome
+
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent", "launch_run_id": "run-1"})
+    chat_service = SimpleNamespace(conversation_repository=repo)
+    first = SimpleNamespace(conversation_id="kid", user_email=USER, depth=1, run_id="run-1")
+    follow_up = SimpleNamespace(conversation_id="kid", user_email=USER, depth=1, run_id="run-2")
+
+    await _record_outcome(chat_service, first, RunStatus.COMPLETED)
+    await _record_outcome(chat_service, follow_up, RunStatus.CANCELLED)
+
+    metadata = repo.get_conversation("kid", USER)["metadata"]
+    assert (metadata["launch_status"], metadata["latest_status"]) == ("completed", "cancelled")
+
+
+async def test_partial_listing_keeps_local_children(cluster, store):
+    from atlas.application.chat.runs.launcher import execute_observation_tool
+
+    _, b = cluster
+    registry = get_run_registry()
+    parent = registry.start(conversation_id="parent-conv", user_email=USER)
+    registry.start(
+        conversation_id="local-child", user_email=USER, parent_run_id=parent.run_id,
+        parent_conversation_id="parent-conv", depth=1,
+    )
+    set_current_run(parent.run_id, "parent-conv")
+
+    async def down(user_email):
+        raise ConnectionError("redis down")
+
+    b.bus.runs_for_user = down
+    context = {"user_email": USER, "factory": SimpleNamespace(conversation_repository=store)}
+
+    outcome = await execute_observation_tool(SimpleNamespace(id="1", arguments={}), context, "atlas_get_subagent_runs")
+
+    assert outcome.success
+    payload = json.loads(outcome.content)
+    assert payload["partial"] is True and "warning" in payload
+    assert [r["conversation_id"] for r in payload["runs"]] == ["local-child"]
