@@ -218,5 +218,10 @@ echo "=== Frontend library tests ==="
 tail -n 4 "$WORK/vitest.log"
 
 echo "=== Backend suite ==="
-DEBUG_MODE=true "$PROJECT_ROOT/test/run_tests.sh" backend
+# Run the suite the way CI does (pytest-xdist, -n 2; see .github/workflows/ci.yml
+# and docs/developer/test-isolation.md), through the wrapper's documented
+# PYTEST_ARGS. Serially, on a 2-CPU host, the suite before this PR already took
+# ~280 s of test/atlas_tests.sh's 300 s cap, and this PR's ~470 tests push it
+# past. The cap itself is unchanged. Set PYTEST_ARGS="" to run serially.
+PYTEST_ARGS="${PYTEST_ARGS--n 2 -p no:cacheprovider}" DEBUG_MODE=true "$PROJECT_ROOT/test/run_tests.sh" backend
 echo "PASSED: team prompt library validation"
