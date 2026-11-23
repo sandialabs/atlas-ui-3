@@ -65,6 +65,7 @@ export function useConversationRuns() {
 						...run,
 						...((!run.title && prior?.title) ? { title: prior.title } : {}),
 						launch_origin: origin,
+						...(prior?.run_id === run.run_id && prior.saved ? { saved: true } : {}),
 					}
 				}
 			}
@@ -110,7 +111,8 @@ export function useConversationRuns() {
 					// Its own turn was committed: completed, or its save was reported.
 					if (prior.run_id === data.run.run_id && (prior.status === 'completed' || prior.saved)) return prev
 					// A late fence for an older run must not replace a newer live run.
-					if (prior.run_id !== data.run.run_id && !TERMINAL_STATUSES.has(prior.status)) return prev
+					// Its own record, ended or not, is the newer fact.
+					if (prior.run_id !== data.run.run_id) return prev
 				}
 				const title = data.run.title || prior?.title || null
 				const parentConversationId = data.run.parent_conversation_id
@@ -137,12 +139,15 @@ export function useConversationRuns() {
 			// arrives later must not call it lost.
 			const savedRunId = data.type === 'run_saved' ? data.run_id : data.frame.run_id
 			const savedConversation = data.type === 'run_saved' ? data.conversation_id : data.frame.conversation_id
-			if (savedRunId && savedConversation) {
-				applyRuns(prev => (
-					prev[savedConversation]?.run_id === savedRunId
-						? { ...prev, [savedConversation]: { ...prev[savedConversation], saved: true } }
-						: prev
-				))
+			if (savedRunId) {
+				// Found by run id: a save that rebinds the thread names the new
+				// conversation, while the record is keyed by the old one.
+				applyRuns(prev => {
+					const key = prev[savedConversation]?.run_id === savedRunId
+						? savedConversation
+						: Object.keys(prev).find(k => prev[k]?.run_id === savedRunId)
+					return key ? { ...prev, [key]: { ...prev[key], saved: true } } : prev
+				})
 			}
 			if (data.type === 'background_activity') setBackgroundSaves(n => n + 1)
 			return

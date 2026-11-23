@@ -147,6 +147,25 @@ describe('interrupted run notice in the transcript', () => {
     expect(deps.setIsThinking).toHaveBeenCalledWith(false)
   })
 
+  it('rebuilds the current-run map from a snapshot, so an older late fence keeps Stop', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'runs_snapshot', runs: [run({ run_id: 'run-new', status: 'running', end_reason: null })] })
+    handler(statusFrame(run({ run_id: 'run-old' })))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+    expect(deps.setIsThinking).not.toHaveBeenCalled()
+  })
+
+  it('settles the latest run when a save rebinds the conversation to a new id', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'run_started', run_id: 'run-1', conversation_id: 'conv-1' })
+    handler(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' })))
+    // The rebinding save carries no run id and names the new conversation.
+    handler({ type: 'conversation_saved', conversation_id: 'conv-branch' })
+    handler(statusFrame(run()))
+    expect(deps.addMessage).not.toHaveBeenCalled()
+    expect(deps.onRunStatus).toHaveBeenCalledWith({ type: 'run_saved', run_id: 'run-1', conversation_id: 'conv-1' })
+  })
+
   it('does not treat an ended run as the current one', () => {
     const { deps, handler } = makeHandler()
     handler({ type: 'run_started', run_id: 'run-a', conversation_id: 'conv-1' })
@@ -238,6 +257,30 @@ describe('completed run later fenced', () => {
     act(() => result.current.handleRunFrame(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' }))))
     act(() => result.current.handleRunFrame(statusFrame(run())))
     expect(result.current.runsByConversation['conv-1'].end_reason).toBe('fenced')
+  })
+
+  it('ignores a late fence for an older run even when the newer run already ended', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ run_id: 'run-new', status: 'completed', end_reason: 'completed' }))))
+    act(() => result.current.handleRunFrame(statusFrame(run({ run_id: 'run-old' }))))
+    expect(result.current.runsByConversation['conv-1']).toMatchObject({ run_id: 'run-new', status: 'completed' })
+  })
+
+  it('keeps the saved marker through a reconnect snapshot', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' }))))
+    act(() => result.current.handleRunFrame({ type: 'run_saved', run_id: 'run-1', conversation_id: 'conv-1' }))
+    act(() => result.current.handleRunFrame({ type: 'runs_snapshot', runs: [run({ status: 'cancelled', end_reason: 'user_cancelled' })] }))
+    act(() => result.current.handleRunFrame(statusFrame(run())))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe('user_cancelled')
+  })
+
+  it('finds the run by id when a save names a rebound conversation', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' }))))
+    act(() => result.current.handleRunFrame({ type: 'run_saved', run_id: 'run-1', conversation_id: 'conv-branch' }))
+    act(() => result.current.handleRunFrame(statusFrame(run())))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe('user_cancelled')
   })
 
   it('ignores a late fence for an older run while a newer run is live', () => {
