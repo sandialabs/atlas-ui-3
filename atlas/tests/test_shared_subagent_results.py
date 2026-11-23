@@ -604,3 +604,17 @@ def test_listing_pages_past_two_hundred(repo):
 
     assert len(repo.list_child_conversations("parent", USER, limit=500)) == 230
     assert len(repo.list_child_conversations("parent", USER, limit=10)) == 10
+
+
+async def test_follow_up_outcome_keeps_launch_outcome(repo):
+    from atlas.application.chat.runs.launcher import _record_outcome
+
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent", "launch_run_id": "run-1"})
+    chat_service = SimpleNamespace(conversation_repository=repo)
+    first = SimpleNamespace(conversation_id="kid", user_email=USER, depth=1, run_id="run-1")
+    follow_up = SimpleNamespace(conversation_id="kid", user_email=USER, depth=1, run_id="run-2")
+
+    await _record_outcome(chat_service, first, RunStatus.COMPLETED)
+    await _record_outcome(chat_service, follow_up, RunStatus.FAILED)
+
+    assert repo.get_conversation("kid", USER)["metadata"]["launch_status"] == "completed"

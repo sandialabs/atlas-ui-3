@@ -452,7 +452,8 @@ class ConversationRepository:
             return children
 
     def record_launch_outcome(
-        self, conversation_id: str, user_email: str, status: str, depth: int
+        self, conversation_id: str, user_email: str, status: str, depth: int,
+        run_id: Optional[str] = None,
     ) -> bool:
         """Record how a launched run ended on its stored conversation (issue #1222).
 
@@ -471,6 +472,10 @@ class ConversationRepository:
             metadata = _load_metadata(row.metadata_json)
             if not isinstance(metadata, dict):
                 metadata = {}
+            # Only the launching run's outcome is kept: a later follow-up
+            # must not replace how the run the launch handed back ended.
+            if run_id and metadata.get("launch_run_id") not in (None, "", run_id):
+                return True
             metadata["launch_status"] = status
             metadata["launch_depth"] = max(1, int(depth or 1))
             row.metadata_json = json.dumps(metadata)

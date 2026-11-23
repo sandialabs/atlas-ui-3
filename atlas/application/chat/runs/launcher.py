@@ -610,7 +610,8 @@ async def _record_outcome(chat_service: Any, record: Any, outcome: RunStatus) ->
     try:
         await asyncio.shield(
             asyncio.to_thread(
-                recorder, record.conversation_id, record.user_email, outcome.value, record.depth
+                recorder, record.conversation_id, record.user_email, outcome.value, record.depth,
+                record.run_id,
             )
         )
     except BaseException as error:  # noqa: BLE001 - cancellation may be pending
