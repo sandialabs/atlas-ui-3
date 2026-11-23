@@ -207,7 +207,7 @@ class RedisIdempotencyStore:
 
     async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> bool:
         try:
-            await self._complete(
+            stored = await self._complete(
                 keys=self._keys(
                     slot.user_email, slot.key, slot.addressed_run_id, slot.conversation_id
                 ),
@@ -230,7 +230,8 @@ class RedisIdempotencyStore:
                 "Could not record the run handle for an idempotency key: %s", type(exc).__name__
             )
             return False
-        return True
+        # 0: another request holds the key now, so there is nothing to record.
+        return bool(stored)
 
     async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
         try:
@@ -270,25 +271,36 @@ class RedisIdempotencyStore:
             )
 
     async def find_follow_up(
-        self, run_id: str, key: str, conversation_id: Optional[str] = None
+        self,
+        run_id: str,
+        key: str,
+        conversation_id: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> Optional[Tuple[str, IdempotencyEntry]]:
+        wanted = normalize_user_email(owner) if owner else None
+        indexes = [self._addr_key(run_id, key)]
+        if conversation_id:
+            indexes.append(self._conv_key(conversation_id, key))
         try:
-            owner = await self._redis.client.get(self._addr_key(run_id, key))
-            if not owner and conversation_id:
-                owner = await self._redis.client.get(self._conv_key(conversation_id, key))
-            if not owner:
-                return None
-            owner = _text(owner)
-            fields = await self._redis.client.hgetall(self._record_key(owner, key))
+            # Each index is tried in turn: one that points at a record that is
+            # gone (or at another run's) must not hide the next.
+            for index in indexes:
+                holder = await self._redis.client.get(index)
+                if not holder:
+                    continue
+                holder = _text(holder)
+                if wanted is not None and holder != wanted:
+                    continue
+                fields = await self._redis.client.hgetall(self._record_key(holder, key))
+                if not fields:
+                    continue
+                entry = _entry_from_fields({_text(k): _text(v) for k, v in fields.items()})
+                if entry.addressed_run_id is None:
+                    continue
+                if entry.addressed_run_id == run_id or (
+                    conversation_id and entry.conversation_id == conversation_id
+                ):
+                    return holder, entry
         except Exception as exc:
             raise self._unavailable(exc) from exc
-        if not fields:
-            return None
-        entry = _entry_from_fields({_text(k): _text(v) for k, v in fields.items()})
-        if entry.addressed_run_id is None:
-            return None
-        if entry.addressed_run_id != run_id and not (
-            conversation_id and entry.conversation_id == conversation_id
-        ):
-            return None
-        return owner, entry
+        return None

@@ -260,3 +260,36 @@ async def test_renew_reports_extended_lost_and_unreachable(make_store, server):
     if isinstance(store, RedisIdempotencyStore):
         store._renew = _boom
         assert await store.renew(slot) is None
+
+
+async def test_redis_complete_reports_false_when_another_request_holds_the_key(server):
+    store = RedisIdempotencyStore(_manager(server))
+    stale, _ = await store.reserve(USER, "held", "fp")
+    await store._redis.client.delete(store._record_key(USER, "held"))
+    other, _ = await store.reserve(USER, "held", "fp")
+    assert other is not None
+    assert await store.complete(stale, {"run_id": "stale"}) is False
+    assert await store.complete(other, HANDLE) is True
+
+
+async def test_redis_find_follow_up_falls_back_to_the_conversation_index(server):
+    store = RedisIdempotencyStore(_manager(server))
+    slot, _ = await store.reserve(
+        USER, "fb", "fp", addressed_run_id="run-1", conversation_id="conv-1"
+    )
+    await store.complete(slot, HANDLE)
+    # The run index points at a record that is no longer there (another user's
+    # key, since expired): the conversation index must still be tried.
+    await store._redis.client.set(store._addr_key("run-2", "fb"), "gone@example.com")
+    found = await store.find_follow_up("run-2", "fb", "conv-1")
+    assert found is not None and found[1].handle == HANDLE
+
+
+async def test_find_follow_up_is_scoped_to_the_owner_when_given(make_store):
+    store = make_store()
+    slot, _ = await store.reserve(
+        USER, "own", "fp", addressed_run_id="run-1", conversation_id="conv-1"
+    )
+    await store.complete(slot, HANDLE)
+    assert await store.find_follow_up("run-2", "own", "conv-1", "alice@example.com") is not None
+    assert await store.find_follow_up("run-2", "own", "conv-1", "mallory@example.com") is None

@@ -89,6 +89,9 @@ class IdempotencySlot:
     fingerprint: str
     addressed_run_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    # time.monotonic() taken before the reserve call, so a reservation's
+    # expiry is never judged later than the store's own clock started.
+    reserved_at: float = 0.0
 
 
 class IdempotencyStore(Protocol):
@@ -129,10 +132,15 @@ class IdempotencyStore(Protocol):
         """Drop a reservation that never produced a run, so a retry can succeed."""
 
     async def find_follow_up(
-        self, run_id: str, key: str, conversation_id: Optional[str] = None
+        self,
+        run_id: str,
+        key: str,
+        conversation_id: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> Optional[Tuple[str, IdempotencyEntry]]:
         """The ``(owner, entry)`` of a follow-up that used ``key`` and addressed
-        ``run_id``, or any run of ``conversation_id`` when it is given."""
+        ``run_id``, or any run of ``conversation_id`` when it is given. With
+        ``owner`` only that user's record qualifies."""
 
 
 class InProcessIdempotencyStore:
@@ -219,16 +227,23 @@ class InProcessIdempotencyStore:
             self._drop(slot_key)
 
     async def find_follow_up(
-        self, run_id: str, key: str, conversation_id: Optional[str] = None
+        self,
+        run_id: str,
+        key: str,
+        conversation_id: Optional[str] = None,
+        owner: Optional[str] = None,
     ) -> Optional[Tuple[str, IdempotencyEntry]]:
         self._prune(time.time())
-        for (owner, entry_key), entry in self._entries.items():
+        wanted = normalize_user_email(owner) if owner else None
+        for (entry_owner, entry_key), entry in self._entries.items():
             if entry_key != key or entry.addressed_run_id is None:
+                continue
+            if wanted is not None and entry_owner != wanted:
                 continue
             if entry.addressed_run_id == run_id or (
                 conversation_id and entry.conversation_id == conversation_id
             ):
-                return owner, entry
+                return entry_owner, entry
         return None
 
 

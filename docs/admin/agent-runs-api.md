@@ -218,11 +218,13 @@ for up to those 2 minutes, during which a retry gets 409 `idempotency_in_progres
 without a key are unaffected. If Redis fails only after the run was admitted, the replica keeps
 retrying to record the run (for up to 2 minutes) so a later retry still replays it.
 If the reservation is lost while a request is still admitting (another request took the key, or
-Redis stayed unreachable for the 2 minute pending window), that request is aborted before the run
-is admitted and answers `503 unavailable`; nothing is launched. A retry of a follow-up replays on
+Redis stayed unreachable for the 2 minute pending window), that request is aborted and answers
+`503 unavailable` with nothing left running (a run admitted a moment before the loss is
+cancelled); the loss is counted as an `idempotency_reservation_lost` coordination event. A retry of a follow-up replays on
 any replica, naming either the run it addressed or any other run of that conversation (the
 conversation is read from the run's shared record, kept 5 minutes after the run ends; after that,
-only the originally addressed run id replays). The shared keys have no entry cap: each is one
+only the originally addressed run id replays; if that record cannot be read the retry is refused
+with `503 unavailable` rather than `404`). The shared keys have no entry cap: each is one
 small hash, kept at most 24 hours, and only the one trusted service holding the master key can
 create them, so memory is bounded by its request rate times 24 hours. Without Redis the keys live in the
 memory of the replica that accepted them and are lost on restart.

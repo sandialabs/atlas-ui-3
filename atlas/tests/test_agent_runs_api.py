@@ -663,6 +663,126 @@ async def test_a_renewal_that_hangs_cannot_outlive_the_reservation(
     assert len(get_run_registry().all_records()) == 0
 
 
+async def test_a_reservation_that_expired_during_reserve_aborts_the_launch(
+    factory, shared_store, monkeypatch
+):
+    """The expiry clock starts before the reserve call, not after it returns."""
+    original_reserve = shared_store.reserve
+
+    async def slow_reserve(*args, **kwargs):
+        result = await original_reserve(*args, **kwargs)
+        await asyncio.sleep(0.2)  # the answer arrives after the pending TTL
+        return result
+
+    shared_store.reserve = slow_reserve
+
+    async def unreachable(slot):
+        return None
+
+    shared_store.renew = unreachable
+    response = await _stalled_admission(factory, monkeypatch, unreachable)
+    assert response.status_code == 503
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_a_run_admitted_just_before_the_loss_is_cancelled(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+
+    async def lost(slot):
+        return False
+
+    shared_store.renew = lost
+
+    async def slow_publish(run_id):
+        await asyncio.sleep(5)  # the run exists; the key is lost meanwhile
+
+    monkeypatch.setattr(f"{module}.publish_run_now", slow_publish)
+    body = {**LAUNCH, "idempotency_key": "lost-2"}
+    async with _client(factory) as client:
+        response = await asyncio.wait_for(
+            client.post("/api/agent-runs", json=body, headers=AUTH), timeout=3
+        )
+        retry_slot, _ = await shared_store.reserve(USER, "lost-2", "other-fingerprint")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    records = get_run_registry().all_records()
+    assert all(record.status is RunStatus.CANCELLED for record in records)
+    assert retry_slot is not None  # the lapsed key was released, not left holding a handle
+
+
+async def test_losing_the_reservation_is_recorded_as_a_coordination_event(
+    factory, shared_store, monkeypatch
+):
+    from atlas.core.coordination_metrics import coordination_metrics
+
+    async def lost(slot):
+        return False
+
+    shared_store.renew = lost
+    before = coordination_metrics().counter(
+        "atlas_coordination_events_total", event="idempotency_reservation_lost"
+    )
+    response = await _stalled_admission(factory, monkeypatch, lost)
+    assert response.status_code == 503
+    assert (
+        coordination_metrics().counter(
+            "atlas_coordination_events_total", event="idempotency_reservation_lost"
+        )
+        == before + 1
+    )
+
+
+async def test_follow_up_replay_is_unavailable_when_the_shared_record_is_unreadable(
+    factory, shared_store
+):
+    from types import SimpleNamespace as NS
+
+    from atlas.application.chat.runs.leases import set_lease_guard
+
+    async def broken(run_id):
+        raise RuntimeError("redis down")
+
+    set_lease_guard(NS(read_record=broken))
+    try:
+        async with _client(factory) as client:
+            response = await client.post(
+                "/api/agent-runs/not-here/follow-up",
+                json={"message": "hi", "idempotency_key": "unread-1"},
+                headers=AUTH,
+            )
+    finally:
+        set_lease_guard(None)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+
+
+async def test_the_handle_retry_stops_when_the_key_is_no_longer_ours(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
+    attempts = []
+
+    async def refused(slot, handle):
+        attempts.append(1)
+        return False
+
+    async def gone(slot):
+        return False
+
+    shared_store.complete = refused
+    shared_store.renew = gone
+    body = {**LAUNCH, "idempotency_key": "gone-1"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        await asyncio.sleep(0.2)
+    assert response.status_code == 202
+    assert len(attempts) == 1  # one write, then renew said the key is gone: no more retries
+
+
 async def test_follow_up_replay_names_a_sibling_run_on_another_replica(
     factory, shared_store
 ):
@@ -712,14 +832,35 @@ async def test_shared_store_concurrent_requests_launch_once(factory, shared_stor
     assert [r.status_code for r in responses].count(202) == 1
 
 
-async def test_shared_store_failed_launch_releases_the_key(factory, shared_store):
+async def test_shared_store_failed_launch_releases_the_key(factory, shared_store, monkeypatch):
+    """The launch fails after the key is reserved; the key must be free again."""
+    from atlas.application.chat.runs.external_runs import _resolve_api_model as real_resolve
+    from atlas.application.chat.runs.launcher import LaunchRefused
+
+    reserved = []
+    original_reserve = shared_store.reserve
+
+    async def spying_reserve(*args, **kwargs):
+        result = await original_reserve(*args, **kwargs)
+        reserved.append(result[0] is not None)
+        return result
+
+    shared_store.reserve = spying_reserve
+    calls = []
+
+    async def fails_once(config_manager, model, user_email):
+        calls.append(1)
+        if len(calls) == 1:
+            raise LaunchRefused("model gone", code="model_not_available")
+        await real_resolve(config_manager, model, user_email)
+
+    monkeypatch.setattr("atlas.application.chat.runs.external_runs._resolve_api_model", fails_once)
     body = {**LAUNCH, "idempotency_key": "xrep-3"}
     async with _client(factory) as client:
-        factory.conversation_repository = None
         refused = await client.post("/api/agent-runs", json=body, headers=AUTH)
-        factory.conversation_repository = object()
         retried = await client.post("/api/agent-runs", json=body, headers=AUTH)
-    assert refused.status_code == 503
+    assert reserved == [True, True]  # the failure came after a granted reservation
+    assert refused.status_code == 422
     assert retried.status_code == 202
 
 
