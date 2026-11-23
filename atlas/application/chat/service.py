@@ -17,7 +17,11 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
-from atlas.domain.conversation_lineage import parent_conversation_id_from_metadata
+from atlas.domain.conversation_lineage import (
+    LAUNCH_RUN_METADATA_KEY,
+    launch_run_id_from_metadata,
+    parent_conversation_id_from_metadata,
+)
 from atlas.domain.conversation_origin import (
     ORIGIN_METADATA_KEY,
     origin_for_run_source,
@@ -583,6 +587,7 @@ class ChatService:
         steering: Optional[Any] = None,
         parent_conversation_id: Optional[str] = None,
         launch_origin: Optional[str] = None,
+        launch_run_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -746,6 +751,14 @@ class ChatService:
         launch_origin = origin_for_run_source(launch_origin)
         if launch_origin and not session.context.get(ORIGIN_METADATA_KEY):
             session.context[ORIGIN_METADATA_KEY] = launch_origin
+
+        # The run that launched this conversation (issue #1222), recorded on
+        # the first save so a later turn on another replica, or after the run
+        # records are gone, can still find the conversation by the run id the
+        # launch handed back. Applied like the parent link: a stored record's
+        # value wins, so a follow-up never replaces it.
+        if launch_run_id and not session.context.get(LAUNCH_RUN_METADATA_KEY):
+            session.context[LAUNCH_RUN_METADATA_KEY] = str(launch_run_id)
 
         # The active workspace (issue #829): the frontend sends the workspace
         # id whose selections are loaded for this turn so the conversation can
@@ -1884,6 +1897,7 @@ class ChatService:
             # in place, a later saving turn would create a new conversation
             # marked as launched by the API.
             session.context.pop(ORIGIN_METADATA_KEY, None)
+            session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             return 0
 
         # The caller only gets here when the session's bound conversation
@@ -1903,6 +1917,8 @@ class ChatService:
         # And for how the conversation was launched (issue #1187).
         previous_origin = session.context.get(ORIGIN_METADATA_KEY, UNSET)
         session.context[ORIGIN_METADATA_KEY] = None
+        previous_launch_run = session.context.get(LAUNCH_RUN_METADATA_KEY, UNSET)
+        session.context[LAUNCH_RUN_METADATA_KEY] = None
 
         try:
             # Off the event loop: get_conversation issues several synchronous
@@ -1957,6 +1973,13 @@ class ChatService:
                 session.context[ORIGIN_METADATA_KEY] = previous_origin
             else:
                 session.context.pop(ORIGIN_METADATA_KEY, None)
+            if (
+                previous_launch_run is not UNSET
+                and previous_conversation_id == conversation_id
+            ):
+                session.context[LAUNCH_RUN_METADATA_KEY] = previous_launch_run
+            else:
+                session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
@@ -1993,6 +2016,7 @@ class ChatService:
         # Likewise the recorded launch origin, so the live view of a turn on
         # an API conversation reports the same origin as its stored record.
         session.context[ORIGIN_METADATA_KEY] = origin_from_metadata(conv_metadata)
+        session.context[LAUNCH_RUN_METADATA_KEY] = launch_run_id_from_metadata(conv_metadata)
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
         # The history the session holds belongs to the previous conversation,
@@ -2098,6 +2122,7 @@ class ChatService:
             # ... which the user started, whatever launched the conversation
             # it branched from (issue #1187).
             session.context.pop(ORIGIN_METADATA_KEY, None)
+            session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             # The segment is a new conversation, so it gets a title from its
             # own first prompt rather than inheriting the original's.
             session.context.pop("_restored", None)
@@ -2132,6 +2157,10 @@ class ChatService:
         launch_origin = origin_for_run_source(session.context.get(ORIGIN_METADATA_KEY))
         if launch_origin:
             metadata[ORIGIN_METADATA_KEY] = launch_origin
+        # The run that launched a sub-conversation (issue #1222).
+        launch_run_id = session.context.get(LAUNCH_RUN_METADATA_KEY)
+        if isinstance(launch_run_id, str) and launch_run_id:
+            metadata[LAUNCH_RUN_METADATA_KEY] = launch_run_id
         # Server-managed classification record (issue #1042), from the binding
         # the turn gate checked -- never from a client field. Legacy history
         # is written without one; the repository refuses any change.

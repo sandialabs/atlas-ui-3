@@ -428,3 +428,64 @@ async def test_hydration_clears_a_previous_conversations_parent(chat_service, re
 
     # Leaving the stale value would stamp the wrong parent onto a later save.
     assert session.context["parent_conversation_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_first_save_records_the_launch_run_id(chat_service, repo):
+    """The run id the launch handed back is stored with the child (issue #1222)."""
+    from unittest.mock import AsyncMock, patch
+
+    from atlas.domain.messages.models import Message, MessageRole
+
+    _save(repo, "parent-conv")
+    session_id = uuid4()
+
+    async def _execute(**_ignored):
+        session = await chat_service.session_repository.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content="do work"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
+        return {"type": "done"}
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(chat_service, "_get_orchestrator", return_value=orchestrator):
+        await chat_service.handle_chat_message(
+            session_id=session_id, content="do work", model="gpt-4", user_email=USER,
+            conversation_id="child-conv", parent_conversation_id="parent-conv",
+            launch_run_id="run-1",
+        )
+
+    assert repo.get_conversation("child-conv", USER)["metadata"]["launch_run_id"] == "run-1"
+    assert [c["id"] for c in repo.list_child_conversations("parent-conv", USER)] == ["child-conv"]
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_keeps_the_first_run_id(chat_service, repo):
+    from unittest.mock import AsyncMock, patch
+
+    from atlas.domain.messages.models import Message, MessageRole
+
+    _save(repo, "parent-conv")
+    repo.save_conversation(
+        "child-conv", USER, "t", "m",
+        [{"role": "user", "content": "x", "message_type": "chat"},
+         {"role": "assistant", "content": "y", "message_type": "chat"}],
+        metadata={"parent_conversation_id": "parent-conv", "launch_run_id": "run-1"},
+    )
+    session_id = uuid4()
+
+    async def _execute(**_ignored):
+        session = await chat_service.session_repository.get(session_id)
+        session.history.add_message(Message(role=MessageRole.USER, content="more"))
+        session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
+        return {"type": "done"}
+
+    orchestrator = MagicMock()
+    orchestrator.execute = AsyncMock(side_effect=_execute)
+    with patch.object(chat_service, "_get_orchestrator", return_value=orchestrator):
+        await chat_service.handle_chat_message(
+            session_id=session_id, content="more", model="gpt-4", user_email=USER,
+            conversation_id="child-conv", launch_run_id="run-2",
+        )
+
+    assert repo.get_conversation("child-conv", USER)["metadata"]["launch_run_id"] == "run-1"

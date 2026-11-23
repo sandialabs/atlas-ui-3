@@ -30,8 +30,14 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional
 
 PARENT_CONVERSATION_METADATA_KEY = "parent_conversation_id"
+# The run that launched the child (issue #1222): the id the launch handed back
+# to the model, kept so the child can still be found by it once the run
+# records are gone or the next turn runs on another replica.
+LAUNCH_RUN_METADATA_KEY = "launch_run_id"
 
 __all__ = [
+    "LAUNCH_RUN_METADATA_KEY",
+    "launch_run_id_from_metadata",
     "PARENT_CONVERSATION_METADATA_KEY",
     "lineage_fields",
     "parent_conversation_id_from_metadata",
@@ -52,6 +58,16 @@ def parent_conversation_id_from_metadata(metadata: Any) -> Optional[str]:
         return None
     value = value.strip()
     return value or None
+
+
+def launch_run_id_from_metadata(metadata: Any) -> Optional[str]:
+    """The recorded launching run id, or ``None`` (legacy or malformed)."""
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get(LAUNCH_RUN_METADATA_KEY)
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
 
 
 def lineage_fields(metadata: Any, *, visible_parent_id: Optional[str]) -> Dict[str, Any]:

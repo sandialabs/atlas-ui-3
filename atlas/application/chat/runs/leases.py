@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from atlas.application.chat.runs.registry import RunRecord, RunRegistry
+from atlas.application.chat.runs.run_directory import lineage_from_record
 from atlas.core.coordination_metrics import EndReason
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,10 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     # Known from admission, so present before the owner's first snapshot.
     view["parent_run_id"] = view.get("parent_run_id") or raw.get("parent_run_id") or None
     view["previous_run_id"] = view.get("previous_run_id") or raw.get("follow_up_of") or None
+    # Also from admission: what a replica needs to list a run it does not own.
+    for key, value in lineage_from_record(raw).items():
+        if key != "parent_run_id":
+            view[key] = value
     view.update({
         "run_id": raw.get("run_id"),
         "conversation_id": raw.get("conversation_id"),

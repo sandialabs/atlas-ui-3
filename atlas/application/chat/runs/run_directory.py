@@ -16,6 +16,7 @@ parses the hash itself.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Optional
 
 from atlas.core.user_identity import normalize_user_email
@@ -29,6 +30,43 @@ def _text(value: Any) -> Optional[str]:
     if isinstance(value, (bytes, bytearray)):
         return value.decode()
     return str(value)
+
+
+def lineage_from_record(record: Optional[Dict[str, str]]) -> Dict[str, Any]:
+    """The lineage fields of a run record, for a replica that does not own the run.
+
+    Admission writes them as fields of the record. A record claimed by an
+    older release has none of them, but the owner's mirrored snapshot (a JSON
+    field of the same record) carries the same values, so that is read next.
+    """
+    record = record or {}
+    snapshot: Dict[str, Any] = {}
+    raw_snapshot = record.get("snapshot")
+    if raw_snapshot:
+        try:
+            parsed = json.loads(raw_snapshot)
+            if isinstance(parsed, dict):
+                snapshot = parsed
+        except ValueError:
+            snapshot = {}
+
+    def pick(key: str) -> Any:
+        value = record.get(key)
+        if value in (None, ""):
+            value = snapshot.get(key)
+        return None if value in (None, "") else value
+
+    try:
+        depth = int(record.get("depth") or snapshot.get("depth") or 0)
+    except (TypeError, ValueError):
+        depth = 0
+    return {
+        "parent_run_id": pick("parent_run_id"),
+        "parent_conversation_id": pick("parent_conversation_id"),
+        "title": pick("title"),
+        "launch_origin": pick("launch_origin"),
+        "depth": depth,
+    }
 
 
 def owner_entry(record: Optional[Dict[str, str]], *, include_terminal: bool = False) -> Optional[Dict[str, Any]]:
@@ -60,6 +98,7 @@ def owner_entry(record: Optional[Dict[str, str]], *, include_terminal: bool = Fa
         "source": record.get("source") or "",
         "parent_run_id": record.get("parent_run_id") or "",
         "follow_up_of": record.get("follow_up_of") or "",
+        "parent_conversation_id": lineage_from_record(record)["parent_conversation_id"] or "",
         "terminal": terminal,
     }
 

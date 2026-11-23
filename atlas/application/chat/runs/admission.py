@@ -36,6 +36,7 @@ from atlas.application.chat.runs.coordination import (
     release_claim_soon,
 )
 from atlas.application.chat.runs.registry import RunRecord, RunStatus, get_run_registry
+from atlas.domain.conversation_origin import origin_for_run_source
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,8 @@ async def admit_run(
     ``source`` (the launch source) and ``follow_up_of`` (the run an API
     follow-up continues) go to the shared run record with the claim, beside
     ``parent_run_id``, so any replica can route by them from the first moment.
+    The lineage (parent conversation, title, launch origin, depth) goes with
+    them, so a replica that lists the run keeps its place in the tree.
     """
     registry = get_run_registry()
     if _admission_closed:
@@ -122,6 +125,12 @@ async def admit_run(
         source=source,
         parent_run_id=start_kwargs.get("parent_run_id"),
         follow_up_of=follow_up_of,
+        parent_conversation_id=start_kwargs.get("parent_conversation_id"),
+        # An off-record run has no title: it is the prompt, and an incognito
+        # turn shares nothing but its claim.
+        title=None if start_kwargs.get("off_record") else start_kwargs.get("title"),
+        launch_origin=origin_for_run_source(source),
+        depth=start_kwargs.get("depth") or 0,
     )
     try:
         # Synchronous from here: the precheck and the insert cannot be

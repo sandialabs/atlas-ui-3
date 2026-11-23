@@ -639,6 +639,9 @@ async def _run_child(
             # Likewise how the conversation was launched (issue #1187): set
             # for an Agent Runs API run, nothing for a sub-conversation.
             launch_origin=origin_for_run_source(getattr(record, "source", "")),
+            # The run id the launch handed back, stored with the child so it
+            # stays findable from any replica (issue #1222).
+            launch_run_id=record.run_id,
         )
         if isinstance(response, dict) and response.get("type") == "error":
             outcome = RunStatus.FAILED
@@ -986,7 +989,109 @@ def _scoped_children(context: Optional[Dict[str, Any]]) -> List[Any]:
 
 
 def get_child_runs(context: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The children this process's registry holds for the caller's conversation."""
     return [record.to_public_dict() for record in _scoped_children(context)]
+
+
+async def list_child_runs(
+    context: Optional[Dict[str, Any]], factory: Any = None
+) -> List[Dict[str, Any]]:
+    """``atlas_get_subagent_runs``: local children, then those only shared state knows.
+
+    Another replica's live children and children whose run records are gone
+    come from the shared run records and the stored conversations
+    (``shared_children.py``), under the same user-and-conversation scope.
+    """
+    from atlas.application.chat.runs.context import get_current_run
+    from atlas.application.chat.runs.shared_children import shared_child_runs
+
+    local = _scoped_children(context)
+    runs = [record.to_public_dict() for record in local]
+    user_email = (context or {}).get("user_email")
+    current = get_current_run()
+    if not user_email or current is None:
+        return runs
+    runs.extend(
+        await shared_child_runs(
+            user_email=user_email,
+            parent_conversation_id=current.conversation_id,
+            known_conversation_ids={record.conversation_id for record in local},
+            factory=factory,
+        )
+    )
+    return runs
+
+
+_NOT_A_CHILD = "That run is not a sub-conversation of this conversation."
+
+
+async def _shared_child_result(
+    run_id: str, context: Optional[Dict[str, Any]], factory: Any
+) -> Dict[str, Any]:
+    """The result of a child the local registry does not hold (issue #1222)."""
+    from atlas.application.chat.runs.context import get_current_run
+    from atlas.application.chat.runs.shared_children import (
+        STORED_STATUS,
+        SharedStateUnavailable,
+        find_shared_child,
+        read_stored_reply,
+    )
+
+    user_email = (context or {}).get("user_email")
+    current = get_current_run()
+    if not user_email or current is None:
+        raise LaunchRefused(_NOT_A_CHILD)
+    try:
+        found = await find_shared_child(
+            run_id,
+            user_email=user_email,
+            parent_conversation_id=current.conversation_id,
+            factory=factory,
+        )
+    except SharedStateUnavailable as error:
+        raise LaunchRefused(
+            "The sub-conversation could not be read right now. Try again.", code="unavailable"
+        ) from error
+    if found is None:
+        raise LaunchRefused(_NOT_A_CHILD)
+
+    view = found["view"]
+    conversation_id = found["conversation_id"]
+    status = (view or {}).get("status") or STORED_STATUS
+    terminal = view is None or status in ("completed", "failed", "cancelled")
+    result: Dict[str, Any] = {
+        "run_id": (view or {}).get("run_id") or run_id,
+        "conversation_id": conversation_id,
+        "status": status,
+        "error": (view or {}).get("error"),
+        "waiting_on": (view or {}).get("waiting_on"),
+        "result": None,
+        "result_status": "unavailable" if terminal else "pending",
+    }
+    if not terminal or status in ("failed", "cancelled"):
+        return result
+
+    if view is not None:
+        # A launched run's reply is mirrored into its shared record when it
+        # completes; nothing else can say which run a transcript line answers.
+        reply = view.get("result")
+        if reply is None:
+            result["result_error"] = "This run's reply could not be captured."
+    else:
+        try:
+            reply = await read_stored_reply(conversation_id, user_email, factory)
+        except SharedStateUnavailable as error:
+            logger.warning("Could not load result for run %s: %s", run_id, error)
+            result["result_status"] = "unreadable"
+            result["result_error"] = "The child result could not be read."
+            return result
+    if reply is None:
+        return result
+    if reply == "":
+        result["result_status"] = "empty"
+    else:
+        _set_result(result, reply)
+    return result
 
 
 async def get_child_result(
@@ -997,7 +1102,7 @@ async def get_child_result(
     children = {record.run_id: record for record in _scoped_children(context)}
     record = children.get(run_id)
     if record is None:
-        raise LaunchRefused("That run is not a sub-conversation of this conversation.")
+        return await _shared_child_result(run_id, context, factory)
 
     result: Dict[str, Any] = {
         "run_id": record.run_id,
@@ -1091,7 +1196,7 @@ async def execute_observation_tool(
         arguments = {}
     try:
         if tool_name == GET_RUNS_TOOL_NAME:
-            payload = {"runs": get_child_runs(context)}
+            payload = {"runs": await list_child_runs(context)}
         elif tool_name == RESULT_TOOL_NAME:
             payload = await get_child_result(arguments.get("run_id"), context)
         else:

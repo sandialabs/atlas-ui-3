@@ -128,6 +128,7 @@ Run record fields:
 | `source` | The run's launch source (`api` for agent-runs API runs, empty otherwise), written at claim. The snapshot write repeats it |
 | `parent_run_id` | The run that launched this one (empty for a top-level run), written at claim; the scripts walk it to keep a finished parent readable while a descendant is live |
 | `follow_up_of` | The run an API follow-up continues (empty otherwise), written at claim |
+| `parent_conversation_id`, `title`, `launch_origin`, `depth` | The run's place in the conversation tree (issue #1222), written at claim: the conversation that launched it (empty for a top-level run), the prompt that started it (first 200 characters; never written for an off-record run), the published launch origin (`agent_runs_api` or empty) and its launch depth. A replica that lists a run it does not own copies them onto the listed run, so an unsaved child still nests under its parent. Records claimed before this field existed fall back to the same values in `snapshot` |
 | `error` | The run's error, if any |
 | `interrupted` | `1` once an orphan sweep took the run over (see below) |
 | `interrupted_by` | Replica id that took it over |
@@ -331,3 +332,33 @@ routing stop/steer/approval to the owner are all covered.
   PostgreSQL (`bash test/multireplica_tests.sh`), including SIGKILL and
   SIGSTOP of the owner with the side-effect counter proving nothing was
   replayed.
+
+## Reading sub-conversations from any replica
+
+Issue #1222. `atlas_get_subagent_runs` and `atlas_get_subagent_result` look in
+the local run registry first, then in shared state
+(`atlas/application/chat/runs/shared_children.py`), so a parent turn that lands
+on a replica other than the launching one, or after the local retention window
+or a restart, still finds its children:
+
+1. **Live children, any replica.** The user's live runs (`<p>:run-user:<user>`)
+   whose `parent_conversation_id` is the caller's conversation. Status, waiting
+   state and error come from the run record and its mirrored `snapshot`.
+2. **Finished children, within retention.** The run record is read by run id;
+   a completed run's reply is the `result` in its snapshot.
+3. **Finished children, after retention.** The stored child conversations: the
+   metadata the server writes on the child's first save holds
+   `parent_conversation_id` and `launch_run_id` (the run id the launch
+   returned). `ConversationRepository.list_child_conversations` finds them by
+   parent and user, and the reply is the conversation's last assistant message.
+   A child found only this way reports status `finished`: how its last run
+   ended is not stored. A child stored before `launch_run_id` existed is
+   addressed by its conversation id.
+
+Authorization is the registry path's: a caller sees only children of its own
+conversation that its own user owns, and an unknown run, another user's run and
+a run of another conversation all get the same "not a sub-conversation" answer.
+An unreadable store is reported as unavailable, never as "not a sub-conversation".
+
+`atlas_follow_up_subagent` is unchanged and still needs the launching replica's
+registry: continuing a child runs on the owning replica.

@@ -371,6 +371,54 @@ class ConversationRepository:
 
             return results
 
+    def list_child_conversations(
+        self,
+        parent_conversation_id: str,
+        user_email: str,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Stored sub-conversations launched from one conversation (issue #1222).
+
+        Scoped to ``user_email``: another user's conversation is never
+        returned, whatever its metadata says. The parent link lives in the
+        child's metadata blob, so the query narrows by a text match on the id
+        and the metadata is then parsed to confirm the link. Rows carry no
+        messages; read one with :meth:`get_conversation`. Oldest first, so the
+        order matches the order the children were launched in.
+        """
+        user_email = normalize_user_email(user_email)
+        if not parent_conversation_id:
+            return []
+        with self._get_session() as session:
+            rows = (
+                session.query(ConversationRecord)
+                .filter(
+                    ConversationRecord.user_email == user_email,
+                    ConversationRecord.metadata_json.contains(
+                        parent_conversation_id, autoescape=True
+                    ),
+                )
+                .order_by(ConversationRecord.created_at, ConversationRecord.id)
+                .limit(max(1, int(limit)))
+                .all()
+            )
+            children = []
+            for row in rows:
+                metadata = _load_metadata(row.metadata_json)
+                if parent_conversation_id_from_metadata(metadata) != parent_conversation_id:
+                    continue
+                if row.id == parent_conversation_id:
+                    continue
+                children.append({
+                    "id": row.id,
+                    "title": row.title,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    "metadata": metadata,
+                    **origin_fields(metadata),
+                })
+            return children
+
     def get_conversation(self, conversation_id: str, user_email: str) -> Optional[Dict[str, Any]]:
         """Get a full conversation with all messages.
 

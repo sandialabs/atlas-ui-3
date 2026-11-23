@@ -558,6 +558,12 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
     return merged
 
 
+# Run-record fields a replica copies onto a run it lists but does not own.
+_LINEAGE_FIELDS = (
+    "parent_run_id", "parent_conversation_id", "title", "launch_origin", "depth",
+)
+
+
 def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict]:
     """Overlay shared projections onto the process-local run list.
 
@@ -598,6 +604,10 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
                 "activity": projection.get("activity"),
                 "execution_revision": projection.get("revision"),
                 "detached": True,
+                # Lineage from the shared run record (issue #1222), so an
+                # unsaved child another replica owns still nests under its
+                # parent instead of showing as a top-level conversation.
+                **{key: projection[key] for key in _LINEAGE_FIELDS if key in projection},
             })
             active_conversations.add(conversation_id)
             continue
@@ -1123,10 +1133,45 @@ async def forget_conversations(user_email: str, conversation_ids: Optional[List[
 
 async def list_execution_snapshots(user_email: str) -> List[dict]:
     try:
-        return await get_execution_store().list_for_user(user_email)
+        projections = await get_execution_store().list_for_user(user_email)
     except Exception:
         logger.warning("execution projection list failed", exc_info=True)
         return []
+    return await _attach_run_lineage(projections, user_email)
+
+
+async def _attach_run_lineage(projections: List[dict], user_email: str) -> List[dict]:
+    """Add the shared run record's lineage to each open projection.
+
+    A projection says what a run is doing, not where it sits in the
+    conversation tree; the run record admission wrote does. Only open runs
+    need it (a finished one is not listed again), and a record that cannot be
+    read leaves the projection as it was.
+    """
+    from atlas.application.chat.runs.control_bus import get_run_control_bus
+    from atlas.application.chat.runs.run_directory import lineage_from_record
+
+    bus = get_run_control_bus()
+    if bus is None:
+        return projections
+    owner = normalize_user_email(user_email)
+    enriched = []
+    for projection in projections:
+        run_id = projection.get("run_id")
+        if not run_id or projection.get("status") in _TERMINAL_RUN:
+            enriched.append(projection)
+            continue
+        try:
+            record = await bus.directory.record(str(run_id))
+        except Exception:
+            logger.warning("run lineage read failed", exc_info=True)
+            enriched.append(projection)
+            continue
+        if not record or record.get("user_email") != owner:
+            enriched.append(projection)
+            continue
+        enriched.append({**projection, **lineage_from_record(record)})
+    return enriched
 
 
 async def wait_for_shared_approval(request, timeout: Optional[float], request_key: Optional[str]) -> dict:
