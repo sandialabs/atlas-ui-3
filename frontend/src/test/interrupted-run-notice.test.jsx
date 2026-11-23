@@ -155,15 +155,20 @@ describe('interrupted run notice in the transcript', () => {
     expect(deps.setIsThinking).not.toHaveBeenCalled()
   })
 
-  it('settles the latest run when a save rebinds the conversation to a new id', () => {
+  it('settles the run a rebinding save names, and tells the tracker', () => {
     const { deps, handler } = makeHandler()
-    handler({ type: 'run_started', run_id: 'run-1', conversation_id: 'conv-1' })
     handler(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' })))
-    // The rebinding save carries no run id and names the new conversation.
-    handler({ type: 'conversation_saved', conversation_id: 'conv-branch' })
+    handler({ type: 'conversation_saved', conversation_id: 'conv-branch', saved_run_id: 'run-1', saved_from_conversation_id: 'conv-1' })
     handler(statusFrame(run()))
     expect(deps.addMessage).not.toHaveBeenCalled()
     expect(deps.onRunStatus).toHaveBeenCalledWith({ type: 'run_saved', run_id: 'run-1', conversation_id: 'conv-1' })
+  })
+
+  it('does not settle the visible run for a save from a background conversation', () => {
+    const { deps, handler } = makeHandler('conv-1')
+    handler({ type: 'conversation_saved', conversation_id: 'bg-branch', saved_run_id: 'bg-run', saved_from_conversation_id: 'bg-conv' })
+    handler(statusFrame(run({ run_id: 'visible-run' })))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
   })
 
   it('does not treat an ended run as the current one', () => {

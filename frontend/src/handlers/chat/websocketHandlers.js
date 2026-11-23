@@ -271,19 +271,10 @@ const liveRunByConversation = new Map()
 export function resetInterruptedRunNotices() {
   announcedRuns.clear()
   liveRunByConversation.clear()
-  lastRunByConversation.clear()
 }
-
-// The newest run of each conversation in any state: a save that moves the
-// thread to a new conversation id carries no run id (the client must adopt
-// the id from an untagged frame), so it settles the visible conversation's
-// latest run instead.
-const lastRunByConversation = new Map()
 
 function noteLiveRun(type, run) {
   if (!run?.conversation_id || !run.run_id) return
-  if (lastRunByConversation.size >= MAX_ANNOUNCED_RUNS) lastRunByConversation.clear()
-  lastRunByConversation.set(run.conversation_id, run.run_id)
   const live = type === 'run_started' || (run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled')
   if (!live) {
     // An ended run is no longer the conversation's current one.
@@ -742,12 +733,13 @@ export function createWebSocketHandler(deps) {
       // A save seen off-screen still settles its run (issue #1218): switching
       // back before a later fence must not show the turn as lost.
       if (data.type === 'conversation_saved') {
-        const savedRunId = data.run_id
-          || (typeof getVisibleConversationId === 'function' ? lastRunByConversation.get(getVisibleConversationId()) : null)
+        // A save that rebinds the thread to a new conversation id is untagged
+        // (the client must adopt the id) and names its run separately.
+        const savedRunId = data.run_id || data.saved_run_id
         if (savedRunId) {
           settleRun(savedRunId)
           if (!data.run_id && typeof onRunStatus === 'function') {
-            onRunStatus({ type: 'run_saved', run_id: savedRunId, conversation_id: getVisibleConversationId() })
+            onRunStatus({ type: 'run_saved', run_id: savedRunId, conversation_id: data.saved_from_conversation_id })
           }
         }
       }

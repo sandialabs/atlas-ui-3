@@ -96,8 +96,13 @@ def tag_event(
         # interlude in a restored conversation branches it). That is a rebind
         # of the conversation the client is showing, not an event of this run's
         # own: tagged, the client would file it as background activity and
-        # never adopt the new id.
-        return data
+        # never adopt the new id. The run is named in separate fields, which
+        # the client's routing does not read, so it can still tell which run's
+        # turn this save committed (issue #1218).
+        named = dict(data) if copy else data
+        named["saved_run_id"] = run_id
+        named["saved_from_conversation_id"] = conversation_id
+        return named
     if "run_id" in data and data["run_id"] != run_id:
         logger.debug(
             "Event run_id %s overrides ambient run_id %s",
