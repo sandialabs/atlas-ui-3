@@ -672,8 +672,10 @@ async def test_conversation_lookup_uses_latest_outcome(cluster, store):
     # The launch run id keeps the launch run's own outcome.
     assert (await get_child_result("r1", context, factory))["status"] == "completed"
     assert (await get_child_result("r2", context, factory))["status"] == "failed"
-    listed = {r["conversation_id"]: r["status"] for r in await list_child_runs(context, factory)}
-    assert listed == {"failed-follow-up": "failed", "good-follow-up": "completed"}
+    rows = {r["conversation_id"]: r for r in await list_child_runs(context, factory)}
+    # A listed row's status belongs to its run id; the newest outcome is its own field.
+    assert (rows["failed-follow-up"]["status"], rows["failed-follow-up"]["latest_status"]) == ("completed", "failed")
+    assert (rows["good-follow-up"]["status"], rows["good-follow-up"]["latest_status"]) == ("failed", "completed")
 
 
 async def test_follow_up_outcome_is_the_latest(repo):
@@ -715,3 +717,16 @@ async def test_partial_listing_keeps_local_children(cluster, store):
     payload = json.loads(outcome.content)
     assert payload["partial"] is True and "warning" in payload
     assert [r["conversation_id"] for r in payload["runs"]] == ["local-child"]
+
+
+async def test_fenced_run_writes_no_outcome(repo, monkeypatch):
+    from atlas.application.chat.runs import leases
+    from atlas.application.chat.runs.launcher import _record_outcome
+
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent", "launch_run_id": "run-1"})
+    monkeypatch.setattr(leases, "current_run_is_fenced", lambda: True)
+    record = SimpleNamespace(conversation_id="kid", user_email=USER, depth=1, run_id="run-1")
+
+    await _record_outcome(SimpleNamespace(conversation_repository=repo), record, RunStatus.CANCELLED)
+
+    assert "latest_status" not in repo.get_conversation("kid", USER)["metadata"]

@@ -143,7 +143,11 @@ def _public_run(view: Dict[str, Any]) -> Dict[str, Any]:
 def _public_stored(child: Dict[str, Any]) -> Dict[str, Any]:
     """A run listed from its stored conversation alone."""
     metadata = child.get("metadata")
-    outcome = outcome_from_metadata(metadata, latest=True)
+    latest = outcome_from_metadata(metadata, latest=True)
+    # The row stands for the launching run, so its status is that run's own;
+    # the sub-conversation's newest outcome is a separate field.
+    launch_run = launch_run_id_from_metadata(metadata)
+    outcome = outcome_from_metadata(metadata) if launch_run else latest
     depth = metadata.get("launch_depth") if isinstance(metadata, dict) else None
     return {
         "run_id": launch_run_id_from_metadata(metadata),
@@ -161,6 +165,7 @@ def _public_stored(child: Dict[str, Any]) -> Dict[str, Any]:
         "launch_origin": origin_from_metadata(metadata),
         "depth": depth if isinstance(depth, int) and depth > 0 else 1,
         "title": child.get("title"),
+        "latest_status": latest,
         "connection_bound": False,
     }
 

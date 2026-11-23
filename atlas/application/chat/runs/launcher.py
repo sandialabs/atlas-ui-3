@@ -603,6 +603,12 @@ async def _record_outcome(chat_service: Any, record: Any, outcome: RunStatus) ->
     not change the run's own outcome. Readers without a live run record
     (another replica, after retention) report this status.
     """
+    from atlas.application.chat.runs.leases import current_run_is_fenced
+
+    if current_run_is_fenced():
+        # A run that lost its claim may be unwinding after another replica
+        # saved a newer turn; its stale outcome must not overwrite theirs.
+        return
     repository = getattr(chat_service, "conversation_repository", None)
     recorder = getattr(repository, "record_launch_outcome", None)
     if recorder is None:
