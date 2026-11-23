@@ -203,3 +203,46 @@ describe('new agent chat answer rendering (#1216)', () => {
     }
   }
 })
+
+describe('new agent chat edge cases (#1216)', () => {
+  it('clears the thinking indicator when the run fails before any token', () => {
+    const { result } = renderChat()
+    const handler = runHandler()
+    act(() => handler({ type: 'connection_session', session_id: 's1' }))
+    act(() => { result.current.sendChatMessage('do a task') })
+    expect(result.current.isThinking).toBe(true)
+
+    act(() => handler(frames.started))
+    act(() => handler({
+      type: 'error',
+      message: 'The run could not be started',
+      error_type: 'unknown',
+      run_id: RUN,
+      conversation_id: CONV,
+    }))
+    act(() => handler({ type: 'run_status', run: { ...runRecord('failed'), error: 'The run could not be started' } }))
+
+    expect(result.current.isThinking).toBe(false)
+    expect(result.current.messages.filter(m => m.role === 'assistant' && !m.content)).toHaveLength(0)
+    expect(result.current.messages.filter(m => m.role === 'user')).toHaveLength(1)
+  })
+
+  it('does not route a frame from the abandoned chat into the new one after New Chat', () => {
+    const { result } = renderChat()
+    const handler = runHandler()
+    act(() => handler({ type: 'connection_session', session_id: 's1' }))
+    act(() => { result.current.sendChatMessage('do a task') })
+    act(() => handler(frames.started))
+
+    // The reset and a late frame from the old conversation land in one batch,
+    // before React renders the reset.
+    act(() => {
+      result.current.clearChat({ skipConfirm: true })
+      handler(frames.stream('stale ', { is_first: true }))
+      handler(frames.stream('', { is_last: true }))
+    })
+
+    expect(result.current.activeConversationId).toBeNull()
+    expect(answerText(result)).not.toContain('stale')
+  })
+})

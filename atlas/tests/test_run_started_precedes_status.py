@@ -87,7 +87,7 @@ async def _one_turn(chat_service, store_delay):
 
     async def slow_create(session_id, user_email):
         await asyncio.sleep(store_delay)
-        events.append("store_created")
+        events.append(f"store_created:{session_id}")
         return MagicMock(context={}, id=session_id)
 
     async def handle_chat_message(**_kwargs):
@@ -134,6 +134,10 @@ async def test_run_started_is_the_first_run_frame(chat_service, coordinator, sto
 async def test_run_task_still_starts_after_seeding(chat_service, coordinator):
     _frames, events = await _one_turn(chat_service, 0.05)
 
-    # Seeding creates the run's session; the task begins only afterwards.
-    assert "store_created" in events
-    assert events.index("task_started") > events.index("store_created"), events
+    # Seeding creates two sessions: the connection's, then the run's own. The
+    # task must begin after both, so it is the run session that gates it.
+    started_at = events.index("task_started")
+    created_before = {e for e in events[:started_at] if e.startswith("store_created:")}
+    assert len(created_before) == 2, events
+    last_created = max(i for i, e in enumerate(events) if e.startswith("store_created:"))
+    assert started_at > last_created, events
