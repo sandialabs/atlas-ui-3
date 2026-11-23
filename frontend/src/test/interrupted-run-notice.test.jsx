@@ -123,6 +123,15 @@ describe('interrupted run notice in the transcript', () => {
     }
   })
 
+  it('remembers a save that arrived while the conversation was off screen', () => {
+    const { handler } = makeHandler('another-conversation')
+    handler({ type: 'conversation_saved', conversation_id: 'conv-1', run_id: 'run-1' })
+    handler(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' })))
+    const back = makeHandler('conv-1')
+    back.handler(statusFrame(run()))
+    expect(back.deps.addMessage).not.toHaveBeenCalled()
+  })
+
   it('still warns when a stopped run is fenced before its turn was saved', () => {
     const { deps, handler } = makeHandler()
     handler(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' })))

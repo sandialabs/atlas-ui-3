@@ -727,6 +727,10 @@ export function createWebSocketHandler(deps) {
       // repeat is still owed.
       if (data.type === 'error' && typeof retrySteer === 'function' && retrySteer(data)) return
 
+      // A save seen off-screen still settles its run (issue #1218): switching
+      // back before a later fence must not show the turn as lost.
+      if (data.type === 'conversation_saved' && data.run_id) settleRun(data.run_id)
+
       if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
         const visible = getVisibleConversationId()
         if (visible !== data.conversation_id) {
