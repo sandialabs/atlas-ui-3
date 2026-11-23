@@ -783,6 +783,59 @@ async def test_the_handle_retry_stops_when_the_key_is_no_longer_ours(
     assert len(attempts) == 1  # one write, then renew said the key is gone: no more retries
 
 
+async def test_the_reservation_stays_renewed_through_a_stalled_handle_write(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    renewals = []
+    original_renew = shared_store.renew
+    original_complete = shared_store.complete
+
+    async def counting_renew(slot):
+        renewals.append(1)
+        return await original_renew(slot)
+
+    async def stalled_complete(slot, handle):
+        before = len(renewals)
+        await asyncio.sleep(0.15)  # the write hangs; the key must stay protected
+        assert len(renewals) > before
+        return await original_complete(slot, handle)
+
+    shared_store.renew = counting_renew
+    shared_store.complete = stalled_complete
+    body = {**LAUNCH, "idempotency_key": "write-1"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        retry = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 202
+    assert retry.status_code == 200 and retry.json()["run_id"] == response.json()["run_id"]
+
+
+async def test_a_loss_during_the_handle_write_does_not_cancel_the_finishing_request(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
+    original_complete = shared_store.complete
+
+    async def lost(slot):
+        return False
+
+    async def slow_complete(slot, handle):
+        await asyncio.sleep(0.1)  # renewal reports the key lost meanwhile
+        return await original_complete(slot, handle)
+
+    shared_store.renew = lost
+    shared_store.complete = slow_complete
+    body = {**LAUNCH, "idempotency_key": "write-2"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 202
+    assert len(get_run_registry().all_records()) == 1
+
+
 async def test_follow_up_replay_names_a_sibling_run_on_another_replica(
     factory, shared_store
 ):

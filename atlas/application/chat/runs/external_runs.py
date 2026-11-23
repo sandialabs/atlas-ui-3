@@ -270,7 +270,10 @@ class _Hold:
     def __init__(self, slot: IdempotencySlot):
         self.slot = slot
         self.lost = False
-        self.run_id: Optional[str] = None
+        # Set once the request stops admitting and writes its outcome: the
+        # reservation stays protected through that write, but a loss then
+        # must not cancel a request that is already finishing.
+        self.writing = False
         self._request = asyncio.current_task()
         self._task = asyncio.ensure_future(self._run())
 
@@ -302,7 +305,7 @@ class _Hold:
                     reason="taken" if extended is False else "expired",
                 )
                 self.lost = True
-                if self._request is not None:
+                if self._request is not None and not self.writing:
                     self._request.cancel()
                 return
 
@@ -342,15 +345,19 @@ async def _release(
     handle: Optional[Dict[str, Any]],
     holder: Optional[_Hold] = None,
 ) -> None:
-    if holder is not None:
-        await holder.stop()
-    if slot is None:
-        return
-    store = get_idempotency_store()
-    if handle is None:
-        await store.release(slot)
-    elif not await store.complete(slot, handle):
-        _complete_later(slot, handle)
+    try:
+        if holder is not None:
+            holder.writing = True  # keep renewing until the outcome is written
+        if slot is None:
+            return
+        store = get_idempotency_store()
+        if handle is None:
+            await store.release(slot)
+        elif not await store.complete(slot, handle):
+            _complete_later(slot, handle)
+    finally:
+        if holder is not None:
+            await holder.stop()
 
 
 # Strong references: asyncio keeps only weak ones to running tasks.
