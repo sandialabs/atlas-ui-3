@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for issue #1218: a run cancelled by a coordination outage is told to the user
+# Test script for PR #1236 (issue #1218): a run cancelled by a coordination outage is told to the user
 #
 # Runs the backend tests for the fenced-run signal and log texts, the
 # frontend tests for the notice, a standalone reproduction of the fence
