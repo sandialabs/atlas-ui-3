@@ -216,7 +216,15 @@ request dies before it records the run, the reservation frees itself 2 minutes l
 once Redis is back, though a request that timed out reaching Redis can leave the key reserved
 for up to those 2 minutes, during which a retry gets 409 `idempotency_in_progress`); requests
 without a key are unaffected. If Redis fails only after the run was admitted, the replica keeps
-retrying to record the run (for up to 2 minutes) so a later retry still replays it. Without Redis the keys live in the
+retrying to record the run (for up to 2 minutes) so a later retry still replays it.
+If the reservation is lost while a request is still admitting (another request took the key, or
+Redis stayed unreachable for the 2 minute pending window), that request is aborted before the run
+is admitted and answers `503 unavailable`; nothing is launched. A retry of a follow-up replays on
+any replica, naming either the run it addressed or any other run of that conversation (the
+conversation is read from the run's shared record, kept 5 minutes after the run ends; after that,
+only the originally addressed run id replays). The shared keys have no entry cap: each is one
+small hash, kept at most 24 hours, and only the one trusted service holding the master key can
+create them, so memory is bounded by its request rate times 24 hours. Without Redis the keys live in the
 memory of the replica that accepted them and are lost on restart.
 
 ## Limits, replicas and restarts

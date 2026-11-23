@@ -118,16 +118,21 @@ class IdempotencyStore(Protocol):
         is unreachable) and should be retried; the run already exists.
         """
 
-    async def renew(self, slot: IdempotencySlot) -> None:
-        """Extend a still-pending reservation this request owns. Best effort."""
+    async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
+        """Extend a still-pending reservation this request owns.
+
+        ``True`` extended, ``False`` the reservation is gone or another
+        request's (lost), ``None`` the store could not be reached.
+        """
 
     async def release(self, slot: IdempotencySlot) -> None:
         """Drop a reservation that never produced a run, so a retry can succeed."""
 
     async def find_follow_up(
-        self, run_id: str, key: str
+        self, run_id: str, key: str, conversation_id: Optional[str] = None
     ) -> Optional[Tuple[str, IdempotencyEntry]]:
-        """The ``(owner, entry)`` of a follow-up that addressed ``run_id`` with ``key``."""
+        """The ``(owner, entry)`` of a follow-up that used ``key`` and addressed
+        ``run_id``, or any run of ``conversation_id`` when it is given."""
 
 
 class InProcessIdempotencyStore:
@@ -199,8 +204,9 @@ class InProcessIdempotencyStore:
             entry.handle = dict(handle)
         return True
 
-    async def renew(self, slot: IdempotencySlot) -> None:
-        return None  # in-process reservations do not expire while pending
+    async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
+        # In-process reservations do not expire while pending.
+        return self._tokens.get((slot.user_email, slot.key)) == slot.token
 
     async def release(self, slot: IdempotencySlot) -> None:
         slot_key = (slot.user_email, slot.key)
@@ -213,11 +219,15 @@ class InProcessIdempotencyStore:
             self._drop(slot_key)
 
     async def find_follow_up(
-        self, run_id: str, key: str
+        self, run_id: str, key: str, conversation_id: Optional[str] = None
     ) -> Optional[Tuple[str, IdempotencyEntry]]:
         self._prune(time.time())
         for (owner, entry_key), entry in self._entries.items():
-            if entry_key == key and entry.addressed_run_id == run_id:
+            if entry_key != key or entry.addressed_run_id is None:
+                continue
+            if entry.addressed_run_id == run_id or (
+                conversation_id and entry.conversation_id == conversation_id
+            ):
                 return owner, entry
         return None
 

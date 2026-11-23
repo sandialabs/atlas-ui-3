@@ -130,3 +130,39 @@ def test_redis_outage_refuses_keyed_launches_and_launches_nothing(cluster):
     cluster.cancel_everywhere(fresh[1]["run_id"])
     if retry[0] == 202:
         cluster.cancel_everywhere(retry[1]["run_id"])
+
+
+def test_follow_up_retry_on_another_replica_replays_even_naming_a_sibling_run(cluster):
+    """The follow-up itself is served by the owner; its retry through the
+    load balancer lands on B, which holds no such run, and must replay."""
+    user = cluster.new_user()
+    first = cluster.launch_ok(cluster.a, user, directive("fu-first", sleep=0))
+    cluster.wait_terminal(cluster.a, first["run_id"], timeout=45)
+    body = {"message": directive("fu-second", sleep=2), "idempotency_key": "fu-key"}
+    status, follow = cluster.call(
+        cluster.a, "POST", f"/api/agent-runs/{first['run_id']}/follow-up", service=True, json_body=body
+    )
+    assert status == 202, (status, follow)
+    follow_id = follow["run_id"]
+    try:
+        # B, naming the run the follow-up addressed.
+        status, replay = cluster.call(
+            cluster.b, "POST", f"/api/agent-runs/{first['run_id']}/follow-up", service=True, json_body=body
+        )
+        assert status == 200, (status, replay)
+        assert replay["run_id"] == follow_id and replay["idempotent_replay"] is True, replay
+        assert replay["conversation_id"] == first["conversation_id"]
+        # B, naming the sibling run the follow-up created.
+        status, replay = cluster.call(
+            cluster.b, "POST", f"/api/agent-runs/{follow_id}/follow-up", service=True, json_body=body
+        )
+        assert status == 200 and replay["run_id"] == follow_id, (status, replay)
+        # A different body under the same key is still refused on B.
+        status, refused = cluster.call(
+            cluster.b, "POST", f"/api/agent-runs/{first['run_id']}/follow-up", service=True,
+            json_body={**body, "message": "something else"},
+        )
+        assert status == 409 and refused["detail"]["code"] == "idempotency_conflict", (status, refused)
+        cluster.wait_terminal(cluster.a, follow_id, timeout=45)
+    finally:
+        cluster.cancel_everywhere(follow_id)

@@ -112,7 +112,7 @@ rather than formatting keys by hand.
 | `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | reply TTL |
 | `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending TTL, then done TTL |
 | `<p>:idem:<user>:<key>` | hash | Agent Runs API idempotency reservation (#1220): `token`, `fingerprint`, `created_at`, `handle` (JSON, absent while the first request is admitting), `addressed_run_id`, `conversation_id`. Written by `RedisIdempotencyStore` (`atlas/infrastructure/redis/idempotency_store.py`) with one Lua script per step (reserve, complete, release); without Redis `InProcessIdempotencyStore` keeps the same contract in a dict | 2 minutes while pending, extended every 40 s by the admitting request (a crash between reserve and launch frees the key); 24 hours once the handle is recorded |
-| `<p>:idem-addr:<run_id>:<key>` | string | The user whose follow-up of `run_id` used `key`, so a retry finds its record after the run is reaped or on another replica | As its `idem` hash |
+| `<p>:idem-addr:<run_id>:<key>`, `<p>:idem-conv:<conversation_id>:<key>` | string | The user whose follow-up of `run_id` (in `conversation_id`) used `key`, so a retry finds its record after the run is reaped, on another replica, or naming a sibling run of the conversation (resolved through the run's shared record) | As its `idem` hash |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
 Run record fields:

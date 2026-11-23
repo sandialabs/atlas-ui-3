@@ -8,10 +8,14 @@ One hash per ``(user, idempotency_key)``:
     admitting the run), ``addressed_run_id`` and ``conversation_id`` (follow-ups).
     A pending reservation (no handle) lives ``IDEMPOTENCY_PENDING_TTL_SECONDS``;
     once the handle is recorded the record lives ``IDEMPOTENCY_TTL_SECONDS``.
-``<p>:idem-addr:<run_id>:<key>`` (string)
-    The user whose follow-up of ``run_id`` used ``key``, so a retry that lands
-    after the run was reaped (or on another replica) still finds its record.
+``<p>:idem-addr:<run_id>:<key>`` and ``<p>:idem-conv:<conversation_id>:<key>`` (strings)
+    The user whose follow-up addressed ``run_id`` (in ``conversation_id``) with
+    ``key``, so a retry that lands after the run was reaped, on another replica,
+    or naming a sibling run of the same conversation still finds its record.
     Same lifetime as the hash.
+
+There is no entry cap: the namespace is bounded by TTL only (see
+``docs/admin/agent-runs-api.md``).
 
 Reservation, completion and release are single Lua scripts, so two replicas
 racing on one key cannot both win. Variable key parts are escaped with
@@ -39,7 +43,7 @@ from atlas.infrastructure.redis.run_coordinator import key_part
 
 logger = logging.getLogger(__name__)
 
-# KEYS: record, addr_index ('' key when the request addresses no run)
+# KEYS: record, addr_index, conv_index (unused when the request addresses no run)
 # ARGV: token, fingerprint, created_at, addressed_run_id, conversation_id,
 #       pending_ms, user_email
 # Returns {} when the key was taken by this call, else the existing hash as a
@@ -53,11 +57,12 @@ redis.call('HSET', KEYS[1], 'token', ARGV[1], 'fingerprint', ARGV[2],
 redis.call('PEXPIRE', KEYS[1], ARGV[6])
 if ARGV[4] ~= '' then
   redis.call('SET', KEYS[2], ARGV[7], 'PX', ARGV[6])
+  if ARGV[5] ~= '' then redis.call('SET', KEYS[3], ARGV[7], 'PX', ARGV[6]) end
 end
 return {}
 """
 
-# KEYS: record, addr_index
+# KEYS: record, addr_index, conv_index
 # ARGV: token, handle_json, ttl_ms, user_email, addressed_run_id, fingerprint,
 #       created_at, conversation_id
 # Records the handle unless another request now holds the key. A reservation
@@ -72,29 +77,36 @@ redis.call('HSET', KEYS[1], 'token', ARGV[1], 'handle', ARGV[2],
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
 if ARGV[5] ~= '' then
   redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3])
+  if ARGV[8] ~= '' then redis.call('SET', KEYS[3], ARGV[4], 'PX', ARGV[3]) end
 end
 return 1
 """
 
-# KEYS: record, addr_index
-# ARGV: token, pending_ms, addressed_run_id
+# KEYS: record, addr_index, conv_index
+# ARGV: token, pending_ms, addressed_run_id, conversation_id
 # Extends a reservation that is still ours and still pending.
 RENEW_SCRIPT = """
 if redis.call('HGET', KEYS[1], 'token') ~= ARGV[1] then return 0 end
 if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 0 end
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
-if ARGV[3] ~= '' then redis.call('PEXPIRE', KEYS[2], ARGV[2]) end
+if ARGV[3] ~= '' then
+  redis.call('PEXPIRE', KEYS[2], ARGV[2])
+  if ARGV[4] ~= '' then redis.call('PEXPIRE', KEYS[3], ARGV[2]) end
+end
 return 1
 """
 
-# KEYS: record, addr_index
-# ARGV: token, addressed_run_id
+# KEYS: record, addr_index, conv_index
+# ARGV: token, addressed_run_id, conversation_id
 # Deletes the reservation only while it is still ours and still pending.
 RELEASE_SCRIPT = """
 if redis.call('HGET', KEYS[1], 'token') ~= ARGV[1] then return 0 end
 if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 0 end
 redis.call('DEL', KEYS[1])
-if ARGV[2] ~= '' then redis.call('DEL', KEYS[2]) end
+if ARGV[2] ~= '' then
+  redis.call('DEL', KEYS[2])
+  if ARGV[3] ~= '' then redis.call('DEL', KEYS[3]) end
+end
 return 1
 """
 
@@ -142,6 +154,16 @@ class RedisIdempotencyStore:
     def _addr_key(self, run_id: str, key: str) -> str:
         return self._redis.key("idem-addr", key_part(run_id), key_part(key))
 
+    def _conv_key(self, conversation_id: str, key: str) -> str:
+        return self._redis.key("idem-conv", key_part(conversation_id), key_part(key))
+
+    def _keys(self, user_email: str, key: str, run_id, conversation_id) -> list:
+        return [
+            self._record_key(user_email, key),
+            self._addr_key(run_id or "-", key),
+            self._conv_key(conversation_id or "-", key),
+        ]
+
     def _unavailable(self, exc: BaseException) -> RunCoordinationUnavailableError:
         stats = getattr(self._redis, "stats", None)
         if stats is not None:
@@ -162,10 +184,7 @@ class RedisIdempotencyStore:
         addr = addressed_run_id or ""
         try:
             raw = await self._reserve(
-                keys=[
-                    self._record_key(owner, key),
-                    self._addr_key(addr or "-", key),
-                ],
+                keys=self._keys(owner, key, addr, conversation_id),
                 args=[
                     token,
                     fingerprint,
@@ -189,10 +208,9 @@ class RedisIdempotencyStore:
     async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> bool:
         try:
             await self._complete(
-                keys=[
-                    self._record_key(slot.user_email, slot.key),
-                    self._addr_key(slot.addressed_run_id or "-", slot.key),
-                ],
+                keys=self._keys(
+                    slot.user_email, slot.key, slot.addressed_run_id, slot.conversation_id
+                ),
                 args=[
                     slot.token,
                     json.dumps(handle, default=str),
@@ -214,14 +232,18 @@ class RedisIdempotencyStore:
             return False
         return True
 
-    async def renew(self, slot: IdempotencySlot) -> None:
+    async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
         try:
-            await self._renew(
-                keys=[
-                    self._record_key(slot.user_email, slot.key),
-                    self._addr_key(slot.addressed_run_id or "-", slot.key),
+            extended = await self._renew(
+                keys=self._keys(
+                    slot.user_email, slot.key, slot.addressed_run_id, slot.conversation_id
+                ),
+                args=[
+                    slot.token,
+                    self._pending_ms,
+                    slot.addressed_run_id or "",
+                    slot.conversation_id or "",
                 ],
-                args=[slot.token, self._pending_ms, slot.addressed_run_id or ""],
             )
         except Exception as exc:
             # Retried at the next interval; the TTL is three intervals long.
@@ -229,15 +251,16 @@ class RedisIdempotencyStore:
             logger.warning(
                 "Could not extend an idempotency reservation: %s", type(exc).__name__
             )
+            return None
+        return bool(extended)
 
     async def release(self, slot: IdempotencySlot) -> None:
         try:
             await self._release(
-                keys=[
-                    self._record_key(slot.user_email, slot.key),
-                    self._addr_key(slot.addressed_run_id or "-", slot.key),
-                ],
-                args=[slot.token, slot.addressed_run_id or ""],
+                keys=self._keys(
+                    slot.user_email, slot.key, slot.addressed_run_id, slot.conversation_id
+                ),
+                args=[slot.token, slot.addressed_run_id or "", slot.conversation_id or ""],
             )
         except Exception as exc:
             self._unavailable(exc)
@@ -247,10 +270,12 @@ class RedisIdempotencyStore:
             )
 
     async def find_follow_up(
-        self, run_id: str, key: str
+        self, run_id: str, key: str, conversation_id: Optional[str] = None
     ) -> Optional[Tuple[str, IdempotencyEntry]]:
         try:
             owner = await self._redis.client.get(self._addr_key(run_id, key))
+            if not owner and conversation_id:
+                owner = await self._redis.client.get(self._conv_key(conversation_id, key))
             if not owner:
                 return None
             owner = _text(owner)
@@ -259,8 +284,11 @@ class RedisIdempotencyStore:
             raise self._unavailable(exc) from exc
         if not fields:
             return None
-        decoded = {_text(k): _text(v) for k, v in fields.items()}
-        entry = _entry_from_fields(decoded)
-        if entry.addressed_run_id != run_id:
+        entry = _entry_from_fields({_text(k): _text(v) for k, v in fields.items()})
+        if entry.addressed_run_id is None:
+            return None
+        if entry.addressed_run_id != run_id and not (
+            conversation_id and entry.conversation_id == conversation_id
+        ):
             return None
         return owner, entry

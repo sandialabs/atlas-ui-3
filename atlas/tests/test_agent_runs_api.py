@@ -16,7 +16,7 @@ import pytest
 from fastapi import FastAPI
 
 from atlas.application.chat.runs.context import clear_current_run
-from atlas.application.chat.runs.external_runs import reset_idempotency_cache
+from atlas.application.chat.runs.external_runs import API_SOURCE, reset_idempotency_cache
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry, reset_run_registry
 from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.domain.errors import ValidationError
@@ -556,7 +556,7 @@ async def test_a_slow_admission_keeps_its_reservation_alive(factory, shared_stor
 
     async def counting_renew(slot):
         renewals.append(slot.key)
-        await original(slot)
+        return await original(slot)
 
     shared_store.renew = counting_renew
     started = asyncio.Event()
@@ -603,6 +603,90 @@ async def test_a_failed_handle_write_is_retried_so_the_key_still_replays(
     assert len(attempts) == 3
     assert retry.status_code == 200
     assert retry.json()["run_id"] == first.json()["run_id"]
+
+
+async def _stalled_admission(factory, monkeypatch, renew):
+    """POST a keyed launch whose admission stalls while ``renew`` runs."""
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_PENDING_TTL_SECONDS", 0.05)
+    started = asyncio.Event()
+
+    async def stalled_resolve(config_manager, model, user_email):
+        started.set()
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(f"{module}._resolve_api_model", stalled_resolve)
+    body = {**LAUNCH, "idempotency_key": "lost-1"}
+    async with _client(factory) as client:
+        return await asyncio.wait_for(
+            client.post("/api/agent-runs", json=body, headers=AUTH), timeout=3
+        )
+
+
+async def test_a_lost_reservation_aborts_the_launch_before_admission(
+    factory, shared_store, monkeypatch
+):
+    async def lost(slot):
+        return False  # another request holds the key now
+
+    shared_store.renew = lost
+    response = await _stalled_admission(factory, monkeypatch, lost)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_renewal_failing_past_the_pending_ttl_aborts_the_launch(
+    factory, shared_store, monkeypatch
+):
+    async def unreachable(slot):
+        return None  # Redis cannot be reached
+
+    shared_store.renew = unreachable
+    response = await _stalled_admission(factory, monkeypatch, unreachable)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_follow_up_replay_names_a_sibling_run_on_another_replica(
+    factory, shared_store
+):
+    from types import SimpleNamespace as NS
+
+    from atlas.application.chat.runs.leases import set_lease_guard
+
+    async with _client(factory) as client:
+        first = (await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)).json()
+        factory.release_all()
+        await _settle()
+        get_run_registry().get(first["run_id"]).status = RunStatus.COMPLETED
+        body = {"message": "Again", "idempotency_key": "sib-1"}
+        follow = await client.post(
+            f"/api/agent-runs/{first['run_id']}/follow-up", json=body, headers=AUTH
+        )
+        assert follow.status_code == 202
+        second_id = follow.json()["run_id"]
+        reset_run_registry()  # another replica: no local runs
+
+        async def read_record(run_id):
+            return {
+                "run_id": run_id,
+                "source": API_SOURCE,
+                "conversation_id": first["conversation_id"],
+                "status": "running",
+            }
+
+        set_lease_guard(NS(read_record=read_record))
+        try:
+            retry = await client.post(
+                f"/api/agent-runs/{second_id}/follow-up", json=body, headers=AUTH
+            )
+        finally:
+            set_lease_guard(None)
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == second_id
 
 
 async def test_shared_store_concurrent_requests_launch_once(factory, shared_store):

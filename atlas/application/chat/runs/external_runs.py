@@ -184,7 +184,9 @@ async def _replay_follow_up_of_reaped_run(
     if not key:
         return None
     try:
-        found = await get_idempotency_store().find_follow_up(run_id, key)
+        found = await get_idempotency_store().find_follow_up(
+            run_id, key, await _shared_conversation(run_id)
+        )
     except RunCoordinationUnavailableError as exc:
         raise LaunchRefused(str(exc), code="unavailable") from exc
     if found is None:
@@ -216,6 +218,22 @@ async def _replayed(handle: Dict[str, Any]) -> Dict[str, Any]:
     return replay
 
 
+async def _shared_conversation(run_id: str) -> Optional[str]:
+    """The conversation of an API run another replica holds, from its shared
+    record, so a follow-up retry naming a sibling run id still replays."""
+    guard = get_lease_guard()
+    if guard is None:
+        return None
+    try:
+        doc = await guard.read_record(run_id)
+    except Exception as exc:
+        logger.warning("shared run record unreadable on replay: %s", type(exc).__name__)
+        return None
+    if not doc or doc.get("source") != API_SOURCE:
+        return None
+    return doc.get("conversation_id") or None
+
+
 async def _shared_status(handle: Dict[str, Any]) -> Optional[str]:
     guard = get_lease_guard()
     if guard is None:
@@ -230,26 +248,74 @@ async def _shared_status(handle: Dict[str, Any]) -> Optional[str]:
     return doc.get("status") or None
 
 
-async def _keep_reserved(slot: IdempotencySlot) -> None:
-    """Extend ``slot``'s pending reservation until cancelled (admission is slow)."""
-    store = get_idempotency_store()
-    while True:
-        await asyncio.sleep(IDEMPOTENCY_RENEW_INTERVAL_SECONDS)
-        await store.renew(slot)
+class _Hold:
+    """Keeps a pending reservation alive while its request admits a run.
+
+    If the reservation is lost (another request holds the key, or Redis stayed
+    unreachable for as long as the pending TTL), the request is cancelled
+    before it admits a run, so an expired reservation cannot lead to a second
+    run for the same key.
+    """
+
+    def __init__(self, slot: IdempotencySlot):
+        self.slot = slot
+        self.lost = False
+        self._request = asyncio.current_task()
+        self._task = asyncio.ensure_future(self._run())
+
+    async def _run(self) -> None:
+        store = get_idempotency_store()
+        last_ok = time.monotonic()
+        while True:
+            await asyncio.sleep(IDEMPOTENCY_RENEW_INTERVAL_SECONDS)
+            extended = await store.renew(self.slot)
+            now = time.monotonic()
+            if extended:
+                last_ok = now
+            elif extended is False or now - last_ok >= IDEMPOTENCY_PENDING_TTL_SECONDS:
+                logger.error("An idempotency reservation was lost while its request was admitting")
+                self.lost = True
+                if self._request is not None:
+                    self._request.cancel()
+                return
+
+    async def stop(self) -> None:
+        self._task.cancel()
+        await asyncio.gather(self._task, return_exceptions=True)
 
 
-def _hold(slot: Optional[IdempotencySlot]) -> Optional["asyncio.Task[None]"]:
-    return asyncio.ensure_future(_keep_reserved(slot)) if slot is not None else None
+def _hold(slot: Optional[IdempotencySlot]) -> Optional[_Hold]:
+    return _Hold(slot) if slot is not None else None
+
+
+def _after_cancel(holder: Optional[_Hold], handle: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Resolve a cancellation that came from a lost reservation.
+
+    Before a run exists the request is refused (nothing launched, nothing to
+    undo); once the run exists its handle is returned. Any other cancellation
+    (the client went away) propagates.
+    """
+    if holder is None or not holder.lost:
+        raise asyncio.CancelledError()
+    task = asyncio.current_task()
+    if task is not None:
+        task.uncancel()
+    if handle is not None:
+        return handle
+    raise LaunchRefused(
+        "The idempotency reservation for this request was lost before the run "
+        "was admitted, so nothing was launched. Retry shortly.",
+        code="unavailable",
+    )
 
 
 async def _release(
     slot: Optional[IdempotencySlot],
     handle: Optional[Dict[str, Any]],
-    holder: Optional["asyncio.Task[None]"] = None,
+    holder: Optional[_Hold] = None,
 ) -> None:
     if holder is not None:
-        holder.cancel()
-        await asyncio.gather(holder, return_exceptions=True)
+        await holder.stop()
     if slot is None:
         return
     store = get_idempotency_store()
@@ -471,6 +537,8 @@ async def launch_api_run(
         # Before the 202: a poll that lands on another replica must find it.
         await publish_run_now(record.run_id)
         return handle
+    except asyncio.CancelledError:
+        return _after_cancel(holder, handle)
     finally:
         await _release(slot, handle, holder)
 
@@ -774,6 +842,8 @@ async def follow_up_api_run(
         _audit("follow_up", record, new_spec, previous_run=target.run_id)
         await publish_run_now(record.run_id)
         return handle
+    except asyncio.CancelledError:
+        return _after_cancel(holder, handle)
     finally:
         await _release(slot, handle, holder)
 

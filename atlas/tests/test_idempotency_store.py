@@ -233,3 +233,30 @@ async def test_redis_renew_failure_is_best_effort(server):
     slot, _ = await store.reserve(USER, "renew2", "fp")
     store._renew = _boom
     await store.renew(slot)  # must not raise
+
+
+async def test_find_follow_up_by_conversation_names_a_sibling_run(make_store):
+    a, b = make_store(), make_store()
+    slot, _ = await a.reserve(
+        USER, "sib", "fp", addressed_run_id="run-1", conversation_id="conv-1"
+    )
+    await a.complete(slot, HANDLE)
+    assert await b.find_follow_up("run-2", "sib") is None
+    owner, entry = await b.find_follow_up("run-2", "sib", "conv-1")
+    assert owner == "alice@example.com" and entry.handle == HANDLE
+    assert await b.find_follow_up("run-2", "sib", "conv-other") is None
+    # A launch (addresses no run) is never found as a follow-up.
+    launch, _ = await a.reserve(USER, "plain", "fp", conversation_id="conv-1")
+    await a.complete(launch, HANDLE)
+    assert await b.find_follow_up("run-2", "plain", "conv-1") is None
+
+
+async def test_renew_reports_extended_lost_and_unreachable(make_store, server):
+    store = make_store()
+    slot, _ = await store.reserve(USER, "rn", "fp")
+    assert await store.renew(slot) is True
+    await store.release(slot)
+    assert await store.renew(slot) is False
+    if isinstance(store, RedisIdempotencyStore):
+        store._renew = _boom
+        assert await store.renew(slot) is None
