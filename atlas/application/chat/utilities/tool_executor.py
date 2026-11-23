@@ -237,7 +237,24 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
 
     except Exception as e:
         logger.warning(f"Error checking approval requirements for {tool_name}: {e}")
-    return (True, True, False)  # Default to user-level approval on error
+    # Fail closed: when the policy cannot be read, treat the tool as
+    # admin-mandated so nothing unattended runs on a guess.
+    return (True, True, True)
+
+
+def is_admin_gated(tool_name: str, config_manager) -> bool:
+    """Whether an administrator made this tool's approval mandatory.
+
+    The one answer the launcher advertises (``tools_needing_approval``) and the
+    executor enforces for a pre-approved child. Fails closed: with no config
+    manager, or when the policy lookup raises, the tool counts as gated.
+    """
+    if config_manager is None:
+        return True
+    try:
+        return bool(requires_approval(tool_name, config_manager)[2])
+    except Exception:
+        return True
 
 
 def user_switch_covers_turn() -> bool:
@@ -575,15 +592,13 @@ async def execute_single_tool(
             needs_approval = False
             allow_edit = True
             admin_required = False
-            if skip_approval and config_manager and not user_switch_covers_turn():
+            if skip_approval and not user_switch_covers_turn():
                 # A launched child is pre-approved by the launch call, but that
                 # approval never covers a tool an administrator made mandatory:
-                # only those stay on the gate; every other tool runs.
-                needs_approval, allow_edit, admin_required = requires_approval(
-                    tool_call.function.name, config_manager
-                )
-                if not admin_required:
-                    needs_approval = False
+                # only those stay on the gate; every other tool runs. A missing
+                # or failing policy lookup counts as mandatory.
+                admin_required = is_admin_gated(tool_call.function.name, config_manager)
+                needs_approval = admin_required
             elif skip_approval:
                 needs_approval = False
             elif config_manager:

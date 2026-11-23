@@ -484,17 +484,9 @@ def _preapprove_child_tools(chat_service: Any) -> bool:
 
 def _admin_gated_tools(tools: List[str], config_manager: Any) -> List[str]:
     """Which of the child's tools an admin has made non-auto-approvable."""
-    from atlas.application.chat.utilities.tool_executor import requires_approval
+    from atlas.application.chat.utilities.tool_executor import is_admin_gated
 
-    gated: List[str] = []
-    for tool in tools:
-        try:
-            _needs, _edit, admin_required = requires_approval(tool, config_manager)
-        except Exception:  # pragma: no cover - defensive: unknown tool name
-            admin_required = True
-        if admin_required:
-            gated.append(tool)
-    return gated
+    return [tool for tool in tools if is_admin_gated(tool, config_manager)]
 
 
 async def resolve_child_data_sources(

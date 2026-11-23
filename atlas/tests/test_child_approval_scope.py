@@ -11,6 +11,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from test_websocket_run_directory_outage import chat_service  # noqa: F401  (fixture)
 
 from atlas.application.chat.approval_manager import get_approval_manager
 from atlas.application.chat.runs.context import clear_current_run, set_current_run
@@ -18,7 +19,9 @@ from atlas.application.chat.runs.launcher import launch_sub_conversation
 from atlas.application.chat.runs.registry import (
     BUSY_MESSAGE,
     LAUNCHED_RUN_BUSY_MESSAGE,
+    NO_STEERING_BUSY_MESSAGE,
     RunRegistry,
+    busy_message_for,
     reset_run_registry,
 )
 from atlas.application.chat.runs.run_control import RunControlService, user_actor
@@ -247,4 +250,118 @@ async def test_steer_to_user_run_keeps_old_text():
     answer = await service._steer(run.run_id, user_actor(USER), {"content": "hello"})
 
     assert answer["code"] == "conversation_busy"
-    assert answer["message"] == BUSY_MESSAGE
+    # No live steering channel: no promise of a step boundary.
+    assert answer["message"] == NO_STEERING_BUSY_MESSAGE
+    assert "next step" not in answer["message"]
+
+
+def test_step_boundary_advice_needs_a_live_channel():
+    from atlas.application.chat.agent.steering import SteeringChannel
+
+    registry = RunRegistry()
+    channel = SteeringChannel()
+    channel.activate()
+    run = registry.start(conversation_id="a", user_email=USER, steering=channel)
+    assert busy_message_for(run) == BUSY_MESSAGE
+    channel.deactivate()
+    assert busy_message_for(run) == NO_STEERING_BUSY_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_child_gate_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.resolve_approval_timeout",
+        lambda: 0.2,
+    )
+    """No config manager, or a policy lookup that raises: the tool stays gated."""
+    factory, handle = await _launch_child()
+    try:
+        set_current_run(handle["run_id"], handle["conversation_id"])
+        for config in (None, _RaisingConfig()):
+            frames = []
+
+            async def update_callback(message, frames=frames):
+                frames.append(message)
+
+            await execute_single_tool(
+                _call("c-closed", OPEN),
+                {"user_email": USER, "session_id": "s1"},
+                _ToolManager(),
+                update_callback=update_callback,
+                config_manager=config,
+                skip_approval=True,
+            )
+            assert [f for f in frames if f.get("type") == "tool_approval_request"]
+    finally:
+        factory.services[0].release.set()
+
+
+class _RaisingConfig:
+    @property
+    def app_settings(self):
+        raise RuntimeError("policy unreadable")
+
+    @property
+    def tool_approvals_config(self):
+        raise RuntimeError("policy unreadable")
+
+
+def test_launch_and_enforcement_agree_on_the_gated_set():
+    from atlas.application.chat.runs.launcher import _admin_gated_tools
+
+    assert _admin_gated_tools([OPEN, GATED], None) == [OPEN, GATED]
+    assert _admin_gated_tools([OPEN], _RaisingConfig()) == [OPEN]
+
+
+@pytest.mark.asyncio
+async def test_launch_handle_text_names_only_gated(gate):
+    from atlas.application.chat.runs.launcher import execute_launch_tool
+
+    factory = _Factory()
+    call = SimpleNamespace(
+        id="l1",
+        arguments={"workspace": "Research", "model": "gpt-4o", "prompt": "go"},
+    )
+    result = await execute_launch_tool(call, {
+        "user_email": USER,
+        "factory": factory,
+        "launch_discovery": {
+            "workspaces": [{"id": "ws-1", "name": "Research"}],
+            "models": [{"name": "gpt-4o"}],
+        },
+    })
+    try:
+        assert result.success, result.content
+        assert "Only these tools will pause" in result.content
+        assert "other tools run without asking" in result.content
+    finally:
+        for service in factory.services:
+            service.release.set()
+
+
+def test_local_websocket_refusal_for_a_child(chat_service):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from main import app
+    from test_websocket_run_directory_outage import CONV as WS_CONV
+    from test_websocket_run_directory_outage import USER as WS_USER
+
+    from atlas.application.chat.runs import get_run_registry
+    from atlas.application.chat.runs.control_bus import set_run_control_bus
+
+    set_run_control_bus(None)
+    registry = get_run_registry()
+    parent = registry.start(conversation_id="parent-conv", user_email=WS_USER)
+    child = registry.start(
+        conversation_id=WS_CONV, user_email=WS_USER,
+        parent_run_id=parent.run_id, depth=1,
+    )
+    child.launch_spec = {"model": "m"}
+    with TestClient(app).websocket_connect("/ws", headers={"X-User-Email": WS_USER}) as ws:
+        ws.send_json({"type": "chat", "content": "hi", "model": "m",
+                      "conversation_id": WS_CONV})
+        frame = ws.receive_json()
+        while frame.get("type") != "error":
+            frame = ws.receive_json()
+    assert frame["error_type"] == "conversation_busy"
+    assert frame["message"] == LAUNCHED_RUN_BUSY_MESSAGE
+
