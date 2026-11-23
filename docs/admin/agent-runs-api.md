@@ -210,8 +210,8 @@ With `SESSION_REPOSITORY_TYPE=redis` the keys are cluster-wide: the same key and
 any replica launches one run, and a replay on a replica other than the one that accepted the
 launch returns the original `run_id` and `conversation_id` with HTTP 200, and the run's current
 `status` read from its shared record. A reservation is made atomically in Redis before anything
-is admitted. If the replica handling a first request dies before it records the run, the
-reservation frees itself after 2 minutes. If Redis cannot be reached, a request that carries an
+is admitted and extended while the request is still admitting. If the replica handling a first
+request dies before it records the run, the reservation frees itself 2 minutes later. If Redis cannot be reached, a request that carries an
 `idempotency_key` is refused with `503 unavailable` (nothing is launched, and the same key works
 once Redis is back, though a request that timed out reaching Redis can leave the key reserved
 for up to those 2 minutes, during which a retry gets 409 `idempotency_in_progress`); requests

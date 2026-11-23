@@ -30,6 +30,7 @@ the user's conversation history like any other run.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import hashlib
 import json
@@ -40,6 +41,7 @@ from uuid import uuid4
 from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
 from atlas.application.chat.runs.follow_up import _revalidate_saved_workspace
 from atlas.application.chat.runs.idempotency import (
+    IDEMPOTENCY_RENEW_INTERVAL_SECONDS,
     IdempotencyEntry,
     IdempotencySlot,
     InProcessIdempotencyStore,
@@ -225,9 +227,26 @@ async def _shared_status(handle: Dict[str, Any]) -> Optional[str]:
     return doc.get("status") or None
 
 
+async def _keep_reserved(slot: IdempotencySlot) -> None:
+    """Extend ``slot``'s pending reservation until cancelled (admission is slow)."""
+    store = get_idempotency_store()
+    while True:
+        await asyncio.sleep(IDEMPOTENCY_RENEW_INTERVAL_SECONDS)
+        await store.renew(slot)
+
+
+def _hold(slot: Optional[IdempotencySlot]) -> Optional["asyncio.Task[None]"]:
+    return asyncio.ensure_future(_keep_reserved(slot)) if slot is not None else None
+
+
 async def _release(
-    slot: Optional[IdempotencySlot], handle: Optional[Dict[str, Any]]
+    slot: Optional[IdempotencySlot],
+    handle: Optional[Dict[str, Any]],
+    holder: Optional["asyncio.Task[None]"] = None,
 ) -> None:
+    if holder is not None:
+        holder.cancel()
+        await asyncio.gather(holder, return_exceptions=True)
     if slot is None:
         return
     store = get_idempotency_store()
@@ -380,6 +399,7 @@ async def launch_api_run(
     if replay is not None:
         return replay
     handle: Optional[Dict[str, Any]] = None
+    holder = _hold(slot)
     try:
         resolved = resolve_workspace(factory.workspace_repository, workspace, user_email)
         await _resolve_api_model(config_manager, model, user_email)
@@ -419,7 +439,7 @@ async def launch_api_run(
         await publish_run_now(record.run_id)
         return handle
     finally:
-        await _release(slot, handle)
+        await _release(slot, handle, holder)
 
 
 async def _resolve_api_model(config_manager: Any, model: str, user_email: str) -> None:
@@ -650,6 +670,7 @@ async def follow_up_api_run(
     if replay is not None:
         return replay
     handle: Optional[Dict[str, Any]] = None
+    holder = _hold(slot)
     try:
         siblings = _api_runs_for_conversation(addressed)
         # Continue from the newest run, whichever id was passed: it carries
@@ -721,7 +742,7 @@ async def follow_up_api_run(
         await publish_run_now(record.run_id)
         return handle
     finally:
-        await _release(slot, handle)
+        await _release(slot, handle, holder)
 
 
 def cancel_api_run(run_id: str) -> Dict[str, Any]:

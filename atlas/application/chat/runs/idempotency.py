@@ -34,6 +34,7 @@ from atlas.core.user_identity import normalize_user_email
 
 __all__ = [
     "IDEMPOTENCY_PENDING_TTL_SECONDS",
+    "IDEMPOTENCY_RENEW_INTERVAL_SECONDS",
     "IDEMPOTENCY_TTL_SECONDS",
     "MAX_IDEMPOTENCY_ENTRIES",
     "IdempotencyEntry",
@@ -53,6 +54,11 @@ IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 # handle, the key frees itself after this long instead of staying blocked for
 # the whole retention window.
 IDEMPOTENCY_PENDING_TTL_SECONDS = 120
+# While a request is admitting, its owner extends the pending reservation this
+# often, so a slow admission (RAG discovery, a busy coordinator) never loses
+# the key while it is still working. Only a replica that stops renewing (a
+# crash) lets it lapse.
+IDEMPOTENCY_RENEW_INTERVAL_SECONDS = IDEMPOTENCY_PENDING_TTL_SECONDS / 3
 # In-process cap only; the shared store is bounded by its TTLs.
 MAX_IDEMPOTENCY_ENTRIES = 10000
 
@@ -102,6 +108,9 @@ class IdempotencyStore(Protocol):
 
     async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> None:
         """Record the run handle on the reservation and keep it for the full TTL."""
+
+    async def renew(self, slot: IdempotencySlot) -> None:
+        """Extend a still-pending reservation this request owns. Best effort."""
 
     async def release(self, slot: IdempotencySlot) -> None:
         """Drop a reservation that never produced a run, so a retry can succeed."""
@@ -179,6 +188,9 @@ class InProcessIdempotencyStore:
         entry = self._entries.get(slot_key)
         if entry is not None and self._tokens.get(slot_key) == slot.token:
             entry.handle = dict(handle)
+
+    async def renew(self, slot: IdempotencySlot) -> None:
+        return None  # in-process reservations do not expire while pending
 
     async def release(self, slot: IdempotencySlot) -> None:
         slot_key = (slot.user_email, slot.key)

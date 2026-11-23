@@ -77,6 +77,17 @@ return 1
 """
 
 # KEYS: record, addr_index
+# ARGV: token, pending_ms, addressed_run_id
+# Extends a reservation that is still ours and still pending.
+RENEW_SCRIPT = """
+if redis.call('HGET', KEYS[1], 'token') ~= ARGV[1] then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 0 end
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+if ARGV[3] ~= '' then redis.call('PEXPIRE', KEYS[2], ARGV[2]) end
+return 1
+"""
+
+# KEYS: record, addr_index
 # ARGV: token, addressed_run_id
 # Deletes the reservation only while it is still ours and still pending.
 RELEASE_SCRIPT = """
@@ -123,6 +134,7 @@ class RedisIdempotencyStore:
         self._reserve = client.register_script(RESERVE_SCRIPT)
         self._complete = client.register_script(COMPLETE_SCRIPT)
         self._release = client.register_script(RELEASE_SCRIPT)
+        self._renew = client.register_script(RENEW_SCRIPT)
 
     def _record_key(self, user_email: str, key: str) -> str:
         return self._redis.key("idem", key_part(normalize_user_email(user_email)), key_part(key))
@@ -198,6 +210,22 @@ class RedisIdempotencyStore:
             self._unavailable(exc)
             logger.warning(
                 "Could not record the run handle for an idempotency key: %s", type(exc).__name__
+            )
+
+    async def renew(self, slot: IdempotencySlot) -> None:
+        try:
+            await self._renew(
+                keys=[
+                    self._record_key(slot.user_email, slot.key),
+                    self._addr_key(slot.addressed_run_id or "-", slot.key),
+                ],
+                args=[slot.token, self._pending_ms, slot.addressed_run_id or ""],
+            )
+        except Exception as exc:
+            # Retried at the next interval; the TTL is three intervals long.
+            self._unavailable(exc)
+            logger.warning(
+                "Could not extend an idempotency reservation: %s", type(exc).__name__
             )
 
     async def release(self, slot: IdempotencySlot) -> None:

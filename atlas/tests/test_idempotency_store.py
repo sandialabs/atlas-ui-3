@@ -206,3 +206,30 @@ async def test_redis_down_on_complete_and_release_is_best_effort(server):
     store._release = _boom
     await store.complete(slot, HANDLE)  # must not raise
     await store.release(slot)
+
+
+async def test_redis_renew_extends_only_our_pending_reservation(server):
+    store = RedisIdempotencyStore(_manager(server))
+    client = store._redis.client
+    record = store._record_key(USER, "renew")
+    slot, _ = await store.reserve(USER, "renew", "fp")
+    await client.pexpire(record, 5000)
+    await store.renew(slot)
+    assert await client.pttl(record) > (IDEMPOTENCY_PENDING_TTL_SECONDS - 5) * 1000
+    # Not ours any more: left alone.
+    await client.delete(record)
+    other, _ = await store.reserve(USER, "renew", "fp")
+    await client.pexpire(record, 5000)
+    await store.renew(slot)
+    assert await client.pttl(record) <= 5000
+    # Completed: the long TTL is not shortened back to the pending one.
+    await store.complete(other, HANDLE)
+    await store.renew(other)
+    assert await client.pttl(record) > (IDEMPOTENCY_TTL_SECONDS - 60) * 1000
+
+
+async def test_redis_renew_failure_is_best_effort(server):
+    store = RedisIdempotencyStore(_manager(server))
+    slot, _ = await store.reserve(USER, "renew2", "fp")
+    store._renew = _boom
+    await store.renew(slot)  # must not raise
