@@ -166,3 +166,56 @@ async def test_childs_own_approval_still_marks_it_waiting():
     })
 
     assert child.status == RunStatus.WAITING_FOR_INPUT
+
+
+@pytest.mark.asyncio
+async def test_non_dict_frame_is_still_forwarded_by_the_child_connection():
+    registry = get_run_registry()
+    root = registry.start(conversation_id="root", user_email=EMAIL)
+    child = registry.start(conversation_id="kid", user_email=EMAIL,
+                           parent_run_id=root.run_id, depth=1)
+    wire = []
+
+    async def socket(payload):
+        wire.append(payload)
+
+    conn = _ChildConnection(socket, child.run_id, "kid")
+    await conn.send_json("plain text frame")
+
+    assert wire == ["plain text frame"]
+
+
+@pytest.mark.asyncio
+async def test_grandchild_settle_frame_does_not_clear_middle_childs_own_request():
+    registry = get_run_registry()
+    root = registry.start(conversation_id="root", user_email=EMAIL)
+    middle = registry.start(conversation_id="mid", user_email=EMAIL,
+                            parent_run_id=root.run_id, depth=1)
+    grand = registry.start(conversation_id="grand", user_email=EMAIL,
+                           parent_run_id=middle.run_id, depth=2)
+
+    async def socket(payload):
+        pass
+
+    middle_conn = _ChildConnection(socket, middle.run_id, "mid")
+    grand_conn = _ChildConnection(middle_conn.send_json, grand.run_id, "grand")
+
+    # The middle child is genuinely waiting on its own approval.
+    await middle_conn.send_json({
+        "type": "tool_approval_request", "tool_call_id": "mid_call",
+        "tool_name": "needs_approval", "arguments": {},
+    })
+    # The grandchild asks and settles a request with the same call id.
+    await grand_conn.send_json({
+        "type": "tool_approval_request", "tool_call_id": "mid_call",
+        "tool_name": "needs_approval", "arguments": {},
+    })
+    await grand_conn.send_json({"type": "tool_complete", "tool_call_id": "mid_call"})
+
+    assert grand.status == RunStatus.RUNNING
+    assert middle.status == RunStatus.WAITING_FOR_INPUT
+    assert [r["tool_call_id"] for r in middle.pending_requests] == ["mid_call"]
+
+    # Its own settle frame still clears it.
+    await middle_conn.send_json({"type": "tool_complete", "tool_call_id": "mid_call"})
+    assert middle.status == RunStatus.RUNNING

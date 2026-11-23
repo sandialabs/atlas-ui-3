@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from redis.exceptions import WatchError
 
+from atlas.application.chat.runs.context import is_foreign_run_frame
 from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 from atlas.core.user_identity import normalize_user_email
 
@@ -1203,19 +1204,6 @@ def _with_invocation_identity(payload, identity: dict):
     return merged
 
 
-def _is_foreign_run_frame(payload, identity: dict) -> bool:
-    """True for a frame another run emitted through this call's callback.
-
-    A tool such as ``atlas_launch_subagent`` hands its callback to a child run,
-    which then emits frames tagged with the child's own run id. Those frames
-    must keep the child's identity and stay out of the parent's projection.
-    """
-    if not isinstance(payload, dict):
-        return False
-    frame_run = payload.get("run_id")
-    return bool(frame_run) and frame_run != identity.get("run_id")
-
-
 def stamp_callback_identity(inner, identity: dict):
     """Attach invocation identity to frames without publishing them.
 
@@ -1228,7 +1216,7 @@ def stamp_callback_identity(inner, identity: dict):
         return inner
 
     async def tagged(payload):
-        if not _is_foreign_run_frame(payload, identity):
+        if not is_foreign_run_frame(payload, identity.get("run_id")):
             payload = _with_invocation_identity(payload, identity)
         if inner is not None:
             await inner(payload)
@@ -1246,7 +1234,7 @@ def observe_tool_callback(inner, identity: dict):
         return inner
 
     async def tagged(payload):
-        if isinstance(payload, dict) and not _is_foreign_run_frame(payload, identity):
+        if isinstance(payload, dict) and not is_foreign_run_frame(payload, identity.get("run_id")):
             merged = _with_invocation_identity(payload, identity)
             event = dict(merged)
             event["user_email"] = identity.get("user_email")

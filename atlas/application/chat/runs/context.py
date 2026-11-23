@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from logging import getLogger
-from typing import NamedTuple, Optional, TypeVar
+from typing import Any, NamedTuple, Optional, TypeVar
 
 from atlas.core.log_sanitizer import sanitize_for_logging
 
@@ -52,6 +52,21 @@ def get_current_run() -> Optional[RunContext]:
 def clear_current_run() -> None:
     """Drop the binding (used by tests)."""
     _current_run.set(None)
+
+
+def is_foreign_run_frame(frame: Any, run_id: Optional[str]) -> bool:
+    """Whether ``frame`` was emitted by a run other than ``run_id``.
+
+    The single "does this frame belong to this run" rule. A frame with no run
+    id (or a non-dict) is not claimed by any other run, so it is never foreign.
+    A launched child's frames travel through its parent's callbacks, so the
+    parent's wrappers use this to leave them alone, and a child connection
+    uses it to ignore a deeper descendant's frames.
+    """
+    if not isinstance(frame, dict):
+        return False
+    frame_run = frame.get("run_id")
+    return bool(frame_run) and frame_run != run_id
 
 
 def tag_event(
