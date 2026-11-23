@@ -229,7 +229,7 @@ async def test_steer_to_child_says_it_cannot():
         conversation_id="c", user_email=USER, parent_run_id=parent.run_id, depth=1
     )
     child.launch_spec = {"model": "gpt-4o"}
-    service = RunControlService(lambda: registry, lambda: get_approval_manager())
+    service = RunControlService(lambda: registry, get_approval_manager)
 
     answer = await service._steer(child.run_id, user_actor(USER), {"content": "hello"})
 
@@ -242,7 +242,7 @@ async def test_steer_to_child_says_it_cannot():
 async def test_steer_to_user_run_keeps_old_text():
     registry = RunRegistry()
     run = registry.start(conversation_id="u", user_email=USER)  # not draining yet
-    service = RunControlService(lambda: registry, lambda: get_approval_manager())
+    service = RunControlService(lambda: registry, get_approval_manager)
 
     answer = await service._steer(run.run_id, user_actor(USER), {"content": "hello"})
 

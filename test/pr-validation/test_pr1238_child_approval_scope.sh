@@ -12,4 +12,6 @@ source .venv/bin/activate
 export PYTHONPATH="$PROJECT_ROOT"
 python -m pytest atlas/tests/test_child_approval_scope.py -q -p no:cacheprovider
 python -m pytest atlas/tests/test_atlas_launch_tool.py atlas/tests/test_auto_approve_background.py -q -p no:cacheprovider
+# Runs/steering changes must pass the multi-replica harness (AGENTS.md).
+bash test/multireplica_tests.sh
 echo "PASS: child approval scope and busy-message validation"
