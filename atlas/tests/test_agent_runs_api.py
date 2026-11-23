@@ -549,9 +549,8 @@ async def test_shared_store_replays_on_another_replica(factory, shared_store):
 
 async def test_a_slow_admission_keeps_its_reservation_alive(factory, shared_store, monkeypatch):
     """The key must not lapse while the first request is still admitting."""
-    import atlas.application.chat.runs.external_runs as external_runs
-
-    monkeypatch.setattr(external_runs, "IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
     renewals = []
     original = shared_store.renew
 
@@ -567,7 +566,7 @@ async def test_a_slow_admission_keeps_its_reservation_alive(factory, shared_stor
         started.set()
         await gate.wait()
 
-    monkeypatch.setattr(external_runs, "_resolve_api_model", slow_resolve)
+    monkeypatch.setattr(f"{module}._resolve_api_model", slow_resolve)
     body = {**LAUNCH, "idempotency_key": "slow-1"}
     async with _client(factory) as client:
         first = asyncio.ensure_future(client.post("/api/agent-runs", json=body, headers=AUTH))
