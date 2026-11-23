@@ -69,6 +69,54 @@ def _live_metadata(session) -> Dict[str, Any]:
     return metadata
 
 
+async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional[Dict[str, Any]]:
+    """A running view of a conversation whose live run another replica owns.
+
+    The run's session, stream buffer and task live on the owner, so this
+    replica cannot build the transcript. The shared run record can still say
+    that a run holds the conversation, which is enough for a client to keep a
+    running state and poll instead of reading a miss as "gone" (issue #1219).
+    The view carries no messages: callers fall back to the stored record for
+    those, and ``attach_execution`` adds the tool rows the owner has
+    projected so far. ``run_elsewhere`` is the marker; ``in_flight`` stays
+    unset because the replay and live-poll paths that key on it need the
+    owner's transcript.
+    """
+    from atlas.application.chat.runs.control_bus import get_run_control_bus
+    from atlas.application.chat.runs.run_control import RunDirectoryUnavailable, conversation_entry
+    from atlas.core.user_identity import normalize_user_email
+
+    bus = get_run_control_bus()
+    if bus is None:
+        return None
+    try:
+        entry = await conversation_entry(conversation_id)
+    except RunDirectoryUnavailable:
+        return None
+    if (
+        entry is None
+        or entry.get("replica") == bus.replica_id
+        or entry.get("user_email") != normalize_user_email(user_email)
+    ):
+        return None
+    now = datetime.now(tz=timezone.utc).isoformat()
+    return {
+        "id": conversation_id,
+        "user_email": user_email,
+        "title": None,
+        "model": None,
+        "created_at": now,
+        "updated_at": now,
+        "message_count": 0,
+        "metadata": {},
+        "messages": [],
+        "tags": [],
+        "run_elsewhere": True,
+        "run_id": entry.get("run_id"),
+        "run_status": entry.get("status") or "running",
+    }
+
+
 async def in_flight_conversation(
     session_repository,
     run_registry: RunRegistry,
@@ -84,7 +132,9 @@ async def in_flight_conversation(
     if not conversation_id or not user_email or session_repository is None:
         return None
     record = run_registry.active_for_conversation(conversation_id, user_email)
-    if record is None or record.off_record or record.connection_bound:
+    if record is None:
+        return await _run_elsewhere_view(conversation_id, user_email)
+    if record.off_record or record.connection_bound:
         # A plain turn runs on its socket's own session, which can hold turns
         # that were never saved (an incognito prefix); only a run with a
         # session of its own has a transcript another socket may read.

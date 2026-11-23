@@ -558,7 +558,11 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
     return merged
 
 
-def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict]:
+def merge_run_snapshots(
+    local_runs: List[dict],
+    shared: List[dict],
+    ended_for: Optional[str] = None,
+) -> List[dict]:
     """Overlay shared projections onto the process-local run list.
 
     A replica that did not start the run still has the projection, so the
@@ -567,6 +571,11 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
     Every local run is kept. A conversation can hold a finished turn and a
     running one at once (both retained in the registry), so the projection is
     matched to the local run with its run_id, never by conversation alone.
+
+    ``ended_for`` names the conversation a client is watching for the end of a
+    run another replica owns (issue #1219). Its finished projection is kept
+    as a terminal entry, so that client learns how the run ended instead of
+    seeing it vanish; a run this replica holds for it still wins.
     """
     merged = [dict(run) for run in local_runs]
     by_run = {run.get("run_id"): run for run in merged if run.get("run_id")}
@@ -586,6 +595,21 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
             # replica holds for the conversation. A finished projection is
             # not a new active run either: keeping it for the document TTL
             # would leave "Needs approval" on a run that already ended.
+            if (
+                projection_status in _TERMINAL_RUN
+                and conversation_id == ended_for
+                and conversation_id not in local_conversations
+            ):
+                merged.append({
+                    "run_id": projection.get("run_id"),
+                    "conversation_id": conversation_id,
+                    "status": projection_status,
+                    "end_reason": projection.get("end_reason"),
+                    "execution_revision": projection.get("revision"),
+                    "detached": True,
+                })
+                local_conversations.add(conversation_id)
+                continue
             if projection_status in _TERMINAL_RUN or conversation_id in active_conversations:
                 continue
             if conversation_id in local_conversations and not projection.get("run_id"):

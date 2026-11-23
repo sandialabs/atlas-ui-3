@@ -166,6 +166,15 @@ async def get_conversation(
         # not appended its prompt yet -- the (still empty) live one, which is
         # a real conversation and must not read as missing.
         conversation = repo.get_conversation(conversation_id, current_user) or live
+    if conversation is not None and live and live.get("run_elsewhere") and conversation is not live:
+        # The run is live on another replica (issue #1219): the stored record
+        # is the last saved turn, and the client must not treat it as final.
+        conversation = {
+            **conversation,
+            "run_elsewhere": True,
+            "run_id": live.get("run_id"),
+            "run_status": live.get("run_status"),
+        }
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     if compliance_level is not None:

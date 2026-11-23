@@ -301,9 +301,10 @@ configuration mistakes:
 - **Tracked agent runs**, their approvals, stop/steer routing and the per-user
   run cap are process-local until distributed run coordination
   ([#1128](https://github.com/sandialabs/atlas-ui-3/issues/1128)) lands. A
-  user who reconnects to another replica doesn't see a run executing
-  elsewhere until it finishes. Validate run operations across replicas once
-  #1128 is done.
+  user who reconnects to another replica sees the run as running (no
+  streamed tokens) and the page learns when it ends, within a few seconds;
+  see [run coordination](../developer/run-coordination.md). A turn that was
+  never saved when its replica was killed is not recovered.
 - **Per-user MCP tokens** (`MCP_TOKEN_STORAGE_DIR=/data/tokens`) are stored on
   each pod's own `emptyDir`. A token entered through one replica is unknown to
   the others and lost when the pod is replaced.

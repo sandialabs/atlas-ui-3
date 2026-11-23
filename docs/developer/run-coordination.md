@@ -309,6 +309,43 @@ an owner consumes a single stream). The envelope, JSON in field `c`:
 
 Details, reply codes and guarantees: [run control](run-control.md).
 
+## Clients on a replica that does not own the run
+
+A run's task, session and stream buffer exist only on its owner, and the
+owner's frames reach only the sockets connected to it. With no session
+affinity a browser can reconnect to any other replica (issue #1219), so that
+replica answers from the shared records and does not stream tokens:
+
+- `GET /api/conversations/<id>` and `restore_conversation`: when this replica
+  has no local run for the conversation, `in_flight_conversation` reads the
+  `<p>:run-conv:<id>` key and the run record it names
+  (`run_control.conversation_entry`). If another replica holds a live run of
+  the same user, the view is `{"run_elsewhere": true, "run_id", "run_status",
+  "messages": []}`. For a conversation with saved turns the route returns the
+  stored record with those three fields added; for an unsaved first turn it is
+  the empty view above, with the tool rows the owner has projected so far
+  merged in by `attach_execution`. It is never a 404 while the run is live.
+  `in_flight` stays unset, because the replay and live-poll paths that read it
+  need the owner's transcript. Another user's conversation id reads as missing.
+- `list_runs` already merges the shared execution projections, so a run owned
+  elsewhere is listed with `detached: true`. A finished run is dropped from the
+  list, unless the frame carries `watch_end: true` and a `conversation_id`: then
+  that conversation's finished projection is kept as a terminal entry (status
+  and `end_reason`), once this replica holds no run for it. The orphan sweep
+  closes the projection of a run whose owner died, so the same entry reports
+  `failed` about one lease after a SIGKILL.
+- The client re-sends `list_runs` (with `watch_end`) every 4 s while its
+  tracker holds a `detached` active run. When the run turns terminal or leaves
+  the list, it clears the thinking and Stop state, closes tool rows that never
+  reported, and reads the stored conversation, retrying with backoff. The
+  reconnect resync retries the same way and, when the read says
+  `run_elsewhere`, keeps the transcript on screen instead of replacing it with
+  the last saved turn.
+
+Not covered: a turn that has not saved when its owner is killed stays unsaved
+(a tracked run persists only at turn end). The user gets an interrupted notice
+and resends.
+
 ## Still open in #1128
 
 Nothing in `test/multireplica/test_run_coordination_gaps.py` is still a gap:
@@ -326,6 +363,9 @@ routing stop/steer/approval to the owner are all covered.
   two replicas: mirror, sweep, takeover generation, stale-owner refusal,
   frozen owner, Redis outage after the lease lapsed, projection and tool
   guards, non-owner reads.
+- `atlas/tests/test_run_elsewhere_view.py` and
+  `test/multireplica/test_non_owner_reconnect.py`: the non-owner view and the
+  `watch_end` list, including a killed owner.
 - `test/multireplica/test_cluster_admission.py`, `test_run_leases.py` and
   `test_run_coordination_gaps.py`: two real replicas with shared Redis and
   PostgreSQL (`bash test/multireplica_tests.sh`), including SIGKILL and

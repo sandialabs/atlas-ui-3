@@ -1201,3 +1201,111 @@ describe('canvas rehydration (issue #1157)', () => {
     unmount()
   })
 })
+
+describe('reconnect to a replica that does not own the run (issue #1219)', () => {
+  const setConnected = async (rerender, connected) => {
+    await act(async () => {
+      h.isConnected = connected
+      rerender()
+    })
+  }
+  const listRunsWatching = () => h.sendMessage.mock.calls
+    .map(c => c[0])
+    .filter(c => c?.type === 'list_runs' && c.watch_end === true)
+
+  it('keeps the view, polls, and loads the stored turn when the run ends', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, rerender, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'first question'), storedChat('assistant', 'first answer')],
+        })
+      })
+      dispatchFrame({ type: 'run_started', conversation_id: 'conv-1', run_id: 'run-2' })
+      const before = result.current.messages.map(m => m.content)
+
+      await setConnected(rerender, false)
+      // The other replica only knows the last saved turn plus a shared run record.
+      h.fetchMock.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          id: 'conv-1', run_elsewhere: true, run_id: 'run-2', run_status: 'running',
+          messages: [storedChat('user', 'first question'), storedChat('assistant', 'first answer')],
+        }),
+      }))
+      await setConnected(rerender, true)
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-2', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      // The on-screen transcript was not replaced by the stored one.
+      expect(result.current.messages.map(m => m.content)).toEqual(before)
+      expect(result.current.isAgentRunning).toBe(true)
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(4100) })
+      expect(listRunsWatching().length).toBeGreaterThan(0)
+      expect(listRunsWatching()[0].conversation_id).toBe('conv-1')
+
+      const finalRecord = {
+        id: 'conv-1',
+        messages: [
+          storedChat('user', 'first question'), storedChat('assistant', 'first answer'),
+          storedChat('user', 'second question'), storedChat('assistant', 'second answer'),
+        ],
+      }
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => finalRecord }))
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-2', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(result.current.isAgentRunning).toBe(false)
+      expect(result.current.isThinking).toBe(false)
+      expect(result.current.messages.at(-1).content).toBe('second answer')
+
+      // Nothing is left to ask about once the run is over.
+      const polls = listRunsWatching().length
+      await act(async () => { await vi.advanceTimersByTimeAsync(9000) })
+      expect(listRunsWatching().length).toBe(polls)
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retries the resync read after a failed fetch', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, rerender, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({ type: 'run_started', conversation_id: 'conv-1', run_id: 'run-1' })
+      await setConnected(rerender, false)
+      const record = {
+        id: 'conv-1',
+        messages: [storedChat('user', 'hello'), storedChat('assistant', 'hi there')],
+      }
+      let calls = 0
+      h.fetchMock.mockImplementation(async () => {
+        calls += 1
+        if (calls === 1) return { ok: false, status: 404, json: async () => ({}) }
+        return { ok: true, json: async () => record }
+      })
+      await setConnected(rerender, true)
+      dispatchFrame({ type: 'runs_snapshot', runs: [] })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      expect(result.current.messages.at(-1).content).toBe('hello')
+      await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
+      expect(calls).toBe(2)
+      expect(result.current.messages.at(-1).content).toBe('hi there')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

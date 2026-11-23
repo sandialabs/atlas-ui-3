@@ -3326,7 +3326,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         merge_run_snapshots,
                     )
 
-                    runs = merge_run_snapshots(runs, await list_execution_snapshots(user_email))
+                    runs = merge_run_snapshots(
+                        runs,
+                        await list_execution_snapshots(user_email),
+                        ended_for=(data.get("conversation_id") or None) if data.get("watch_end") is True else None,
+                    )
                 except Exception:
                     logger.warning("execution snapshot merge failed", exc_info=True)
                 await websocket.send_json({

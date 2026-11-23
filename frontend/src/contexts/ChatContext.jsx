@@ -38,6 +38,16 @@ import { clientMayAutoApprove } from '../utils/toolApproval'
 // How long to wait for a `conversation_saved` after a joined run ends before
 // reloading anyway (a run that failed before saving never sends one).
 const RUN_END_RELOAD_GRACE_MS = 2500
+// A socket on a replica that does not own a run gets no frames for it. While
+// the tracker holds such a run (`detached`), ask for the run list this often
+// so its end, or the owner's loss, reaches the view (issue #1219).
+const REMOTE_RUN_POLL_MS = 4000
+// Reads of the conversation record after a reconnect or a remote run's end
+// are retried with this backoff instead of giving up on the first failure
+// (a replica that has not seen the save yet answers 404).
+const RECORD_RETRY_BASE_MS = 1000
+const RECORD_RETRY_MAX_MS = 8000
+const RECORD_RETRY_ATTEMPTS = 6
 // How many times the joined-run refresh will re-arm for a conversation whose
 // record still reports itself in flight. Bounded so an untracked run cannot
 // turn the refresh into an open-ended poll; after this the caller's full
@@ -258,6 +268,8 @@ export const ChatProvider = ({ children }) => {
 	// a conversation the user is not looking at still has somewhere to live --
 	// and so the history list can mark it as still working.
 	const runs = useConversationRuns()
+	const handleRunFrameRef = useRef(runs.handleRunFrame)
+	handleRunFrameRef.current = runs.handleRunFrame
 	// The delayed joined-run refresh fires from a setTimeout closure, which
 	// would otherwise read the run map as it was when the timer was armed. Read
 	// the live map through a ref so the timer can re-check whether the run is
@@ -1774,20 +1786,109 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const id = activeConversationId
 		const generation = reconnectResyncGenerationRef.current
 		const controller = new AbortController()
+		let retryTimer = null
+		const wait = (ms) => new Promise(resolve => { retryTimer = setTimeout(resolve, ms) })
 		const resync = async () => {
-			try {
-				const data = await fetchConversationRecord(id, { signal: controller.signal })
-				if (cancelled || reconnectResyncGenerationRef.current !== generation ||
-					activeConversationIdRef.current !== id || data?.id !== id || data.error) return
-				if (!reconnectSnapshotChanged(data, id)) return
-				await loadSavedConversationRef.current(data, { origin: 'reconnect' })
-			} catch (error) {
-				if (!cancelled) console.error('Could not resync conversation after reconnect:', error)
+			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS && !cancelled; attempt++) {
+				try {
+					const data = await fetchConversationRecord(id, { signal: controller.signal })
+					if (cancelled || reconnectResyncGenerationRef.current !== generation ||
+						activeConversationIdRef.current !== id || data?.id !== id || data.error) return
+					if (data.run_elsewhere === true) {
+						// The run lives on another replica, so this record is the last
+						// saved turn, not the live one. Replacing the view with it would
+						// drop the prompt and rows on screen. Keep the view, mark the
+						// run active and let the remote-run poll report its end.
+						handleRunFrameRef.current?.({
+							type: 'run_status',
+							run: {
+								run_id: data.run_id,
+								conversation_id: id,
+								status: data.run_status || 'running',
+								detached: true,
+							},
+						})
+						return
+					}
+					if (!reconnectSnapshotChanged(data, id)) return
+					await loadSavedConversationRef.current(data, { origin: 'reconnect' })
+					return
+				} catch (error) {
+					if (cancelled) return
+					console.error('Could not resync conversation after reconnect:', error)
+				}
+				await wait(Math.min(RECORD_RETRY_BASE_MS * 2 ** attempt, RECORD_RETRY_MAX_MS))
 			}
 		}
 		resync()
-		return () => { cancelled = true; controller.abort() }
+		return () => { cancelled = true; controller.abort(); if (retryTimer) clearTimeout(retryTimer) }
 	}, [isConnected, config.features?.chat_history, saveMode, activeConversationId, reconnectSnapshotChanged])
+
+	// A run another replica owns (issue #1219). This socket gets none of its
+	// frames, so its end is learned by asking: while the tracker holds a
+	// `detached` active run, re-send `list_runs` (naming the open conversation
+	// and asking for its ended run) on an interval. The reply replaces the
+	// tracker; a remote run that has ended is then terminal or absent.
+	const hasRemoteRun = Object.values(runs.runsByConversation).some(r => isRunActive(r) && r.detached === true)
+	useEffect(() => {
+		if (!isConnected || !hasRemoteRun || !config.features?.chat_history) return
+		const timer = setInterval(() => {
+			sendMessageRef.current?.({
+				type: 'list_runs',
+				conversation_id: activeConversationIdRef.current || undefined,
+				watch_end: true,
+			})
+		}, REMOTE_RUN_POLL_MS)
+		return () => clearInterval(timer)
+	}, [isConnected, hasRemoteRun, config.features?.chat_history])
+
+	// The remote run on screen ended: stop the running state, close tool rows
+	// that never reported, and read the stored conversation. The saved turn can
+	// lag the run's end on the replica that answers, so the read is retried.
+	const remoteWatchRef = useRef(null)
+	useEffect(() => {
+		const id = activeConversationId
+		const run = id ? runs.runsByConversation[id] : null
+		if (id && isRunActive(run) && run.detached === true) {
+			remoteWatchRef.current = id
+			return
+		}
+		const watched = remoteWatchRef.current
+		if (!watched) return
+		remoteWatchRef.current = null
+		if (watched !== id) return
+		const finish = async () => {
+			cleanupStreamState()
+			streamEnd()
+			setIsThinking(false)
+			setIsSynthesizing(false)
+			setIsAgentRunning(false)
+			mapMessages(prev => prev.map(m => (
+				m.type === 'tool_call' && (m.status === 'calling' || m.status === 'in_progress')
+					? { ...m, status: 'interrupted' }
+					: m
+			)))
+			if (run && run.status && run.status !== 'completed') {
+				toast.error('This run ended before it finished.')
+			}
+			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
+				try {
+					const data = await fetchConversationRecord(id)
+					if (activeConversationIdRef.current !== id || data?.id !== id || data.error) return
+					// A newer turn already holds the conversation: its own tracking
+					// takes over, and this record is not the final one.
+					if (data.run_elsewhere === true || data.in_flight === true) return
+					await loadSavedConversationRef.current(data, { origin: 'reconnect' })
+					return
+				} catch (error) {
+					console.error('Could not load conversation after its run ended:', error)
+				}
+				await new Promise(resolve => setTimeout(resolve, Math.min(RECORD_RETRY_BASE_MS * 2 ** attempt, RECORD_RETRY_MAX_MS)))
+			}
+		}
+		finish()
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [runs.runsByConversation, activeConversationId])
 
 	const refreshJoinedConversation = useCallback((conversationData, { live = false } = {}) => {
 		if (!conversationData || !conversationData.messages) return false
