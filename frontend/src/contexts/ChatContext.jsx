@@ -727,6 +727,25 @@ export const ChatProvider = ({ children }) => {
 						}
 					}
 				}
+				if (
+					data?.type === 'run_status' &&
+					data.run &&
+					!isRunActive(data.run) &&
+					data.run.conversation_id &&
+					data.run.conversation_id === activeConversationIdRef.current
+				) {
+					// A run that ends on screen must not leave the turn looking busy:
+					// one that fails before any token (a start-up failure) sends no
+					// other frame to clear it. Skipped when the tracker holds a
+					// different run for this conversation -- a newer turn is live and
+					// the terminal frame belongs to the older one.
+					const tracked = runs.getRun(data.run.conversation_id)
+					if (!tracked || !tracked.run_id || tracked.run_id === data.run.run_id) {
+						setIsThinking(false)
+						setIsAgentRunning(false)
+						setIsSynthesizing(false)
+					}
+				}
 				runs.handleRunFrame(data)
 			},
 			// The joined conversation's turn is on disk: reload now rather than

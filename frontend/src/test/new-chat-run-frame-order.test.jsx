@@ -213,18 +213,27 @@ describe('new agent chat edge cases (#1216)', () => {
     expect(result.current.isThinking).toBe(true)
 
     act(() => handler(frames.started))
-    act(() => handler({
-      type: 'error',
-      message: 'The run could not be started',
-      error_type: 'unknown',
-      run_id: RUN,
-      conversation_id: CONV,
-    }))
+    // What the server sends when seeding fails: no error frame, no tokens.
     act(() => handler({ type: 'run_status', run: { ...runRecord('failed'), error: 'The run could not be started' } }))
 
     expect(result.current.isThinking).toBe(false)
+    expect(result.current.isAgentRunning).toBe(false)
+    expect(result.current.isSynthesizing).toBe(false)
     expect(result.current.messages.filter(m => m.role === 'assistant' && !m.content)).toHaveLength(0)
     expect(result.current.messages.filter(m => m.role === 'user')).toHaveLength(1)
+  })
+
+  it('keeps the turn busy when an older run of the conversation ends', () => {
+    const { result } = renderChat()
+    const handler = runHandler()
+    act(() => handler({ type: 'connection_session', session_id: 's1' }))
+    act(() => { result.current.sendChatMessage('do a task') })
+    act(() => handler(frames.started))
+    // A newer run of the same conversation is now the tracked one.
+    act(() => handler({ ...frames.started, run_id: 'run-2' }))
+    act(() => handler({ type: 'run_status', run: { ...runRecord('completed'), run_id: RUN } }))
+
+    expect(result.current.isThinking).toBe(true)
   })
 
   it('does not route a frame from the abandoned chat into the new one after New Chat', () => {
