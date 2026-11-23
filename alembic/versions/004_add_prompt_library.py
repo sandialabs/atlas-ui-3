@@ -18,8 +18,9 @@ draft_revision and sharing_revision counters back optimistic concurrency for
 draft edits/publication and sharing changes.
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "004"
 down_revision = "003"

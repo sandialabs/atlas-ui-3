@@ -20,6 +20,12 @@ from atlas.domain.messages.models import Message, MessageRole
 from atlas.modules.chat_history.database import reset_engine
 from atlas.modules.prompts.prompt_library_service import PromptLibraryService
 
+
+def _outcome(response):
+    """The clear's outcome fields (the response also carries the stored pin revision)."""
+    return {k: v for k, v in response.json().items() if k in ("cleared", "recovered")}
+
+
 OWNER = "owner@example.com"
 USER = "member@example.com"
 OUTSIDER = "outsider@example.com"
@@ -50,6 +56,14 @@ def _clean_engine():
     reset_engine()
     yield
     reset_engine()
+
+
+def _team_text(call):
+    """The prompt text a turn ran with: a TeamPrompt's text, or a private prompt."""
+    from atlas.domain.team_prompt import TeamPrompt
+
+    value = call.get("custom_system_prompt")
+    return value.text if isinstance(value, TeamPrompt) else value
 
 
 class Members:
@@ -149,7 +163,7 @@ async def test_library_prompt_is_resolved_server_side_and_pinned(env):
     service, calls, _ = _service(env)
     conv = str(uuid4())
     await _turn(service, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
-    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(calls[-1]) == "v1 body"
     meta = _stored_meta(env, conv)
     assert meta["prompt_library"] == {
         "prompt_id": prompt["id"], "version_id": v1["id"], "version_number": 1, "title": "Team reviewer",
@@ -209,17 +223,17 @@ async def test_exact_version_survives_new_publications(env):
     # "Latest" in this conversation keeps v1; an old client omitting the field too.
     await _turn(service, session_id, conv, library_prompt=latest)
     await _turn(service, session_id, conv)
-    assert [c["custom_system_prompt"] for c in calls] == ["v1 body"] * 3
+    assert [_team_text(c) for c in calls] == ["v1 body"] * 3
     assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
 
     # A brand-new conversation picks up v2.
     other = str(uuid4())
     await _turn(service, uuid4(), other, library_prompt=latest)
-    assert calls[-1]["custom_system_prompt"] == "v2 body"
+    assert _team_text(calls[-1]) == "v2 body"
 
     # An explicit choice re-pins and is recorded in the history.
     await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v2["id"]})
-    assert calls[-1]["custom_system_prompt"] == "v2 body"
+    assert _team_text(calls[-1]) == "v2 body"
     meta = _stored_meta(env, conv)
     assert meta["prompt_library"]["version_id"] == v2["id"]
     assert [h["version_number"] for h in meta["prompt_library_history"]] == [1, 2]
@@ -240,7 +254,7 @@ async def test_null_unpins_and_other_prompts_take_over(env):
     # Re-pin, then an inline custom prompt with the field omitted also unpins.
     await _turn(service, session_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
     await _turn(service, session_id, conv, custom_system_prompt="my own")
-    assert calls[-1]["custom_system_prompt"] == "my own"
+    assert _team_text(calls[-1]) == "my own"
     assert "prompt_library" not in _stored_meta(env, conv)
 
 
@@ -257,7 +271,7 @@ async def test_restored_conversation_keeps_its_version(env):
     # A new replica/socket: fresh service and session, hydrated from the store.
     fresh, fresh_calls, _ = _service(env)
     await _turn(fresh, uuid4(), conv)
-    assert fresh_calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(fresh_calls[-1]) == "v1 body"
 
     # The sidebar restore path loads the pin too.
     restorer, restore_calls, sessions = _service(env)
@@ -269,7 +283,7 @@ async def test_restored_conversation_keeps_its_version(env):
         session_id=session_id, content="again", model="m", user_email=USER,
         library_prompt={"prompt_id": prompt["id"], "version_id": None},
     )
-    assert restore_calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(restore_calls[-1]) == "v1 body"
 
 
 @pytest.mark.asyncio
@@ -366,7 +380,7 @@ async def test_saved_workspace_selection_is_rechecked_after_revocation(env):
     prompt_id, version_id = stored_key[len("libprompt:"):].split("@")
     service, calls, _ = _service(env)
     await _turn(service, uuid4(), str(uuid4()), library_prompt={"prompt_id": prompt_id, "version_id": version_id})
-    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(calls[-1]) == "v1 body"
     env["members"].table["eng"].discard(USER)
     with pytest.raises(AuthorizationError):
         await _turn(service, uuid4(), str(uuid4()), library_prompt={"prompt_id": prompt_id, "version_id": version_id})
@@ -431,7 +445,7 @@ async def test_owner_can_clear_an_unavailable_pin_and_continue(env, monkeypatch)
     assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
 
     cleared = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert cleared.status_code == 200 and cleared.json() == {"cleared": True}
+    assert cleared.status_code == 200 and _outcome(cleared) == {"cleared": True}
     meta = _stored_meta(env, conv)
     assert "prompt_library" not in meta
     assert meta["prompt_library_history"][0]["version_id"] == v1["id"]  # what ran stays recorded
@@ -442,7 +456,7 @@ async def test_owner_can_clear_an_unavailable_pin_and_continue(env, monkeypatch)
     await _turn(cli, uuid4(), conv)
     assert cli_calls[-1].get("custom_system_prompt") is None  # default prompt, explicitly chosen
     again = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert again.json() == {"cleared": False}
+    assert _outcome(again) == {"cleared": False}
 
 
 @pytest.mark.asyncio
@@ -480,7 +494,7 @@ async def test_pin_can_be_cleared_while_the_library_is_switched_off(env, monkeyp
     client = _pin_client(env, monkeypatch, env["members"])
     monkeypatch.setattr(prompt_library_routes, "_library_enabled", lambda: False)
     cleared = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert cleared.status_code == 200 and cleared.json() == {"cleared": True}
+    assert cleared.status_code == 200 and _outcome(cleared) == {"cleared": True}
     await _turn(off, uuid4(), conv)
     assert off_calls[-1].get("custom_system_prompt") is None
 
@@ -562,7 +576,7 @@ async def test_clearing_a_pin_binds_a_session_that_is_already_open(env, monkeypa
 
     client = _pin_client(env, monkeypatch, env["members"])
     cleared = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert cleared.json() == {"cleared": True}
+    assert _outcome(cleared) == {"cleared": True}
 
     # The same session -- still holding the pin in memory -- runs unpinned.
     await _turn(service, session_id, conv)
@@ -595,7 +609,7 @@ async def test_a_clear_during_a_running_turn_is_not_undone_by_its_save(env):
 
     _set_execute(service, clear_mid_turn)
     await _turn(service, session_id, conv)
-    assert calls[-1]["custom_system_prompt"] == "v1 body"  # resolved before the clear
+    assert _team_text(calls[-1]) == "v1 body"  # resolved before the clear
     assert "prompt_library" not in _stored_meta(env, conv)  # ... but not written back
     assert len(env["conversations"].get_conversation(conv, USER)["messages"]) == 4
 
@@ -634,7 +648,7 @@ async def test_choosing_the_prompt_again_after_a_clear_pins_the_current_version(
     assert len(calls) == 1
     # "Latest" no longer means "the version I had pinned".
     await _turn(service, session_id, conv, library_prompt=ref)
-    assert calls[-1]["custom_system_prompt"] == "v2 body"
+    assert _team_text(calls[-1]) == "v2 body"
     meta = _stored_meta(env, conv)
     assert meta["prompt_library"]["version_id"] == v2["id"]
     assert meta["prompt_library_pin_revision"] == 3
@@ -685,7 +699,7 @@ async def test_failed_load_adopts_the_stored_pin_when_it_can_be_read(env, monkey
     service, calls, sessions, session_id, conv_b = await _session_on_other_conversation(env, prompt)
     monkeypatch.setattr(env["conversations"], "get_conversation", _fail)
     await _turn(service, session_id, conv_b)
-    assert calls[-1]["custom_system_prompt"] == "v1 body"  # the pinned version, not the default
+    assert _team_text(calls[-1]) == "v1 body"  # the pinned version, not the default
     assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY]["version_id"] == v1["id"]
 
 
@@ -712,7 +726,7 @@ async def test_turns_recover_once_the_store_answers_again(env, monkeypatch, no_c
         with pytest.raises(AuthorizationError):
             await _turn(service, session_id, conv_b)
     await _turn(service, session_id, conv_b)
-    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(calls[-1]) == "v1 body"
     assert _stored_meta(env, conv_b)["prompt_library"]["version_id"] == v1["id"]
 
 
@@ -784,7 +798,7 @@ async def test_unknown_pin_with_no_metadata_record_is_refused_not_defaulted(env,
     assert _stored_meta(env, conv_b)["prompt_library"]["version_id"] == v1["id"]
     # Once the full load works, the stored pin -- not the default -- runs.
     await _turn(service, session_id, conv_b)
-    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(calls[-1]) == "v1 body"
     assert sessions[session_id].context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY) is None
 
 
@@ -840,7 +854,7 @@ async def test_two_sessions_selecting_different_versions_do_not_overwrite_each_o
     (a, a_id, a_calls, _), (b, b_id, b_calls, b_sessions), conv = await _two_sessions_on_pinned(env, prompt, v1["id"])
     assert _stored_meta(env, conv)["prompt_library_pin_revision"] == 1
     await _turn(a, a_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v2["id"]})
-    assert a_calls[-1]["custom_system_prompt"] == "v2 body"
+    assert _team_text(a_calls[-1]) == "v2 body"
     # B decided on revision 1 (v1) and now picks v1 explicitly: refused, not applied.
     with pytest.raises(PromptPinConflictError) as exc:
         await _turn(b, b_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
@@ -850,7 +864,7 @@ async def test_two_sessions_selecting_different_versions_do_not_overwrite_each_o
     assert meta["prompt_library"]["version_id"] == v2["id"] and meta["prompt_library_pin_revision"] == 2
     # Informed now, B's choice applies.
     await _turn(b, b_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": v1["id"]})
-    assert b_calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(b_calls[-1]) == "v1 body"
     meta = _stored_meta(env, conv)
     assert meta["prompt_library"]["version_id"] == v1["id"] and meta["prompt_library_pin_revision"] == 3
     assert [h["version_id"] for h in meta["prompt_library_history"]] == [v1["id"], v2["id"], v1["id"]]
@@ -887,7 +901,7 @@ async def test_a_session_that_never_saw_the_pin_runs_and_saves_under_it(env):
     await _turn(a, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
     # B (never saw the pin) continues with a client that sends nothing.
     await _turn(b, b_id, conv)
-    assert b_calls[-1]["custom_system_prompt"] == "v1 body"  # not the default
+    assert _team_text(b_calls[-1]) == "v1 body"  # not the default
     meta = _stored_meta(env, conv)
     assert meta["prompt_library"]["version_id"] == v1["id"] and meta["prompt_library_pin_revision"] == 1
     # Its save of a session that holds no pin cannot drop the stored one.
@@ -985,7 +999,7 @@ async def test_incognito_turns_in_a_stored_conversation_never_conflict_or_write_
     ref = {"prompt_id": prompt["id"], "version_id": None}
     for _ in range(3):
         await _turn(service, session_id, conv, library_prompt=ref, incognito=True)
-        assert calls[-1]["custom_system_prompt"] == "v1 body"
+        assert _team_text(calls[-1]) == "v1 body"
     assert _stored_meta(env, conv) == stored_before
     assert sessions[session_id].context[library_turn.PIN_CONTEXT_KEY] is None
     # Back on the record, the selection is made and stored as usual.
@@ -1039,9 +1053,9 @@ async def test_unreadable_metadata_refuses_the_turn_and_is_left_alone(env, monke
     # Once the record is readable again, the stored pin runs -- not the default.
     _set_raw_metadata(env, conv, good)
     await _turn(service, session_id, conv)
-    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(calls[-1]) == "v1 body"
     await _turn(fresh, uuid4(), conv)
-    assert fresh_calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(fresh_calls[-1]) == "v1 body"
 
 
 @pytest.mark.asyncio
@@ -1075,7 +1089,7 @@ async def test_a_metadata_read_failure_refuses_the_turn(env, monkeypatch):
         assert exc.value.message == library_turn.PIN_STATE_UNAVAILABLE_MESSAGE
     assert len(calls) == 1
     await _turn(service, session_id, conv)
-    assert calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(calls[-1]) == "v1 body"
 
 
 @pytest.mark.asyncio
@@ -1108,7 +1122,7 @@ async def test_owner_clear_on_unreadable_metadata_recovers_it_without_guessing(e
     _set_raw_metadata(env, conv, "{broken")
     client = _pin_client(env, monkeypatch, env["members"])
     response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert response.status_code == 200 and response.json() == {"cleared": True, "recovered": True}
+    assert response.status_code == 200 and _outcome(response) == {"cleared": True, "recovered": True}
     stored = json.loads(_raw_metadata(env, conv))
     assert "prompt_library" not in stored
     assert stored["prompt_library_recovery"]["original_metadata_json"] == "{broken"
@@ -1173,7 +1187,7 @@ async def test_live_view_of_a_running_turn_carries_the_pin_and_matches_the_saved
     # Resumed: the observing tab continues under the pin it saw, no conflict.
     await _turn(observer, observer_id, conv, library_prompt={"prompt_id": prompt["id"], "version_id": None},
                 library_prompt_revision=live["prompt_library_pin_revision"])
-    assert observer_calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(observer_calls[-1]) == "v1 body"
 
 
 @pytest.mark.asyncio
@@ -1201,7 +1215,7 @@ async def test_unsaved_conversations_change_their_pin_without_spurious_conflicts
     for version, body in ((v1, "v1 body"), (v2, "v2 body"), (v1, "v1 body")):
         await _turn(service, session_id, conv, incognito=True, library_prompt_revision=0,
                     library_prompt={"prompt_id": prompt["id"], "version_id": version["id"]})
-        assert calls[-1]["custom_system_prompt"] == body
+        assert _team_text(calls[-1]) == body
     await _turn(service, session_id, conv, incognito=True, library_prompt=None, library_prompt_revision=0)
     assert calls[-1].get("custom_system_prompt") is None
     assert env["conversations"].get_conversation(conv, USER) is None
@@ -1257,7 +1271,7 @@ async def test_malformed_pin_fields_never_run_the_default_prompt(env, key, bad):
     # Readable again: the stored pin runs.
     _set_raw_metadata(env, conv, good)
     await _turn(fresh, uuid4(), conv)
-    assert fresh_calls[-1]["custom_system_prompt"] == "v1 body"
+    assert _team_text(fresh_calls[-1]) == "v1 body"
 
 
 @pytest.mark.asyncio
@@ -1348,7 +1362,7 @@ async def test_conversation_saved_reports_the_persisted_pin_after_a_concurrent_c
     _set_execute(service, other_tab_repins_mid_turn)
     frames, collect = _frames()
     await _turn(service, session_id, conv, update_callback=collect)
-    assert calls[-2]["custom_system_prompt"] == "v1 body"  # this turn ran v1 (its pin when it started)
+    assert _team_text(calls[-2]) == "v1 body"  # this turn ran v1 (its pin when it started)
     saved = [f for f in frames if f.get("type") == "conversation_saved"][-1]
     stored = _stored_meta(env, conv)
     assert stored["prompt_library"]["version_id"] == v2["id"] and stored["prompt_library_pin_revision"] == 2
@@ -1358,7 +1372,7 @@ async def test_conversation_saved_reports_the_persisted_pin_after_a_concurrent_c
     assert sessions[session_id].context[library_turn.PIN_REVISION_CONTEXT_KEY] == 2
     _set_execute(service, _plain_execute(calls))
     await _turn(service, session_id, conv, library_prompt_revision=saved["prompt_library_pin_revision"])
-    assert calls[-1]["custom_system_prompt"] == "v2 body"
+    assert _team_text(calls[-1]) == "v2 body"
 
 
 def _plain_execute(calls):

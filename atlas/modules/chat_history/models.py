@@ -251,7 +251,33 @@ class PromptLibraryAuditRecord(Base):
     actor_email = Column(String(255), nullable=False)
     details_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    # Repeated events of one kind by one actor on one prompt within a time
+    # window (today: ``use_denied``) are one row: ``dedup_key`` names the
+    # window (unique), ``occurrences`` counts them and ``last_occurred_at`` is
+    # the latest. Other events have no key and are one row each (migration 005).
+    occurrences = Column(Integer, nullable=False, default=1, server_default="1")
+    last_occurred_at = Column(DateTime(timezone=True), nullable=True)
+    dedup_key = Column(String(160), nullable=True)
 
     __table_args__ = (
         Index("ix_prompt_library_audit_prompt_created", "prompt_id", "created_at"),
+        Index("ix_prompt_library_audit_prompt_type_created", "prompt_id", "event_type", "created_at"),
+        Index("uq_prompt_library_audit_dedup", "dedup_key", unique=True),
     )
+
+
+class ConversationPromptPinMarker(Base):
+    """A conversation that has, or had, a team-prompt pin (issue #1169).
+
+    Written in the same transaction as the pin, and never removed while the
+    conversation exists. It is consulted only when the conversation's
+    metadata cannot be read: then a missing marker proves the conversation
+    was never pinned (it behaves exactly as before the library existed),
+    while a marker keeps it fail closed until the owner recovers it.
+    """
+
+    __tablename__ = "conversation_prompt_pin_markers"
+
+    conversation_id = Column(String(36), primary_key=True)
+    user_email = Column(String(255), nullable=False)
+    first_pinned_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)

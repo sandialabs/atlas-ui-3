@@ -58,6 +58,20 @@ def api(method, path, user, body=None):
         return e.code, json.loads(e.read() or b"null")
 
 
+def team_prompt_sent():
+    """The team-prompt block of the last model call ("" when none ran)."""
+    for message in last_llm_request().get("messages") or []:
+        if message.get("role") == "user" and "<team_prompt>" in (message.get("content") or ""):
+            return message["content"]
+    return ""
+
+
+def ran(text):
+    """The last turn ran this team prompt: in its own user-role block, below
+    the platform system prompt, never in (or in place of) the system message."""
+    return text in team_prompt_sent() and text not in system_prompt_sent() and bool(system_prompt_sent())
+
+
 def system_prompt_sent():
     """The system prompt of the last model call (Atlas appends date/time to any prompt)."""
     return last_llm_request().get("system_prompt") or ""
@@ -146,8 +160,12 @@ async def main():
     # --- Server-side execution and pinning ---------------------------------
     conv = str(uuid.uuid4())
     status, _ = await chat(MEMBER, conv, {"prompt_id": pid, "version_id": None})
-    check(status == "ok" and system_prompt_sent().startswith(V1),
+    check(status == "ok" and ran(V1),
           "member's chat runs v1, resolved server-side")
+    platform = system_prompt_sent()
+    check("A shared team prompt is in use" in platform and V1 not in platform
+          and platform.split("A shared team prompt is in use")[0].strip() != "",
+          "the platform system prompt stays the system message, followed by the precedence notice")
     s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
     pin = (stored.get("metadata") or {}).get("prompt_library") if s == 200 else None
     check(pin and pin["version_id"] == v1["id"], "conversation records the pinned version")
@@ -166,10 +184,10 @@ async def main():
     check(body["version"]["content"] == V1, "v1 is unchanged after v2 is published")
 
     status, _ = await chat(MEMBER, conv, {"prompt_id": pid, "version_id": None})
-    check(status == "ok" and system_prompt_sent().startswith(V1),
+    check(status == "ok" and ran(V1),
           "existing conversation keeps v1 after v2 is published")
     status, _ = await chat(MEMBER, str(uuid.uuid4()), {"prompt_id": pid, "version_id": None})
-    check(status == "ok" and system_prompt_sent().startswith(V2), "a new conversation runs v2")
+    check(status == "ok" and ran(V2), "a new conversation runs v2")
 
     # --- Crafted frames ----------------------------------------------------
     before = last_llm_request().get("timestamp")
@@ -200,11 +218,12 @@ async def main():
     live = str(uuid.uuid4())
     async with websockets.connect(WS, additional_headers={"X-User-Email": MEMBER}) as ws:
         status, _ = await turn_on(ws, live, {"prompt_id": pid, "version_id": v1["id"]})
-        check(status == "ok" and system_prompt_sent().startswith(V1), "open session pins v1")
+        check(status == "ok" and ran(V1), "open session pins v1")
         s, body = api("DELETE", f"/api/prompts/pins/{live}", MEMBER)
-        check(s == 200 and body == {"cleared": True}, "pin cleared while the session stays open")
+        check(s == 200 and body.get("cleared") is True and isinstance(body.get("prompt_library_pin_revision"), int),
+              "pin cleared while the session stays open")
         status, _ = await turn_on(ws, live, ...)
-        check(status == "ok" and not system_prompt_sent().startswith(V1),
+        check(status == "ok" and not ran(V1) and V1 not in system_prompt_sent(),
               "the open session's next turn runs unpinned")
     s, stored = api("GET", f"/api/conversations/{live}", MEMBER)
     meta = stored.get("metadata") or {}
@@ -220,7 +239,7 @@ async def main():
         check(status == "ok" and seen == 1, "conversation_saved reports the pin revision (1)")
         status, b_saved = await turn_on(tab_b, race, {"prompt_id": pid, "version_id": v2["id"]},
                                         {"library_prompt_revision": seen})
-        check(status == "ok" and system_prompt_sent().startswith(V2), "tab B re-pins to v2 from revision 1")
+        check(status == "ok" and ran(V2), "tab B re-pins to v2 from revision 1")
         check(b_saved and (b_saved.get("prompt_library") or {}).get("version_id") == v2["id"]
               and b_saved.get("prompt_library_pin_revision") == 2,
               "tab B's conversation_saved reports the stored pin (v2, revision 2)")
@@ -238,7 +257,7 @@ async def main():
         check(status == "error" and frame.get("error_type") == "prompt_pin_conflict",
               "tab A's stale explicit clear (library_prompt: null) is refused too")
         status, _ = await turn_on(tab_a, race, None, {"library_prompt_revision": 2})
-        check(status == "ok" and not system_prompt_sent().startswith((V1, V2)),
+        check(status == "ok" and not (ran(V1) or ran(V2) or V1 in system_prompt_sent() or V2 in system_prompt_sent()),
               "after catching up, tab A's explicit clear applies")
     s, stored = api("GET", f"/api/conversations/{race}", MEMBER)
     meta = stored.get("metadata") or {}
@@ -267,6 +286,9 @@ async def main():
     status, frame = await chat(MEMBER, conv, ...)
     check(status == "error" and frame.get("error_type") == "authorization",
           "after unsharing, continuing the pinned conversation is refused")
+    check(frame.get("recovery") == "clear_team_prompt" and frame.get("conversation_id") == conv
+          and frame.get("pin_problem") == "unavailable",
+          "the refusal offers the owner's clear, for that conversation (browser recovery)")
     s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
     check(s == 200 and stored["metadata"]["prompt_library"]["version_id"] == v1["id"],
           "history keeps its pinned reference after revocation")
@@ -275,14 +297,29 @@ async def main():
           "a client that cannot pick a prompt is told how to clear the pin")
     s, _ = api("DELETE", f"/api/prompts/pins/{conv}", OUTSIDER)
     check(s == 404, "only the conversation owner can clear its pin")
-    s, body = api("DELETE", f"/api/prompts/pins/{conv}", MEMBER)
-    check(s == 200 and body == {"cleared": True}, "the owner clears the unavailable pin")
+    stale = (frame.get("prompt_library_pin_revision") or 0) + 100
+    s, _ = api("DELETE", f"/api/prompts/pins/{conv}?expected_revision={stale}", MEMBER)
+    check(s == 409, "a clear naming a revision the pin no longer has is refused (409), nothing cleared")
+    s, body = api("DELETE", f"/api/prompts/pins/{conv}?expected_revision={frame.get('prompt_library_pin_revision')}", MEMBER)
+    check(s == 200 and body.get("cleared") is True, "the owner clears the unavailable pin")
     status, _ = await chat(MEMBER, conv, ...)
-    check(status == "ok" and not system_prompt_sent().startswith(V1),
+    check(status == "ok" and not ran(V1) and V1 not in system_prompt_sent(),
           "after clearing, a legacy-style turn continues with the default prompt")
     s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
     history = (stored.get("metadata") or {}).get("prompt_library_history") or []
     check(any(h.get("version_id") == v1["id"] for h in history), "the pin history still records v1")
+
+    # --- Refused uses cannot flood the audit trail ---------------------------
+    for _ in range(6):
+        await chat(OUTSIDER, str(uuid.uuid4()), {"prompt_id": pid, "version_id": None})
+    s, denied = api("GET", f"/api/prompts/{pid}/audit?category=denied", OWNER)
+    rows = [e for e in denied.get("events", []) if e["actor_email"] == OUTSIDER]
+    check(s == 200 and len(rows) == 1 and rows[0]["occurrences"] >= 6,
+          "repeated refused uses by one user are one counted audit row")
+    s, management = api("GET", f"/api/prompts/{pid}/audit?category=management", OWNER)
+    kinds = {e["event_type"] for e in management.get("events", [])}
+    check(s == 200 and {"create", "publish", "share"} <= kinds and not kinds & {"use", "use_denied"},
+          "management events stay reachable on their own page")
 
     # --- Fork and audit ----------------------------------------------------
     share(pid, ["eng"])
@@ -328,7 +365,7 @@ async def damaged_metadata_recovery(pid, v1):
     conv = str(uuid.uuid4())
     status, saved = await chat(MEMBER, conv, {"prompt_id": pid, "version_id": v1["id"]})
     seen = (saved or {}).get("prompt_library_pin_revision")
-    check(status == "ok" and system_prompt_sent().startswith(V1) and seen == 1, "a pinned conversation (v1, revision 1)")
+    check(status == "ok" and ran(V1) and seen == 1, "a pinned conversation (v1, revision 1)")
     s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
     meta = dict(stored.get("metadata") or {})
     meta["prompt_library"] = {"prompt_id": pid}  # version_id lost
@@ -340,10 +377,13 @@ async def damaged_metadata_recovery(pid, v1):
     check(status == "error" and f"DELETE /api/prompts/pins/{conv}" in frame.get("message", "")
           and last_llm_request().get("timestamp") == before,
           "a turn on the damaged record is refused, names the owner's way out, and never reaches the model")
+    check(frame.get("recovery") == "clear_team_prompt" and frame.get("pin_problem") == "damaged"
+          and frame.get("conversation_id") == conv, "...and the browser is offered the clear for that conversation")
     s, _ = api("DELETE", f"/api/prompts/pins/{conv}", OUTSIDER)
     check(s == 404, "another user cannot recover it (same 404 as an unknown id)")
     s, body = api("DELETE", f"/api/prompts/pins/{conv}", MEMBER)
-    check(s == 200 and body == {"cleared": True, "recovered": True}, "the owner's clear recovers it")
+    check(s == 200 and body.get("cleared") is True and body.get("recovered") is True
+          and "classification_unknown" not in body, "the owner's clear recovers it")
     s, stored = api("GET", f"/api/conversations/{conv}", MEMBER)
     meta = stored.get("metadata") or {}
     check("prompt_library" not in meta and meta.get("prompt_library_recovery", {}).get("reason") == "malformed_pin_fields"
@@ -354,8 +394,28 @@ async def damaged_metadata_recovery(pid, v1):
     check(status == "error" and frame.get("error_type") == "prompt_pin_conflict",
           "a tab still holding the pre-damage revision cannot re-pin blindly")
     status, _ = await chat(MEMBER, conv, ...)
-    check(status == "ok" and not system_prompt_sent().startswith(V1),
+    check(status == "ok" and not ran(V1) and V1 not in system_prompt_sent(),
           "after the owner's reset the conversation continues on the default prompt")
+
+    # Legacy compatibility (review finding 1): a conversation that never had a
+    # team prompt keeps working in its open session after its metadata is
+    # damaged, exactly as before the library existed, and the owner's clear
+    # leaves it untouched.
+    legacy = str(uuid.uuid4())
+    async with websockets.connect(WS, additional_headers={"X-User-Email": MEMBER}) as ws:
+        status, _ = await turn_on(ws, legacy, None)
+        set_raw_metadata(legacy, "{not json")
+        before = last_llm_request().get("timestamp")
+        status, legacy_frame = await turn_on(ws, legacy, None)
+        # As on main: the turn runs (the model is reached); only its save is
+        # refused, because the classification guard will not overwrite an
+        # unreadable record ("conversation_save_rejected"). No pin refusal.
+        check(last_llm_request().get("timestamp") != before
+              and (status == "ok" or legacy_frame.get("error_type") == "conversation_save_rejected")
+              and "recovery" not in (legacy_frame or {}),
+              "a never-pinned conversation with damaged metadata keeps running in its open session, as on main")
+    s, body = api("DELETE", f"/api/prompts/pins/{legacy}", MEMBER)
+    check(s == 200 and body == {"cleared": False}, "the owner's clear leaves a never-pinned record untouched")
 
     broken = str(uuid.uuid4())
     await chat(MEMBER, broken, {"prompt_id": pid, "version_id": v1["id"]})

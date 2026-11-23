@@ -386,4 +386,4 @@ Guardrails:
 
 ### Legacy Method: Modifying the Code
 
-For advanced use cases, you can still directly modify the `is_user_in_group` function located in `atlas/core/auth.py`. The default implementation is a mock and **must be replaced** if you are not using the HTTP endpoint method.
+For advanced use cases, you can still directly modify the `is_user_in_group` function located in `atlas/core/auth.py`. The default implementation is a mock and **must be replaced** if you are not using the HTTP endpoint method. Every feature uses your version, including the team prompt library, which calls it through `check_user_in_group` (that wrapper only adds an "unknown" answer when the built-in HTTP endpoint method cannot reach the authorization service).

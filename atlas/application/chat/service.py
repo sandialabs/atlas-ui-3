@@ -1925,10 +1925,26 @@ class ChatService:
             metadata = record.get("metadata")
             return metadata if isinstance(metadata, dict) else {}
 
+        def read():
+            try:
+                if callable(read_metadata):
+                    return read_metadata(conversation_id, user_email)
+                return read_via_record()
+            except ConversationMetadataUnreadableError:
+                # Legacy compatibility (issue #1169): unreadable metadata says
+                # nothing about a pin, but the pin marker does. A conversation
+                # that was never pinned has no pin to lose, so the pin layer
+                # stands aside and the turn proceeds exactly as it did before
+                # the library existed (the other gates -- data classification,
+                # saves -- still read the damaged record as they always have).
+                # A conversation that has or had a pin stays fail closed.
+                was_pinned = getattr(repository, "conversation_was_pinned", None)
+                if callable(was_pinned) and was_pinned(conversation_id, user_email) is False:
+                    return {}
+                raise
+
         async def load():
-            if callable(read_metadata):
-                return await asyncio.to_thread(read_metadata, conversation_id, user_email)
-            return await asyncio.to_thread(read_via_record)
+            return await asyncio.to_thread(read)
 
         return load
 

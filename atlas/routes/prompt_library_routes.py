@@ -17,8 +17,9 @@ reviewed, and sharing changes the ``expected_revision`` of the grants they
 were computed from, so concurrent editors cannot overwrite each other or
 publish text nobody reviewed.
 
-Gated on the same flag as custom prompts (``custom_prompts_effective``: the
-custom-prompt feature plus chat history, which provides the database).
+Gated on its own flag (``prompt_library_effective``: FEATURE_PROMPT_LIBRARY_ENABLED,
+default off, on top of custom prompts and chat history, which provides the
+database). The owner's pin-clear route is not gated: see its docstring.
 """
 
 import asyncio
@@ -88,7 +89,7 @@ class ForkRequest(BaseModel):
 def _library_enabled() -> bool:
     from atlas.infrastructure.app_factory import app_factory
 
-    return app_factory.get_config_manager().app_settings.custom_prompts_effective
+    return app_factory.get_config_manager().app_settings.prompt_library_effective
 
 
 def _get_service() -> Optional[PromptLibraryService]:
@@ -314,10 +315,20 @@ async def export_library_prompt(
 
 
 @router.get("/{prompt_id}/audit")
-async def list_library_prompt_audit(prompt_id: str, current_user: str = Depends(get_current_user)):
+async def list_library_prompt_audit(
+    prompt_id: str,
+    category: str = Query("all"),
+    limit: int = Query(200),
+    offset: int = Query(0),
+    current_user: str = Depends(get_current_user),
+):
+    """The audit trail (manage permission), newest first and paged:
+    ``{events, total, limit, offset, category}``. ``category`` is ``all``,
+    ``management``, ``use`` or ``denied``; refused uses are one counted row
+    (``occurrences``) per actor and hour."""
     service = _service()
     try:
-        return {"events": await service.list_audit_events(current_user, prompt_id)}
+        return await service.list_audit_events(current_user, prompt_id, category, limit, offset)
     except PromptLibraryError as e:
         raise _http_error(e)
 
@@ -352,7 +363,11 @@ async def resolve_library_prompt(
 
 
 @router.delete("/pins/{conversation_id}")
-async def clear_conversation_pin(conversation_id: str, current_user: str = Depends(get_current_user)):
+async def clear_conversation_pin(
+    conversation_id: str,
+    expected_revision: Optional[int] = Query(default=None, ge=0),
+    current_user: str = Depends(get_current_user),
+):
     """Clear the team prompt pinned to one of the caller's conversations.
 
     The explicit way out when a pinned prompt is no longer available to a
@@ -368,32 +383,48 @@ async def clear_conversation_pin(conversation_id: str, current_user: str = Depen
     A conversation whose stored pin state is unreadable (damaged metadata)
     refuses every turn; this request resets that state without guessing a
     pin and keeps the rest of the record, answering ``{"cleared": true,
-    "recovered": true}`` (see ``recover_unreadable_metadata``).
+    "recovered": true}`` (see ``recover_unreadable_metadata``), plus
+    ``classification_unknown: true`` when nothing in the record could be read
+    (the conversation then stays closed to chat, as before).
+
+    ``expected_revision`` (optional): the pin revision the caller saw (a
+    browser's refusal frame carries it). If the stored revision moved since,
+    nothing is cleared and the answer is 409 -- a stale button cannot remove
+    a pin set meanwhile. Responses carry ``prompt_library_pin_revision`` (the
+    revision now stored, when readable).
 
     The clear also binds sessions that already have the conversation open:
     it bumps the stored pin epoch, so their next turn re-reads the record and
     runs unpinned, and their saves cannot write the old pin back.
     """
-    from atlas.domain.conversation_prompt_pin import PIN_METADATA_KEY
     from atlas.infrastructure.app_factory import app_factory
 
     conversations = getattr(app_factory, "conversation_repository", None)
     if conversations is None:
         raise HTTPException(status_code=503, detail=app_factory.chat_history_unavailable_reason())
     try:
-        removed = await asyncio.to_thread(
-            conversations.clear_prompt_pin, conversation_id, current_user
+        result = await asyncio.to_thread(
+            conversations.clear_prompt_pin_checked, conversation_id, current_user, expected_revision
         )
     except Exception as e:
         logger.error("Clearing a conversation pin failed (%s)", type(e).__name__)
         raise HTTPException(status_code=503, detail=PromptLibraryUnavailable().message)
-    if removed is None:
+    if result is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if removed.get("recovered"):
+    revision = {"prompt_library_pin_revision": result["revision"]} if result.get("revision") is not None else {}
+    if result.get("conflict"):
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation's team prompt changed since then. Nothing was cleared; reload and check it.",
+        )
+    if result.get("recovered"):
         # The stored pin state was unreadable and has been reset (nothing in
         # it could be trusted, so nothing from it is audited).
-        return {"cleared": True, "recovered": True}
-    pin = removed.get(PIN_METADATA_KEY)
+        return {
+            "cleared": True, "recovered": True, **revision,
+            **({"classification_unknown": True} if result.get("classification_unknown") else {}),
+        }
+    pin = result.get("removed")
     service = _get_service() if _library_enabled() else None
     if service is not None and isinstance(pin, dict) and isinstance(pin.get("prompt_id"), str):
         try:
@@ -401,4 +432,4 @@ async def clear_conversation_pin(conversation_id: str, current_user: str = Depen
         except PromptLibraryError:
             pass  # the pin is cleared; the audit write failure is already logged
     # ``prompt_library_history`` is kept: it records what the conversation ran.
-    return {"cleared": bool(pin)}
+    return {"cleared": bool(pin), **revision}

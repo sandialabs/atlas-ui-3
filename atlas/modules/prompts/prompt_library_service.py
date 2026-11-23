@@ -51,9 +51,11 @@ from atlas.modules.chat_history.prompt_library_repository import (
     GRANTEE_USER,
     PromptConflictError,
     PromptLibraryRepository,
+    PromptLimitError,
     PromptStorageError,
 )
 from atlas.modules.prompts.prompt_library_listing import PromptLibraryListing
+from atlas.modules.prompts.prompt_library_membership import MembershipResolver
 from atlas.modules.prompts.prompt_library_policy import (
     LEVEL_EDIT,
     LEVEL_MANAGE,
@@ -70,6 +72,8 @@ from atlas.modules.prompts.prompt_library_policy import (
     PromptConflict,
     PromptForbidden,
     PromptLibraryUnavailable,
+    PromptLimitReached,
+    PromptMembershipUnknown,
     PromptNotFound,
     PromptUnavailable,
     PromptValidationError,
@@ -111,6 +115,12 @@ MAX_SHAREABLE_GROUP_CHECKS = 100
 SHAREABLE_GROUP_CHECK_TIMEOUT_S = 10.0
 # Version history pages, and how many versions (with content) one export holds.
 DEFAULT_VERSION_PAGE_SIZE = 50
+# Audit trail: refused uses are one counted row per actor, prompt and window;
+# the trail is paged and can be filtered so management events stay reachable.
+USE_DENIED_DEDUP_WINDOW_S = 3600
+AUDIT_PAGE_SIZE = 200
+MAX_AUDIT_PAGE_SIZE = 500
+AUDIT_CATEGORIES = ("all", "management", "use", "denied")
 MAX_EXPORT_VERSIONS = 100
 
 T = TypeVar("T")
@@ -126,10 +136,39 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         repository: PromptLibraryRepository,
         group_check: Optional[GroupCheck] = None,
         group_candidates: Optional[GroupCandidates] = None,
+        membership_cache: Any = None,
+        membership_ttl: Optional[Callable[[], int]] = None,
+        limits: Optional[Callable[[], Dict[str, int]]] = None,
     ):
+        """``membership_cache``/``membership_ttl`` enable reuse of membership
+        answers (see ``prompt_library_membership``); the app factory passes
+        them. Without them every check asks the authorizer. ``limits`` returns
+        ``{"prompts_per_owner": n, "versions_per_prompt": n}`` (0: unlimited)."""
         self._repo = repository
         self._group_check = group_check
         self._group_candidates = group_candidates or _default_group_candidates
+        self._limits = limits or (lambda: {})
+        self._resolver = MembershipResolver(
+            check=self._resolve_check,
+            ttl_seconds=membership_ttl or (lambda: 0),
+            store=lambda: membership_cache,
+        )
+
+    def _limit(self, name: str) -> int:
+        try:
+            return max(0, int(self._limits().get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _resolve_check(self) -> GroupCheck:
+        if self._group_check is not None:
+            return self._group_check
+        # Resolved per call so the live auth module (and test patches of it)
+        # is always the one consulted. The tri-state check tells an
+        # unavailable authorizer (None) apart from "not a member" (False).
+        from atlas.core.auth import check_user_in_group
+
+        return check_user_in_group
 
     @property
     def repository(self) -> PromptLibraryRepository:
@@ -141,6 +180,8 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             return await asyncio.to_thread(fn, *args, **kwargs)
         except PromptConflictError as e:
             raise PromptConflict(e.kind) from None
+        except PromptLimitError as e:
+            raise PromptLimitReached(e.kind, e.limit) from None
         except PromptStorageError:
             # Already logged (type and SQLSTATE only) by the storage guard.
             raise PromptLibraryUnavailable() from None
@@ -153,26 +194,19 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         return bool(await self._membership(user_email, group))
 
     async def _membership(self, user_email: str, group: str) -> Optional[bool]:
-        """True/False from the authorizer, or None when the check itself failed."""
-        check = self._group_check
-        if check is None:
-            # Resolved per call so the live auth module (and test patches of
-            # it) is always the one consulted.
-            from atlas.core.auth import is_user_in_group
+        """True/False from the authorizer, or None when the check itself failed
+        (fail closed: never a member). Bounded and reused; see
+        ``prompt_library_membership``."""
+        return await self._resolver.membership(user_email, group)
 
-            check = is_user_in_group
-        try:
-            return bool(await check(user_email, group))
-        except Exception as e:
-            # Fail closed: an authorizer outage must not grant access.
-            logger.warning(
-                "Group check failed for prompt-library access; treating as not a member: %s",
-                type(e).__name__,
-            )
-            return None
+    async def _member_groups(
+        self, user_email: str, groups: Iterable[str], unknown: Optional[Set[str]] = None
+    ) -> Set[str]:
+        """The groups among ``groups`` the user is in, names as given (case kept).
 
-    async def _member_groups(self, user_email: str, groups: Iterable[str]) -> Set[str]:
-        """The groups among ``groups`` the user is in, names as given (case kept)."""
+        A group whose check could not be answered is not a member (fail
+        closed); when ``unknown`` is given, it is also added there.
+        """
         names = sorted({g for g in groups if g and not is_org_wide_group(g)})
         if not names:
             return set()
@@ -180,7 +214,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
 
         async def check(group: str) -> Optional[str]:
             async with semaphore:
-                return group if await self._is_member(user_email, group) else None
+                answer = await self._membership(user_email, group)
+            if answer is None and unknown is not None:
+                unknown.add(group)
+            return group if answer else None
 
         results = await asyncio.gather(*(check(g) for g in names))
         return {g for g in results if g}
@@ -248,6 +285,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         grants: Optional[List[Dict[str, Any]]] = None,
         member_groups: Optional[Set[str]] = None,
         history: bool = False,
+        unknown_groups: Optional[Set[str]] = None,
     ) -> Access:
         """The caller's level on ``prompt``.
 
@@ -278,7 +316,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         ]
         if group_names:
             if member_groups is None:
-                matched = await self._member_groups(user_email, group_names)
+                matched = await self._member_groups(user_email, group_names, unknown_groups)
             else:
                 matched = {g for g in group_names if g in member_groups}
             if matched:
@@ -306,9 +344,11 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         return user_email, prompt, access
 
     async def _audit(self, prompt_id: str, event: str, actor: str, version_id: Optional[str] = None,
-                     details: Optional[Dict[str, Any]] = None) -> None:
+                     details: Optional[Dict[str, Any]] = None, dedup_window_s: Optional[int] = None) -> None:
         try:
-            await asyncio.to_thread(self._repo.add_audit_event, prompt_id, event, actor, version_id, details)
+            await asyncio.to_thread(
+                self._repo.add_audit_event, prompt_id, event, actor, version_id, details, dedup_window_s
+            )
         except Exception as e:  # an audit write failure is logged, never silent
             # Event type and exception type only: the prompt id is
             # client-supplied, and the failure is the same for every prompt.
@@ -389,9 +429,36 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         detail["export_format"] = "atlas-prompt-library/1"
         return detail
 
-    async def list_audit_events(self, user_email: str, prompt_id: str) -> List[Dict[str, Any]]:
+    async def list_audit_events(
+        self,
+        user_email: str,
+        prompt_id: str,
+        category: str = "all",
+        limit: int = AUDIT_PAGE_SIZE,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """One page of the audit trail, newest first: ``{events, total, limit, offset}``.
+
+        ``category``: ``all``; ``management`` (everything but use and refused
+        use: creation, drafts, publishing, sharing, forks, archiving, unpins);
+        ``use``; ``denied`` (refused use, one counted row per actor and hour).
+        Management events can always be paged to, however many uses happen.
+        """
+        if category not in AUDIT_CATEGORIES:
+            raise PromptValidationError(f"category must be one of {', '.join(AUDIT_CATEGORIES)}")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_AUDIT_PAGE_SIZE:
+            raise PromptValidationError(f"limit must be between 1 and {MAX_AUDIT_PAGE_SIZE}")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise PromptValidationError("offset must be zero or more")
         await self._authorize(user_email, prompt_id, LEVEL_MANAGE)
-        return await self._db(self._repo.list_audit_events, prompt_id)
+        include, exclude = {
+            "all": (None, None),
+            "management": (None, ["use", "use_denied"]),
+            "use": (["use"], None),
+            "denied": (["use_denied"], None),
+        }[category]
+        page = await self._db(self._repo.page_audit_events, prompt_id, limit, offset, include, exclude)
+        return {**page, "limit": limit, "offset": offset, "category": category}
 
     async def shareable_groups(self, user_email: str) -> List[str]:
         """Configured groups the caller belongs to (the only ones they may share with)."""
@@ -438,7 +505,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         title = clean_title(title, required=True)
         content = clean_content(content, required=True)
         description = clean_description(description)
-        prompt = await self._db(self._repo.create_prompt, user_email, title, description, content)
+        prompt = await self._db(
+            self._repo.create_prompt, user_email, title, description, content,
+            max_owned=self._limit("prompts_per_owner"),
+        )
         await self._audit(prompt["id"], "create", user_email)
         return await self.get_prompt(user_email, prompt["id"])
 
@@ -476,7 +546,11 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             if prompt["draft_revision"] != expected:
                 raise PromptConflict("draft")
             return await self._detail_view(prompt_id, prompt, access)
-        updated = await self._db(self._repo.update_prompt, prompt_id, expected, title, description, content)
+        # The edit right is re-checked inside the write's transaction (under
+        # the row lock sharing changes also take), not only above.
+        updated = await self._db(
+            self._repo.update_prompt, prompt_id, expected, title, description, content, user_email
+        )
         if updated is None:
             raise PromptNotFound()
         await self._audit(
@@ -499,7 +573,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             raise PromptValidationError(
                 f"Change description is longer than {MAX_CHANGE_DESCRIPTION_LEN} characters"
             )
-        version = await self._db(self._repo.publish_version, prompt_id, user_email, change_description, expected)
+        version = await self._db(
+            self._repo.publish_version, prompt_id, user_email, change_description, expected,
+            True, self._limit("versions_per_prompt"),
+        )
         if version is None:
             raise PromptNotFound()
         await self._audit(
@@ -530,7 +607,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         new_title = clean_title(title, required=False) or f"{source['title']} (copy)"[:200]
         new_prompt = await self._db(
             self._repo.create_prompt, user_email, new_title, prompt.get("description"), source["content"],
-            prompt_id, source["id"],
+            prompt_id, source["id"], max_owned=self._limit("prompts_per_owner"),
         )
         await self._audit(
             prompt_id, "fork", user_email, version_id=source["id"],
@@ -577,12 +654,20 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         if prompt is None:
             raise PromptUnavailable()
         grants = await self._db(self._repo.list_grants, prompt_id)
-        access = await self._access(user_email, prompt, grants)
+        unknown: Set[str] = set()
+        access = await self._access(user_email, prompt, grants, unknown_groups=unknown)
+        if access.level == LEVEL_NONE and unknown and not prompt.get("archived_at"):
+            # Not a confirmed denial: a group grant could not be checked. Not
+            # recorded as a refused use; the caller sees the same message.
+            raise PromptMembershipUnknown()
         if access.level == LEVEL_NONE:
             # Recorded for an entry that exists (archived or revoked); ids that
             # match nothing leave no row behind.
             if record_denial:
-                await self._audit(prompt_id, "use_denied", user_email, version_id)
+                # One counted row per actor, prompt and window: repeated
+                # refused turns are evidence, but cannot flood the trail.
+                await self._audit(prompt_id, "use_denied", user_email, version_id,
+                                  dedup_window_s=USE_DENIED_DEDUP_WINDOW_S)
             raise PromptUnavailable()
         if version_id:
             version = await self._db(self._repo.get_version, prompt_id, version_id)

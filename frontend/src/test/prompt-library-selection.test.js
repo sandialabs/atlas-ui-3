@@ -76,7 +76,7 @@ describe('resolveLibrarySelection', () => {
 
   it('sends a draft under test inline only while it is open', () => {
     const library = { ...loaded(), testDraft: { promptId: 'p1', content: 'draft text' } }
-    expect(resolveLibrarySelection(libraryDraftKey('p1'), library)).toEqual({ kind: 'draft', content: 'draft text' })
+    expect(resolveLibrarySelection(libraryDraftKey('p1'), library)).toEqual({ kind: 'draft', content: 'draft text', title: null })
     expect(resolveLibrarySelection(libraryDraftKey('p2'), library).kind).toBe('blocked')
     expect(resolveLibrarySelection(libraryDraftKey('p1'), loaded()).kind).toBe('blocked')
   })

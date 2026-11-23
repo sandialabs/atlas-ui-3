@@ -91,3 +91,56 @@ def test_the_conflict_names_the_conversation_it_concerns_over_the_envelope():
     assert err.conversation_id == "conv-pinned"
     frame = tag_event({"type": "error", "conversation_id": err.conversation_id}, "run-1", "conv-other")
     assert frame["conversation_id"] == "conv-pinned" and frame["run_id"] == "run-1"
+
+
+# --- Review finding 5: a blocking pin is recoverable from the browser -----------
+
+
+@pytest.fixture
+def blocked_service(conflicting_service):
+    from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+    from atlas.domain.errors import AuthorizationError
+
+    async def blocked(**kwargs):
+        conversation_id = kwargs.get("conversation_id")
+        if conversation_id == "conv-plain":
+            raise AuthorizationError("The selected team prompt is not available. Choose another prompt.")
+        raise PromptPinBlockedError(
+            f"pinned ... (DELETE /api/prompts/pins/{conversation_id})", conversation_id,
+            "damaged" if conversation_id == "conv-damaged" else "unavailable",
+        )
+
+    conflicting_service.handle_chat_message = AsyncMock(side_effect=blocked)
+    return conflicting_service
+
+
+def test_a_blocking_pin_frame_offers_the_owner_clear_for_its_conversation(blocked_service):
+    client = TestClient(app)
+    with client.websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
+        ws.send_json({"type": "chat", "content": "hi", "model": "m", "conversation_id": "conv-a"})
+        unavailable = _error_frame(ws)
+        ws.send_json({"type": "chat", "content": "hi", "model": "m", "conversation_id": "conv-damaged"})
+        damaged = _error_frame(ws)
+        ws.send_json({"type": "chat", "content": "hi", "model": "m", "conversation_id": "conv-plain"})
+        plain = _error_frame(ws)
+    assert unavailable["error_type"] == "authorization"  # unchanged for existing clients
+    assert unavailable["recovery"] == "clear_team_prompt" and unavailable["pin_problem"] == "unavailable"
+    assert unavailable["conversation_id"] == "conv-a" and unavailable["run_id"]
+    assert "DELETE /api/prompts/pins/conv-a" in unavailable["message"]  # the CLI text stays
+    assert damaged["pin_problem"] == "damaged" and damaged["conversation_id"] == "conv-damaged"
+    # A refused *new* selection (no stored pin) offers no clear: choosing another prompt is the way out.
+    assert "recovery" not in plain
+
+
+@pytest.mark.asyncio
+async def test_only_a_stored_pin_raises_the_recoverable_refusal():
+    from atlas.application.chat import prompt_library_turn as library_turn
+    from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+    from atlas.domain.errors import AuthorizationError
+
+    context = {"conversation_id": "conv-1", library_turn.PIN_CONTEXT_KEY: dict(PIN)}
+    assert isinstance(library_turn._pin_refusal(context, True, None, True), PromptPinBlockedError)
+    not_stored = library_turn._pin_refusal(context, True, None, False)  # an unsaved / incognito session
+    assert type(not_stored) is AuthorizationError
+    new_selection = library_turn._pin_refusal(context, False, "Not available.", True)
+    assert type(new_selection) is AuthorizationError and new_selection.message == "Not available."

@@ -1,6 +1,6 @@
 # Team Prompt Library (issue #1169)
 
-Date: 2026-11-09 (review revisions 2026-11-10, 2026-11-13)
+Date: 2026-11-09 (review revisions 2026-11-10, 2026-11-13, 2026-11-23)
 
 How the team-shared, versioned prompt library was built, and why. User-facing
 behaviour is in the [user guide](../../user-guide/team-prompt-library/README.md).
@@ -16,6 +16,15 @@ behaviour is in the [user guide](../../user-guide/team-prompt-library/README.md)
 | Chat | `atlas/application/chat/prompt_library_turn.py` | Per-turn resolution and version pinning, called from `ChatService.handle_chat_message` |
 | UI | `usePromptLibrary`, `PromptLibraryPanel` (+ Editor/Sharing/Versions), `PromptSelector`, `utils/libraryPromptSelection.js` | Browse, manage, select; send a reference only |
 
+**Feature flag.** `FEATURE_PROMPT_LIBRARY_ENABLED` (default off) gates the
+library on its own, on top of custom prompts and chat history
+(`prompt_library_effective`): the `/api/prompts` library routes, the config
+payload (`features.prompt_library`), the browser UI, and library references
+on chat turns (refused when off). Enabling private custom prompts therefore
+never turns on cross-user sharing. The owner's pin-clear route is not gated:
+a conversation pinned while the library was on must stay recoverable with it
+off (its turns are refused, never run on the default prompt).
+
 The library is a separate registry rather than a conversion of `user_prompts`:
 issue #153 prompts keep their API, storage and inline execution unchanged, and
 "Save to team library" copies one in explicitly. That keeps the migration
@@ -24,9 +33,31 @@ does.
 
 ## Authorization
 
-Atlas's existing group check (`atlas.core.auth.is_user_in_group`) is the only
-membership source; the library adds an object ACL, not a new identity or group
-model.
+Atlas's existing group logic is the only membership source; the library adds
+an object ACL, not a new identity or group model. It calls
+`atlas.core.auth.check_user_in_group`, which answers `True`, `False`, or `None`
+when the external authorizer could not answer (network error, non-2xx, no
+`is_member`). `is_user_in_group` is that answer with `None` collapsed to
+`False`, unchanged for every other caller. In the library, `None` is never
+"member" (fail closed) and never "not a member" either: listings say
+`incomplete`, and sharing into the group answers 503.
+
+Membership answers are bounded and reused (`prompt_library_membership.py`):
+
+- A definite answer is reused for `PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS`
+  (default 30, at most 300, 0 disables). That is the revocation latency for a
+  change made in the authorization service; changes made in Atlas (unsharing,
+  removing a grant, archiving) are read from the database on every request.
+  Failures are never cached.
+- Keys are a SHA-256 of the exact identity and group, so answers are never
+  reused across users, and no identity appears in Redis keys.
+- With `SESSION_REPOSITORY_TYPE=redis` the answers live in Redis (`SET ... EX`)
+  through the process's bounded pool, shared by every replica; otherwise each
+  replica keeps a bounded local table (10,000 entries). Correctness does not
+  depend on sharing; a Redis error falls back to asking the authorizer.
+- Identical concurrent checks share one call, and at most 32 run at once per
+  process, so a burst of listings cannot open an unbounded number of HTTP
+  clients.
 
 - Levels: `use` < `edit` < `manage` < `owner`. Group grants are always `use`;
   `edit`/`manage` exist only as direct user grants; only the owner changes
@@ -113,7 +144,8 @@ either side is resolved (`frame_has_conflicting_prompts`, error type
 happens, so no `use` or `use_denied` is audited; the pin is untouched.
 
 Any refusal raises `AuthorizationError` before the turn runs or is saved, with
-one generic message. It never falls back to another version or the default
+one generic message (`PromptPinBlockedError` when a stored pin is the cause; see
+"Recovering from an unavailable pin"). It never falls back to another version or the default
 prompt; the client sends `library_prompt: null` to move on explicitly.
 
 The pin (`metadata.prompt_library`) and a capped change history
@@ -125,6 +157,43 @@ key afterwards; an explicit workspace switch by the user does not. Because versi
 and archiving is a soft delete, a pinned id always resolves to its original
 text; running it again still needs current access. That is the distinction
 between preserving history and permitting new use.
+
+### Instruction precedence: team text never replaces the platform prompt
+
+A private custom prompt (issue #153) is the user's own text and replaces the
+platform system prompt, as before. A team prompt -- a shared version, or an
+unpublished draft under "Test in chat" -- is written by other users, so it
+is layered below the platform's instructions (`atlas/domain/team_prompt.py`,
+`MessageBuilder.build_messages`):
+
+1. MCP prompts the user selected (admin-configured server prompts, unchanged);
+2. the system message: the configured platform system prompt (with the
+   date/time enrichment) followed by a fixed precedence notice -- platform
+   text only;
+3. a separate **user-role** message holding the team text inside
+   `<team_prompt>` tags, labelled as team-authored;
+4. the conversation history.
+
+The trust boundary is the role, which the server sets: team text cannot edit
+or remove the system message, and a closing tag inside it is neutralised so it
+cannot end its own block. Enforcement never depends on prompt text at all:
+tool admission, compliance levels, data classification and authorization run
+in code before and around the model call. `TeamPrompt` is deliberately not a
+`str`; any path that would treat it as a plain system prompt fails loudly. A
+browser marks a library draft (`custom_system_prompt_source: "library_draft"`)
+so it is tested exactly as it will run; the marker can only lower the text's
+trust. Code that treats messages by role recognises the team block
+(`is_team_prompt_message`): tool-result synthesis never takes it for the
+user's question (so it never reaches that system message), mid-run
+compaction keeps it with the system messages instead of summarising it, and
+for models with `strict_role_ordering` it is folded into the user's turn
+rather than sent as a second consecutive user message.
+
+What this does not guarantee: how firmly a model ranks a system message
+above a user message is model-dependent. This is the strongest separation the
+chat-completions message format offers; it is a maintainer decision whether
+team prompts should instead be limited further (for example, appended only as
+style guidance), and the design leaves room for that.
 
 ### Pin state is the stored record's
 
@@ -213,6 +282,16 @@ Unknown and unreadable state:
     damaged pin is audited or logged, and other users still get 404;
   - `prompt_library_recovery` is server-written: saves carry it like the
     pin, and a new conversation cannot be created with one.
+- **Legacy compatibility.** `conversation_prompt_pin_markers` records, in the
+  same transaction as the pin, every conversation that has or had one
+  (migration 005 backfills every conversation whose stored metadata mentions
+  the library, readable or not, and every one named by a `use` audit event).
+  When metadata cannot be read, a conversation with no marker -- and whose raw
+  blob does not mention the library -- has no pin to lose: the pin layer
+  stands aside and it behaves exactly as on `main` (an open session keeps
+  running; the data-classification gate and save guard treat the damaged
+  record as they always have), and the owner's clear leaves it untouched. A
+  conversation with a marker stays fail closed until its owner recovers it.
 - The live view of a run that has not saved yet (`in_flight`) carries the
   same pin, history and revision as the session, so a tab that opens it shows
   the right selection and does not send `library_prompt: null` by accident.
@@ -230,8 +309,49 @@ uses the default prompt. A storage outage during resolution is reported as
 such and keeps the pin. Browsers choose explicitly every turn
 (`library_prompt: null` unpins).
 
+When a *stored* pin blocks a conversation (the pinned prompt is unavailable,
+the library is off, or the stored pin state is damaged), the error frame keeps
+`error_type: "authorization"` and its text, and adds `recovery:
+"clear_team_prompt"`, `pin_problem` (`unavailable` | `damaged`) and the
+`conversation_id` (the run envelope adds `run_id`). The browser shows a **Clear
+team prompt** action on that message: it asks for confirmation, calls the
+same owner-only DELETE for the conversation the frame named (never whichever
+one is on screen), and reports success or the server's refusal; only when the
+cleared conversation is the one shown does its team selection change. A
+refused *new* selection has no recovery (the user just picks another prompt).
+The frame also carries the pin revision the refusal saw; the browser sends it
+as `expected_revision`, so a pin changed meanwhile in another tab is not
+cleared (409), and it follows the revision the clear returns. When the whole
+blob was unreadable the response says `classification_unknown: true` and the
+browser explains the conversation stays closed.
+
+An authorizer outage is not a revocation: when no grant gives access and a
+group grant could not be checked, the turn on a conversation pinned to that
+prompt is refused as "could not be confirmed right now, try again", with no
+clear offer and no `use_denied` row. A *new* selection, and every REST
+answer, stay identical to "not available", so an outage reveals nothing about
+whether an entry exists. Picking a team prompt in a never-pinned conversation
+whose stored settings are damaged is refused with "start a new conversation"
+(nothing may be written over the damaged record).
+
 ## Concurrency and scaling
 
+- Edit rights come only from ownership or a direct `edit`/`manage` grant, so
+  `update_prompt` and `publish` re-check them inside their own transaction
+  (after taking the prompt's row lock on PostgreSQL; sharing changes take the
+  same lock). A revocation either commits before the check -- the write is
+  refused with 409 "permission ... was removed" and nothing is written -- or
+  waits for the write to commit. On DuckDB, which has no row locks, the check
+  still runs in the write's transaction; a concurrent sharing change then
+  conflicts at commit. Group membership cannot be part of a database
+  transaction, but it only ever grants `use`, never a write.
+- Storage bounds: `PROMPT_LIBRARY_MAX_PROMPTS_PER_OWNER` (default 1000,
+  archived and forks included) and `PROMPT_LIBRARY_MAX_VERSIONS_PER_PROMPT`
+  (default 1000); 0 means unlimited; past a bound the request is refused with
+  400. The version bound is checked under the publish lock; the owner bound is
+  read in the creating transaction, so concurrent creations by one owner can
+  overshoot it by at most the requests in flight. Grants per prompt were
+  already bounded (100).
 - Version numbers are unique per prompt (database constraint). Publishing
   computes `max+1` in a transaction (`SELECT ... FOR UPDATE` on the prompt row
   on PostgreSQL) and retries with jittered backoff only on transient
@@ -287,11 +407,36 @@ such and keeps the pin. Browsers choose explicitly every turn
 `unpin`.
 Prompt text is never written to audit rows or logs.
 
+Refused uses are evidence but must not flood the trail: `use_denied` events by
+one actor on one prompt are one row per hour (`dedup_key`, unique, so the
+first insert wins across replicas; later refusals increment `occurrences` and
+move `last_occurred_at`). They are only recorded for entries that exist, and
+the caller's answer is the same either way, so nothing reveals existence. The
+trail (`GET /api/prompts/{id}/audit`, manage permission) is paged (`limit`,
+`offset`, `total`) and filterable by `category` (`all`, `management` -- every
+event except use and refused use --, `use`, `denied`), so sharing, publishing
+and management events are always reachable however many uses happen.
+
+## Module size
+
+Every module the library added or grew stays cohesive. The library code was
+kept out of the shared conversation store (`conversation_pin_store.py` is a
+mixin of `ConversationRepository`). Over the 400-line guideline remain:
+`prompt_library_service.py` (~680 lines: the access core, CRUD, history and
+audit), `prompt_library_repository.py` (~580), `prompt_library_turn.py` (~510)
+and `prompt_library_routes.py` (~420). Natural follow-up boundaries, if
+wanted: history/export and audit out of the service into mixins like
+`prompt_library_listing.py`; versions out of the repository into a store like
+`prompt_library_grants.py`. They were not split during review to avoid churn.
+
 ## Tests
 
 `atlas/tests/test_prompt_library_access.py`, `..._routes.py`,
 `..._chat_turn.py`, `..._migration.py`, `..._concurrency.py`,
 `..._storage.py`, `..._bounds.py`, `..._archived.py`, `..._listing_columns.py`,
+`..._membership.py`, `..._audit_history.py`, `..._write_races.py`,
+`..._migration_005.py`, `test_prompt_pin_legacy_compat.py`,
+`test_team_prompt_precedence.py`, `test_prompt_pin_recovery.py`,
 `atlas/tests/test_prompt_pin_conflict_frames.py`,
 `atlas/tests/test_conversation_prompt_pin.py` (SQLite,
 DuckDB and, with `ATLAS_TEST_POSTGRES_URL`, PostgreSQL); frontend `src/test/prompt-library-*.test.*`;

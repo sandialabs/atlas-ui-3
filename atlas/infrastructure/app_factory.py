@@ -183,10 +183,28 @@ class AppFactory:
             self.workspace_repository = WorkspaceRepository(session_factory)
             # Team prompt library (issue #1169): shares the chat-history
             # database; authorization lives in the service, not the repository.
+            from atlas.modules.prompts.prompt_library_membership import (
+                LocalMembershipCache,
+                RedisMembershipCache,
+            )
             from atlas.modules.prompts.prompt_library_service import PromptLibraryService
 
+            settings_now = lambda: self.config_manager.app_settings  # noqa: E731
             self.prompt_library_service = PromptLibraryService(
-                PromptLibraryRepository(session_factory)
+                PromptLibraryRepository(session_factory),
+                # Membership answers are shared across replicas through Redis
+                # when it is configured; otherwise each replica keeps a bounded
+                # local table. Either way they expire after the configured TTL.
+                membership_cache=(
+                    RedisMembershipCache(self.redis)
+                    if getattr(self, "redis", None) is not None
+                    else LocalMembershipCache()
+                ),
+                membership_ttl=lambda: settings_now().prompt_library_membership_cache_seconds,
+                limits=lambda: {
+                    "prompts_per_owner": settings_now().prompt_library_max_prompts_per_owner,
+                    "versions_per_prompt": settings_now().prompt_library_max_versions_per_prompt,
+                },
             )
             self.startup_outcomes["chat_history"] = "ok"
             logger.info("Chat history persistence initialized")
@@ -309,7 +327,7 @@ class AppFactory:
         Read when each chat service is built, so the same flag that hides the
         /api/prompts routes also makes a library reference on a turn fail closed.
         """
-        if not self.config_manager.app_settings.custom_prompts_effective:
+        if not self.config_manager.app_settings.prompt_library_effective:
             return None
         return self.prompt_library_service
 

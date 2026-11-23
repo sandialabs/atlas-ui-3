@@ -395,7 +395,7 @@ async def test_audit_records_events_without_prompt_bodies(lib):
     prompt = await _published(lib, content="TOP SECRET BODY", groups_=["eng"])
     await _edit(lib, OWNER, prompt["id"], content="ANOTHER SECRET")
     await lib.fork(ALICE, prompt["id"])
-    events = await lib.list_audit_events(OWNER, prompt["id"])
+    events = (await lib.list_audit_events(OWNER, prompt["id"]))["events"]
     kinds = [e["event_type"] for e in reversed(events)]
     assert kinds == ["create", "publish", "share", "update_draft", "fork"]
     by_kind = {e["event_type"]: e for e in events}

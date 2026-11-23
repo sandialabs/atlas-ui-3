@@ -983,7 +983,24 @@ export function createWebSocketHandler(deps) {
           if (typeof onContextCompaction === 'function' && data.error_type !== 'compaction_in_progress') {
             onContextCompaction({ status: 'failed', silent: true })
           }
-          addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
+          addMessage({
+            role: 'system',
+            content: `Error: ${data.message}`,
+            timestamp: new Date().toISOString(),
+            // A stored team-prompt pin blocks the conversation (issue #1169):
+            // offer its owner the clear, for the conversation the server named.
+            ...(data.recovery === 'clear_team_prompt' && typeof data.conversation_id === 'string' && data.conversation_id
+              ? {
+                  recovery: {
+                    action: 'clear_team_prompt',
+                    conversationId: data.conversation_id,
+                    problem: data.pin_problem || null,
+                    // The pin revision the refusal saw: the clear is refused if it moved since.
+                    revision: Number.isInteger(data.prompt_library_pin_revision) ? data.prompt_library_pin_revision : null,
+                  },
+                }
+              : {}),
+          })
           break
         case 'agent_step_update':
           setCurrentAgentStep(data.current_step)

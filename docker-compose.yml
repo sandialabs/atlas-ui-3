@@ -61,6 +61,8 @@ services:
       - FEATURE_CHAT_HISTORY_ENABLED=true
       # Per-user custom prompt library (requires chat history)
       - FEATURE_CUSTOM_PROMPTS_ENABLED=false
+      # Team-shared prompt library (issue #1169; needs custom prompts and chat history)
+      - FEATURE_PROMPT_LIBRARY_ENABLED=false
       # Parallel conversation runs (issue #884). Applies to agent-mode turns
       # saved to the server; see docs/admin/parallel-conversation-runs.md.
       # Counts every run that has not finished, including one paused on a tool

@@ -19,6 +19,7 @@ re-inserts the same unique key -- a pattern DuckDB's constraint checking
 rejects.
 """
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -31,6 +32,7 @@ from atlas.core.user_identity import normalize_user_email
 
 from .models import PromptLibraryAuditRecord, PromptLibraryGrantRecord, PromptLibraryPromptRecord
 from .prompt_library_storage import (
+    AUDIT_DEDUP_CONSTRAINT,
     GRANT_CONSTRAINT,
     PromptConflictError,
     guarded,
@@ -69,6 +71,8 @@ def audit_to_dict(record: PromptLibraryAuditRecord) -> Dict[str, Any]:
         "actor_email": record.actor_email,
         "details": details,
         "created_at": _iso(record.created_at),
+        "occurrences": record.occurrences or 1,
+        "last_occurred_at": _iso(record.last_occurred_at) if record.last_occurred_at else None,
     }
 
 
@@ -255,25 +259,89 @@ class PromptLibraryGrantStore:
         actor_email: str,
         version_id: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
+        dedup_window_s: Optional[int] = None,
     ) -> None:
-        with self._session() as session:
-            session.add(PromptLibraryAuditRecord(
-                prompt_id=prompt_id,
-                version_id=version_id,
-                event_type=event_type,
-                actor_email=normalize_user_email(actor_email),
-                details_json=json.dumps(details, sort_keys=True) if details else None,
-            ))
-            session.commit()
+        """Append an audit event.
+
+        With ``dedup_window_s``, repeats of the same event by the same actor
+        on the same prompt within one window are one row: the first insert
+        wins the unique ``dedup_key`` (across replicas too), and every later
+        one increments ``occurrences`` and moves ``last_occurred_at``. The
+        row keeps the first occurrence's ``created_at`` and version.
+        """
+        actor = normalize_user_email(actor_email)
+        now = datetime.now(timezone.utc)
+        key = None
+        if dedup_window_s:
+            window = int(now.timestamp()) // dedup_window_s
+            digest = hashlib.sha256(f"{event_type}\x00{prompt_id}\x00{actor}\x00{window}".encode()).hexdigest()
+            key = f"{event_type}:{digest}"
+        for attempt in range(5):
+            try:
+                with self._session() as session:
+                    if key is not None:
+                        counted = session.execute(
+                            update(PromptLibraryAuditRecord)
+                            .where(PromptLibraryAuditRecord.dedup_key == key)
+                            .values(
+                                occurrences=PromptLibraryAuditRecord.occurrences + 1,
+                                last_occurred_at=now,
+                            )
+                            # RETURNING, not rowcount: DuckDB's driver reports
+                            # rowcount -1 for UPDATE, which read as "counted"
+                            # and dropped the window's first refusal.
+                            .returning(PromptLibraryAuditRecord.id)
+                            .execution_options(synchronize_session=False)
+                        )
+                        if counted.fetchall():
+                            session.commit()
+                            return
+                    session.add(PromptLibraryAuditRecord(
+                        prompt_id=prompt_id,
+                        version_id=version_id,
+                        event_type=event_type,
+                        actor_email=actor,
+                        details_json=json.dumps(details, sort_keys=True) if details else None,
+                        created_at=now,
+                        occurrences=1,
+                        last_occurred_at=now if key is not None else None,
+                        dedup_key=key,
+                    ))
+                    session.commit()
+                    return
+            except SQLAlchemyError as e:
+                # Another replica inserted this window's row first (unique
+                # key), or a concurrent writer conflicted: count again.
+                if key is None or attempt == 4 or not is_transient_conflict(e, AUDIT_DEDUP_CONSTRAINT):
+                    raise
+
+    def list_audit_events(self, prompt_id: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """The newest ``limit`` events of a prompt (all kinds)."""
+        return self.page_audit_events(prompt_id, limit)["events"]
 
     @guarded("read audit")
-    def list_audit_events(self, prompt_id: str, limit: int = 200) -> List[Dict[str, Any]]:
+    def page_audit_events(
+        self,
+        prompt_id: str,
+        limit: int = 200,
+        offset: int = 0,
+        event_types: Optional[Iterable[str]] = None,
+        exclude_types: Optional[Iterable[str]] = None,
+    ) -> Dict[str, Any]:
+        """One page of a prompt's audit events, newest first, and the total."""
         with self._session() as session:
+            query = session.query(PromptLibraryAuditRecord).filter(
+                PromptLibraryAuditRecord.prompt_id == prompt_id
+            )
+            if event_types is not None:
+                query = query.filter(PromptLibraryAuditRecord.event_type.in_(list(event_types)))
+            if exclude_types:
+                query = query.filter(PromptLibraryAuditRecord.event_type.notin_(list(exclude_types)))
+            total = query.count()
             records = (
-                session.query(PromptLibraryAuditRecord)
-                .filter(PromptLibraryAuditRecord.prompt_id == prompt_id)
-                .order_by(PromptLibraryAuditRecord.created_at.desc())
+                query.order_by(PromptLibraryAuditRecord.created_at.desc(), PromptLibraryAuditRecord.id)
+                .offset(max(0, offset))
                 .limit(max(1, min(limit, 1000)))
                 .all()
             )
-            return [audit_to_dict(r) for r in records]
+            return {"events": [audit_to_dict(r) for r in records], "total": total}

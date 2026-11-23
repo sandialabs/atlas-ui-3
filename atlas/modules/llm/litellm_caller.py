@@ -20,6 +20,7 @@ import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
+from atlas.domain.team_prompt import is_team_prompt_message
 from atlas.hooks import HookBlockedError, HookEvent, get_hook_manager
 
 # Suppress Pydantic deprecation warnings from litellm's response processing.
@@ -1388,6 +1389,19 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             if last_role == "tool" and role not in ("tool", "assistant"):
                 result.append({"role": "assistant", "content": "(continuing)"})
                 logger.debug("strict_role_ordering: inserted bridging assistant message")
+            # A team-prompt block (issue #1169) followed by the user's turn
+            # would be two user messages in a row: fold them into one user
+            # message, team block first. Both are user-role already, so
+            # nothing changes trust.
+            if (
+                role == "user"
+                and result
+                and is_team_prompt_message(result[-1])
+                and isinstance(msg.get("content"), str)
+            ):
+                result[-1] = {**result[-1], "content": f"{result[-1]['content']}\n\n{msg['content']}"}
+                last_role = role
+                continue
             result.append(msg)
             last_role = role
         return result

@@ -40,6 +40,11 @@ from atlas.tests.test_prompt_library_chat_turn import (
 )
 
 
+def _outcome(response):
+    """The clear's outcome fields (the response also carries the stored pin revision)."""
+    return {k: v for k, v in response.json().items() if k in ("cleared", "recovered")}
+
+
 @pytest.fixture(autouse=True)
 def _clean_engine():
     reset_engine()
@@ -104,7 +109,7 @@ async def test_owner_recovers_metadata_that_is_not_an_object(env, monkeypatch, r
 
     response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
     assert response.status_code == 200
-    assert response.json() == {"cleared": True, "recovered": True}
+    assert _outcome(response) == {"cleared": True, "recovered": True}
 
     stored = json.loads(_raw_metadata(env, conv))
     assert pin_fields_readable(stored) and "prompt_library" not in stored
@@ -141,7 +146,7 @@ async def test_owner_recovers_a_malformed_pin_and_keeps_everything_else(env, mon
 
     client = _pin_client(env, monkeypatch, env["members"])
     response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert response.status_code == 200 and response.json() == {"cleared": True, "recovered": True}
+    assert response.status_code == 200 and _outcome(response) == {"cleared": True, "recovered": True}
 
     stored = json.loads(_raw_metadata(env, conv))
     assert pin_fields_readable(stored) and "prompt_library" not in stored
@@ -190,11 +195,11 @@ async def test_recovery_audits_nothing_from_the_untrusted_pin(env, monkeypatch):
     prompt, conv, meta = await _pinned_conversation(env)
     meta["prompt_library"] = {"prompt_id": prompt["id"]}  # a prompt id, but no version: untrusted
     _set_raw_metadata(env, conv, json.dumps(meta))
-    before = await env["library"].list_audit_events(OWNER, prompt["id"])
+    before = (await env["library"].list_audit_events(OWNER, prompt["id"]))["events"]
     client = _pin_client(env, monkeypatch, env["members"])
     response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
     assert response.status_code == 200
-    after = await env["library"].list_audit_events(OWNER, prompt["id"])
+    after = (await env["library"].list_audit_events(OWNER, prompt["id"]))["events"]
     assert len(after) == len(before)  # no "unpin" written against a damaged reference
 
 
@@ -259,7 +264,7 @@ async def test_after_recovery_the_conversation_continues_unpinned_and_saves_keep
     assert stored[PIN_RECOVERY_METADATA_KEY] == recovery
 
     again = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
-    assert again.status_code == 200 and again.json() == {"cleared": False}  # readable now: no churn
+    assert again.status_code == 200 and _outcome(again) == {"cleared": False}  # readable now: no churn
 
 
 @pytest.mark.asyncio
@@ -279,7 +284,7 @@ async def test_a_transient_store_failure_is_still_503(env, monkeypatch):
     def down(*a, **k):
         raise RuntimeError("database is down")
 
-    monkeypatch.setattr(env["conversations"], "clear_prompt_pin", down)
+    monkeypatch.setattr(env["conversations"], "clear_prompt_pin_checked", down)
     client = _pin_client(env, monkeypatch, env["members"])
     response = client.delete(f"/api/prompts/pins/{conv}", headers={"x-test-user": USER})
     assert response.status_code == 503

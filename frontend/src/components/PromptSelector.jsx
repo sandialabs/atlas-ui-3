@@ -320,8 +320,8 @@ const PromptSelector = () => {
             </>
           )}
 
-          {/* Team-shared prompt library (issue #1169) */}
-          {customPromptsEnabled && (
+          {/* Team-shared prompt library (issue #1169); null when its flag is off */}
+          {customPromptsEnabled && promptLibrary && (
             <>
               <div className="p-2 border-b border-t border-gray-700 bg-gray-750">
                 <div className="flex items-center justify-between gap-2">

@@ -8,8 +8,17 @@ with the Atlas groups you belong to. It sits next to your private
 Prompts**, and its published entries appear under **Team Library** in the
 prompt picker above the chat box.
 
-The library is available whenever custom prompts are (`FEATURE_CUSTOM_PROMPTS_ENABLED`
-plus chat history). Private custom prompts keep working exactly as before.
+The library has its own setting, off by default: `FEATURE_PROMPT_LIBRARY_ENABLED`,
+together with custom prompts (`FEATURE_CUSTOM_PROMPTS_ENABLED`) and chat history.
+Private custom prompts keep working exactly as before.
+
+A team prompt adds to the platform's own instructions; it never replaces
+them. Atlas keeps its system prompt in place and gives the model the team
+prompt as separate, clearly labelled instructions from your organization, of
+lower priority. A team prompt can set tone, format and focus, but it cannot
+change which tools, data or compliance level a conversation may use: those
+are enforced by Atlas, not by the prompt. (A private custom prompt is your own
+text and still replaces the default prompt, as before.)
 
 ![Team Library panel](screenshots/1169-01-library-panel.png)
 
@@ -74,9 +83,13 @@ The conversation records the exact version it ran with:
   Choose the newer version explicitly to switch.
 - Reopening the conversation from the sidebar re-selects that version, even
   when it also restores the conversation's workspace.
-- If the entry is unshared, archived, or your access is removed, Atlas refuses
-  to run it and asks you to choose another prompt. It never silently switches
-  to a different prompt. The conversation's history is kept either way.
+- If the entry is unshared, archived, or your access is removed (or the library
+  has been turned off), Atlas refuses to run it. It never silently switches to
+  a different prompt, and the conversation's history is kept either way. In
+  the browser, the refusal offers **Clear team prompt**: after you confirm, the
+  conversation's team prompt is removed and your next message uses the default
+  prompt (you can then pick another). Only the conversation's owner can do
+  this.
 - A client that cannot choose a prompt per message (the `atlas-chat` CLI,
   follow-up and API runs, older browser versions) is told how to continue: the
   conversation's owner clears its team prompt with
@@ -93,13 +106,15 @@ The conversation records the exact version it ran with:
 - If the conversation (or its stored settings) cannot be loaded -- for example
   a brief database outage -- Atlas refuses the message rather than running it
   with a different prompt; try again once it is back.
-- If a conversation's stored prompt settings are damaged, every message is
-  refused with a note saying so. Its owner can reset them with
-  `DELETE /api/prompts/pins/{conversation_id}`: the damaged team-prompt
+- If a conversation that used a team prompt has damaged stored settings, every
+  message is refused with a note saying so. Its owner can reset them with
+  **Clear team prompt** (or `DELETE /api/prompts/pins/{conversation_id}`): the damaged team-prompt
   selection is set aside (kept for reference, never guessed) and the
   conversation continues with the default prompt. If nothing in the stored
   settings could be read at all, its data classification is unknown too, so
   the conversation stays closed to chat until an administrator reviews it.
+  Conversations that never used a team prompt are not affected by any of this
+  and behave as they always have.
 - A message cannot use a team prompt and a custom prompt or persona at the
   same time; such a request is refused with "Choose either a team library
   prompt or a custom prompt, not both."
@@ -141,7 +156,7 @@ that does not exist.
 | GET/PUT | `/api/prompts/{id}/sharing` | manage (GET returns `revision`; PUT names `expected_revision`) |
 | POST | `/api/prompts/{id}/fork` | use |
 | GET | `/api/prompts/{id}/export?offset=` | use (up to 100 versions with content; `versions_total`, `versions_truncated`) |
-| GET | `/api/prompts/{id}/audit` | manage |
+| GET | `/api/prompts/{id}/audit?category=all\|management\|use\|denied&limit=&offset=` | manage (paged; repeated refused uses are one counted row per user and hour) |
 | GET | `/api/prompts/{id}/resolve?version_id=` | use (read-only advisory check) |
 | DELETE | `/api/prompts/pins/{conversation_id}` | conversation owner |
 

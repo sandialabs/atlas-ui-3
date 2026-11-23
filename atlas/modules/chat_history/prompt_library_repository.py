@@ -34,11 +34,12 @@ from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
 from atlas.core.user_identity import normalize_user_email
 
-from .models import PromptLibraryPromptRecord, PromptLibraryVersionRecord
+from .models import PromptLibraryGrantRecord, PromptLibraryPromptRecord, PromptLibraryVersionRecord
 from .prompt_library_grants import GRANTEE_GROUP, GRANTEE_USER, PromptLibraryGrantStore
 from .prompt_library_storage import (
     VERSION_CONSTRAINT,
     PromptConflictError,
+    PromptLimitError,
     PromptStorageError,
     guarded,
     is_transient_conflict,
@@ -255,9 +256,23 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
         draft_content: str,
         forked_from_prompt_id: Optional[str] = None,
         forked_from_version_id: Optional[str] = None,
+        max_owned: int = 0,
     ) -> Dict[str, Any]:
+        """Create a private entry. ``max_owned`` (0: unlimited) bounds how many
+        entries the owner may have, archived included; raises
+        ``PromptLimitError("prompts")`` past it. The count is read in this
+        transaction, so concurrent creations by one owner can overshoot it by
+        at most the number of requests in flight."""
         owner_email = normalize_user_email(owner_email)
         with self._session() as session:
+            if max_owned:
+                owned = (
+                    session.query(func.count(PromptLibraryPromptRecord.id))
+                    .filter(PromptLibraryPromptRecord.owner_email == owner_email)
+                    .scalar()
+                ) or 0
+                if owned >= max_owned:
+                    raise PromptLimitError("prompts", max_owned)
             record = PromptLibraryPromptRecord(
                 owner_email=owner_email,
                 title=title.strip(),
@@ -281,8 +296,16 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
         title: Optional[str] = None,
         description: Optional[str] = None,
         draft_content: Optional[str] = None,
+        editor_email: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Compare-and-set the draft. Published versions are never touched.
+
+        With ``editor_email``, the editor's right to edit (owner, or a direct
+        ``edit``/``manage`` grant -- the only sources of edit access) is
+        re-checked inside this transaction, after the compare-and-set took the
+        prompt's row lock on PostgreSQL. Sharing changes take the same lock,
+        so a revocation either lands before this check (the save is refused
+        with ``PromptConflictError("access")``) or waits until it commits.
 
         Returns the prompt exactly as this write left it -- read inside the
         compare-and-set transaction, so its ``draft_revision`` and
@@ -325,6 +348,9 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                         if record is None or record.archived_at is not None:
                             return None
                         raise PromptConflictError("draft")
+                    if editor_email is not None and not self._may_edit(session, prompt_id, editor_email):
+                        session.rollback()
+                        raise PromptConflictError("access")
                     # Still inside the transaction that made the write (and,
                     # on PostgreSQL, holds its row lock): this is the state the
                     # write produced, not whatever lands after it.
@@ -338,6 +364,23 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                     raise PromptConflictError("draft") from None
                 raise
         return snapshot
+
+    @staticmethod
+    def _may_edit(session: Any, prompt_id: str, user_email: str, owner_email: Optional[str] = None) -> bool:
+        """Owner, or a direct edit/manage grant, read in the caller's transaction."""
+        user_email = normalize_user_email(user_email)
+        if owner_email is None:
+            owner_email = session.query(PromptLibraryPromptRecord.owner_email).filter(
+                PromptLibraryPromptRecord.id == prompt_id
+            ).scalar()
+        if owner_email == user_email:
+            return True
+        return session.query(PromptLibraryGrantRecord.id).filter(
+            PromptLibraryGrantRecord.prompt_id == prompt_id,
+            PromptLibraryGrantRecord.grantee_type == GRANTEE_USER,
+            PromptLibraryGrantRecord.grantee == user_email,
+            PromptLibraryGrantRecord.permission.in_(("edit", "manage")),
+        ).first() is not None
 
     @guarded("archive prompt")
     def archive_prompt(self, prompt_id: str) -> bool:
@@ -360,8 +403,15 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
         author_email: str,
         change_description: Optional[str],
         expected_draft_revision: int,
+        require_editor: bool = False,
+        max_versions: int = 0,
     ) -> Optional[Dict[str, Any]]:
         """Snapshot the draft at ``expected_draft_revision`` as the next version.
+
+        ``require_editor``: re-check, under the prompt's row lock, that the
+        author may still edit (see ``update_prompt``); ``PromptConflictError("access")``
+        otherwise. ``max_versions`` (0: unlimited) bounds the published
+        versions; ``PromptLimitError("versions")`` past it.
 
         Returns None when the prompt is missing or archived; raises
         ``PromptConflictError("draft")`` when the draft changed since the
@@ -375,7 +425,10 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                 if attempt:
                     time.sleep(random.uniform(0, _PUBLISH_BACKOFF_SECONDS * min(attempt, 8)))
                 try:
-                    return self._publish_once(prompt_id, author_email, change_description, expected_draft_revision)
+                    return self._publish_once(
+                        prompt_id, author_email, change_description, expected_draft_revision,
+                        require_editor, max_versions,
+                    )
                 except SQLAlchemyError as e:
                     if not is_transient_conflict(e, VERSION_CONSTRAINT):
                         raise
@@ -386,7 +439,8 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
         raise PromptConflictError("publish")
 
     def _publish_once(
-        self, prompt_id: str, author_email: str, change_description: Optional[str], expected_draft_revision: int
+        self, prompt_id: str, author_email: str, change_description: Optional[str], expected_draft_revision: int,
+        require_editor: bool = False, max_versions: int = 0,
     ) -> Optional[Dict[str, Any]]:
         with self._session() as session:
             query = session.query(PromptLibraryPromptRecord).filter(PromptLibraryPromptRecord.id == prompt_id)
@@ -399,11 +453,15 @@ class PromptLibraryRepository(PromptLibraryGrantStore):
                 return None
             if (prompt.draft_revision or 1) != expected_draft_revision:
                 raise PromptConflictError("draft")
+            if require_editor and not self._may_edit(session, prompt_id, author_email, prompt.owner_email):
+                raise PromptConflictError("access")
             current = (
                 session.query(func.max(PromptLibraryVersionRecord.version_number))
                 .filter(PromptLibraryVersionRecord.prompt_id == prompt_id)
                 .scalar()
             ) or 0
+            if max_versions and current >= max_versions:
+                raise PromptLimitError("versions", max_versions)
             version = PromptLibraryVersionRecord(
                 prompt_id=prompt_id,
                 version_number=current + 1,

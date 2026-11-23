@@ -129,6 +129,9 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections(config.user)
+	// Latest selections for callbacks that must stay stable (no re-creation per render).
+	const selectionsRef = useRef(selections)
+	selectionsRef.current = selections
 	const complianceEnabled = !!config.features?.compliance_levels
 	const { complianceLevels, complianceMode, defaultComplianceLevel } = useComplianceLevels(complianceEnabled)
 	// Required-level mode: there is no "All Levels" state; a session always
@@ -137,8 +140,11 @@ export const ChatProvider = ({ children }) => {
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
-	// Team-shared prompt library (issue #1169); same gate as custom prompts.
-	const promptLibrary = usePromptLibrary(customPromptsEnabled)
+	// Team-shared prompt library (issue #1169): its own flag (features.prompt_library,
+	// off by default), on top of custom prompts. When it is off nothing is
+	// fetched and the library UI is hidden; the server refuses library references.
+	const promptLibraryEnabled = customPromptsEnabled && !!config.features?.prompt_library
+	const promptLibrary = usePromptLibrary(promptLibraryEnabled)
 	// Admin-preconfigured personas loaded from markdown files (issue #880).
 	// Always available: they need no chat history and no per-user storage.
 	const personas = usePersonas()
@@ -397,6 +403,39 @@ export const ChatProvider = ({ children }) => {
 	// A draft under test lives in memory only; after a reload the persisted key
 	// has nothing behind it. Clearing it here is safe: the draft was never a
 	// saved selection, and the send path refuses rather than falls back.
+	// The owner's way out of a conversation whose team-prompt pin blocks it
+	// (issue #1169): the prompt is unavailable to them, or the stored pin is
+	// damaged. DELETE /api/prompts/pins/{id} -- the same route CLI users call --
+	// is deliberately not gated on the library flag. It acts on the conversation
+	// the server named, never on whatever is on screen; only when that is the
+	// conversation shown does the local selection follow the cleared pin, and
+	// the caller tells the user so.
+	const clearConversationTeamPrompt = useCallback(async (conversationId, expectedRevision = null) => {
+		if (typeof conversationId !== 'string' || !conversationId) throw new Error('No conversation to clear.')
+		// With the revision the refusal saw, a pin changed since (another tab)
+		// is not cleared: the server answers 409 instead.
+		const query = Number.isInteger(expectedRevision) ? `?expected_revision=${expectedRevision}` : ''
+		const res = await fetch(`/api/prompts/pins/${encodeURIComponent(conversationId)}${query}`, { method: 'DELETE' })
+		let data = null
+		try { data = await res.json() } catch { data = null }
+		if (!res.ok) {
+			const message = res.status === 404
+				? "Only this conversation's owner can clear its team prompt (or the conversation no longer exists)."
+				: (data && typeof data.detail === 'string' ? data.detail : `Could not clear the team prompt (${res.status}).`)
+			const error = new Error(message)
+			error.status = res.status
+			throw error
+		}
+		if (conversationId === activeConversationIdRef.current) {
+			conversationLibraryPinRef.current = null
+			// Follow the revision the clear stored, so the next pin change is
+			// decided on it (not refused as a change made elsewhere).
+			if (Number.isInteger(data?.prompt_library_pin_revision)) libraryPinRevisionRef.current = data.prompt_library_pin_revision
+			const key = selectionsRef.current?.activePromptKey
+			if (isLibraryPromptKey(key) || isLibraryDraftKey(key)) selectionsRef.current.clearActivePrompt()
+		}
+		return { cleared: !!data?.cleared, recovered: !!data?.recovered, classificationUnknown: !!data?.classification_unknown }
+	}, [])
 	const testDraft = promptLibrary.testDraft
 	useEffect(() => {
 		if (isLibraryDraftKey(activePromptKey) && !testDraft) clearActivePrompt()
@@ -1223,6 +1262,10 @@ export const ChatProvider = ({ children }) => {
 			custom_system_prompt: librarySelection.kind === 'draft'
 				? librarySelection.content
 				: (activeUserPrompt ? activeUserPrompt.content : undefined),
+			// A library draft under test is team text: the server runs it below
+			// the platform system prompt, as the published version will run.
+			custom_system_prompt_source: librarySelection.kind === 'draft' ? 'library_draft' : undefined,
+			library_draft_title: librarySelection.kind === 'draft' ? (librarySelection.title || undefined) : undefined,
 			// Explicit null (not omitted) when no library prompt is selected:
 			// the server keeps a conversation's pinned version only while the
 			// client keeps naming it, so choosing another prompt unpins.
@@ -2648,8 +2691,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		fetchPersonas: personas.fetchPersonas,
 		// User-authored custom prompt library (issue #153)
 		// Team-shared prompt library (issue #1169)
-		promptLibrary,
-		libraryPrompts: promptLibrary.entries,
+		promptLibrary: promptLibraryEnabled ? promptLibrary : null,
+		clearConversationTeamPrompt,
+		libraryPrompts: promptLibraryEnabled ? promptLibrary.entries : [],
 		userPrompts: userPrompts.prompts,
 		userPromptsLoading: userPrompts.loading,
 		userPromptsError: userPrompts.error,

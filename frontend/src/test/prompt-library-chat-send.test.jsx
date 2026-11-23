@@ -31,6 +31,8 @@ const h = vi.hoisted(() => ({
   makePromptActive: vi.fn(),
   clearActivePrompt: vi.fn(),
   library: { entries: [], loaded: true, error: null, testDraft: null, setTestDraft: () => {} },
+  promptLibraryFeature: true,
+  libraryEnabledArgs: [],
 }))
 
 vi.mock('../contexts/WSContext', () => ({
@@ -54,7 +56,7 @@ vi.mock('../hooks/chat/useChatConfig', () => ({
     ragServers: [],
     tools: [{ server: 'files', tools: ['read', 'write'] }],
     configReady: h.configReady,
-    features: { workspaces: h.workspacesEnabled, custom_prompts: true },
+    features: { workspaces: h.workspacesEnabled, custom_prompts: true, prompt_library: h.promptLibraryFeature },
     prompts: [],
     appName: 'Atlas',
     isInAdminGroup: false,
@@ -110,7 +112,9 @@ vi.mock('../hooks/chat/useComplianceLevels', () => ({
 }))
 
 vi.mock('../hooks/useUserPrompts', () => ({ useUserPrompts: () => ({ prompts: [] }) }))
-vi.mock('../hooks/usePromptLibrary', () => ({ usePromptLibrary: () => h.library }))
+vi.mock('../hooks/usePromptLibrary', () => ({
+  usePromptLibrary: (enabled) => { h.libraryEnabledArgs.push(enabled); return h.library },
+}))
 
 vi.mock('../hooks/chat/useAgentMode', () => ({
   useAgentMode: () => ({
@@ -185,6 +189,9 @@ beforeEach(() => {
   h.level = null
   h.activeKey = null
   h.library = { entries: [entry], loaded: true, error: null, testDraft: null, setTestDraft: () => {} }
+  h.promptLibraryFeature = true
+  h.libraryEnabledArgs = []
+  vi.unstubAllGlobals()
 })
 
 describe('team prompt library on the chat send path (issue #1169)', () => {
@@ -533,5 +540,135 @@ describe('pin-conflict errors reach only their own conversation (issue #1169)', 
     expect(h.makePromptActive).not.toHaveBeenCalled()
     act(() => { result.current.sendChatMessage('in b') })
     expect(chatFrames().at(-1).library_prompt_revision).toBe(5)
+  })
+})
+
+
+describe('the library has its own flag (review note 11)', () => {
+  it('is off unless features.prompt_library is on, even with custom prompts on', () => {
+    h.promptLibraryFeature = false
+    const { result } = renderChat()
+    expect(result.current.promptLibrary).toBeNull()
+    expect(result.current.libraryPrompts).toEqual([])
+    expect(h.libraryEnabledArgs.every(arg => arg === false)).toBe(true)  // nothing fetched
+  })
+
+  it('is on with the flag', () => {
+    const { result } = renderChat()
+    expect(result.current.promptLibrary).not.toBeNull()
+    expect(h.libraryEnabledArgs.at(-1)).toBe(true)
+  })
+})
+
+describe('a library draft under test is sent as team text (review finding 2)', () => {
+  it('marks the inline draft so the server runs it below the platform prompt', () => {
+    h.activeKey = 'libdraft:p1'
+    h.library = { ...h.library, testDraft: { promptId: 'p1', title: 'Reviewer', content: 'draft text' } }
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('hello') })
+    const [frame] = chatFrames()
+    expect(frame.custom_system_prompt).toBe('draft text')
+    expect(frame.custom_system_prompt_source).toBe('library_draft')
+    expect(frame.library_draft_title).toBe('Reviewer')
+  })
+
+  it('leaves private custom prompts unmarked', () => {
+    const { result } = renderChat()
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()[0].custom_system_prompt_source).toBeUndefined()
+  })
+})
+
+describe('clearing a blocking team prompt from the browser (review finding 5)', () => {
+  const load = (result, id) => act(() => {
+    result.current.loadSavedConversation({
+      id,
+      messages: [{ role: 'user', content: 'hi', message_type: 'chat', timestamp: '2026-01-01T00:00:00Z' }],
+      metadata: { prompt_library: { prompt_id: 'p1', version_id: 'v1' }, prompt_library_pin_revision: 1 },
+    })
+  })
+  const refusal = (extra = {}) => ({
+    type: 'error', error_type: 'authorization', message: 'pinned prompt unavailable',
+    recovery: 'clear_team_prompt', pin_problem: 'unavailable', conversation_id: 'conv-1', ...extra,
+  })
+
+  it('keeps the recovery action, for the conversation the server named', () => {
+    const { result } = renderChat()
+    load(result, 'conv-1')
+    act(() => { h.wsHandler(refusal()) })
+    const last = result.current.messages.at(-1)
+    expect(last.content).toMatch(/pinned prompt unavailable/)
+    expect(last.recovery).toEqual({ action: 'clear_team_prompt', conversationId: 'conv-1', problem: 'unavailable', revision: null })
+    act(() => { h.wsHandler(refusal({ prompt_library_pin_revision: 3 })) })
+    expect(result.current.messages.at(-1).recovery.revision).toBe(3)
+  })
+
+  it('offers nothing when the frame names no conversation', () => {
+    const { result } = renderChat()
+    act(() => { h.wsHandler(refusal({ conversation_id: undefined })) })
+    expect(result.current.messages.at(-1).recovery).toBeUndefined()
+  })
+
+  it('clears the shown conversation and drops its team selection', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ cleared: true }) }))
+    vi.stubGlobal('fetch', fetchMock)
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1')
+    h.clearActivePrompt.mockClear()
+    let outcome
+    await act(async () => { outcome = await result.current.clearConversationTeamPrompt('conv-1') })
+    expect(fetchMock).toHaveBeenCalledWith('/api/prompts/pins/conv-1', { method: 'DELETE' })
+    expect(outcome).toEqual({ cleared: true, recovered: false, classificationUnknown: false })
+    expect(h.clearActivePrompt).toHaveBeenCalled()
+  })
+
+  it('names the revision it saw, and follows the one the clear stored', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ cleared: true, prompt_library_pin_revision: 7 }) }))
+    vi.stubGlobal('fetch', fetchMock)
+    h.activeKey = null
+    const { result } = renderChat()
+    load(result, 'conv-1')
+    await act(async () => { await result.current.clearConversationTeamPrompt('conv-1', 6) })
+    expect(fetchMock).toHaveBeenCalledWith('/api/prompts/pins/conv-1?expected_revision=6', { method: 'DELETE' })
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(7)  // no spurious "changed elsewhere"
+  })
+
+  it('clears another conversation without touching what is on screen', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ cleared: true, recovered: true }) })))
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-shown')
+    h.clearActivePrompt.mockClear()
+    let outcome
+    await act(async () => { outcome = await result.current.clearConversationTeamPrompt('conv-elsewhere/x') })
+    expect(fetch).toHaveBeenCalledWith('/api/prompts/pins/conv-elsewhere%2Fx', { method: 'DELETE' })
+    expect(outcome.recovered).toBe(true)
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+  })
+
+  it('reports the server refusing a non-owner, and changes nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail: 'Conversation not found' }) })))
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1')
+    h.clearActivePrompt.mockClear()
+    await act(async () => {
+      await expect(result.current.clearConversationTeamPrompt('conv-1')).rejects.toMatchObject({
+        status: 404, message: expect.stringMatching(/Only this conversation's owner/),
+      })
+    })
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+  })
+
+  it('works with the library flag off (a pinned conversation must stay recoverable)', async () => {
+    h.promptLibraryFeature = false
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ cleared: true }) })))
+    const { result } = renderChat()
+    let outcome
+    await act(async () => { outcome = await result.current.clearConversationTeamPrompt('conv-1') })
+    expect(fetch).toHaveBeenCalledWith('/api/prompts/pins/conv-1', { method: 'DELETE' })
+    expect(outcome.cleared).toBe(true)
   })
 })

@@ -46,7 +46,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.domain.conversation_classification import CLASSIFICATION_METADATA_KEY
-from atlas.domain.errors import ValidationError
+from atlas.domain.errors import AuthorizationError, ValidationError
 
 PIN_METADATA_KEY = "prompt_library"
 PIN_HISTORY_METADATA_KEY = "prompt_library_history"
@@ -89,6 +89,30 @@ class PromptPinConflictError(ValidationError):
         super().__init__(PIN_CONFLICT_MESSAGE, code=PIN_CONFLICT_CODE)
         self.pin_state = pin_state
         self.conversation_id = conversation_id
+
+
+class PromptPinBlockedError(AuthorizationError):
+    """A stored conversation's team-prompt pin keeps it from running.
+
+    ``reason`` is ``unavailable`` (the pinned prompt is no longer available to
+    the user: revoked, archived, or the library is off) or ``damaged`` (the
+    stored pin state cannot be read). Either way the conversation's owner can
+    clear the pin (``DELETE /api/prompts/pins/{conversation_id}``); the error
+    frame carries ``recovery: "clear_team_prompt"`` and the conversation id so
+    a browser can offer that action on the right conversation. Nothing runs
+    on another prompt until the owner does.
+    """
+
+    RECOVERY = "clear_team_prompt"
+
+    def __init__(self, message: str, conversation_id: Optional[str], reason: str,
+                 revision: Optional[int] = None):
+        super().__init__(message)
+        self.conversation_id = conversation_id
+        self.reason = reason
+        # The pin revision the refusal was decided on (None when the stored
+        # pin state cannot be read): lets the clear refuse if it moved since.
+        self.revision = revision
 
 
 def _revision_value(value: Any) -> Optional[int]:

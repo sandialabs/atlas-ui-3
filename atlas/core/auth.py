@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import logging
 import re
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 
@@ -74,6 +75,33 @@ def _prune_alb_cache() -> None:
     while len(_alb_key_cache) >= _ALB_CACHE_MAX_ENTRIES:
         oldest = min(_alb_key_cache, key=lambda k: _alb_key_cache[k][1])
         _alb_key_cache.pop(oldest, None)
+
+
+# Set by is_user_in_group's external-authorizer branch when the service could
+# not answer (network error, non-2xx, no is_member). Read by
+# check_user_in_group within the same task; nothing else depends on it.
+_AUTHORIZER_UNAVAILABLE: ContextVar[bool] = ContextVar("atlas_authorizer_unavailable", default=False)
+
+
+async def check_user_in_group(user_id: str, group_id: str) -> Optional[bool]:
+    """``is_user_in_group``, but ``None`` when the external authorization
+    service could not answer -- instead of the ``False`` that
+    ``is_user_in_group`` returns then (fail closed).
+
+    For callers that must tell "not a member" apart from "could not check"
+    (the team prompt library, issue #1169). It calls ``is_user_in_group``
+    itself, so a deployment that customised that function (see
+    docs/admin/authentication.md) keeps its rules here too; only the built-in
+    external-authorizer branch can report "unknown".
+    """
+    token = _AUTHORIZER_UNAVAILABLE.set(False)
+    try:
+        member = await is_user_in_group(user_id, group_id)
+        if _AUTHORIZER_UNAVAILABLE.get():
+            return None
+        return bool(member)
+    finally:
+        _AUTHORIZER_UNAVAILABLE.reset(token)
 
 
 async def is_user_in_group(user_id: str, group_id: str) -> bool:
@@ -200,12 +228,20 @@ async def is_user_in_group(user_id: str, group_id: str) -> bool:
                 response = await client.post(auth_url, json=payload, headers=headers, timeout=5.0)
                 response.raise_for_status()
                 # Assuming the endpoint returns a simple JSON like {"is_member": true}
-                return response.json().get("is_member", False)
+                member = response.json().get("is_member")
+                if member is None:
+                    # No answer in the reply: still "no" here, as before, but
+                    # "unknown" to check_user_in_group.
+                    _AUTHORIZER_UNAVAILABLE.set(True)
+                    return False
+                return member
         except httpx.RequestError as e:
             logger.error(f"HTTP request to auth endpoint failed: {e}", exc_info=True)
+            _AUTHORIZER_UNAVAILABLE.set(True)
             return False
         except Exception as e:
             logger.error(f"Error during external auth check: {e}", exc_info=True)
+            _AUTHORIZER_UNAVAILABLE.set(True)
             return False
     else:
         # Statically configured membership (AUTH_STATIC_GROUPS, plus the

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 VERSION_CONSTRAINT = "uq_prompt_library_version_number"
 GRANT_CONSTRAINT = "uq_prompt_library_grant"
+AUDIT_DEDUP_CONSTRAINT = "uq_prompt_library_audit_dedup"
 
 # Text a non-PostgreSQL driver puts in a unique-violation message, per
 # constraint (SQLite and DuckDB do not report constraint names). Only ever
@@ -31,6 +32,7 @@ GRANT_CONSTRAINT = "uq_prompt_library_grant"
 _CONSTRAINT_MARKERS = {
     VERSION_CONSTRAINT: "version_number",
     GRANT_CONSTRAINT: "grantee",
+    AUDIT_DEDUP_CONSTRAINT: "dedup_key",
 }
 
 # PostgreSQL: serialization failure, deadlock, lock not available.
@@ -44,6 +46,15 @@ class PromptStorageError(Exception):
     def __init__(self, operation: str):
         super().__init__(f"Prompt library storage error during {operation}")
         self.operation = operation
+
+
+class PromptLimitError(Exception):
+    """A configured storage bound would be exceeded: ``kind`` is ``prompts`` or ``versions``."""
+
+    def __init__(self, kind: str, limit: int):
+        super().__init__(f"{kind} limit {limit} reached")
+        self.kind = kind
+        self.limit = limit
 
 
 class PromptConflictError(Exception):
@@ -92,7 +103,7 @@ def storage_guard(operation: str) -> Iterator[None]:
     """Turn any database error into a ``PromptStorageError`` with a safe message."""
     try:
         yield
-    except (PromptStorageError, PromptConflictError):
+    except (PromptStorageError, PromptConflictError, PromptLimitError):
         raise
     except SQLAlchemyError as e:
         logger.error(

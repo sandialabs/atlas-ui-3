@@ -92,6 +92,19 @@ class PromptValidationError(PromptLibraryError):
     """The request is malformed."""
 
 
+class PromptLimitReached(PromptValidationError):
+    """A configured storage bound would be exceeded (HTTP 400)."""
+
+    def __init__(self, kind: str, limit: int) -> None:
+        what = {
+            "prompts": f"You can own at most {limit} library prompts (archived ones included).",
+            "versions": f"A library prompt can have at most {limit} published versions.",
+        }.get(kind, "A library limit was reached.")
+        super().__init__(f"{what} Ask an administrator if you need more.")
+        self.kind = kind
+        self.limit = limit
+
+
 class PromptConflict(PromptLibraryError):
     """Someone else changed the entry first; reload and retry (HTTP 409)."""
 
@@ -99,6 +112,7 @@ class PromptConflict(PromptLibraryError):
         "draft": "The draft was changed by someone else. Reload it, review the changes, and try again.",
         "sharing": "Sharing was changed by someone else. Reload the sharing settings and try again.",
         "publish": "Another version is being published right now. Try again in a moment.",
+        "access": "Your permission to change this prompt was removed while you were working. Nothing was saved.",
     }
 
     def __init__(self, kind: str) -> None:
@@ -132,6 +146,17 @@ class PromptUnavailable(PromptLibraryError):
             "The selected team prompt is not available. It may have been "
             "unshared or archived; choose another prompt to continue."
         )
+
+
+class PromptMembershipUnknown(PromptUnavailable):
+    """Not runnable *as far as could be checked*: no grant gave access, and a
+    group grant could not be checked (the authorizer did not answer).
+
+    Same message as ``PromptUnavailable`` -- a caller who may not know the
+    prompt exists learns nothing -- but it is not recorded as a refused use,
+    and the chat turn can tell the owner of a conversation pinned to it to try
+    again instead of offering to clear a pin that may well still be valid.
+    """
 
 
 @dataclass

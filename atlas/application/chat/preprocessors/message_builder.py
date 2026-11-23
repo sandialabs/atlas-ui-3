@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from atlas.domain.sessions.models import Session
+from atlas.domain.team_prompt import TeamPrompt, with_precedence_notice
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import file_processor
@@ -146,10 +147,24 @@ class MessageBuilder:
         messages = []
 
         # Optionally add system prompt at the beginning. A user-supplied custom
-        # prompt (issue #153) fully replaces the default system prompt.
+        # prompt (issue #153) fully replaces the default system prompt. A team
+        # prompt (issue #1169) never does: the platform prompt stays the system
+        # message (plus a precedence notice) and the team text follows as a
+        # delimited user-role message -- see atlas.domain.team_prompt.
+        team_message = None
         if include_system_prompt:
             system_prompt = None
-            if custom_system_prompt and custom_system_prompt.strip():
+            if isinstance(custom_system_prompt, TeamPrompt):
+                platform = (
+                    self.prompt_provider.get_system_prompt(user_email=session.user_email)
+                    if self.prompt_provider else None
+                )
+                system_prompt = with_precedence_notice(platform)
+                team_message = custom_system_prompt.message()
+                logger.debug("Using a team prompt below the platform system prompt")
+            elif custom_system_prompt is not None and not isinstance(custom_system_prompt, str):
+                raise TypeError("custom_system_prompt must be a str or a TeamPrompt")
+            elif custom_system_prompt and custom_system_prompt.strip():
                 system_prompt = custom_system_prompt
                 logger.debug(
                     f"Using custom system prompt (len={len(system_prompt)})"
@@ -176,6 +191,8 @@ class MessageBuilder:
                     )
                 messages.append({"role": "system", "content": system_prompt})
                 logger.debug(f"Added system prompt (len={len(system_prompt)})")
+            if team_message is not None:
+                messages.append(team_message)
 
         # Get conversation history from session
         history_messages = session.history.get_messages_for_llm()

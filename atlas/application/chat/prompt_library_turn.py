@@ -69,11 +69,13 @@ from atlas.domain.conversation_prompt_pin import (
     PIN_HISTORY_METADATA_KEY,
     PIN_METADATA_KEY,
     PIN_REVISION_METADATA_KEY,
+    PromptPinBlockedError,
     PromptPinConflictError,
     pin_state,
     valid_pin,
 )
 from atlas.domain.errors import AuthorizationError, ConversationMetadataUnreadableError, ValidationError
+from atlas.domain.team_prompt import TeamPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,16 @@ PIN_STATE_UNAVAILABLE_MESSAGE = (
     "This conversation's prompt settings could not be loaded right now, so the "
     "turn was not run. Try again shortly."
 )
+
+PIN_ON_DAMAGED_RECORD_MESSAGE = (
+    "This conversation's stored settings are damaged, so a team prompt cannot be "
+    "used in it. Start a new conversation to use a team prompt."
+)
+GROUP_CHECK_UNAVAILABLE_MESSAGE = (
+    "Access to this conversation's team prompt could not be confirmed right now "
+    "(group membership could not be checked), so the turn was not run. Try again shortly."
+)
+
 
 def pin_state_damaged_message(conversation_id: Any) -> str:
     """Refusal for a conversation whose stored pin state is unreadable."""
@@ -296,7 +308,9 @@ async def _refresh_pin_state(context: Dict[str, Any], load_metadata: MetadataLoa
     except ConversationMetadataUnreadableError:
         # Damaged, not unavailable: retrying will not help, so name the way out.
         logger.warning("The conversation's stored prompt pin is unreadable")
-        raise AuthorizationError(pin_state_damaged_message(context.get("conversation_id")))
+        raise PromptPinBlockedError(
+            pin_state_damaged_message(context.get("conversation_id")), context.get("conversation_id"), "damaged"
+        )
     except Exception as e:
         logger.warning("Could not read the conversation's prompt pin (%s)", type(e).__name__)
         raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
@@ -363,6 +377,11 @@ async def _change_pin(
     if store_pin is not None:
         try:
             result = await store_pin(current_revision, target, entry)
+        except ConversationMetadataUnreadableError:
+            # Damaged stored settings (legacy, never pinned): retrying will not
+            # help, and nothing may be written over them. Say so plainly.
+            logger.warning("Refused to pin a team prompt: the conversation's stored settings are unreadable")
+            raise AuthorizationError(PIN_ON_DAMAGED_RECORD_MESSAGE)
         except Exception as e:
             logger.warning("Could not store the conversation's prompt pin (%s)", type(e).__name__)
             raise AuthorizationError(PIN_STATE_UNAVAILABLE_MESSAGE)
@@ -395,6 +414,15 @@ def _refusal_message(context: Dict[str, Any], from_pin_only: bool, default: Opti
     return default or "The selected team prompt is not available. Choose another prompt to continue."
 
 
+def _pin_refusal(context: Dict[str, Any], from_pin_only: bool, default: Optional[str], stored: bool):
+    """The refusal error: recoverable by the owner when a stored pin is the cause."""
+    message = _refusal_message(context, from_pin_only, default)
+    conversation_id = context.get("conversation_id")
+    if from_pin_only and stored and isinstance(conversation_id, str):
+        return PromptPinBlockedError(message, conversation_id, "unavailable", session_revision(context))
+    return AuthorizationError(message)
+
+
 async def resolve_library_prompt_for_turn(
     *,
     context: Dict[str, Any],
@@ -407,8 +435,11 @@ async def resolve_library_prompt_for_turn(
     load_metadata: Optional[MetadataLoader] = None,
     store_pin: Optional[PinWriter] = None,
     observed_revision: Any = None,
-) -> Optional[str]:
-    """Return the system-prompt text a library selection contributes, or None.
+) -> Optional[TeamPrompt]:
+    """Return the ``TeamPrompt`` a library selection contributes, or None.
+
+    The text is team-authored: the message builder places it below the
+    platform system prompt, never in its place (``atlas.domain.team_prompt``).
 
     ``request`` is the frame value or ``omitted``. ``library`` is the
     ``PromptLibraryService`` (None when the feature is unavailable).
@@ -462,9 +493,13 @@ async def resolve_library_prompt_for_turn(
 
     if library is None or not user_email:
         logger.warning("Library prompt requested but the prompt library is unavailable")
-        raise AuthorizationError(_refusal_message(context, from_pin_only, None))
+        raise _pin_refusal(context, from_pin_only, None, stored)
 
-    from atlas.modules.prompts.prompt_library_policy import PromptLibraryError, PromptLibraryUnavailable
+    from atlas.modules.prompts.prompt_library_policy import (
+        PromptLibraryError,
+        PromptLibraryUnavailable,
+        PromptMembershipUnknown,
+    )
 
     try:
         version = await library.resolve_for_execution(user_email, prompt_id, version_id)
@@ -472,10 +507,20 @@ async def resolve_library_prompt_for_turn(
         # Storage outage: say so, and keep the pin -- the prompt may well
         # still be the user's to run once the database is back.
         raise AuthorizationError(e.message)
+    except PromptMembershipUnknown:
+        if from_pin_only:
+            # The conversation's own pin, and the authorizer could not say
+            # whether its group grant still applies: a transient refusal, not
+            # "no longer available" -- no offer to clear a pin that may well
+            # still be valid. (A new selection gets the generic refusal below,
+            # which reveals nothing about the entry.)
+            logger.warning("Refused a pinned team-library prompt: group membership could not be checked")
+            raise AuthorizationError(GROUP_CHECK_UNAVAILABLE_MESSAGE)
+        raise AuthorizationError(_refusal_message(context, from_pin_only, None))
     except PromptLibraryError as e:
         # Nothing client-supplied is logged: the prompt id came from the frame.
         logger.warning("Refused a team-library prompt for this turn (%s)", type(e).__name__)
-        raise AuthorizationError(_refusal_message(context, from_pin_only, e.message))
+        raise _pin_refusal(context, from_pin_only, e.message, stored)
 
     if current is None or current["version_id"] != version["id"]:
         target = {
@@ -489,4 +534,10 @@ async def resolve_library_prompt_for_turn(
             await library.record_use(user_email, version, context.get("conversation_id"))
         except Exception:  # pragma: no cover - audit failure is logged inside
             logger.warning("Could not record prompt-library use")
-    return version["content"]
+    # Team-authored text: it runs below the platform system prompt, never in
+    # its place (see atlas.domain.team_prompt).
+    return TeamPrompt(
+        text=version["content"],
+        title=version.get("title"),
+        version_number=version.get("version_number"),
+    )

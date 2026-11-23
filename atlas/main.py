@@ -2372,6 +2372,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     config_manager.app_settings.custom_prompts_effective,
                     compliance_level_filter=data.get("compliance_level_filter"),
                 )
+                # "Test in chat" of an unpublished team-library draft (issue
+                # #1169) runs the way the published version will: below the
+                # platform system prompt, not in its place. The marker can only
+                # lower the text's trust, so a client cannot gain anything by it.
+                if (
+                    data.get("custom_system_prompt_source") == "library_draft"
+                    and isinstance(custom_system_prompt, str)
+                    and custom_system_prompt.strip()
+                    and not data.get("persona_id")
+                ):
+                    from atlas.domain.team_prompt import TeamPrompt
+
+                    draft_title = data.get("library_draft_title")
+                    custom_system_prompt = TeamPrompt(
+                        text=custom_system_prompt,
+                        title=draft_title[:200] if isinstance(draft_title, str) else None,
+                        draft=True,
+                    )
 
                 try:
                     oversized_file = find_oversized_inline_file(data.get("files"))
@@ -2740,10 +2758,26 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.warning(f"Authorization error in chat handler: {e}")
                         turn_failure.append("authorization")
                         log_metric("error", user_email, error_type="authorization")
+                        recovery = {}
+                        from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+
+                        if isinstance(e, PromptPinBlockedError):
+                            # Issue #1169: a stored pin blocks this conversation.
+                            # The browser offers the owner's clear on the
+                            # conversation named here (the envelope adds run_id
+                            # and never overwrites it); the text still names the
+                            # API route for clients without that action.
+                            recovery = {
+                                "recovery": PromptPinBlockedError.RECOVERY,
+                                "pin_problem": e.reason,
+                                "conversation_id": e.conversation_id,
+                                **({"prompt_library_pin_revision": e.revision} if e.revision is not None else {}),
+                            }
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
-                            "error_type": "authorization"
+                            "error_type": "authorization",
+                            **recovery,
                         })
                     except asyncio.CancelledError:
                         logger.info("Chat task cancelled by user (stop_streaming)")

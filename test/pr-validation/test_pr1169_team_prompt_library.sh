@@ -75,6 +75,7 @@ DEBUG_MODE=true
 ENVIRONMENT=development
 FEATURE_CHAT_HISTORY_ENABLED=true
 FEATURE_CUSTOM_PROMPTS_ENABLED=true
+FEATURE_PROMPT_LIBRARY_ENABLED=true
 FEATURE_WORKSPACES_ENABLED=true
 FEATURE_TOOLS_ENABLED=false
 FEATURE_RAG_ENABLED=false
@@ -186,6 +187,15 @@ python -m pytest -q -p no:warnings \
     atlas/tests/test_prompt_pin_conflict_frames.py \
     atlas/tests/test_prompt_pin_recovery.py \
     atlas/tests/test_prompt_library_listing_bounds.py \
+    atlas/tests/test_prompt_library_membership.py \
+    atlas/tests/test_prompt_library_audit_history.py \
+    atlas/tests/test_prompt_library_write_races.py \
+    atlas/tests/test_prompt_library_migration_005.py \
+    atlas/tests/test_prompt_pin_legacy_compat.py \
+    atlas/tests/test_team_prompt_precedence.py \
+    atlas/tests/test_conversation_classification_boundaries.py \
+    atlas/tests/test_core_auth.py \
+    atlas/tests/test_system_prompt_loading.py \
     atlas/tests/test_run_in_flight_conversation.py \
     atlas/tests/test_user_prompts.py \
     atlas/tests/test_schema_migration.py
@@ -202,6 +212,7 @@ echo "=== Frontend library tests ==="
     src/test/prompt-selector.test.jsx \
     src/test/prompt-library-panel-lifecycle.test.jsx \
     src/test/prompt-selector-library-states.test.jsx \
+    src/test/team-prompt-recovery.test.jsx \
     src/test/useSelections.test.js > "$WORK/vitest.log" 2>&1) \
     || { cat "$WORK/vitest.log"; exit 1; }
 tail -n 4 "$WORK/vitest.log"

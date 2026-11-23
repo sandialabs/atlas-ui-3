@@ -27,7 +27,7 @@ export function resolveLibrarySelection(activeKey, library) {
     const promptId = activeKey.slice(LIBRARY_DRAFT_PREFIX.length)
     const draft = library?.testDraft
     if (draft && draft.promptId === promptId && draft.content && draft.content.trim()) {
-      return { kind: 'draft', content: draft.content }
+      return { kind: 'draft', content: draft.content, title: draft.title || null }
     }
     return {
       kind: 'blocked',
