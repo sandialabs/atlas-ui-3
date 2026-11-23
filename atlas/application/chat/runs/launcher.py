@@ -1031,6 +1031,7 @@ async def _shared_child_result(
     """The result of a child the local registry does not hold (issue #1222)."""
     from atlas.application.chat.runs.context import get_current_run
     from atlas.application.chat.runs.shared_children import (
+        SEPARATE_REPLY_ERROR,
         STORED_STATUS,
         SharedStateUnavailable,
         find_shared_child,
@@ -1079,13 +1080,17 @@ async def _shared_child_result(
             result["result_error"] = "This run's reply could not be captured."
     else:
         try:
-            reply = await read_stored_reply(conversation_id, user_email, factory)
+            reply = await read_stored_reply(
+                conversation_id, user_email, factory, single_run=found.get("by_run_id", False)
+            )
         except SharedStateUnavailable as error:
             logger.warning("Could not load result for run %s: %s", run_id, error)
             result["result_status"] = "unreadable"
             result["result_error"] = "The child result could not be read."
             return result
     if reply is None:
+        if view is None and found.get("by_run_id"):
+            result["result_error"] = SEPARATE_REPLY_ERROR
         return result
     if reply == "":
         result["result_status"] = "empty"

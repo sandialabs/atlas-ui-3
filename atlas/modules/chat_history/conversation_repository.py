@@ -376,8 +376,12 @@ class ConversationRepository:
         parent_conversation_id: str,
         user_email: str,
         limit: int = 200,
+        child_ref: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Stored sub-conversations launched from one conversation (issue #1222).
+
+        ``child_ref`` narrows the answer to the child whose conversation id or
+        launching run id it is, however many children the parent has.
 
         Scoped to ``user_email``: another user's conversation is never
         returned, whatever its metadata says. The parent link lives in the
@@ -390,14 +394,19 @@ class ConversationRepository:
         if not parent_conversation_id:
             return []
         with self._get_session() as session:
-            rows = (
-                session.query(ConversationRecord)
-                .filter(
-                    ConversationRecord.user_email == user_email,
-                    ConversationRecord.metadata_json.contains(
-                        parent_conversation_id, autoescape=True
-                    ),
+            query = session.query(ConversationRecord).filter(
+                ConversationRecord.user_email == user_email,
+                ConversationRecord.metadata_json.contains(
+                    parent_conversation_id, autoescape=True
+                ),
+            )
+            if child_ref:
+                query = query.filter(
+                    ConversationRecord.metadata_json.contains(child_ref, autoescape=True)
+                    | (ConversationRecord.id == child_ref)
                 )
+            rows = (
+                query
                 .order_by(ConversationRecord.created_at, ConversationRecord.id)
                 .limit(max(1, int(limit)))
                 .all()
@@ -408,6 +417,10 @@ class ConversationRepository:
                 if parent_conversation_id_from_metadata(metadata) != parent_conversation_id:
                     continue
                 if row.id == parent_conversation_id:
+                    continue
+                if child_ref and child_ref != row.id and (
+                    not isinstance(metadata, dict) or metadata.get("launch_run_id") != child_ref
+                ):
                     continue
                 children.append({
                     "id": row.id,

@@ -121,13 +121,15 @@ def _public_stored(child: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _stored_children(
-    factory: Any, user_email: str, parent_id: str
+    factory: Any, user_email: str, parent_id: str, child_ref: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     repository = _repository(factory)
     lister = getattr(repository, "list_child_conversations", None)
     if lister is None:
         return []
     try:
+        if child_ref:
+            return await asyncio.to_thread(lister, parent_id, user_email, child_ref=child_ref)
         return await asyncio.to_thread(lister, parent_id, user_email)
     except Exception as exc:
         raise SharedStateUnavailable(type(exc).__name__) from exc
@@ -195,7 +197,9 @@ async def find_shared_child(
 ) -> Optional[Dict[str, Any]]:
     """The child ``run_id`` names, or ``None`` when it is not the caller's child.
 
-    Returns ``{"view": <shared run record or None>, "conversation_id": ...}``.
+    Returns ``{"view": <shared run record or None>, "conversation_id": ...,
+    "by_run_id": bool}`` (``by_run_id``: a stored child named by its launching
+    run id, whose reply must belong to that run alone).
     ``None`` covers an unknown run id, another user's run and a run of another
     conversation alike. A run id is matched against the shared record first,
     then against the stored children's launching run id, and finally against
@@ -206,20 +210,24 @@ async def find_shared_child(
     """
     view = await _read_record(run_id)
     if view is not None and _is_child_record(view, user_email, parent_conversation_id):
-        return {"view": view, "conversation_id": view.get("conversation_id")}
+        return {"view": view, "conversation_id": view.get("conversation_id"), "by_run_id": False}
 
-    stored = await _stored_children(factory, user_email, parent_conversation_id)
-    for matcher in (
-        lambda c: launch_run_id_from_metadata(c.get("metadata")) == run_id,
-        lambda c: c.get("id") == run_id,
-    ):
-        child = next((c for c in stored if matcher(c)), None)
-        if child is not None:
-            conversation_id = child.get("id")
-            return {
-                "view": await _live_view(conversation_id, user_email),
-                "conversation_id": conversation_id,
-            }
+    stored = await _stored_children(factory, user_email, parent_conversation_id, run_id)
+    by_run = next(
+        (c for c in stored if launch_run_id_from_metadata(c.get("metadata")) == run_id), None
+    )
+    if by_run is not None:
+        # The launching run, named by its own id: its answer is its own, so a
+        # later run of the conversation must not stand in for it.
+        return {"view": None, "conversation_id": by_run.get("id"), "by_run_id": True}
+    by_conversation = next((c for c in stored if c.get("id") == run_id), None)
+    if by_conversation is not None:
+        conversation_id = by_conversation.get("id")
+        return {
+            "view": await _live_view(conversation_id, user_email),
+            "conversation_id": conversation_id,
+            "by_run_id": False,
+        }
     return None
 
 
@@ -242,12 +250,20 @@ async def _live_view(conversation_id: str, user_email: str) -> Optional[Dict[str
     return await _read_record(entry.get("run_id") or "")
 
 
+SEPARATE_REPLY_ERROR = (
+    "This run's reply could not be read separately from the other runs in this "
+    "sub-conversation."
+)
+
+
 async def read_stored_reply(
-    conversation_id: str, user_email: str, factory: Any = None
+    conversation_id: str, user_email: str, factory: Any = None, *, single_run: bool = False
 ) -> Optional[str]:
     """The last assistant message of a stored child, ``""`` when it has none.
 
-    ``None`` when the conversation is gone. Raises
+    ``None`` when the conversation is gone, or when ``single_run`` is set and
+    the conversation holds more than the launch prompt (a follow-up ran, so its
+    last reply may answer another run). Raises
     :class:`SharedStateUnavailable` when the store cannot be read.
     """
     repository = _repository(factory)
@@ -265,6 +281,11 @@ async def read_stored_reply(
     if not conversation:
         return None
     from atlas.application.chat.runs.launcher import _content_text
+
+    if single_run and sum(
+        1 for message in conversation.get("messages", []) if message.get("role") == "user"
+    ) > 1:
+        return None
 
     replies = [
         message for message in conversation.get("messages", []) if message.get("role") == "assistant"

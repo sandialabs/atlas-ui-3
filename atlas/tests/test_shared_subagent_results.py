@@ -65,7 +65,7 @@ class FakeStore:
     def __init__(self):
         self.rows = {}
 
-    def add(self, conversation_id, user, parent, launch_run_id=None, reply="stored answer"):
+    def add(self, conversation_id, user, parent, launch_run_id=None, reply="stored answer", follow_ups=0):
         metadata = {"parent_conversation_id": parent}
         if launch_run_id:
             metadata["launch_run_id"] = launch_run_id
@@ -73,15 +73,17 @@ class FakeStore:
             "id": conversation_id, "user": user, "title": "saved child", "metadata": metadata,
             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:01:00",
             "messages": [{"role": "user", "content": "go"}]
-            + ([{"role": "assistant", "content": reply}] if reply is not None else []),
+            + ([{"role": "assistant", "content": reply}] if reply is not None else [])
+            + [{"role": "user", "content": "more"}, {"role": "assistant", "content": "later answer"}] * follow_ups,
         }
 
-    def list_child_conversations(self, parent_conversation_id, user_email, limit=200):
+    def list_child_conversations(self, parent_conversation_id, user_email, limit=200, child_ref=None):
         return [
             {k: v for k, v in row.items() if k not in ("user", "messages")}
             for row in self.rows.values()
             if row["user"] == user_email
             and row["metadata"].get("parent_conversation_id") == parent_conversation_id
+            and (not child_ref or child_ref in (row["id"], row["metadata"].get("launch_run_id")))
         ]
 
     def get_conversation(self, conversation_id, user_email):
@@ -415,3 +417,39 @@ async def test_off_record_run_shares_no_title(cluster):
     raw = await b.coordinator.read(record.run_id)
     assert raw["title"] == ""
     assert "private prompt" not in json.dumps(raw)
+
+
+async def test_followed_up_child_by_run_id(cluster, store):
+    store.add("child-conv", USER, "parent-conv", launch_run_id="child-run", follow_ups=1)
+    context, factory = _on_replica_b(store)
+
+    by_run = await get_child_result("child-run", context, factory)
+    by_conversation = await get_child_result("child-conv", context, factory)
+
+    assert by_run["result"] is None and by_run["result_status"] == "unavailable"
+    assert "separately" in by_run["result_error"]
+    assert by_conversation["result"] == "later answer"
+
+
+async def test_live_follow_up_not_substituted(cluster, store):
+    a, _ = cluster
+    await a.launch_child(run_id="follow-run", conversation_id="child-conv")
+    store.add("child-conv", USER, "parent-conv", launch_run_id="child-run", follow_ups=1)
+    context, factory = _on_replica_b(store)
+
+    result = await get_child_result("child-run", context, factory)
+
+    assert result["run_id"] == "child-run"
+    assert result["result"] is None
+
+
+def test_child_found_beyond_the_listing_limit(repo):
+    _save(repo, "parent", USER)
+    for i in range(205):
+        _save(repo, f"kid-{i}", USER, {"parent_conversation_id": "parent", "launch_run_id": f"run-{i}"})
+
+    assert len(repo.list_child_conversations("parent", USER)) == 200
+    found = repo.list_child_conversations("parent", USER, child_ref="run-204")
+    assert [c["id"] for c in found] == ["kid-204"]
+    assert [c["id"] for c in repo.list_child_conversations("parent", USER, child_ref="kid-203")] == ["kid-203"]
+    assert repo.list_child_conversations("parent", USER, child_ref="nope") == []
