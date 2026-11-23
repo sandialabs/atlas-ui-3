@@ -106,11 +106,12 @@ export function useConversationRuns() {
 				// A run that already ended (completed, stopped, failed in the model
 				// call, shutdown) committed its turn. A fence arriving afterwards must
 				// not flag it Interrupted or say it was not saved (issue #1218).
-				if (
-					prior?.run_id === data.run.run_id
-					&& TERMINAL_STATUSES.has(prior.status)
-					&& data.run.end_reason === 'fenced'
-				) return prev
+				if (data.run.end_reason === 'fenced' && prior) {
+					// Its own turn was committed: completed, or its save was reported.
+					if (prior.run_id === data.run.run_id && (prior.status === 'completed' || prior.saved)) return prev
+					// A late fence for an older run must not replace a newer live run.
+					if (prior.run_id !== data.run.run_id && !TERMINAL_STATUSES.has(prior.status)) return prev
+				}
 				const title = data.run.title || prior?.title || null
 				const parentConversationId = data.run.parent_conversation_id
 					|| prior?.parent_conversation_id
@@ -125,13 +126,25 @@ export function useConversationRuns() {
 						...(title ? { title } : {}),
 						parent_conversation_id: parentConversationId,
 						launch_origin: launchOrigin,
+						...(prior?.run_id === data.run.run_id && prior.saved ? { saved: true } : {}),
 					},
 				}
 			})
 			return
 		}
-		if (data.type === 'background_activity' && data.frame?.type === 'conversation_saved') {
-			setBackgroundSaves(n => n + 1)
+		if (data.type === 'run_saved' || (data.type === 'background_activity' && data.frame?.type === 'conversation_saved')) {
+			// Remember that this run's turn is on disk (issue #1218): a fence that
+			// arrives later must not call it lost.
+			const savedRunId = data.type === 'run_saved' ? data.run_id : data.frame.run_id
+			const savedConversation = data.type === 'run_saved' ? data.conversation_id : data.frame.conversation_id
+			if (savedRunId && savedConversation) {
+				applyRuns(prev => (
+					prev[savedConversation]?.run_id === savedRunId
+						? { ...prev, [savedConversation]: { ...prev[savedConversation], saved: true } }
+						: prev
+				))
+			}
+			if (data.type === 'background_activity') setBackgroundSaves(n => n + 1)
 			return
 		}
 		if (data.type === 'background_activity' && data.conversation_id) {

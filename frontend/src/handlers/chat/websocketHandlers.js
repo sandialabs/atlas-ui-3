@@ -276,7 +276,11 @@ export function resetInterruptedRunNotices() {
 function noteLiveRun(type, run) {
   if (!run?.conversation_id || !run.run_id) return
   const live = type === 'run_started' || (run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled')
-  if (!live) return
+  if (!live) {
+    // An ended run is no longer the conversation's current one.
+    if (liveRunByConversation.get(run.conversation_id) === run.run_id) liveRunByConversation.delete(run.conversation_id)
+    return
+  }
   if (liveRunByConversation.size >= MAX_ANNOUNCED_RUNS) liveRunByConversation.clear()
   liveRunByConversation.set(run.conversation_id, run.run_id)
 }
@@ -321,10 +325,11 @@ export function createWebSocketHandler(deps) {
   // A run the server ended without the user stopping it (issue #1218).
   function announceInterruptedRun(run) {
     const notice = interruptedRunNotice(run)
-    // A run that ended any other way (completed, stopped, failed in the model
-    // call, shutdown) committed its turn; a fence arriving afterwards must not
-    // claim it was lost.
-    if (run && !notice && ['completed', 'cancelled', 'failed'].includes(run.status)) settleRun(run.run_id)
+    // A completed run saved its turn before reporting. Any other ending (stop,
+    // model failure, shutdown) reports before it commits, so only the run's
+    // own `conversation_saved` frame settles it; a fence arriving after that
+    // must not claim the turn was lost.
+    if (run && run.status === 'completed') settleRun(run.run_id)
     if (!notice || announcedRuns.has(run.run_id)) return
     // A conversation that is not on screen shows it through the history list
     // indicator instead; a notice here would land in the wrong chat.
@@ -676,9 +681,11 @@ export function createWebSocketHandler(deps) {
         if (typeof onRunStatus === 'function') onRunStatus(data)
         // Live status frames only, not a snapshot of runs that ended earlier.
         if (data.type === 'run_started') noteLiveRun('run_started', data)
+        // A snapshot after a reconnect replaces what this tab knew about live runs.
+        if (data.type === 'runs_snapshot') liveRunByConversation.clear()
         if (data.type === 'run_status') {
-          noteLiveRun('run_status', data.run)
           announceInterruptedRun(data.run)
+          noteLiveRun('run_status', data.run)
         }
         // A new chat has no conversation id until the turn is saved, so the
         // server mints one when it admits the run and reports it here. Adopting
@@ -919,6 +926,10 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'conversation_saved': {
+          if (data.run_id) {
+            settleRun(data.run_id)
+            if (typeof onRunStatus === 'function') onRunStatus({ type: 'run_saved', run_id: data.run_id, conversation_id: data.conversation_id })
+          }
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)
           }

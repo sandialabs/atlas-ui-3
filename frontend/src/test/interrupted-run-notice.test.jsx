@@ -112,13 +112,40 @@ describe('interrupted run notice in the transcript', () => {
     expect(interruptedRunNotice(run({ end_reason: 'error' }))).toBeNull()
   })
 
-  it('does not warn about a run that failed or shut down after saving its turn', () => {
+  it('does not warn about a run that failed or shut down and then saved its turn', () => {
     for (const end_reason of ['error', 'replica_shutdown']) {
       const { deps, handler } = makeHandler()
-      handler(statusFrame(run({ end_reason, run_id: `run-${end_reason}` })))
-      handler(statusFrame(run({ run_id: `run-${end_reason}` })))
+      const id = `run-${end_reason}`
+      handler(statusFrame(run({ end_reason, run_id: id })))
+      handler({ type: 'conversation_saved', conversation_id: 'conv-1', run_id: id })
+      handler(statusFrame(run({ run_id: id })))
       expect(deps.addMessage).not.toHaveBeenCalled()
     }
+  })
+
+  it('still warns when a stopped run is fenced before its turn was saved', () => {
+    const { deps, handler } = makeHandler()
+    handler(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' })))
+    handler(statusFrame(run()))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a fence for the current run as current after a reconnect snapshot', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'run_started', run_id: 'run-old', conversation_id: 'conv-1' })
+    handler({ type: 'runs_snapshot', runs: [] })
+    handler(statusFrame(run({ run_id: 'run-old' })))
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
+  })
+
+  it('does not treat an ended run as the current one', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'run_started', run_id: 'run-a', conversation_id: 'conv-1' })
+    handler(statusFrame(run({ run_id: 'run-a', status: 'completed', end_reason: 'completed' })))
+    handler({ type: 'run_started', run_id: 'run-b', conversation_id: 'conv-1' })
+    handler(statusFrame(run({ run_id: 'run-b', status: 'completed', end_reason: 'completed' })))
+    handler(statusFrame(run({ run_id: 'run-c' })))
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
   })
 
   it('leaves the busy indicators alone when a newer run owns the conversation', () => {
@@ -188,12 +215,27 @@ describe('completed run later fenced', () => {
     expect(result.current.runsByConversation['conv-1'].status).toBe('completed')
   })
 
-  it.each(['error', 'replica_shutdown', 'user_cancelled'])('ignores a fence after the run ended with %s', (end_reason) => {
+  it.each(['error', 'replica_shutdown', 'user_cancelled'])('ignores a fence after the run ended with %s and saved', (end_reason) => {
     const { result } = renderHook(() => useConversationRuns())
     const status = end_reason === 'user_cancelled' ? 'cancelled' : 'failed'
     act(() => result.current.handleRunFrame(statusFrame(run({ status, end_reason }))))
+    act(() => result.current.handleRunFrame({ type: 'run_saved', run_id: 'run-1', conversation_id: 'conv-1' }))
     act(() => result.current.handleRunFrame(statusFrame(run())))
     expect(result.current.runsByConversation['conv-1'].end_reason).toBe(end_reason)
+  })
+
+  it('records a fence on a stopped run whose turn was not saved yet', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' }))))
+    act(() => result.current.handleRunFrame(statusFrame(run())))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe('fenced')
+  })
+
+  it('ignores a late fence for an older run while a newer run is live', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ run_id: 'run-new', status: 'running', end_reason: null }))))
+    act(() => result.current.handleRunFrame(statusFrame(run({ run_id: 'run-old' }))))
+    expect(result.current.runsByConversation['conv-1']).toMatchObject({ run_id: 'run-new', status: 'running' })
   })
 
   it('records a fence on a run that was still running', () => {
