@@ -1275,6 +1275,60 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     }
   })
 
+  it('treats a move to local tracking as a handoff, not an end', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      // The same run is now held by this socket's own replica.
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running' }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(h.toastError).not.toHaveBeenCalled()
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('waits for a stopped run to save before reading the record', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      h.fetchMock.mockClear()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'cancelled', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(h.fetchMock).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(h.fetchMock).toHaveBeenCalled()
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retries the resync read after a failed fetch', async () => {
     vi.useFakeTimers()
     try {

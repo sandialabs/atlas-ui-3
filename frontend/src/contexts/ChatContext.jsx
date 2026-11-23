@@ -1859,6 +1859,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			remoteWatchRef.current = id
 			return
 		}
+		// Still running, now tracked by this socket (it reconnected to the
+		// owner): a handoff, not an end.
+		if (id && isRunActive(run)) {
+			remoteWatchRef.current = null
+			return
+		}
 		const watched = remoteWatchRef.current
 		if (!watched) return
 		remoteWatchRef.current = null
@@ -1879,6 +1885,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			)))
 			if (run && run.status && run.status !== 'completed') {
 				toast.error('This run ended before it finished.')
+			}
+			// A stopped or failed run reports its status before the owner has
+			// written the interrupted turn; give that save time to land, as the
+			// joined-run reload does.
+			if (!run || run.status !== 'completed') {
+				await new Promise(resolve => setTimeout(resolve, RUN_END_RELOAD_GRACE_MS))
 			}
 			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
 				try {
