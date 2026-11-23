@@ -2,8 +2,9 @@
 // is told to the user, in the conversation on screen and in the history list.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, renderHook, act } from '@testing-library/react'
 
+import { useConversationRuns } from '../hooks/chat/useConversationRuns'
 import { createWebSocketHandler, resetInterruptedRunNotices } from '../handlers/chat/websocketHandlers'
 import { interruptedRunNotice } from '../utils/interruptedRunNotice'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
@@ -148,5 +149,21 @@ describe('interrupted run in the history list', () => {
   it('keeps Failed for an ordinary failed run', () => {
     render(<RunIndicator run={run({ end_reason: 'error' })} />)
     expect(screen.getByText('Failed')).toBeTruthy()
+  })
+})
+
+describe('completed run later fenced', () => {
+  it('stays completed in the run tracker, so the history list does not flag it', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'completed', end_reason: 'completed' }))))
+    act(() => result.current.handleRunFrame(statusFrame(run())))
+    expect(result.current.runsByConversation['conv-1'].status).toBe('completed')
+  })
+
+  it('records a fence on a run that was still running', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'running', end_reason: null }))))
+    act(() => result.current.handleRunFrame(statusFrame(run())))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe('fenced')
   })
 })

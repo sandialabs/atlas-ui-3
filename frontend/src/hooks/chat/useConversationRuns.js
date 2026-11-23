@@ -103,6 +103,14 @@ export function useConversationRuns() {
 		if (data.type === 'run_status' && data.run) {
 			applyRuns(prev => {
 				const prior = prev[data.run.conversation_id]
+				// A run that already completed and is then fenced while its final
+				// snapshot is written delivered and saved its answer (issue #1218):
+				// keep the completed record rather than flag it Interrupted.
+				if (
+					prior?.run_id === data.run.run_id
+					&& prior.status === 'completed'
+					&& data.run.end_reason === 'fenced'
+				) return prev
 				const title = data.run.title || prior?.title || null
 				const parentConversationId = data.run.parent_conversation_id
 					|| prior?.parent_conversation_id
