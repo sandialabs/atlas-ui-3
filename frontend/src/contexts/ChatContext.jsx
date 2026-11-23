@@ -1918,6 +1918,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						}
 						throw new Error('run still reported live')
 					}
+					// This is now the newest read: an older reconnect read still in
+					// the air must not replace it with an earlier turn.
+					reconnectResyncGenerationRef.current += 1
 					await loadSavedConversationRef.current(data, { origin: 'reconnect' })
 					return
 				} catch (error) {
