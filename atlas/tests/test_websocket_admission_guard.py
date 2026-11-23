@@ -154,7 +154,8 @@ async def test_seeding_failure_after_admission_releases_the_claim(
 
     monkeypatch.setattr(main, "_seed_run_session_files", boom)
     frames = await _run_until_the_handler_fails(_chat_frame(), injected)
-    assert "run_started" not in [f["type"] for f in frames]
+    # The run is announced before seeding (#1216), then fails with no task.
+    assert [f["type"] for f in frames if f["type"] == "run_started"] == ["run_started"]
 
     record = _only_record()
     assert record.status == RunStatus.FAILED
