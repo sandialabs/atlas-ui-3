@@ -847,7 +847,9 @@ async def _start_child_run(
     # the one the user already gave (or auto-gave) for *this* ``atlas_launch_subagent``
     # (or ``atlas_follow_up_subagent``) call, which named the task. Tools an admin has
     # pinned to mandatory approval are exempt: those keep prompting inside
-    # the child, which pauses it until the user opens that conversation.
+    # the child, which pauses it until the user opens that conversation. The
+    # pre-approval is set for the whole child; ``execute_single_tool`` keeps
+    # the admin-pinned tools on the gate, so the others do not wait.
     admin_gated = _admin_gated_tools(tools, config_manager)
     if admin_gated and refuse_approval_gated:
         raise LaunchRefused(
@@ -857,7 +859,7 @@ async def _start_child_run(
             "approves them in the conversation.",
             code="approval_required",
         )
-    if not admin_gated and not _preapprove_child_tools(chat_service):
+    if not _preapprove_child_tools(chat_service):
         logger.warning("Could not pre-approve tools for launched run")
     if compliance_level is _FROM_CONTEXT:
         compliance_level = (context or {}).get("compliance_level")
@@ -1162,8 +1164,8 @@ async def execute_launch_tool(tool_call: Any, context: Optional[Dict[str, Any]])
         "for it. Its transcript is a separate conversation in the user's "
         "history.\n"
         + (
-            "It will pause for approval on these tools until the user opens "
-            f"that conversation: {', '.join(handle['tools_needing_approval'])}.\n"
+            "Only these tools will pause for approval until the user opens "
+            f"that conversation (its other tools run without asking): {', '.join(handle['tools_needing_approval'])}.\n"
             if handle["tools_needing_approval"]
             else ""
         )

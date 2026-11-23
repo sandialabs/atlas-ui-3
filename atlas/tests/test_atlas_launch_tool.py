@@ -1194,7 +1194,9 @@ async def test_an_admin_mandated_tool_still_prompts_inside_the_child(monkeypatch
     )
 
     assert handle["tools_needing_approval"] == ["math_add"]
-    assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is False
+    # Pre-approved all the same: the executor keeps only the mandatory tools
+    # on the gate (see test_child_approval_scope.py).
+    assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is True
     for service in factory.services:
         service.release.set()
 

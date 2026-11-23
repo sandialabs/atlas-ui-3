@@ -575,7 +575,16 @@ async def execute_single_tool(
             needs_approval = False
             allow_edit = True
             admin_required = False
-            if skip_approval:
+            if skip_approval and config_manager and not user_switch_covers_turn():
+                # A launched child is pre-approved by the launch call, but that
+                # approval never covers a tool an administrator made mandatory:
+                # only those stay on the gate; every other tool runs.
+                needs_approval, allow_edit, admin_required = requires_approval(
+                    tool_call.function.name, config_manager
+                )
+                if not admin_required:
+                    needs_approval = False
+            elif skip_approval:
                 needs_approval = False
             elif config_manager:
                 needs_approval, allow_edit, admin_required = requires_approval(tool_call.function.name, config_manager)

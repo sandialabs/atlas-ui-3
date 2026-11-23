@@ -124,6 +124,30 @@ STEER_QUEUE_FULL = "steering_queue_full"
 STEER_RUN_FINISHED = "run_finished"
 STEER_NOT_DRAINING = "not_draining"
 
+BUSY_MESSAGE = (
+    "This conversation already has a run in progress. Wait for it to "
+    "reach its next step, or stop it, before sending another message."
+)
+LAUNCHED_RUN_BUSY_MESSAGE = (
+    "This conversation is a sub-conversation running on its own; it cannot "
+    "take messages while it runs. Wait for it to finish, or stop it, then "
+    "send your message."
+)
+
+
+def busy_message_for(record: Any) -> str:
+    """The refusal text for a message sent to a run that is not draining steers.
+
+    A run started from the user's own turn reaches a step boundary and drains
+    the steering queue, so "wait for the next step" is true advice. A launched
+    run is started without a steering channel and never drains one, so the same
+    advice could never come true.
+    """
+    follows = getattr(record, "follows_user_auto_approve", None)
+    if callable(follows) and follows() is False:
+        return LAUNCHED_RUN_BUSY_MESSAGE
+    return BUSY_MESSAGE
+
 
 @dataclass
 class RunRecord:

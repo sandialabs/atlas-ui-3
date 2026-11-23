@@ -416,8 +416,9 @@ async def test_approval_mandatory_tools_are_refused_unless_pausing_is_allowed(fa
         )
     assert paused.status_code == 202
     assert paused.json()["tools_needing_approval"] == ["math_add"]
-    # Never auto-approved: the run will prompt the user.
-    assert factory.services[-1].agent_mode.agent_loop_factory.skip_approval is False
+    # The mandatory tool is never auto-approved: the executor keeps it on the
+    # gate even though the run is pre-approved (see test_child_approval_scope.py).
+    assert factory.services[-1].agent_mode.agent_loop_factory.skip_approval is True
 
 
 async def test_the_per_user_concurrency_cap_applies(factory):

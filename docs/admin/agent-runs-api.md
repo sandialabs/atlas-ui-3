@@ -187,8 +187,8 @@ or per-tool configuration) are **never** auto-approved:
 
 - By default a launch or follow-up whose tools include one is refused with `409
   approval_required`, naming the tools, before anything runs.
-- With `"allow_approval_pause": true` the run is admitted, every tool call prompts, and the run
-  pauses as `waiting_for_input` until the user opens the conversation in ATLAS and answers. The
+- With `"allow_approval_pause": true` the run is admitted, each mandatory tool call prompts (the
+  other tools run), and the run pauses as `waiting_for_input` until the user opens the conversation in ATLAS and answers. The
   handle's `tools_needing_approval` lists the mandatory ones. Paused runs count toward the user's
   concurrency cap, and `TOOL_APPROVAL_TIMEOUT_SECONDS` applies as usual.
 

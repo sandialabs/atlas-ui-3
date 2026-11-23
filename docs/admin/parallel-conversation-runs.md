@@ -449,7 +449,12 @@ Background auto-approve covers runs the *user* started. A conversation the
 model launched (`atlas_launch_subagent`) runs on model-chosen arguments, so its
 approval requests are not answered off-screen; the child still appears in the
 history list -- titled by its prompt -- with its "Needs approval" marker, and
-admin-pinned tools pause it until it is opened.
+only admin-pinned tools pause it until it is opened; its other tools run without
+asking, because approving the launch call covered them.
+
+A sub-conversation is started without a steering channel. A message sent to it
+while it runs is refused with `conversation_busy` and text saying it runs on its own
+and cannot take messages until it finishes; stop it or wait.
 
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
 canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging
