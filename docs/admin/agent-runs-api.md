@@ -197,13 +197,26 @@ or per-tool configuration) are **never** auto-approved:
 Send an `idempotency_key` (any caller-chosen string up to 200 characters) to make retries safe.
 A repeat with the same key and the same body, for the same user, returns the original handle
 with HTTP 200 and `idempotent_replay: true` rather than launching again; the same key with a
-different body is a 409. Two simultaneous requests with one key launch once. A request that was
-refused does not consume its key. Keys share one namespace per user across launches and
-follow-ups, so use a distinct key for each request (reusing a launch's key for its follow-up is a
-409 `idempotency_conflict`). Keys are remembered for 24 hours, in the memory of the replica
-that accepted them. A replay of a follow-up still works after the run it addressed has been
-cleaned up. When the replayed run itself is no longer tracked, the handle's `status` is
-`expired` (a value only replays carry); its conversation is still in the user's history.
+different body is a 409. Two simultaneous requests with one key launch once; the loser gets
+409 `idempotency_in_progress` while the first is still admitting (retry shortly, it then replays).
+A request that was refused or failed to launch does not consume its key. Keys share one namespace
+per user across launches and follow-ups, so use a distinct key for each request (reusing a
+launch's key for its follow-up is a 409 `idempotency_conflict`). Keys are remembered for 24 hours.
+A replay of a follow-up still works after the run it addressed has been cleaned up. When the
+replayed run itself is no longer tracked, the handle's `status` is `expired` (a value only
+replays carry); its conversation is still in the user's history.
+
+With `SESSION_REPOSITORY_TYPE=redis` the keys are cluster-wide: the same key and body sent to
+any replica launches one run, and a replay on a replica other than the one that accepted the
+launch returns the original `run_id` and `conversation_id` with HTTP 200, and the run's current
+`status` read from its shared record. A reservation is made atomically in Redis before anything
+is admitted. If the replica handling a first request dies before it records the run, the
+reservation frees itself after 2 minutes. If Redis cannot be reached, a request that carries an
+`idempotency_key` is refused with `503 unavailable` (nothing is launched, and the same key works
+once Redis is back, though a request that timed out reaching Redis can leave the key reserved
+for up to those 2 minutes, during which a retry gets 409 `idempotency_in_progress`); requests
+without a key are unaffected. Without Redis the keys live in the
+memory of the replica that accepted them and are lost on restart.
 
 ## Limits, replicas and restarts
 
@@ -211,7 +224,7 @@ cleaned up. When the replayed run itself is no longer tracked, the handle's `sta
   other. With Redis the cap counts the user's runs on every replica, browser runs included; the `atlas_launch_subagent` depth and fan-out caps do not apply to the API run itself (it is a
   root, depth 0) but do apply to anything it launches. The global HTTP rate limiter applies to
   these endpoints. Messages are limited to 20,000 characters.
-- **Run state is per replica, status is shared.** Follow-up, cancel, listing and idempotency
+- **Run state is per replica, status is shared.** Follow-up and listing
   are served by the replica that accepted the launch, and only while the registry retains the run
   (30 minutes after it ends). **Cancel** is the exception: with `SESSION_REPOSITORY_TYPE=redis`
   any replica accepts it and stops the run on the replica executing it (see

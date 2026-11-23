@@ -509,6 +509,103 @@ async def test_a_refused_launch_does_not_burn_its_idempotency_key(factory):
     assert retried.status_code == 202
 
 
+@pytest.fixture
+def shared_store():
+    """Bind the Redis idempotency store, as the app factory does with Redis."""
+    import fakeredis
+
+    from atlas.application.chat.runs.idempotency import set_idempotency_store
+    from atlas.infrastructure.redis import RedisClientManager, RedisSettings
+    from atlas.infrastructure.redis.idempotency_store import RedisIdempotencyStore
+
+    manager = RedisClientManager(
+        RedisSettings(url="redis://fake/0"), client=fakeredis.FakeAsyncRedis()
+    )
+    store = RedisIdempotencyStore(manager)
+    set_idempotency_store(store)
+    yield store
+    set_idempotency_store(None)
+
+
+async def test_shared_store_replays_on_another_replica(factory, shared_store):
+    body = {**LAUNCH, "idempotency_key": "xrep-1"}
+    async with _client(factory) as client:
+        first = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        # Another replica has no local record of the run.
+        reset_run_registry()
+        retry = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        conflict = await client.post(
+            "/api/agent-runs", json={**body, "message": "other"}, headers=AUTH
+        )
+    assert first.status_code == 202
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == first.json()["run_id"]
+    assert retry.json()["conversation_id"] == first.json()["conversation_id"]
+    assert retry.json()["idempotent_replay"] is True
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_conflict"
+    assert len(get_run_registry().all_records()) == 0  # no second run here
+
+
+async def test_shared_store_concurrent_requests_launch_once(factory, shared_store):
+    body = {**LAUNCH, "idempotency_key": "xrep-2"}
+    async with _client(factory) as client:
+        responses = await asyncio.gather(
+            *[client.post("/api/agent-runs", json=body, headers=AUTH) for _ in range(4)]
+        )
+    assert len(get_run_registry().all_records()) == 1
+    assert [r.status_code for r in responses].count(202) == 1
+
+
+async def test_shared_store_failed_launch_releases_the_key(factory, shared_store):
+    body = {**LAUNCH, "idempotency_key": "xrep-3"}
+    async with _client(factory) as client:
+        factory.conversation_repository = None
+        refused = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        factory.conversation_repository = object()
+        retried = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert refused.status_code == 503
+    assert retried.status_code == 202
+
+
+async def test_shared_store_outage_refuses_keyed_requests_only(factory, shared_store):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    async def down(*args, **kwargs):
+        raise RedisConnectionError("down")
+
+    shared_store._reserve = down
+    async with _client(factory) as client:
+        keyed = await client.post(
+            "/api/agent-runs", json={**LAUNCH, "idempotency_key": "xrep-4"}, headers=AUTH
+        )
+        unkeyed = await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)
+    assert keyed.status_code == 503
+    assert keyed.json()["detail"]["code"] == "unavailable"
+    assert unkeyed.status_code == 202
+    assert len(get_run_registry().all_records()) == 1
+
+
+async def test_shared_store_follow_up_replays_on_another_replica(factory, shared_store):
+    async with _client(factory) as client:
+        launched = (await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)).json()
+        record = get_run_registry().get(launched["run_id"])
+        factory.release_all()
+        await _settle()
+        record.status = RunStatus.COMPLETED
+        body = {"message": "Again", "idempotency_key": "xrep-5"}
+        first = await client.post(
+            f"/api/agent-runs/{launched['run_id']}/follow-up", json=body, headers=AUTH
+        )
+        reset_run_registry()
+        retry = await client.post(
+            f"/api/agent-runs/{launched['run_id']}/follow-up", json=body, headers=AUTH
+        )
+    assert first.status_code == 202
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == first.json()["run_id"]
+
+
 # ---------------------------------------------------------------------------
 # Observation and scoping
 # ---------------------------------------------------------------------------
