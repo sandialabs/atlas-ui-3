@@ -264,8 +264,21 @@ export function cleanupStreamState() {
 const announcedRuns = new Set()
 const MAX_ANNOUNCED_RUNS = 500
 
+// The newest live run of each conversation, so a late fence frame for an older
+// run does not clear the indicators of a newer one.
+const liveRunByConversation = new Map()
+
 export function resetInterruptedRunNotices() {
   announcedRuns.clear()
+  liveRunByConversation.clear()
+}
+
+function noteLiveRun(type, run) {
+  if (!run?.conversation_id || !run.run_id) return
+  const live = type === 'run_started' || (run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled')
+  if (!live) return
+  if (liveRunByConversation.size >= MAX_ANNOUNCED_RUNS) liveRunByConversation.clear()
+  liveRunByConversation.set(run.conversation_id, run.run_id)
 }
 
 function settleRun(runId) {
@@ -307,16 +320,24 @@ export function createWebSocketHandler(deps) {
 
   // A run the server ended without the user stopping it (issue #1218).
   function announceInterruptedRun(run) {
-    if (run && (run.status === 'completed' || run.status === 'cancelled')) settleRun(run.run_id)
     const notice = interruptedRunNotice(run)
+    // A run that ended any other way (completed, stopped, failed in the model
+    // call, shutdown) committed its turn; a fence arriving afterwards must not
+    // claim it was lost.
+    if (run && !notice && ['completed', 'cancelled', 'failed'].includes(run.status)) settleRun(run.run_id)
     if (!notice || announcedRuns.has(run.run_id)) return
     // A conversation that is not on screen shows it through the history list
     // indicator instead; a notice here would land in the wrong chat.
     if (typeof getVisibleConversationId === 'function' && run.conversation_id !== getVisibleConversationId()) return
     settleRun(run.run_id)
-    setIsThinking(false)
-    clearAgentRunning()
-    if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+    // Only the conversation's current run owns the busy indicators: a newer
+    // run may be executing, and its Stop button must stay.
+    const current = liveRunByConversation.get(run.conversation_id)
+    if (!current || current === run.run_id) {
+      setIsThinking(false)
+      clearAgentRunning()
+      if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+    }
     addMessage({ role: 'system', content: notice, type: 'warning', timestamp: new Date().toISOString() })
   }
 
@@ -654,7 +675,11 @@ export function createWebSocketHandler(deps) {
       if (data.type === 'run_started' || data.type === 'run_status' || data.type === 'runs_snapshot') {
         if (typeof onRunStatus === 'function') onRunStatus(data)
         // Live status frames only, not a snapshot of runs that ended earlier.
-        if (data.type === 'run_status') announceInterruptedRun(data.run)
+        if (data.type === 'run_started') noteLiveRun('run_started', data)
+        if (data.type === 'run_status') {
+          noteLiveRun('run_status', data.run)
+          announceInterruptedRun(data.run)
+        }
         // A new chat has no conversation id until the turn is saved, so the
         // server mints one when it admits the run and reports it here. Adopting
         // it now is what lets the routing below recognise this run's own events

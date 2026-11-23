@@ -76,7 +76,7 @@ Redis (below).
 
 Runs already executing when Redis goes away keep going only while their lease
 holds. An unreachable Redis is an unknown answer, not a refusal: once a whole
-lease (`RUN_LEASE_SECONDS`, 30 s) has passed since the last proven renewal, the
+lease (`RUN_LEASE_SECONDS`, default 30 s) has passed since the last proven renewal, the
 run is fenced at its next tool call or projection write, and when Redis
 returns, its renewal finds the conversation lease expired and reports the claim
 lost. Either way the run is cancelled and its partial turn is **not saved**

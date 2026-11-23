@@ -553,7 +553,11 @@ class RunLeaseGuard:
                 run_id, raw.get("owner") or "?", generation,
             )
             lease = self._leases.get(run_id)
-            if lease is not None:
+            if lease is not None and lease.fenced:
+                # Already fenced here for a weaker reason (a lapse without
+                # proof): the takeover now observed is the better account.
+                lease.fence_reason = FENCE_REASON_TAKEN_OVER
+            elif lease is not None:
                 self._fence_local(lease, run_id, FENCE_REASON_TAKEN_OVER)
         # The run stays in ``runs-live`` until its projection is closed, so a
         # failed close is retried by the next sweep on any replica.

@@ -15,9 +15,6 @@ const NOTICES = {
   fenced:
     'This response was interrupted because the server lost contact with its coordination service for too long. '
     + `The work it had done was not saved. ${RESEND}`,
-  owner_lost:
-    'This response was interrupted because the server running it stopped responding. '
-    + `The work it had done was not saved. ${RESEND}`,
 }
 
 /**

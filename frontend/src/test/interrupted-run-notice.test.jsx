@@ -8,6 +8,7 @@ import { useConversationRuns } from '../hooks/chat/useConversationRuns'
 import { createWebSocketHandler, resetInterruptedRunNotices } from '../handlers/chat/websocketHandlers'
 import { interruptedRunNotice } from '../utils/interruptedRunNotice'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
+import { arrangeConversations } from '../utils/conversationTree'
 import { RunIndicator } from '../components/ConversationTreeRow'
 
 const makeHandler = (visibleConversationId = 'conv-1') => {
@@ -106,9 +107,36 @@ describe('interrupted run notice in the transcript', () => {
     expect(deps.addMessage).not.toHaveBeenCalled()
   })
 
-  it('words an orphaned run differently from a lost coordination service', () => {
-    expect(interruptedRunNotice(run({ end_reason: 'owner_lost' }))).toContain('stopped responding')
+  it('has a notice only for the fenced reason', () => {
+    expect(interruptedRunNotice(run({ end_reason: 'owner_lost' }))).toBeNull()
     expect(interruptedRunNotice(run({ end_reason: 'error' }))).toBeNull()
+  })
+
+  it('does not warn about a run that failed or shut down after saving its turn', () => {
+    for (const end_reason of ['error', 'replica_shutdown']) {
+      const { deps, handler } = makeHandler()
+      handler(statusFrame(run({ end_reason, run_id: `run-${end_reason}` })))
+      handler(statusFrame(run({ run_id: `run-${end_reason}` })))
+      expect(deps.addMessage).not.toHaveBeenCalled()
+    }
+  })
+
+  it('leaves the busy indicators alone when a newer run owns the conversation', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'run_started', run_id: 'run-old', conversation_id: 'conv-1' })
+    handler({ type: 'run_started', run_id: 'run-new', conversation_id: 'conv-1' })
+    handler(statusFrame(run({ run_id: 'run-old' })))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+    expect(deps.setIsThinking).not.toHaveBeenCalled()
+    expect(deps.setIsAgentRunning).not.toHaveBeenCalled()
+    expect(deps.setIsSynthesizing).not.toHaveBeenCalled()
+  })
+
+  it('clears the busy indicators when the fenced run is the current one', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'run_started', run_id: 'run-1', conversation_id: 'conv-1' })
+    handler(statusFrame(run()))
+    expect(deps.setIsThinking).toHaveBeenCalledWith(false)
   })
 })
 
@@ -160,10 +188,39 @@ describe('completed run later fenced', () => {
     expect(result.current.runsByConversation['conv-1'].status).toBe('completed')
   })
 
+  it.each(['error', 'replica_shutdown', 'user_cancelled'])('ignores a fence after the run ended with %s', (end_reason) => {
+    const { result } = renderHook(() => useConversationRuns())
+    const status = end_reason === 'user_cancelled' ? 'cancelled' : 'failed'
+    act(() => result.current.handleRunFrame(statusFrame(run({ status, end_reason }))))
+    act(() => result.current.handleRunFrame(statusFrame(run())))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe(end_reason)
+  })
+
   it('records a fence on a run that was still running', () => {
     const { result } = renderHook(() => useConversationRuns())
     act(() => result.current.handleRunFrame(statusFrame(run({ status: 'running', end_reason: null }))))
     act(() => result.current.handleRunFrame(statusFrame(run())))
     expect(result.current.runsByConversation['conv-1'].end_reason).toBe('fenced')
+  })
+})
+
+describe('collapsed parent of a fenced child', () => {
+  const conv = (id, extra = {}) => ({ id, title: id, updated_at: '2026-11-23T00:00:00Z', ...extra })
+
+  it('carries the end reason so the marker reads Interrupted', () => {
+    const rows = arrangeConversations([conv('p'), conv('c', { parent_conversation_id: 'p' })], {
+      c: { conversation_id: 'c', status: 'failed', end_reason: 'fenced' },
+    })
+    expect(rows[0]._aggregateRun).toMatchObject({ status: 'failed', end_reason: 'fenced' })
+  })
+
+  it('reads as a plain failure when the failed children ended differently', () => {
+    const rows = arrangeConversations([
+      conv('p'), conv('a', { parent_conversation_id: 'p' }), conv('b', { parent_conversation_id: 'p' }),
+    ], {
+      a: { conversation_id: 'a', status: 'failed', end_reason: 'fenced' },
+      b: { conversation_id: 'b', status: 'failed', end_reason: 'error' },
+    })
+    expect(rows[0]._aggregateRun.end_reason).toBeNull()
   })
 })
