@@ -1899,7 +1899,25 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						activeConversationIdRef.current !== id || data?.id !== id || data.error) return
 					// A newer turn already holds the conversation: its own tracking
 					// takes over, and this record is not the final one.
-					if (data.run_elsewhere === true || data.in_flight === true) return
+					if (data.in_flight === true) return
+					if (data.run_elsewhere === true) {
+						// A different run: its own tracking takes over. The same run
+						// still reported live: the shared record has not caught up with
+						// the end yet, so ask again.
+						if (!run?.run_id || data.run_id !== run.run_id) {
+							handleRunFrameRef.current?.({
+								type: 'run_status',
+								run: {
+									run_id: data.run_id,
+									conversation_id: id,
+									status: data.run_status || 'running',
+									detached: true,
+								},
+							})
+							return
+						}
+						throw new Error('run still reported live')
+					}
 					await loadSavedConversationRef.current(data, { origin: 'reconnect' })
 					return
 				} catch (error) {

@@ -1301,6 +1301,65 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     }
   })
 
+  it('keeps tracking a remote run through a degraded snapshot', async () => {
+    const { result, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1', messages: [storedChat('user', 'hello')],
+      })
+    })
+    dispatchFrame({
+      type: 'runs_snapshot',
+      runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+    })
+    h.fetchMock.mockClear()
+    // The shared store could not be read: the run is not in the list, but that
+    // is not an end.
+    dispatchFrame({ type: 'runs_snapshot', runs: [], degraded: true })
+    expect(result.current.isAgentRunning).toBe(true)
+    expect(h.fetchMock).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('asks again while the shared record still reports the ended run live', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      let calls = 0
+      const record = { id: 'conv-1', messages: [storedChat('user', 'hello'), storedChat('assistant', 'done')] }
+      h.fetchMock.mockImplementation(async () => {
+        calls += 1
+        return {
+          ok: true,
+          json: async () => (calls === 1
+            ? { id: 'conv-1', run_elsewhere: true, run_id: 'run-1', messages: [] }
+            : record),
+        }
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      expect(calls).toBe(1)
+      expect(result.current.messages.at(-1).content).toBe('hello')
+      await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
+      expect(result.current.messages.at(-1).content).toBe('done')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for a stopped run to save before reading the record', async () => {
     vi.useFakeTimers()
     try {

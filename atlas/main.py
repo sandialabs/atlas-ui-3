@@ -3320,6 +3320,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the run still overlays the shared projection, so the sidebar
                 # shows the same activity.
                 runs = run_registry.snapshot_for_user(user_email)
+                degraded = False
                 try:
                     from atlas.application.chat.runs.execution_state import (
                         list_execution_snapshots,
@@ -3328,14 +3329,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     runs = merge_run_snapshots(
                         runs,
-                        await list_execution_snapshots(user_email),
+                        await list_execution_snapshots(user_email, strict=True),
                         ended_for=(data.get("conversation_id") or None) if data.get("watch_end") is True else None,
                     )
                 except Exception:
+                    # Without the shared projections this list says nothing
+                    # about runs other replicas own. Say so, so a client does
+                    # not read their absence as an end (issue #1219).
+                    degraded = True
                     logger.warning("execution snapshot merge failed", exc_info=True)
                 await websocket.send_json({
                     "type": "runs_snapshot",
                     "runs": runs,
+                    "degraded": degraded,
                     "max_concurrent_runs_per_user": run_registry.max_concurrent_runs_per_user,
                 })
 

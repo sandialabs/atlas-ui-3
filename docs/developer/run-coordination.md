@@ -316,7 +316,7 @@ owner's frames reach only the sockets connected to it. With no session
 affinity a browser can reconnect to any other replica (issue #1219), so that
 replica answers from the shared records and does not stream tokens:
 
-- `GET /api/conversations/<id>` and `restore_conversation`: when this replica
+- `GET /api/conversations/<id>` (and the stored-record lookup that `restore_conversation` shares): when this replica
   has no local run for the conversation, `in_flight_conversation` reads the
   `<p>:run-conv:<id>` key and the run record it names
   (`run_control.conversation_entry`). If another replica holds a live run of
@@ -327,8 +327,16 @@ replica answers from the shared records and does not stream tokens:
   merged in by `attach_execution`. It is never a 404 while the run is live.
   `in_flight` stays unset, because the replay and live-poll paths that read it
   need the owner's transcript. Another user's conversation id reads as missing.
+  `restore_conversation` replies with its usual `conversation_restored` frame
+  and does not carry these fields; the client learns a run is elsewhere from
+  the GET and the run list. A non-owner GET names no classification, so under
+  enforced compliance levels a request that supplies a level is refused with
+  409 until the run ends. The lookup is one Redis read on a registry miss, and
+  only when run coordination is on.
 - `list_runs` already merges the shared execution projections, so a run owned
-  elsewhere is listed with `detached: true`. A finished run is dropped from the
+  elsewhere is listed with `detached: true`. If the shared projections cannot
+  be read, the frame carries `degraded: true` and the client keeps its remote
+  runs instead of reading their absence as an end. A finished run is dropped from the
   list, unless the frame carries `watch_end: true` and a `conversation_id`: then
   that conversation's finished projection is kept as a terminal entry (status
   and `end_reason`), once this replica holds no run for it. The orphan sweep

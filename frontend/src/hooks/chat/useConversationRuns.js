@@ -68,6 +68,16 @@ export function useConversationRuns() {
 					}
 				}
 			}
+			if (data.degraded === true) {
+				// The server could not read the shared run projections, so this
+				// list says nothing about runs another replica owns. Keep those
+				// until a complete snapshot confirms how they ended (issue #1219).
+				for (const [conversationId, prior] of Object.entries(runsRef.current)) {
+					if (!next[conversationId] && prior?.detached === true && isRunActive(prior)) {
+						next[conversationId] = prior
+					}
+				}
+			}
 			runsRef.current = next
 			setRunsByConversation(next)
 			if (typeof data.max_concurrent_runs_per_user === 'number') {

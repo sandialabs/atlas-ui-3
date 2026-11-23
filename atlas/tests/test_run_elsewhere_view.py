@@ -89,3 +89,20 @@ def test_snapshot_drops_ended_run_unwatched():
 def test_snapshot_lists_remote_running_run():
     runs = merge_run_snapshots([], [_projection("running")], ended_for="conv-1")
     assert runs[0]["status"] == "running" and runs[0]["detached"] is True
+
+
+@pytest.mark.asyncio
+async def test_strict_snapshot_read_raises(monkeypatch):
+    from atlas.application.chat.runs import execution_state
+
+    class _Broken:
+        async def list_for_user(self, user_email):
+            raise RuntimeError("redis down")
+
+    execution_state.set_execution_store(_Broken())
+    try:
+        assert await execution_state.list_execution_snapshots("u@example.com") == []
+        with pytest.raises(RuntimeError):
+            await execution_state.list_execution_snapshots("u@example.com", strict=True)
+    finally:
+        execution_state.reset_execution_store()

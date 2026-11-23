@@ -1145,10 +1145,14 @@ async def forget_conversations(user_email: str, conversation_ids: Optional[List[
         logger.warning("execution projection delete failed", exc_info=True)
 
 
-async def list_execution_snapshots(user_email: str) -> List[dict]:
+async def list_execution_snapshots(user_email: str, *, strict: bool = False) -> List[dict]:
+    """The user's shared projections. A store failure reads as empty unless
+    ``strict``, which re-raises so a caller can tell "no runs" from "unknown"."""
     try:
         return await get_execution_store().list_for_user(user_email)
     except Exception:
+        if strict:
+            raise
         logger.warning("execution projection list failed", exc_info=True)
         return []
 
