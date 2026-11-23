@@ -2399,7 +2399,7 @@ async def test_child_frames_through_the_real_tool_executor_keep_child_identity()
     registry = get_run_registry()
     parent = registry.start(conversation_id="conv-parent", user_email="user@example.com")
     set_current_run(parent.run_id, parent.conversation_id)
-    factory = _Factory(lambda c: _ChatService(c))
+    factory = _Factory(_ChatService)
     wire = []
 
     async def _socket(frame):
