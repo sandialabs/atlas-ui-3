@@ -270,6 +270,16 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	// Adopt a conversation id the server announced (`run_started`, or
+	// `conversation_saved`) so the routing sees it at once. The ref above only
+	// catches up when React next renders, and the run's first tagged frames can
+	// arrive before that: they would not match the still-empty id, be filed as
+	// background activity, and leave a new chat's answer out of the transcript
+	// (issue #1216).
+	const adoptConversationId = useCallback((id) => {
+		activeConversationIdRef.current = id
+		setActiveConversationId(id)
+	}, [])
 	// Canvas documents this tab has shown for the open conversation. A
 	// reconnect or joined poll compares the stored artifact with this, not
 	// with the panel text, which a file view clears (issue #1157).
@@ -659,7 +669,7 @@ export const ChatProvider = ({ children }) => {
 			addAttachment,
 			resolvePendingFileEvent,
 			setPendingElicitation,
-			setActiveConversationId,
+			setActiveConversationId: adoptConversationId,
 			streamToken,
 			streamEnd,
 			getVisibleConversationId: () => activeConversationIdRef.current,
@@ -728,7 +738,7 @@ export const ChatProvider = ({ children }) => {
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, runs.handleRunFrame])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, adoptConversationId, streamToken, streamEnd, runs.handleRunFrame])
 
 	// Refs so the message handler above (rebuilt only when its deps change)
 	// sees the current settings and socket without re-subscribing per change.
