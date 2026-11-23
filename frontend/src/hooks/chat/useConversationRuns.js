@@ -73,7 +73,12 @@ export function useConversationRuns() {
 				// list says nothing about runs another replica owns. Keep those
 				// until a complete snapshot confirms how they ended (issue #1219).
 				for (const [conversationId, prior] of Object.entries(runsRef.current)) {
-					if (!next[conversationId] && prior?.detached === true && isRunActive(prior)) {
+					if (prior?.detached !== true || !isRunActive(prior)) continue
+					// A different, finished run this replica still retains for the
+					// conversation is an earlier turn: it does not end the remote
+					// one. The same run reported finished does.
+					const current = next[conversationId]
+					if (!current || (!isRunActive(current) && current.run_id !== prior.run_id)) {
 						next[conversationId] = prior
 					}
 				}

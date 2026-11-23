@@ -83,11 +83,23 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
     owner's transcript.
     """
     from atlas.application.chat.runs.control_bus import get_run_control_bus
+    from atlas.application.chat.runs.execution_state import _TERMINAL_RUN, get_execution_store
     from atlas.application.chat.runs.run_control import RunDirectoryUnavailable, conversation_entry
     from atlas.core.user_identity import normalize_user_email
 
     bus = get_run_control_bus()
     if bus is None:
+        return None
+    # The caller's own projection first. It is keyed by user and conversation,
+    # so an id the caller has no run in never reaches the global run key (no
+    # way to probe other users' runs), and a run that shares nothing -- an
+    # off-record turn publishes no projection -- is not served here, as the
+    # owner's own guard refuses it too.
+    try:
+        doc = await get_execution_store().get(conversation_id, user_email)
+    except Exception:
+        return None
+    if not doc or doc.get("status") in _TERMINAL_RUN:
         return None
     try:
         entry = await conversation_entry(conversation_id)
@@ -97,6 +109,7 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
         entry is None
         or entry.get("replica") == bus.replica_id
         or entry.get("user_email") != normalize_user_email(user_email)
+        or (doc.get("run_id") and entry.get("run_id") != doc.get("run_id"))
     ):
         return None
     now = datetime.now(tz=timezone.utc).isoformat()

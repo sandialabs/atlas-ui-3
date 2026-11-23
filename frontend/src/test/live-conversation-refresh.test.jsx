@@ -1260,7 +1260,7 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
         type: 'runs_snapshot',
         runs: [{ conversation_id: 'conv-1', run_id: 'run-2', status: 'completed', detached: true }],
       })
-      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2700) })
       expect(result.current.isAgentRunning).toBe(false)
       expect(result.current.isThinking).toBe(false)
       expect(result.current.messages.at(-1).content).toBe('second answer')
@@ -1317,6 +1317,13 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     // is not an end.
     dispatchFrame({ type: 'runs_snapshot', runs: [], degraded: true })
     expect(result.current.isAgentRunning).toBe(true)
+    // A retained earlier (finished) run of the conversation does not end it.
+    dispatchFrame({
+      type: 'runs_snapshot',
+      runs: [{ conversation_id: 'conv-1', run_id: 'run-0', status: 'completed' }],
+      degraded: true,
+    })
+    expect(result.current.isAgentRunning).toBe(true)
     expect(h.fetchMock).not.toHaveBeenCalled()
     unmount()
   })
@@ -1349,7 +1356,7 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
         type: 'runs_snapshot',
         runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
       })
-      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2600) })
       expect(calls).toBe(1)
       expect(result.current.messages.at(-1).content).toBe('hello')
       await act(async () => { await vi.advanceTimersByTimeAsync(1100) })

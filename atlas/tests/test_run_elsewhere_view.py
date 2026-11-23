@@ -2,7 +2,7 @@
 
 import pytest
 
-from atlas.application.chat.runs import RunRegistry, run_control
+from atlas.application.chat.runs import RunRegistry, execution_state, run_control
 from atlas.application.chat.runs.control_bus import set_run_control_bus
 from atlas.application.chat.runs.execution_state import merge_run_snapshots
 from atlas.application.chat.runs.in_flight import in_flight_conversation
@@ -28,8 +28,14 @@ def _entry(replica="replica-b", user="owner@example.com"):
 @pytest.fixture
 def shared(monkeypatch):
     """Install a bus and a controllable shared run lookup."""
-    state = {"entry": _entry()}
+    state = {"entry": _entry(), "doc": {"run_id": "run-1", "status": "running"}}
     set_run_control_bus(_Bus())
+
+    class _Store:
+        async def get(self, conversation_id, user_email):
+            return state["doc"]
+
+    execution_state.set_execution_store(_Store())
 
     async def fake_entry(conversation_id):
         return state["entry"]
@@ -37,6 +43,7 @@ def shared(monkeypatch):
     monkeypatch.setattr(run_control, "conversation_entry", fake_entry)
     yield state
     set_run_control_bus(None)
+    execution_state.reset_execution_store()
 
 
 async def _view():
@@ -62,6 +69,25 @@ async def test_remote_run_is_user_scoped(shared):
 @pytest.mark.asyncio
 async def test_own_replica_run_is_not_remote(shared):
     shared["entry"] = _entry(replica="replica-a")
+    assert await _view() is None
+
+
+@pytest.mark.asyncio
+async def test_run_without_projection_is_hidden(shared):
+    # An off-record turn publishes no projection and shares nothing.
+    shared["doc"] = None
+    assert await _view() is None
+
+
+@pytest.mark.asyncio
+async def test_ended_projection_is_not_a_live_run(shared):
+    shared["doc"] = {"run_id": "run-1", "status": "failed"}
+    assert await _view() is None
+
+
+@pytest.mark.asyncio
+async def test_other_run_projection_is_a_miss(shared):
+    shared["doc"] = {"run_id": "run-0", "status": "running"}
     assert await _view() is None
 
 

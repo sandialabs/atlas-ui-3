@@ -1889,9 +1889,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// A stopped or failed run reports its status before the owner has
 			// written the interrupted turn; give that save time to land, as the
 			// joined-run reload does.
-			if (!run || run.status !== 'completed') {
-				await new Promise(resolve => setTimeout(resolve, RUN_END_RELOAD_GRACE_MS))
-			}
+			// A completed run can also be reported before its save is readable
+			// on the replica that answers, so every end waits.
+			await new Promise(resolve => setTimeout(resolve, RUN_END_RELOAD_GRACE_MS))
 			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
 				try {
 					const data = await fetchConversationRecord(id)
