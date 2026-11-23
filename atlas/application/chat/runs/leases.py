@@ -56,6 +56,7 @@ INTERRUPTED_ERROR = (
 # The API returns at most 20,000 characters (``launcher.MAX_RESULT_CHARS``).
 # One more is kept so a reader can still tell the reply was truncated.
 MAX_SNAPSHOT_RESULT_CHARS = 20_001
+FENCE_REASON_TAKEN_OVER = "interrupted by orphan sweep"
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -151,6 +152,22 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     return view
 
 
+def _is_redis_unreachable(exc: BaseException) -> bool:
+    from atlas.infrastructure.redis.client import is_redis_connectivity_error
+
+    return is_redis_connectivity_error(exc)
+
+
+def _note_redis_unreachable(exc: BaseException, op: str) -> None:
+    """Record the failure with the dependency state (``[COORD] event=dependency_down``)."""
+    try:
+        from atlas.core.coordination_metrics import coordination_metrics
+
+        coordination_metrics().dependency_failed("redis", exc, op=op)
+    except Exception:  # pragma: no cover - bookkeeping must not replace the caller's handling
+        logger.debug("recording a Redis error failed", exc_info=True)
+
+
 @dataclass
 class _Lease:
     claim: Any
@@ -160,6 +177,9 @@ class _Lease:
     # answer fences.
     verified_at: float = float("-inf")
     fenced: bool = False
+    # Why this replica fenced the run (local knowledge only; see
+    # ``current_run_fence_reason``).
+    fence_reason: str = ""
     done: bool = False
     dirty: bool = True
     syncing: bool = False
@@ -238,8 +258,15 @@ class RunLeaseGuard:
                 await self.sweep_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.warning("run orphan sweep failed", exc_info=True)
+            except Exception as exc:
+                if _is_redis_unreachable(exc):
+                    # An outage is one condition, not one traceback per sweep:
+                    # the first failure logs ``dependency_down`` and later
+                    # ones are summarized by the coordination metrics.
+                    _note_redis_unreachable(exc, "orphan_sweep")
+                    logger.warning("run orphan sweep skipped: Redis unreachable (%s)", type(exc).__name__)
+                else:
+                    logger.warning("run orphan sweep failed", exc_info=True)
 
     # -- claim bookkeeping ---------------------------------------------------------
 
@@ -405,6 +432,7 @@ class RunLeaseGuard:
         if lease.fenced:
             return
         lease.fenced = True
+        lease.fence_reason = why
         logger.warning("Run %s lost its claim (%s); stopping it on this replica", run_id, why)
         self._registry.mark_interrupted(run_id, INTERRUPTED_ERROR)
 
@@ -486,6 +514,10 @@ class RunLeaseGuard:
         lease = self._leases.get(run_id)
         return bool(lease and lease.fenced)
 
+    def fence_reason(self, run_id: str) -> str:
+        lease = self._leases.get(run_id)
+        return lease.fence_reason if lease else ""
+
     # -- orphan sweep (any replica) -------------------------------------------------
 
     async def sweep_once(self) -> List[str]:
@@ -522,7 +554,7 @@ class RunLeaseGuard:
             )
             lease = self._leases.get(run_id)
             if lease is not None:
-                self._fence_local(lease, run_id, "interrupted by orphan sweep")
+                self._fence_local(lease, run_id, FENCE_REASON_TAKEN_OVER)
         # The run stays in ``runs-live`` until its projection is closed, so a
         # failed close is retried by the next sweep on any replica.
         if await _close_projection(run_id, raw):
@@ -554,8 +586,11 @@ async def _close_projection(run_id: str, raw: Dict[str, str]) -> bool:
         # Confirmed only by reading it back: ``apply_event`` also returns
         # nothing when it gave up after its revision retries.
         doc = await store.get(conversation_id, user_email) if conversation_id and user_email else None
-    except Exception:
-        logger.warning("could not close the projection of an interrupted run", exc_info=True)
+    except Exception as exc:
+        if _is_redis_unreachable(exc):
+            logger.warning("could not close the projection of an interrupted run: Redis unreachable (%s)", type(exc).__name__)
+        else:
+            logger.warning("could not close the projection of an interrupted run", exc_info=True)
         return False
     if doc is None or doc.get("run_id") != run_id:
         return True  # nothing of this run left open (expired, or a newer run's)
@@ -619,6 +654,20 @@ def current_run_is_fenced() -> bool:
         return False
     record = get_run_registry().get(run.run_id)
     return bool(record is not None and record.fenced)
+
+
+def current_run_fence_reason() -> str:
+    """Why this replica fenced the current run, as far as it knows locally.
+
+    Only "interrupted by orphan sweep" means a takeover was observed here; a
+    refused renewal or a lapse without proof says the claim was lost, not
+    that anyone took the run over.
+    """
+    from atlas.application.chat.runs.context import get_current_run
+
+    run = get_current_run()
+    guard = _guard
+    return guard.fence_reason(run.run_id) if run is not None and guard is not None else ""
 
 
 async def may_publish_for_run(run_id: Optional[str]) -> bool:

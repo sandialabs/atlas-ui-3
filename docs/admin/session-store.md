@@ -18,7 +18,10 @@ startup by `SESSION_REPOSITORY_TYPE`:
 Conversations themselves are always stored by
 [chat history](chat-history.md) (DuckDB or PostgreSQL). The session store is a
 cache of live state on top of that record, not a second record: losing it
-loses only state a reconnecting client rebuilds from the database.
+loses only state a reconnecting client rebuilds from the database. The
+exception is a run still executing: its turn is written only when it ends, and
+losing Redis for longer than `RUN_LEASE_SECONDS` cancels it (see
+[Outages](#outages)).
 
 ## Process-local store (`memory`)
 
@@ -160,7 +163,8 @@ page resume.
 | Redis down at startup | Startup fails. |
 | Redis down, session live on this replica | Turns already running continue from the local copy; each session write fails, is logged at ERROR and counted. The conversation is still saved to chat history. A session whose socket closes during the outage is dropped from memory. |
 | Redis down, new turn or run | **Refused (fail closed).** Run admission needs Redis to enforce `MAX_CONCURRENT_RUNS_PER_USER` and one run per conversation across replicas, so it is not attempted: WebSocket turns get an `error` frame with `error_type: run_coordination_unavailable`, the agent-runs API and `atlas_launch_subagent` get HTTP 503 `unavailable`. Retry once Redis is back. See [run coordination](../developer/run-coordination.md). |
-| Redis down longer than 30 s, run still executing | The run keeps going and finishes normally, but its cluster-wide claim lapses: it is logged once as lost and no longer counts toward the cap or holds the conversation lock, so another replica may admit a run for the same conversation once Redis returns. |
+| Redis down longer than `RUN_LEASE_SECONDS` (30 s), run still executing | **The run is cancelled and its unsaved turn is lost.** A run whose lease lapses without proof of ownership is fenced, because nothing can show that no other replica took it over. It stops at its next tool call or write, or when Redis returns and refuses its claim, and its partial turn is not written to chat history (a save replaces the stored message set). The user sees the conversation go idle with a notice that the response was interrupted and not saved, and sends the message again; in the history list the run shows as Interrupted. Tool calls that finished stay in the run's execution record, and no tool is retried. A first-turn conversation that was never saved is gone. The log has `Run ... lost its claim` and `Not saving the turn of a run that lost its claim`. |
+| Redis failover that loses recent writes, flush, or an evicting `maxmemory-policy` | The same cancellation, with no outage at all: a run whose claim record is missing or expired is refused at its next renewal and fenced. Set `maxmemory-policy noeviction` (the default when `maxmemory` is unset), and treat a promotion that can lose acknowledged writes as an outage for every run in flight. |
 | Redis down, session not on this replica | Reads raise `SessionStoreUnavailableError`; a reconnect starts a fresh session and the next turn rebuilds context from chat history. |
 | Redis restarted or flushed | Stored sessions are gone; live replicas re-store their sessions on the next write. Reconnects start fresh. |
 | Session idle past the TTL | Expired; a replica still holding it live re-stores it on the next write. |
@@ -185,8 +189,11 @@ Store errors and refused writes are also logged (ERROR and WARNING).
 ### Kubernetes notes
 
 - Run Redis as a managed service or a StatefulSet with persistence matching
-  how much a Redis restart may cost (losing sessions costs only resumable
-  state; see above). Use `rediss://` across untrusted networks.
+  how much a Redis restart may cost. Losing session state costs only
+  resumable state, but an outage longer than `RUN_LEASE_SECONDS` also cancels
+  every in-flight run and discards its unsaved turn (see [Outages](#outages)).
+  Set `maxmemory-policy noeviction`: evicting a run's claim record fences the
+  run. Use `rediss://` across untrusted networks.
 - Set `REDIS_KEY_PREFIX` per environment if environments share a Redis.
 - Size `REDIS_MAX_CONNECTIONS` from the budget formula above.
 - Rolling deploys: a replica that is stopping closes its sockets; clients

@@ -74,10 +74,28 @@ setting to fall back to local admission while Redis is configured. A
 single-replica deployment that does not want the dependency runs without
 Redis (below).
 
-Runs already executing when Redis goes away keep going. If the outage outlasts
-the lease (30 s), their claims lapse: each is reported lost once (see
-"Renewal reports loss") and, until those runs finish, the cluster-wide cap and
-conversation lock no longer count them. Nothing re-claims them automatically.
+Runs already executing when Redis goes away keep going only while their lease
+holds. An unreachable Redis is an unknown answer, not a refusal: once a whole
+lease (`RUN_LEASE_SECONDS`, 30 s) has passed since the last proven renewal, the
+run is fenced at its next tool call or projection write, and when Redis
+returns, its renewal finds the conversation lease expired and reports the claim
+lost. Either way the run is cancelled and its partial turn is **not saved**
+(see "Fence" below): an outage longer than the lease loses the unsaved turn of
+every run in flight, on every replica. Nothing re-claims a lapsed run. This is
+deliberate: with Redis unreachable nothing can show that no other replica took
+the run over, and a save replaces the stored message set.
+
+The same happens without an outage when the shared record is gone or expired:
+a flush, a failover that loses recent writes, or an evicting `maxmemory-policy`
+(Redis must run `noeviction`). The run's claim is refused at its next renewal.
+
+The user is told: the owner's `run_status` frame carries `status: failed`,
+`end_reason: fenced` (sent from local state, so it does not need Redis), and
+the frontend shows a notice that the response was interrupted, was not saved
+and can be sent again; the history list marks the conversation Interrupted.
+The server log has `Run ... lost its claim` and `Not saving the turn of a run
+that lost its claim`, which says whether a takeover was observed here. A
+fenced run's work is never saved: it is a retry for the user.
 
 The WebSocket handler also guards the window between a granted admission and
 the run's task being attached (seeding the run's session files, sending
@@ -278,7 +296,9 @@ turn.
   registry. It does not save its partial turn to chat history: the
   conversation may have a newer turn saved since the takeover, and a save
   replaces the stored message set. Its finished tool calls stay in the
-  execution projection.
+  execution projection. The same holds when no replica took the run over and
+  it was fenced only because the lease lapsed during a Redis outage: the owner
+  cannot tell the two apart, so the turn is not saved either.
 - Live session snapshots (`session:<id>`) are not fenced.
 
 A graceful shutdown stops its live runs and then releases their claims

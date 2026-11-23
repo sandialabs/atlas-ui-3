@@ -2,6 +2,7 @@
 
 import { isCanvasTool } from '../../constants/atlasTools'
 import { isOpenLegacyRow, isSleepTool, toolStatusFromEvent } from '../../utils/executionState'
+import { interruptedRunNotice } from '../../utils/interruptedRunNotice'
 
 function withIdentity(message, data) {
   const next = { ...message }
@@ -287,6 +288,26 @@ export function createWebSocketHandler(deps) {
     onContextUsage,
     onContextCompaction,
   } = deps
+
+  // Runs that need no interruption notice: one already shown, and one this
+  // handler saw finish. A run that completed and is then fenced while its
+  // final snapshot is written (issue #1128) delivered its answer and saved it.
+  const announcedRuns = new Set()
+
+  // A run the server ended without the user stopping it (issue #1218).
+  function announceInterruptedRun(run) {
+    if (run && (run.status === 'completed' || run.status === 'cancelled')) announcedRuns.add(run.run_id)
+    const notice = interruptedRunNotice(run)
+    if (!notice || announcedRuns.has(run.run_id)) return
+    // A conversation that is not on screen shows it through the history list
+    // indicator instead; a notice here would land in the wrong chat.
+    if (typeof getVisibleConversationId === 'function' && run.conversation_id !== getVisibleConversationId()) return
+    announcedRuns.add(run.run_id)
+    setIsThinking(false)
+    clearAgentRunning()
+    if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+    addMessage({ role: 'system', content: notice, type: 'warning', timestamp: new Date().toISOString() })
+  }
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
   // existing handler tests that don't inject the setter keep working.
@@ -621,6 +642,8 @@ export function createWebSocketHandler(deps) {
       // history list, including for conversations that are not on screen.
       if (data.type === 'run_started' || data.type === 'run_status' || data.type === 'runs_snapshot') {
         if (typeof onRunStatus === 'function') onRunStatus(data)
+        // Live status frames only, not a snapshot of runs that ended earlier.
+        if (data.type === 'run_status') announceInterruptedRun(data.run)
         // A new chat has no conversation id until the turn is saved, so the
         // server mints one when it admits the run and reports it here. Adopting
         // it now is what lets the routing below recognise this run's own events
