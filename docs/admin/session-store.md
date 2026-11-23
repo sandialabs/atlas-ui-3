@@ -134,6 +134,16 @@ replica, resumes the session when:
 The new connection works on a detached copy of the session, so a turn of the
 old connection that is still finishing cannot reach it.
 
+A resumed session still names the conversation its previous connection was in,
+but the client may have started a new chat while it was disconnected. The
+client replays a `reset_session` or `restore_conversation` it could not send as
+soon as the socket reopens. As a backstop for any lost reset, the first chat
+frame on a resumed session that is saved to the server and names no
+`conversation_id` is treated as a new chat: the session is reset exactly as
+`reset_session` does, instead of running in and saving over the old
+conversation. A frame that names the conversation continues it, and unsaved
+(incognito or browser-only) frames keep the session's history.
+
 Resuming stamps the new connection as the session's owner and writes it, so
 the old connection's late teardown leaves it alone, and its stale copy can no
 longer overwrite it.

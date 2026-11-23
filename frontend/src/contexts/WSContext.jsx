@@ -7,6 +7,10 @@ const WSContext = createContext()
 const INITIAL_HEALTH_CHECK_INTERVAL = 5000 // 5 seconds for first retry
 const MAX_HEALTH_CHECK_INTERVAL = 300000 // 5 minutes max
 
+// Frames that change which conversation the server session is in. They are
+// kept and replayed on the next open when they could not be sent.
+const NAVIGATION_FRAME_TYPES = ['reset_session', 'restore_conversation']
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const useWS = () => {
   const context = useContext(WSContext)
@@ -30,6 +34,11 @@ export const WSProvider = ({ children }) => {
   // balancer picks -- instead of starting over. Held for the page's lifetime
   // only: a reload starts a fresh UI, so it must start a fresh session too.
   const serverSessionIdRef = useRef('')
+  // The last navigation frame (reset_session / restore_conversation) sent while
+  // the socket was not open. Delivered first on the next open, so a New Chat
+  // clicked while disconnected is not lost (issue #1217). One slot: the latest
+  // navigation supersedes any earlier one.
+  const pendingNavigationRef = useRef(null)
 
   const connectWebSocket = () => {
     // The server sends a `session_ended` frame and closes with 4401 when the
@@ -51,6 +60,11 @@ export const WSProvider = ({ children }) => {
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {
+        const pending = pendingNavigationRef.current
+        if (pending) {
+          pendingNavigationRef.current = null
+          wsRef.current.send(JSON.stringify(pending))
+        }
         setIsConnected(true)
         setConnectionStatus('Connected')
       }
@@ -107,6 +121,9 @@ export const WSProvider = ({ children }) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message))
       return true
+    }
+    if (NAVIGATION_FRAME_TYPES.includes(message?.type)) {
+      pendingNavigationRef.current = message
     }
     console.error('WebSocket is not connected, readyState:', wsRef.current?.readyState)
     return false

@@ -957,6 +957,57 @@ _RUN_SESSION_MARKER = "tracked_run_session"
 # Query parameter a reconnecting client uses to name its previous session.
 RESUME_SESSION_PARAM = "resume_session"
 
+# Set on a resumed session whose carried conversation the new connection has
+# not yet confirmed (issue #1217); cleared by the first chat frame.
+_RESUMED_CONVERSATION_KEY = "resumed_conversation_unconfirmed"
+
+
+async def _settle_resumed_conversation(
+    chat_service, session_id, user_email, run_registry, data, frame_conversation_id, tracked_run
+) -> Optional[dict]:
+    """Decide, on the first chat frame after a resume, which conversation it is in.
+
+    A client that clicked New Chat while its socket was down never delivered
+    ``reset_session``, so the resumed session still names the old conversation
+    and the next turn would run in, and be saved over, it. The rule: a
+    server-mode frame that names no conversation, arriving on a resumed session
+    that carries one, is a new chat. The client sends the id of every
+    conversation it has opened (the server told it the id in ``run_started`` /
+    ``conversation_saved``), so a continuation always names it, and a frame
+    that does names it, which hydrates from the store as before. Frames that are
+    not saved (incognito, browser-only) keep the session's own history, and a
+    frame steering a running turn is untouched.
+
+    The marker is consumed by the first chat frame whatever it carries, so the
+    rule never applies to later frames on the connection. Returns an error
+    frame to send if the session could not be reset, else None.
+    """
+    session = await chat_service.session_repository.get(session_id)
+    if session is None or not session.context.get(_RESUMED_CONVERSATION_KEY):
+        return None
+    if tracked_run is None and frame_conversation_id is None and not turn_is_off_record(data):
+        old_conv_id = session.context.get("conversation_id")
+        logger.info(
+            "Resumed session %s: chat frame names no conversation, starting a new one "
+            "instead of continuing %s",
+            sanitize_for_logging(str(session_id)),
+            sanitize_for_logging(str(old_conv_id)),
+        )
+        try:
+            await chat_service.handle_reset_session(
+                session_id=session_id,
+                user_email=user_email,
+                preserve_conversation_resources=(
+                    run_registry.active_for_conversation(old_conv_id, user_email) is not None
+                ),
+            )
+        except DomainError as e:
+            return {"type": "error", "message": e.message, "error_type": "domain"}
+        return None
+    session.context.pop(_RESUMED_CONVERSATION_KEY, None)
+    await _persist_session(chat_service, session)
+    return None
+
 
 async def _resume_connection_session(chat_service, requested, user_email):
     """Take over the session a reconnecting client names, or return None.
@@ -1013,6 +1064,12 @@ async def _resume_connection_session(chat_service, requested, user_email):
     session = decode_session(encode_session(session), session.store_version)
     session.active = True
     session.connection_owner = chat_service.connection_id
+    # The conversation this session carries was bound by the previous
+    # connection. The client may have started a new chat while disconnected, in
+    # which case its reset_session frame was lost (issue #1217). The first
+    # server-mode chat frame decides: see _settle_resumed_conversation.
+    if session.context.get("conversation_id") and session.context.get("incognito") is not True:
+        session.context[_RESUMED_CONVERSATION_KEY] = True
     if not await chat_service.persist_session(session, adopt=True):
         return None
     chat_service.restore_connection_state(session)
@@ -2216,6 +2273,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     # turn this connection is already running.
                     bound_runs = run_registry.active_bound_to(session_id)
                     tracked_run = bound_runs[0] if bound_runs else None
+                settle_error = await _settle_resumed_conversation(
+                    chat_service, session_id, user_email, run_registry, data,
+                    frame_conversation_id, tracked_run,
+                )
+                if settle_error is not None:
+                    await websocket.send_json(settle_error)
+                    continue
                 if tracked_run is not None:
                     # A chat or steer frame must not rewrite the switch on a
                     # run that is already going. A second tab, or a steer the
