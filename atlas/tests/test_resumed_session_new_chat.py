@@ -203,6 +203,49 @@ def test_session_store_outage_answers_the_frame(mock_app_factory, repo, seen):
     assert _new_conversation(seen[0])
 
 
+def test_unexpected_marker_read_failure_answers_the_frame(mock_app_factory, repo, seen):
+    session = _previous_session(repo)
+    with _connect(session) as ws:
+        assert ws.receive_json()["resumed"] is True
+        with patch.object(repo, "get", AsyncMock(side_effect=RuntimeError("boom"))):
+            ws.send_json({"type": "chat", "content": "hello", "model": "m"})
+            frame = ws.receive_json()
+        assert frame["type"] == "error"
+        # The socket survived and the next frame is served.
+        _chat(ws, seen, 1)
+    assert _new_conversation(seen[0])
+
+
+def test_failing_marker_clear_does_not_stop_an_admitted_turn(mock_app_factory, repo, seen):
+    session = _previous_session(repo)
+    with patch("main._persist_session", AsyncMock(side_effect=RuntimeError("boom"))):
+        with _connect(session) as ws:
+            assert ws.receive_json()["resumed"] is True
+            _chat(ws, seen, 1)
+    assert len(seen) == 1
+    assert _new_conversation(seen[0])
+
+
+def test_marker_is_read_only_while_it_may_be_set(mock_app_factory, repo, seen):
+    session = _previous_session(repo)
+    reads = AsyncMock(return_value=True)
+    with patch("main._resumed_conversation_unconfirmed", reads):
+        with _connect(session) as ws:
+            assert ws.receive_json()["resumed"] is True
+            _chat(ws, seen, 1)
+            _chat(ws, seen, 2)
+    # Read for the first frame; the clear that followed ended the reads.
+    assert reads.await_count == 1
+
+
+def test_fresh_connection_never_reads_the_marker(mock_app_factory, repo, seen):
+    reads = AsyncMock(return_value=False)
+    with patch("main._resumed_conversation_unconfirmed", reads):
+        with TestClient(app).websocket_connect("/ws", headers={"X-User-Email": USER}) as ws:
+            _chat(ws, seen, 1)
+    assert reads.await_count == 0
+
+
 def test_unsaved_new_chat_is_not_marked_on_resume(mock_app_factory, repo, seen):
     """A New Chat awaiting its first message (files may be attached) carries on."""
     session = _previous_session(repo, conversation_id="conv-not-saved-yet")

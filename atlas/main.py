@@ -1008,7 +1008,10 @@ async def _confirm_resumed_conversation(chat_service, session_id) -> None:
         session = await chat_service.session_repository.get(session_id)
         if session is not None and session.context.pop(_RESUMED_CONVERSATION_KEY, None):
             await _persist_session(chat_service, session)
-    except DomainError:
+    except Exception:
+        # Best effort: the turn is already admitted, and nothing here may stop
+        # it from starting. A marker that stays set only means the next
+        # id-less saved frame also gets a fresh id.
         logger.warning("Could not clear the resumed-conversation marker", exc_info=True)
 
 
@@ -1079,6 +1082,11 @@ async def _resume_connection_session(chat_service, requested, user_email):
         chat_service, session.context.get("conversation_id")
     ):
         session.context[_RESUMED_CONVERSATION_KEY] = True
+        # The carried conversation's messages belong to it, not to whatever
+        # id-less chat comes next. Drop them from the snapshot being adopted
+        # (the next turn of the carried conversation rehydrates from the
+        # store), so a fresh id minted for that chat starts empty.
+        session.history.messages.clear()
     if not await chat_service.persist_session(session, adopt=True):
         return None
     chat_service.restore_connection_state(session)
@@ -2134,6 +2142,11 @@ async def websocket_endpoint(websocket: WebSocket):
         chat_service, requested_session, user_email
     )
     session_id = resumed_session.id if resumed_session is not None else uuid4()
+    # Only a resumed connection can carry the marker; fresh connections, and
+    # frames after it was consumed, never read the session store for it.
+    resumed_marker_pending = bool(
+        resumed_session is not None and resumed_session.context.get(_RESUMED_CONVERSATION_KEY)
+    )
     if requested_session is not None:
         await websocket_update_callback(
             websocket,
@@ -2478,7 +2491,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Nothing is written here: a frame refused below leaves the
                 # session and the marker as they were. Off-record frames and
                 # frames steering a run neither read nor clear the marker.
-                resumed_server_frame = not turn_is_off_record(data)
+                resumed_server_frame = resumed_marker_pending and not turn_is_off_record(data)
                 if resumed_server_frame:
                     try:
                         resumed_unconfirmed = await _resumed_conversation_unconfirmed(
@@ -2489,6 +2502,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             {"type": "error", "message": e.message, "error_type": "domain"}
                         )
                         continue
+                    except Exception:
+                        logger.exception("Could not read the resumed-conversation marker")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "The conversation could not be started. Try again shortly.",
+                            "error_type": "domain",
+                        })
+                        continue
                     if resumed_unconfirmed and turn_conversation_id is None:
                         turn_conversation_id = str(uuid4())
                         logger.info(
@@ -2497,6 +2518,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             sanitize_for_logging(str(session_id)),
                         )
                     resumed_server_frame = resumed_unconfirmed
+                    resumed_marker_pending = resumed_unconfirmed
                 if turn_conversation_id:
                     data["conversation_id"] = turn_conversation_id
 
@@ -2561,6 +2583,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # The run keeps this after the socket closes.
                     run_record.note_auto_approve(data)
                     if resumed_server_frame:
+                        resumed_marker_pending = False
                         await _confirm_resumed_conversation(chat_service, session_id)
                 except ConcurrencyLimitError as e:
                     await websocket.send_json({

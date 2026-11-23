@@ -126,6 +126,8 @@ export const WSProvider = ({ children }) => {
   const sendMessage = (message) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message))
+      // A navigation frame that got through supersedes any held one.
+      if (NAVIGATION_FRAME_TYPES.includes(message?.type)) pendingNavigationRef.current = null
       return true
     }
     if (NAVIGATION_FRAME_TYPES.includes(message?.type)) {

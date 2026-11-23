@@ -129,6 +129,25 @@ describe('navigation frames sent while disconnected', () => {
     expect(second.sent).toEqual([{ type: 'reset_session' }])
   })
 
+  it('drops a held frame when a newer navigation frame is sent successfully', () => {
+    const first = FakeWebSocket.instances[0]
+    act(() => probe.sendMessage({ type: 'reset_session' }))
+    const realSend = first.send.bind(first)
+    first.send = () => {
+      throw new Error('socket closing')
+    }
+    act(() => first.open())
+    first.send = realSend
+
+    act(() => {
+      probe.sendMessage({ type: 'restore_conversation', conversation_id: 'c2', messages: [] })
+    })
+    expect(first.sent.map((m) => m.type)).toEqual(['restore_conversation'])
+
+    const second = reconnect()
+    expect(second.sent).toEqual([])
+  })
+
   it('does not queue chat frames', () => {
     let sent
     act(() => {
