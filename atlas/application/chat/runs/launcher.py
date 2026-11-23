@@ -596,6 +596,29 @@ async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
     return ""
 
 
+async def _record_outcome(chat_service: Any, record: Any, outcome: RunStatus) -> None:
+    """Store how the run ended, and its depth, on the child's conversation.
+
+    Best effort: the child may never have been saved, and a failure here must
+    not change the run's own outcome. Readers without a live run record
+    (another replica, after retention) report this status.
+    """
+    repository = getattr(chat_service, "conversation_repository", None)
+    recorder = getattr(repository, "record_launch_outcome", None)
+    if recorder is None:
+        return
+    try:
+        await asyncio.shield(
+            asyncio.to_thread(
+                recorder, record.conversation_id, record.user_email, outcome.value, record.depth
+            )
+        )
+    except BaseException as error:  # noqa: BLE001 - cancellation may be pending
+        if isinstance(error, asyncio.CancelledError):
+            return
+        logger.warning("Could not record the outcome of run %s: %s", record.run_id, type(error).__name__)
+
+
 async def _run_child(
     *,
     chat_service: Any,
@@ -658,6 +681,9 @@ async def _run_child(
             "Launched run %s failed: %s", record.run_id, sanitize_for_logging(str(e))
         )
     finally:
+        # Before the status is published, so a reader that sees the run end
+        # also finds how it ended on the stored conversation (issue #1222).
+        await _record_outcome(chat_service, record, outcome)
         # In a ``finally`` for the same reason the transport's own run wrapper
         # uses one: a run left non-terminal holds a slot against the user's
         # concurrency cap forever, and its conversation's one-run lock with it.
@@ -1003,7 +1029,7 @@ async def list_child_runs(
     (``shared_children.py``), under the same user-and-conversation scope.
     """
     from atlas.application.chat.runs.context import get_current_run
-    from atlas.application.chat.runs.shared_children import shared_child_runs
+    from atlas.application.chat.runs.shared_children import SharedStateUnavailable, shared_child_runs
 
     local = _scoped_children(context)
     runs = [record.to_public_dict() for record in local]
@@ -1011,14 +1037,20 @@ async def list_child_runs(
     current = get_current_run()
     if not user_email or current is None:
         return runs
-    runs.extend(
-        await shared_child_runs(
-            user_email=user_email,
-            parent_conversation_id=current.conversation_id,
-            known_conversation_ids={record.conversation_id for record in local},
-            factory=factory,
+    try:
+        runs.extend(
+            await shared_child_runs(
+                user_email=user_email,
+                parent_conversation_id=current.conversation_id,
+                known_conversation_ids={record.conversation_id for record in local},
+                factory=factory,
+            )
         )
-    )
+    except SharedStateUnavailable as error:
+        # A short list would read as "no such children".
+        raise LaunchRefused(
+            "The sub-conversations could not be listed right now. Try again.", code="unavailable"
+        ) from error
     return runs
 
 
@@ -1032,7 +1064,7 @@ async def _shared_child_result(
     from atlas.application.chat.runs.context import get_current_run
     from atlas.application.chat.runs.shared_children import (
         SEPARATE_REPLY_ERROR,
-        STORED_STATUS,
+        UNRECORDED_OUTCOME_ERROR,
         SharedStateUnavailable,
         find_shared_child,
         read_stored_reply,
@@ -1058,18 +1090,22 @@ async def _shared_child_result(
 
     view = found["view"]
     conversation_id = found["conversation_id"]
-    status = (view or {}).get("status") or STORED_STATUS
+    outcome = found.get("outcome")
+    status = (view or {}).get("status") or outcome or "failed"
     terminal = view is None or status in ("completed", "failed", "cancelled")
     result: Dict[str, Any] = {
         "run_id": (view or {}).get("run_id") or run_id,
         "conversation_id": conversation_id,
         "status": status,
-        "error": (view or {}).get("error"),
+        "error": (view or {}).get("error") or (None if view or outcome else UNRECORDED_OUTCOME_ERROR),
         "waiting_on": (view or {}).get("waiting_on"),
         "result": None,
         "result_status": "unavailable" if terminal else "pending",
     }
-    if not terminal or status in ("failed", "cancelled"):
+    # A stored child with no recorded outcome still has its last reply to
+    # give; it is reported ``failed`` so it is never taken for a success.
+    unrecorded = view is None and outcome is None
+    if not terminal or (status in ("failed", "cancelled") and not unrecorded):
         return result
 
     if view is not None:
@@ -1201,9 +1237,11 @@ async def execute_observation_tool(
         arguments = {}
     try:
         if tool_name == GET_RUNS_TOOL_NAME:
-            payload = {"runs": await list_child_runs(context)}
+            payload = {"runs": await list_child_runs(context, (context or {}).get("factory"))}
         elif tool_name == RESULT_TOOL_NAME:
-            payload = await get_child_result(arguments.get("run_id"), context)
+            payload = await get_child_result(
+                arguments.get("run_id"), context, (context or {}).get("factory")
+            )
         else:
             raise LaunchRefused("Unknown sub-conversation observation tool.")
     except LaunchRefused as error:

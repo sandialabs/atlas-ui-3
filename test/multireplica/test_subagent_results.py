@@ -158,6 +158,9 @@ def test_child_is_found_after_its_run_record_expired(cluster):
 
     assert [r["conversation_id"] for r in runs["runs"]] == [launched["conversation_id"]], runs
     assert runs["runs"][0]["run_id"] == child_run, runs
+    # The outcome and depth were recorded on the stored conversation by the owner.
+    assert runs["runs"][0]["status"] == "completed" and runs["runs"][0]["depth"] == 1, runs
+    assert result["status"] == "completed", result
     assert result["result_status"] == "available", result
     assert "FINAL[kidgone]" in result["result"], result
 

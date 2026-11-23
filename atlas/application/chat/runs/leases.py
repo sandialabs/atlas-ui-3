@@ -134,7 +134,8 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     view["parent_run_id"] = view.get("parent_run_id") or raw.get("parent_run_id") or None
     view["previous_run_id"] = view.get("previous_run_id") or raw.get("follow_up_of") or None
     # Also from admission: what a replica needs to list a run it does not own.
-    for key, value in lineage_from_record(raw).items():
+    snapshot_fields = {k: v for k, v in view.items() if k in ("parent_conversation_id", "title", "launch_origin", "depth")}
+    for key, value in lineage_from_record(raw, snapshot_fields).items():
         if key != "parent_run_id":
             view[key] = value
     view.update({

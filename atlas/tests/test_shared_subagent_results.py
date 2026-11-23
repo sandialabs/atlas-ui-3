@@ -65,8 +65,13 @@ class FakeStore:
     def __init__(self):
         self.rows = {}
 
-    def add(self, conversation_id, user, parent, launch_run_id=None, reply="stored answer", follow_ups=0):
+    def add(self, conversation_id, user, parent, launch_run_id=None, reply="stored answer", follow_ups=0,
+            status="completed", depth=None):
         metadata = {"parent_conversation_id": parent}
+        if status:
+            metadata["launch_status"] = status
+        if depth:
+            metadata["launch_depth"] = depth
         if launch_run_id:
             metadata["launch_run_id"] = launch_run_id
         self.rows[conversation_id] = {
@@ -156,7 +161,7 @@ async def test_stored_child_listed_after_reap(cluster, store):
     runs = await list_child_runs(context, factory)
 
     assert [(r["run_id"], r["conversation_id"]) for r in runs] == [("gone-run", "child-conv")]
-    assert runs[0]["status"] == "finished"
+    assert runs[0]["status"] == "completed"
 
 
 async def test_listing_has_no_duplicates(cluster, store):
@@ -461,3 +466,141 @@ def test_later_save_keeps_launch_run_id(repo):
     _save(repo, "kid", USER, {"parent_conversation_id": "parent"})
 
     assert repo.get_conversation("kid", USER)["metadata"]["launch_run_id"] == "run-1"
+
+
+async def test_stored_child_reports_recorded_outcome(cluster, store):
+    store.add("c-failed", USER, "parent-conv", launch_run_id="r-failed", status="failed", depth=2)
+    store.add("c-old", USER, "parent-conv", launch_run_id="r-old", status=None)
+    context, factory = _on_replica_b(store)
+
+    runs = {r["run_id"]: r for r in await list_child_runs(context, factory)}
+
+    assert runs["r-failed"]["status"] == "failed" and runs["r-failed"]["depth"] == 2
+    # No recorded outcome: never shown as a success, and its depth defaults to a direct child.
+    assert runs["r-old"]["status"] == "failed"
+    assert runs["r-old"]["error"] == "The run's outcome was not recorded."
+    assert runs["r-old"]["depth"] == 1
+    assert (await get_child_result("r-failed", context, factory))["result"] is None
+    assert (await get_child_result("r-failed", context, factory))["status"] == "failed"
+
+
+async def test_unrecorded_outcome_keeps_reply(cluster, store):
+    store.add("c-old", USER, "parent-conv", launch_run_id="r-old", status=None)
+    context, factory = _on_replica_b(store)
+
+    result = await get_child_result("r-old", context, factory)
+
+    assert result["status"] == "failed" and result["error"]
+    assert result["result"] == "stored answer"
+
+
+async def test_unreadable_record_is_not_absent(cluster, store):
+    _, b = cluster
+    store.add("child-conv", USER, "parent-conv", launch_run_id="child-run")
+    context, factory = _on_replica_b(store)
+
+    async def down(run_id):
+        raise ConnectionError("redis down")
+
+    b.bus.directory.record = down
+
+    with pytest.raises(LaunchRefused) as raised:
+        await get_child_result("child-run", context, factory)
+    assert raised.value.code == "unavailable"
+    assert str(raised.value) != REFUSAL
+    with pytest.raises(LaunchRefused) as listing:
+        await list_child_runs(context, factory)
+    assert listing.value.code == "unavailable"
+
+
+async def test_unreadable_live_lookup_fails_listing(cluster, store):
+    _, b = cluster
+    context, factory = _on_replica_b(store)
+
+    async def down(user_email):
+        raise ConnectionError("redis down")
+
+    b.bus.runs_for_user = down
+
+    with pytest.raises(LaunchRefused) as raised:
+        await list_child_runs(context, factory)
+    assert raised.value.code == "unavailable"
+
+
+async def test_read_failure_is_counted(cluster, store):
+    from atlas.core.coordination_metrics import coordination_metrics
+
+    _, b = cluster
+    context, factory = _on_replica_b(store)
+
+    async def down(user_email):
+        raise ConnectionError("redis down")
+
+    b.bus.runs_for_user = down
+    before = coordination_metrics().counter("atlas_shared_child_read_failures_total")
+    with pytest.raises(LaunchRefused):
+        await list_child_runs(context, factory)
+
+    assert coordination_metrics().counter("atlas_shared_child_read_failures_total") == before + 1
+
+
+async def test_observation_tools_use_injected_factory(cluster, store):
+    from atlas.application.chat.runs.launcher import execute_observation_tool
+
+    store.add("child-conv", USER, "parent-conv", launch_run_id="child-run")
+    context, factory = _on_replica_b(store)
+    context = {**context, "factory": factory}
+
+    runs = await execute_observation_tool(SimpleNamespace(id="1", arguments={}), context, "atlas_get_subagent_runs")
+    result = await execute_observation_tool(
+        SimpleNamespace(id="2", arguments={"run_id": "child-run"}), context, "atlas_get_subagent_result"
+    )
+
+    assert runs.success and "child-conv" in runs.content
+    assert result.success and "stored answer" in result.content
+
+
+async def test_run_outcome_recorded_on_child(repo):
+    from atlas.application.chat.runs.launcher import _record_outcome
+
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent", "launch_run_id": "run-1"})
+    chat_service = SimpleNamespace(conversation_repository=repo)
+    record = SimpleNamespace(conversation_id="kid", user_email=USER, depth=2, run_id="run-1")
+
+    await _record_outcome(chat_service, record, RunStatus.CANCELLED)
+
+    metadata = repo.get_conversation("kid", USER)["metadata"]
+    assert metadata["launch_status"] == "cancelled" and metadata["launch_depth"] == 2
+    assert metadata["launch_run_id"] == "run-1"
+    # A later save from a session that never loaded them keeps all three.
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent"})
+    metadata = repo.get_conversation("kid", USER)["metadata"]
+    assert (metadata["launch_status"], metadata["launch_depth"], metadata["launch_run_id"]) == ("cancelled", 2, "run-1")
+
+
+def test_outcome_not_recorded_for_other_user(repo):
+    _save(repo, "kid", USER, {"parent_conversation_id": "parent"})
+
+    assert repo.record_launch_outcome("kid", "eve@example.com", "completed", 1) is False
+    assert "launch_status" not in repo.get_conversation("kid", USER)["metadata"]
+
+
+def test_mentions_do_not_fill_the_limit(repo):
+    _save(repo, "parent", USER)
+    for i in range(210):
+        _save(repo, f"note-{i:03}", USER, {"note": "parent", "parent_conversation_id": "parentX"})
+    for i in range(3):
+        _save(repo, f"real-{i}", USER, {"parent_conversation_id": "parent"})
+
+    children = repo.list_child_conversations("parent", USER, limit=5)
+
+    assert [c["id"] for c in children] == ["real-0", "real-1", "real-2"]
+
+
+def test_listing_pages_past_two_hundred(repo):
+    _save(repo, "parent", USER)
+    for i in range(230):
+        _save(repo, f"kid-{i:03}", USER, {"parent_conversation_id": "parent"})
+
+    assert len(repo.list_child_conversations("parent", USER, limit=500)) == 230
+    assert len(repo.list_child_conversations("parent", USER, limit=10)) == 10

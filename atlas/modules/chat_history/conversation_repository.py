@@ -41,6 +41,12 @@ from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagR
 logger = logging.getLogger(__name__)
 
 
+# Metadata the launch path records on a sub-conversation (issue #1222). Fixed
+# per conversation: a later save that does not carry them keeps the stored ones.
+LAUNCH_RECORD_KEYS = ("launch_run_id", "launch_status", "launch_depth")
+_CHILD_SCAN_PAGE = 200
+
+
 class ConversationRepository:
     """Handles all conversation CRUD, search, and tag operations."""
 
@@ -206,12 +212,10 @@ class ConversationRepository:
                     # The launching run id (issue #1222) is fixed at creation
                     # too: a save from a session that never loaded it (an
                     # explicit restore) must not erase it.
-                    recorded_run = (
-                        stored_metadata.get("launch_run_id")
-                        if isinstance(stored_metadata, dict) else None
-                    )
-                    if recorded_run and not metadata.get("launch_run_id"):
-                        metadata["launch_run_id"] = recorded_run
+                    if isinstance(stored_metadata, dict):
+                        for key in LAUNCH_RECORD_KEYS:
+                            if stored_metadata.get(key) and not metadata.get(key):
+                                metadata[key] = stored_metadata[key]
                     existing.metadata_json = json.dumps(metadata)
 
                 # Delete old messages
@@ -413,32 +417,65 @@ class ConversationRepository:
                     ConversationRecord.metadata_json.contains(child_ref, autoescape=True)
                     | (ConversationRecord.id == child_ref)
                 )
-            rows = (
-                query
-                .order_by(ConversationRecord.created_at, ConversationRecord.id)
-                .limit(max(1, int(limit)))
-                .all()
-            )
-            children = []
-            for row in rows:
-                metadata = _load_metadata(row.metadata_json)
-                if parent_conversation_id_from_metadata(metadata) != parent_conversation_id:
-                    continue
-                if row.id == parent_conversation_id:
-                    continue
-                if child_ref and child_ref != row.id and (
-                    not isinstance(metadata, dict) or metadata.get("launch_run_id") != child_ref
-                ):
-                    continue
-                children.append({
-                    "id": row.id,
-                    "title": row.title,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                    "metadata": metadata,
-                    **origin_fields(metadata),
-                })
+            query = query.order_by(ConversationRecord.created_at, ConversationRecord.id)
+            limit = max(1, int(limit))
+            children: List[Dict[str, Any]] = []
+            offset = 0
+            # The text match only narrows the scan: rows that merely mention
+            # the id can fill a page, so the exact check runs per row and the
+            # scan pages on until ``limit`` real children are found.
+            while len(children) < limit:
+                rows = query.offset(offset).limit(_CHILD_SCAN_PAGE).all()
+                for row in rows:
+                    metadata = _load_metadata(row.metadata_json)
+                    if parent_conversation_id_from_metadata(metadata) != parent_conversation_id:
+                        continue
+                    if row.id == parent_conversation_id:
+                        continue
+                    if child_ref and child_ref != row.id and (
+                        not isinstance(metadata, dict) or metadata.get("launch_run_id") != child_ref
+                    ):
+                        continue
+                    children.append({
+                        "id": row.id,
+                        "title": row.title,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                        "metadata": metadata,
+                        **origin_fields(metadata),
+                    })
+                    if len(children) >= limit:
+                        break
+                if len(rows) < _CHILD_SCAN_PAGE:
+                    break
+                offset += _CHILD_SCAN_PAGE
             return children
+
+    def record_launch_outcome(
+        self, conversation_id: str, user_email: str, status: str, depth: int
+    ) -> bool:
+        """Record how a launched run ended on its stored conversation (issue #1222).
+
+        Merges ``launch_status`` and ``launch_depth`` into the metadata and
+        touches nothing else. Returns whether a conversation of this user was
+        found. Later saves keep both (``LAUNCH_RECORD_KEYS``).
+        """
+        user_email = normalize_user_email(user_email)
+        with self._get_session() as session:
+            row = session.query(ConversationRecord).filter(
+                ConversationRecord.id == conversation_id,
+                ConversationRecord.user_email == user_email,
+            ).first()
+            if row is None:
+                return False
+            metadata = _load_metadata(row.metadata_json)
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["launch_status"] = status
+            metadata["launch_depth"] = max(1, int(depth or 1))
+            row.metadata_json = json.dumps(metadata)
+            session.commit()
+            return True
 
     def get_conversation(self, conversation_id: str, user_email: str) -> Optional[Dict[str, Any]]:
         """Get a full conversation with all messages.

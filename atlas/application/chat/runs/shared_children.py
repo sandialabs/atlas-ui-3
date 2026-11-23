@@ -39,10 +39,34 @@ from atlas.domain.conversation_origin import origin_from_metadata
 
 logger = logging.getLogger(__name__)
 
-# Status of a child known only from its stored conversation: it is no longer
-# running anywhere, but how its last run ended was not recorded.
-STORED_STATUS = "finished"
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+# Shown for a stored child whose outcome was never recorded (it predates the
+# recorded outcome, or its replica died before writing it). Reported as
+# ``failed``, the status an interrupted run gets, so it is never taken for a
+# success.
+UNRECORDED_OUTCOME_ERROR = "The run's outcome was not recorded."
+
+
+def record_read_failure(exc: BaseException, op: str) -> None:
+    """Count a shared-state read error; a Redis one also marks Redis down (#1129)."""
+    try:
+        from atlas.core.coordination_metrics import coordination_metrics
+        from atlas.infrastructure.redis.client import is_redis_connectivity_error
+
+        metrics = coordination_metrics()
+        metrics.incr("atlas_shared_child_read_failures_total", op=op)
+        if is_redis_connectivity_error(exc):
+            metrics.dependency_failed("redis", exc, op=op)
+    except Exception:  # pragma: no cover - bookkeeping must never escape
+        logger.debug("recording a shared read failure failed", exc_info=True)
+
+
+def outcome_from_metadata(metadata: Any) -> Optional[str]:
+    """The terminal status recorded on a stored child, or ``None``."""
+    if not isinstance(metadata, dict):
+        return None
+    status = metadata.get("launch_status")
+    return status if status in TERMINAL_STATUSES else None
 
 
 class SharedStateUnavailable(Exception):
@@ -56,15 +80,21 @@ def _repository(factory: Any) -> Any:
 
 
 async def _read_record(run_id: str) -> Optional[Dict[str, Any]]:
-    """The shared view of one run record, or ``None`` (absent, or Redis is out)."""
+    """The shared view of one run record; ``None`` only when it is absent.
+
+    Raises :class:`SharedStateUnavailable` when Redis cannot be read: an
+    unreadable record is not an absent one.
+    """
     bus = get_run_control_bus()
     if bus is None or not run_id:
         return None
     try:
-        return shared_view(await bus.directory.record(run_id))
+        raw = await bus.directory.record(run_id)
     except Exception as exc:
         logger.warning("shared run record unreadable: %s", type(exc).__name__)
-        return None
+        record_read_failure(exc, "record_read")
+        raise SharedStateUnavailable(type(exc).__name__) from exc
+    return shared_view(raw)
 
 
 def _is_child_record(view: Optional[Dict[str, Any]], user_email: str, parent_id: str) -> bool:
@@ -100,21 +130,23 @@ def _public_run(view: Dict[str, Any]) -> Dict[str, Any]:
 def _public_stored(child: Dict[str, Any]) -> Dict[str, Any]:
     """A run listed from its stored conversation alone."""
     metadata = child.get("metadata")
+    outcome = outcome_from_metadata(metadata)
+    depth = metadata.get("launch_depth") if isinstance(metadata, dict) else None
     return {
         "run_id": launch_run_id_from_metadata(metadata),
         "conversation_id": child.get("id"),
-        "status": STORED_STATUS,
+        "status": outcome or "failed",
         "waiting_on": None,
         "created_at": child.get("created_at"),
         "updated_at": child.get("updated_at"),
         "ended_at": child.get("updated_at"),
-        "error": None,
+        "error": None if outcome else UNRECORDED_OUTCOME_ERROR,
         "end_reason": None,
         "detached": False,
         "parent_run_id": None,
         "parent_conversation_id": metadata.get("parent_conversation_id") if isinstance(metadata, dict) else None,
         "launch_origin": origin_from_metadata(metadata),
-        "depth": 1,
+        "depth": depth if isinstance(depth, int) and depth > 0 else 1,
         "title": child.get("title"),
         "connection_bound": False,
     }
@@ -147,8 +179,9 @@ async def shared_child_runs(
     Live children come from the shared run records of the user's live runs,
     on any replica; the rest from the stored child conversations, each
     described by its run record when one is still kept. A child already listed
-    locally (``known_conversation_ids``) is skipped. Shared state that cannot
-    be read leaves the list short rather than failing the tool.
+    locally (``known_conversation_ids``) is skipped. Raises
+    :class:`SharedStateUnavailable` when shared state cannot be read: a short
+    list would read as "no such children".
     """
     found: List[Dict[str, Any]] = []
     seen = set(known_conversation_ids)
@@ -159,33 +192,41 @@ async def shared_child_runs(
             live = await bus.runs_for_user(user_email)
         except Exception as exc:
             logger.warning("live run lookup failed: %s", type(exc).__name__)
-            live = []
-        for entry in live:
-            if entry.get("parent_conversation_id") != parent_conversation_id:
-                continue
-            if entry.get("conversation_id") in seen:
-                continue
-            view = await _read_record(entry.get("run_id") or "")
-            if _is_child_record(view, user_email, parent_conversation_id):
+            record_read_failure(exc, "live_runs")
+            raise SharedStateUnavailable(type(exc).__name__) from exc
+        wanted = [
+            entry for entry in live
+            if entry.get("parent_conversation_id") == parent_conversation_id
+            and entry.get("conversation_id") not in seen
+        ]
+        views = await asyncio.gather(*(_read_record(e.get("run_id") or "") for e in wanted))
+        for view in views:
+            if _is_child_record(view, user_email, parent_conversation_id) and view["conversation_id"] not in seen:
                 seen.add(view["conversation_id"])
                 found.append(_public_run(view))
 
-    try:
-        stored = await _stored_children(factory, user_email, parent_conversation_id)
-    except SharedStateUnavailable as exc:
-        logger.warning("stored child lookup failed: %s", exc)
-        stored = []
-    for child in stored:
+    stored = [
+        child
+        for child in await _stored_children(factory, user_email, parent_conversation_id)
+        if child.get("id") not in seen
+    ]
+    # One round of concurrent reads for the children whose run record may
+    # still be kept; a child without a recorded launch run has none.
+    launch_runs = [launch_run_id_from_metadata(child.get("metadata")) for child in stored]
+    records = await asyncio.gather(*(_read_record(run) if run else _none() for run in launch_runs))
+    for child, view in zip(stored, records):
         if child.get("id") in seen:
             continue
         seen.add(child.get("id"))
-        launch_run = launch_run_id_from_metadata(child.get("metadata"))
-        view = await _read_record(launch_run) if launch_run else None
         if _is_child_record(view, user_email, parent_conversation_id) and view.get("conversation_id") == child.get("id"):
             found.append(_public_run(view))
         else:
             found.append(_public_stored(child))
     return found
+
+
+async def _none() -> None:
+    return None
 
 
 async def find_shared_child(
@@ -210,7 +251,7 @@ async def find_shared_child(
     """
     view = await _read_record(run_id)
     if view is not None and _is_child_record(view, user_email, parent_conversation_id):
-        return {"view": view, "conversation_id": view.get("conversation_id"), "by_run_id": False}
+        return {"view": view, "conversation_id": view.get("conversation_id"), "by_run_id": False, "outcome": None}
 
     stored = await _stored_children(factory, user_email, parent_conversation_id, run_id)
     by_run = next(
@@ -219,7 +260,12 @@ async def find_shared_child(
     if by_run is not None:
         # The launching run, named by its own id: its answer is its own, so a
         # later run of the conversation must not stand in for it.
-        return {"view": None, "conversation_id": by_run.get("id"), "by_run_id": True}
+        return {
+            "view": None,
+            "conversation_id": by_run.get("id"),
+            "by_run_id": True,
+            "outcome": outcome_from_metadata(by_run.get("metadata")),
+        }
     by_conversation = next((c for c in stored if c.get("id") == run_id), None)
     if by_conversation is not None:
         conversation_id = by_conversation.get("id")
@@ -227,6 +273,7 @@ async def find_shared_child(
             "view": await _live_view(conversation_id, user_email),
             "conversation_id": conversation_id,
             "by_run_id": False,
+            "outcome": outcome_from_metadata(by_conversation.get("metadata")),
         }
     return None
 
@@ -244,7 +291,8 @@ async def _live_view(conversation_id: str, user_email: str) -> Optional[Dict[str
         entry = await bus.run_for_conversation(conversation_id)
     except Exception as exc:
         logger.warning("live run lookup failed: %s", type(exc).__name__)
-        return None
+        record_read_failure(exc, "live_conversation")
+        raise SharedStateUnavailable(type(exc).__name__) from exc
     if entry is None or entry.get("user_email") != normalize_user_email(user_email):
         return None
     return await _read_record(entry.get("run_id") or "")

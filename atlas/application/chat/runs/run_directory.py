@@ -32,7 +32,9 @@ def _text(value: Any) -> Optional[str]:
     return str(value)
 
 
-def lineage_from_record(record: Optional[Dict[str, str]]) -> Dict[str, Any]:
+def lineage_from_record(
+    record: Optional[Dict[str, str]], snapshot: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """The lineage fields of a run record, for a replica that does not own the run.
 
     Admission writes them as fields of the record. A record claimed by an
@@ -40,24 +42,30 @@ def lineage_from_record(record: Optional[Dict[str, str]]) -> Dict[str, Any]:
     field of the same record) carries the same values, so that is read next.
     """
     record = record or {}
-    snapshot: Dict[str, Any] = {}
-    raw_snapshot = record.get("snapshot")
-    if raw_snapshot:
-        try:
-            parsed = json.loads(raw_snapshot)
-            if isinstance(parsed, dict):
-                snapshot = parsed
-        except ValueError:
-            snapshot = {}
+    # ``snapshot`` is the owner's mirrored snapshot when the caller already
+    # parsed it; otherwise it is parsed here, and only if a field is missing.
+    parsed: Dict[str, Any] = snapshot if snapshot is not None else {}
+    loaded = snapshot is not None
+
+    def snap() -> Dict[str, Any]:
+        nonlocal parsed, loaded
+        if not loaded:
+            loaded = True
+            try:
+                value = json.loads(record.get("snapshot") or "{}")
+                parsed = value if isinstance(value, dict) else {}
+            except ValueError:
+                parsed = {}
+        return parsed
 
     def pick(key: str) -> Any:
         value = record.get(key)
         if value in (None, ""):
-            value = snapshot.get(key)
+            value = snap().get(key)
         return None if value in (None, "") else value
 
     try:
-        depth = int(record.get("depth") or snapshot.get("depth") or 0)
+        depth = int(record.get("depth") or snap().get("depth") or 0)
     except (TypeError, ValueError):
         depth = 0
     return {

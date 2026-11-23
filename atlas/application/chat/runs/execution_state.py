@@ -1155,22 +1155,25 @@ async def _attach_run_lineage(projections: List[dict], user_email: str) -> List[
     if bus is None:
         return projections
     owner = normalize_user_email(user_email)
-    enriched = []
-    for projection in projections:
+
+    async def read(projection: dict):
         run_id = projection.get("run_id")
         if not run_id or projection.get("status") in _TERMINAL_RUN:
-            enriched.append(projection)
-            continue
+            return None
         try:
-            record = await bus.directory.record(str(run_id))
-        except Exception:
+            return await bus.directory.record(str(run_id))
+        except Exception as exc:
             logger.warning("run lineage read failed", exc_info=True)
-            enriched.append(projection)
-            continue
+            _record_projection_failure(exc, "lineage_read")
+            return None
+
+    records = await asyncio.gather(*(read(p) for p in projections))
+    enriched = []
+    for projection, record in zip(projections, records):
         if not record or record.get("user_email") != owner:
             enriched.append(projection)
-            continue
-        enriched.append({**projection, **lineage_from_record(record)})
+        else:
+            enriched.append({**projection, **lineage_from_record(record)})
     return enriched
 
 
