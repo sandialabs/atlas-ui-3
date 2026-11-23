@@ -1,10 +1,10 @@
 // Issue #1218: a run the server cancels because its coordination claim lapsed
 // is told to the user, in the conversation on screen and in the history list.
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
-import { createWebSocketHandler } from '../handlers/chat/websocketHandlers'
+import { createWebSocketHandler, resetInterruptedRunNotices } from '../handlers/chat/websocketHandlers'
 import { interruptedRunNotice } from '../utils/interruptedRunNotice'
 import { getDisplayConversations } from '../utils/getDisplayConversations'
 import { RunIndicator } from '../components/ConversationTreeRow'
@@ -36,6 +36,8 @@ const run = (overrides = {}) => ({
 const statusFrame = (r) => ({ type: 'run_status', run: r })
 
 describe('interrupted run notice in the transcript', () => {
+  beforeEach(() => resetInterruptedRunNotices())
+
   it('shows a plain-language notice for a fenced run in the conversation on screen', () => {
     const { deps, handler } = makeHandler()
     handler(statusFrame(run()))
@@ -87,6 +89,14 @@ describe('interrupted run notice in the transcript', () => {
     handler(statusFrame(run({ status: 'completed', end_reason: 'completed' })))
     handler(statusFrame(run()))
     expect(deps.addMessage).not.toHaveBeenCalled()
+  })
+
+  it('remembers a finished run across a rebuilt handler', () => {
+    const first = makeHandler()
+    first.handler(statusFrame(run({ status: 'completed', end_reason: 'completed' })))
+    const second = makeHandler()
+    second.handler(statusFrame(run()))
+    expect(second.deps.addMessage).not.toHaveBeenCalled()
   })
 
   it('does not announce runs from a reconnect snapshot', () => {
