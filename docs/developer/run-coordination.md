@@ -309,6 +309,18 @@ an owner consumes a single stream). The envelope, JSON in field `c`:
 
 Details, reply codes and guarantees: [run control](run-control.md).
 
+## Child run frames and tool identity
+
+A tool that launches a run (`atlas_launch_subagent`, `atlas_follow_up_subagent`)
+hands its update callback to the child, so the child's frames travel through
+the parent's tool-call wrappers. Rule: a frame whose `run_id` differs from the
+wrapper's own run belongs to a descendant. `observe_tool_callback` and
+`stamp_callback_identity` forward it unchanged: no parent `tool_name`,
+`tool_call_id`, `step` or `invocation_id`, and no execution-projection write.
+`_ChildConnection` likewise calls `note_event` only for frames with no run id
+or its own run id, so a grandchild's approval request does not mark the
+middle child as waiting for input.
+
 ## Still open in #1128
 
 Nothing in `test/multireplica/test_run_coordination_gaps.py` is still a gap:
