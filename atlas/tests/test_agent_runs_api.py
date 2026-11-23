@@ -650,6 +650,19 @@ async def test_renewal_failing_past_the_pending_ttl_aborts_the_launch(
     assert len(get_run_registry().all_records()) == 0
 
 
+async def test_a_renewal_that_hangs_cannot_outlive_the_reservation(
+    factory, shared_store, monkeypatch
+):
+    async def hangs(slot):
+        await asyncio.sleep(30)  # Redis accepts the call and never answers
+
+    shared_store.renew = hangs
+    response = await _stalled_admission(factory, monkeypatch, hangs)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert len(get_run_registry().all_records()) == 0
+
+
 async def test_follow_up_replay_names_a_sibling_run_on_another_replica(
     factory, shared_store
 ):

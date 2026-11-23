@@ -265,14 +265,25 @@ class _Hold:
 
     async def _run(self) -> None:
         store = get_idempotency_store()
+        # The reservation is only good until its last extension plus the
+        # pending TTL, however long a renewal takes to answer. ``last_ok`` is
+        # taken before the call, so the deadline is never later than the
+        # store's own.
         last_ok = time.monotonic()
         while True:
-            await asyncio.sleep(IDEMPOTENCY_RENEW_INTERVAL_SECONDS)
-            extended = await store.renew(self.slot)
-            now = time.monotonic()
+            deadline = last_ok + IDEMPOTENCY_PENDING_TTL_SECONDS
+            await asyncio.sleep(max(0.0, min(IDEMPOTENCY_RENEW_INTERVAL_SECONDS, deadline - time.monotonic())))
+            attempt = time.monotonic()
+            remaining = deadline - attempt
+            extended: Optional[bool] = None
+            if remaining > 0:
+                try:
+                    extended = await asyncio.wait_for(store.renew(self.slot), timeout=remaining)
+                except asyncio.TimeoutError:
+                    extended = None
             if extended:
-                last_ok = now
-            elif extended is False or now - last_ok >= IDEMPOTENCY_PENDING_TTL_SECONDS:
+                last_ok = attempt
+            elif extended is False or time.monotonic() >= deadline:
                 logger.error("An idempotency reservation was lost while its request was admitting")
                 self.lost = True
                 if self._request is not None:
