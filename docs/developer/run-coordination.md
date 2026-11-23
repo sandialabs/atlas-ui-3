@@ -324,7 +324,12 @@ replica answers from the shared records and does not stream tokens:
   "messages": []}`. For a conversation with saved turns the route returns the
   stored record with those three fields added; for an unsaved first turn it is
   the empty view above, with the tool rows the owner has projected so far
-  merged in by `attach_execution`. It is never a 404 while the run is live.
+  merged in by `attach_execution`. The view needs the caller's own execution
+  projection of the run (written a moment after `run_started`) as well as the
+  run record, so an off-record turn, which publishes no projection, is never
+  served, and an id the caller has no run in does not reach the global run
+  key. Until the projection exists the read is a miss, which the client's
+  retry covers. It is never a 404 while the run is live.
   `in_flight` stays unset, because the replay and live-poll paths that read it
   need the owner's transcript. Another user's conversation id reads as missing.
   `restore_conversation` replies with its usual `conversation_restored` frame

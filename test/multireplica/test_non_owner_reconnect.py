@@ -45,7 +45,13 @@ def test_conversation_get_on_non_owner_shows_running_view(cluster):
         run_id, conversation_id = started["run_id"], started["conversation_id"]
         try:
             # The first turn is unsaved, so only the shared record knows it.
-            status, body = cluster.call(cluster.b, "GET", f"/api/conversations/{conversation_id}", user=user)
+            # The shared projection follows run_started by a moment.
+            deadline = time.monotonic() + 10
+            while True:
+                status, body = cluster.call(cluster.b, "GET", f"/api/conversations/{conversation_id}", user=user)
+                if status == 200 or time.monotonic() > deadline:
+                    break
+                time.sleep(0.25)
             assert status == 200, (status, body)
             assert body["run_elsewhere"] is True and body["run_id"] == run_id, body
 
