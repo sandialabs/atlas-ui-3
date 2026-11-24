@@ -122,6 +122,18 @@ def test_snapshot_keeps_ended_run_when_watched():
     assert [(r["run_id"], r["status"], r["end_reason"]) for r in runs] == [("run-1", "failed", "owner_lost")]
 
 
+def test_ended_run_survives_an_older_local_run():
+    older = {"run_id": "run-0", "conversation_id": "conv-1", "status": "completed", "created_at": 1}
+    runs = merge_run_snapshots([older], [_projection("failed")], ended_for="conv-1")
+    assert sorted(r["run_id"] for r in runs) == ["run-0", "run-1"]
+
+
+def test_ended_run_yields_to_a_live_local_run():
+    live = {"run_id": "run-2", "conversation_id": "conv-1", "status": "running", "created_at": 5}
+    runs = merge_run_snapshots([live], [_projection("failed")], ended_for="conv-1")
+    assert [r["run_id"] for r in runs] == ["run-2"]
+
+
 def test_snapshot_drops_ended_run_unwatched():
     assert merge_run_snapshots([], [_projection("failed")]) == []
     assert merge_run_snapshots([], [_projection("failed")], ended_for="other") == []

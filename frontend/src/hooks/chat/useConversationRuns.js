@@ -55,10 +55,14 @@ export function useConversationRuns() {
 				// a finished one whatever their timestamps: a run another replica
 				// owns carries no `created_at`, and must not lose to an earlier
 				// finished run this replica still retains (issue #1219).
+				// Between two finished runs, the one the server kept because this tab
+				// is watching for its end (`detached`) is the newer turn.
 				const outranks = !existing
 					|| (isRunActive(run) !== isRunActive(existing)
 						? isRunActive(run)
-						: (run.created_at || 0) >= (existing.created_at || 0))
+						: (!isRunActive(run) && (run.detached === true) !== (existing.detached === true))
+							? run.detached === true
+							: (run.created_at || 0) >= (existing.created_at || 0))
 				if (outranks) {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.

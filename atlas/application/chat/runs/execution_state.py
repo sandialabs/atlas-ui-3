@@ -576,7 +576,8 @@ def merge_run_snapshots(
     ``ended_for`` names the conversation a client is watching for the end of a
     run another replica owns (issue #1219). Its finished projection is kept
     as a terminal entry, so that client learns how the run ended instead of
-    seeing it vanish; a run this replica holds for it still wins.
+    seeing it vanish; a live run this replica holds for it still wins, an
+    earlier finished one does not.
     """
     merged = [dict(run) for run in local_runs]
     by_run = {run.get("run_id"): run for run in merged if run.get("run_id")}
@@ -599,7 +600,7 @@ def merge_run_snapshots(
             if (
                 projection_status in _TERMINAL_RUN
                 and conversation_id == ended_for
-                and conversation_id not in local_conversations
+                and conversation_id not in active_conversations
             ):
                 merged.append({
                     "run_id": projection.get("run_id"),

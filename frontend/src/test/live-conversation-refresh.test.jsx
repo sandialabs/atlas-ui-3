@@ -1513,6 +1513,43 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     }
   })
 
+  it('loads the final record when an older finished run is also in the list', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const final = {
+        id: 'conv-1',
+        messages: [storedChat('user', 'first'), storedChat('assistant', 'one'),
+          storedChat('user', 'second'), storedChat('assistant', 'two')],
+      }
+      // The baseline read lands after the run already saved: it must not
+      // become the baseline, since the response does not say the run is live.
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => final }))
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'first'), storedChat('assistant', 'one')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [
+          { conversation_id: 'conv-1', run_id: 'run-0', status: 'completed', created_at: 100 },
+          { conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true },
+        ],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(result.current.messages.at(-1).content).toBe('two')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for a stopped run to save before reading the record', async () => {
     vi.useFakeTimers()
     try {

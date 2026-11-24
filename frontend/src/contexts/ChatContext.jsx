@@ -1903,7 +1903,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// it. The run's own save is the first record with more than this.
 				remoteBaselineRef.current = null
 				fetchConversationRecord(id).then(data => {
-					if (remoteWatchRef.current === id && data?.id === id) {
+					// Only a response that still reports the run live predates its save.
+					if (remoteWatchRef.current === id && data?.id === id && data.run_elsewhere === true) {
 						remoteBaselineRef.current = savedChatCount(data)
 					}
 				}).catch(() => {})
