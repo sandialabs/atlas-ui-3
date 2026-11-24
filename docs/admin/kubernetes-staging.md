@@ -295,11 +295,12 @@ connection budgets, no committed credentials, and no fixed UIDs on OpenShift.
 
 ## Not shared between replicas (yet)
 
-Run state that is shared through Redis: the run cap, run status, stop, steer,
-approval responses and the auto-approve switch (see
+Shared through Redis, and so not listed below: the run cap, run status, and
+routing of stop, steer, approval responses and auto-approve commands to the
+replica that owns the run (see
 [Session Store](session-store.md#limits-of-the-shared-store)).
 
-These are per-replica in this deployment. They are known gaps, not
+The following are per-replica in this deployment. They are known gaps, not
 configuration mistakes:
 
 - **The live transcript of a tracked run** that has not yet been saved, the

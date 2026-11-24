@@ -26,7 +26,7 @@ random `instance_id` that changes on every process start. The `replica` metric
 label and the `replica=` log field are therefore **the pod (or host)**: one
 value per pod, low cardinality.
 
-#1128 run coordination identifies a run's owner per **process**, as
+Run coordination identifies a run's owner per **process**, as
 `<hostname>-<pid>-<random>`. On Kubernetes the hostname is the pod name, so an
 owner id starts with the pod's `replica` value (unless `ATLAS_REPLICA_ID`
 overrides it). Once that coordination is installed, `atlas_replica_info` and
@@ -133,7 +133,7 @@ The same numbers in Prometheus text format, every series labelled
 | `atlas_projection_failures_total` | counter | `op` |
 | `atlas_conversation_persist_failures_total` | counter | `error` |
 | `atlas_coordination_events_total` | counter | `event` |
-| `atlas_replica_info` | gauge | `instance_id`, `version`, `owner_id` once #1128 coordination is present (`instance` is left to Prometheus's own target label) |
+| `atlas_replica_info` | gauge | `instance_id`, `version`, `owner_id` when run coordination is active (`instance` is left to Prometheus's own target label) |
 | `atlas_replica_start_time_seconds` | gauge | |
 | `atlas_dependency_command_errors_total` | counter | `dependency`, `op`, `error` (`PoolExhausted` = this replica's Redis pool ran out) |
 
@@ -172,7 +172,7 @@ The console handler shows WARNING and above, so `kubectl logs` carries
 interruptions, failures and dependency transitions; INFO events are in
 `APP_LOG_DIR/app.jsonl`.
 
-Reserved for #1128 so coordination PRs log with stable names: `lease_acquired`,
+These event names are reserved for coordination logging and are not emitted today (the lease and control code logs through the ordinary logger, for example `Run ... lost its owner`): `lease_acquired`,
 `lease_renewed`, `lease_lost`, `orphan_detected`, `run_fenced`,
 `command_routed`, `command_delivered`, `command_timed_out`. Emit them with
 `coordination_metrics().record_event(CoordinationEvent.LEASE_LOST, run_id=..., ...)`
