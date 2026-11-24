@@ -458,3 +458,34 @@ async def test_unconfirmed_publication_is_rolled_back(coord, monkeypatch):
     assert (await coord.read_api_continuation("c1"))["run_id"] == first.run_id
     assert [r["run_id"] for r in await coord.read_api_runs()] == [first.run_id]
     assert await _slots(coord) == 0
+
+
+async def test_shutdown_during_api_publication_releases_claim(coord, monkeypatch):
+    spec = {"source": "agent_runs_api", "tools": ["read"]}
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+    real_publish = coord.publish_api_admission
+
+    async def pause_publication(claim):
+        entered.set()
+        await resume.wait()
+        await real_publish(claim)
+
+    monkeypatch.setattr(coord, "publish_api_admission", pause_publication)
+    task = asyncio.create_task(admit_run(
+        conversation_id="c1", user_email=USER,
+        source="agent_runs_api", api_continuation=spec,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        released = await admission.shut_down_live_runs(timeout=2)
+        await drain_pending_releases()
+        assert released == 1
+        assert await _slots(coord) == 0
+        assert await _conversation_holder(coord, "c1") is None
+    finally:
+        resume.set()
+        with pytest.raises(RunCoordinationUnavailableError):
+            await task
+        await drain_pending_releases()
+    assert await coord.read_api_runs() == []

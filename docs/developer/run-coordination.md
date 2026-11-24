@@ -65,10 +65,17 @@ rather than a turn that bypasses the cap.
 
 If the claim's reply is lost (a timeout after Redis applied it), the
 coordinator releases whatever this replica holds under that run id before
-reporting the failure. For API turns, CLAIM stages the continuation spec without
-publishing the API identity or retained indexes. Publication follows the local
-registry insert and checks that the original claim is still held. A refused
-publication removes the local record and attempts to undo the shared claim.
+reporting the failure. For API turns, CLAIM exposes the routing source but stages
+the continuation spec without updating the latest pointer or retained indexes.
+The local record holds the claim before publication can suspend. Publication
+checks that the original claim is still held. A refused publication removes
+the local record and attempts to undo the shared claim. Its original publication
+identity permits metadata cleanup after lease expiry or orphan takeover, without
+releasing a different run's lock or overwriting a newer continuation pointer.
+The owner's orphan sweep retries known refusals if Redis was unreachable during
+cleanup; the retry queue is process-local. If the owner process is lost before
+it can reconcile an ambiguous publication, the normal orphan and retention
+rules apply.
 
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket

@@ -141,16 +141,21 @@ async def admit_run(
         if claim is not None:
             release_claim_soon(claim, "failed")
         raise
-    if claim is not None and api_continuation is not None:
-        try:
-            await coordinator.publish_api_admission(claim)
-        except BaseException:
-            registry.remove(record.run_id)
-            release_claim_soon(claim, "admission_refused")
-            raise
+    # Attach before publication can suspend so shutdown and terminal
+    # transitions can release the claim, and the heartbeat can renew it.
     record.claim = claim
     if claim is not None:
         ensure_lease_heartbeat()
+    if claim is not None and api_continuation is not None:
+        try:
+            await coordinator.publish_api_admission(claim)
+            if record.is_terminal or record.claim is not claim or _admission_closed:
+                raise RunCoordinationUnavailableError("API admission interrupted")
+        except BaseException:
+            record.claim = None
+            registry.remove(record.run_id)
+            release_claim_soon(claim, "admission_refused")
+            raise
     return record
 
 

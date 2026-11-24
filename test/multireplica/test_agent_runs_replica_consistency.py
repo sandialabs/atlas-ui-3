@@ -113,3 +113,84 @@ def test_missing_continuation_refuses_on_both_replicas(cluster):
             service=True, json_body={"message": "must not run"},
         )
         assert status == 503 and body["detail"]["code"] == "unavailable", (status, body)
+
+
+def test_refused_publication_reconciles_after_lease_expiry(shared_infra, monkeypatch):
+    """Real Redis: lost publication replies and cleanup outage outlive a lease."""
+    import asyncio
+    from uuid import uuid4
+
+    import pytest
+    import redis.asyncio as redis
+    from redis.exceptions import ConnectionError
+
+    from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+    from atlas.application.chat.runs.leases import RunLeaseGuard
+    from atlas.application.chat.runs.registry import RunRegistry
+    from atlas.infrastructure.redis import RedisClientManager, RedisSettings
+    from atlas.infrastructure.redis.run_coordinator import RedisRunCoordinator
+    from atlas.infrastructure.redis.run_leases import RedisRunLeases
+
+    async def exercise():
+        prefix = f"{shared_infra.redis_key_prefix}:refusal-{uuid4().hex}"
+        settings = RedisSettings(url=shared_infra.redis_url, key_prefix=prefix)
+        async with redis.Redis.from_url(shared_infra.redis_url) as client:
+            manager = RedisClientManager(settings, client=client)
+            a = RedisRunCoordinator(manager, replica_id="refusal-a", lease_seconds=0.5,
+                                    retention_seconds=30)
+            b = RedisRunCoordinator(manager, replica_id="refusal-b", lease_seconds=0.5,
+                                    retention_seconds=30)
+            user = "refusal@example.com"
+            spec = {"source": "agent_runs_api", "tools": ["read"]}
+
+            async def claim(run_id, previous=None):
+                return await a.claim(
+                    run_id=run_id, conversation_id="conversation", user_email=user,
+                    max_runs_per_user=5, source="agent_runs_api",
+                    api_continuation=spec, follow_up_of=previous,
+                )
+
+            first = await claim("first")
+            await a.publish_api_admission(first)
+            await a.release(first, "completed")
+            refused = await claim("refused", first.run_id)
+
+            publish = a._publish_api
+
+            async def lose_reply(**kwargs):
+                await publish(**kwargs)
+                raise ConnectionError("publication reply lost")
+
+            with monkeypatch.context() as faults:
+                faults.setattr(a, "_publish_api", lose_reply)
+                with pytest.raises(RunCoordinationUnavailableError):
+                    await a.publish_api_admission(refused)
+
+                async def unavailable(**kwargs):
+                    raise ConnectionError("cleanup unavailable")
+
+                faults.setattr(a, "_release", unavailable)
+                released = await a.release(refused, "admission_refused")
+                assert not released
+                await asyncio.sleep(0.7)
+                takeover = await RedisRunLeases(b).interrupt(
+                    refused.run_id, refused.conversation_id, refused.user_email, "owner lost",
+                )
+                assert takeover and takeover > 0
+
+            guard = RunLeaseGuard(a, RedisRunLeases(a), RunRegistry())
+            await guard.sweep_once()
+            latest = await b.read_api_continuation("conversation")
+            assert latest["run_id"] == first.run_id
+            assert [r["run_id"] for r in await b.read_api_runs(user)] == [first.run_id]
+            assert await b.read(refused.run_id) is None
+            slots = await client.zcard(b.keys.user(user))
+            assert slots == 0
+            # Repeating cleanup must not change a subsequently admitted turn.
+            next_run = await claim("next", first.run_id)
+            await a.publish_api_admission(next_run)
+            await a.release(refused, "admission_refused")
+            assert (await b.read_api_continuation("conversation"))["run_id"] == next_run.run_id
+            await a.release(next_run, "completed")
+
+    asyncio.run(exercise())

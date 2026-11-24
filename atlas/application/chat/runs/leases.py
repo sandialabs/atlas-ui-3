@@ -528,6 +528,11 @@ class RunLeaseGuard:
     # -- orphan sweep (any replica) -------------------------------------------------
 
     async def sweep_once(self) -> List[str]:
+        # Retry refused API publications outside the lease-renewal heartbeat:
+        # a slow cleanup must not delay renewal of unrelated live runs.
+        retry_refusals = getattr(self._coordinator, "retry_api_refusals", None)
+        if retry_refusals is not None:
+            await retry_refusals()
         for run_id, lease in list(self._leases.items()):
             if self._registry.get(run_id) is None:
                 self._leases.pop(run_id, None)  # reaped here: nothing left to track

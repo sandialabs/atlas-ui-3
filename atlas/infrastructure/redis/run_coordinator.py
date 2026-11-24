@@ -230,10 +230,10 @@ redis.call('HSET', KEYS[3],
   'run_id', ARGV[1], 'conversation_id', ARGV[2], 'user_email', ARGV[3],
   'owner', ARGV[4], 'generation', generation, 'status', 'queued',
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
-  'source', ARGV[12] == '' and ARGV[8] or '', 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
+  'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
 if ARGV[12] ~= '' then
-  redis.call('HSET', KEYS[3], 'api_pending_spec', ARGV[12], 'api_pending_source', ARGV[8],
+  redis.call('HSET', KEYS[3], 'api_pending_spec', ARGV[12],
     'api_completed_before', completed_before)
 end
 if ARGV[9] ~= '' then
@@ -264,8 +264,9 @@ if not spec then return 0 end
 local previous = redis.call('HGET', KEYS[1], 'follow_up_of') or ''
 if (redis.call('GET', KEYS[3]) or '') ~= previous then return 0 end
 redis.call('HSET', KEYS[1], 'api_spec', spec, 'api_latest_key', KEYS[3],
-  'api_user_index', KEYS[4], 'source', redis.call('HGET', KEYS[1], 'api_pending_source'))
-redis.call('HDEL', KEYS[1], 'api_pending_spec', 'api_pending_source')
+  'api_user_index', KEYS[4], 'api_admission_owner', ARGV[2],
+  'api_admission_generation', ARGV[3])
+redis.call('HDEL', KEYS[1], 'api_pending_spec')
 redis.call('SET', KEYS[3], ARGV[1])
 refresh_api_retention(ARGV[5], KEYS[3], KEYS[4], ARGV[1], expires + tonumber(ARGV[4]))
 return 1
@@ -277,14 +278,21 @@ return 1
 RELEASE_SCRIPT = _NOW + _SUBTREE + """
 local generation = redis.call('HGET', KEYS[1], 'generation')
 local owner = redis.call('HGET', KEYS[1], 'owner')
+local refused = ARGV[4] == 'admission_refused'
+local same_claim = generation and owner == ARGV[2]
+    and (ARGV[3] == '' or generation == ARGV[3])
+-- A refused publication is metadata cleanup, not a terminal write or a
+-- renewed lease. Its immutable admission identity survives orphan takeover.
+local same_publication = refused and ARGV[3] ~= ''
+    and redis.call('HGET', KEYS[1], 'api_admission_owner') == ARGV[2]
+    and redis.call('HGET', KEYS[1], 'api_admission_generation') == ARGV[3]
 if generation then
-  if owner ~= ARGV[2] then return 0 end
-  if ARGV[3] ~= '' and generation ~= ARGV[3] then return 0 end
+  if not same_claim and not same_publication then return 0 end
   -- Like renew: once a live run's lease has passed it is no longer ours to
   -- end, even before a sweep has recorded the takeover (run_leases.py).
   local current = redis.call('HGET', KEYS[1], 'status')
   if current ~= 'completed' and current ~= 'failed' and current ~= 'cancelled' then
-    if tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0') <= now then
+    if not refused and tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0') <= now then
       return 0
     end
   end
@@ -456,6 +464,9 @@ class RedisRunCoordinator:
         self._release = client.register_script(RELEASE_SCRIPT)
         self._publish_api = client.register_script(PUBLISH_API_SCRIPT)
         self._renew = client.register_script(RENEW_SCRIPT)
+        # Explicit publication refusals are retried independently of live
+        # leases. A successful cleanup or an expired record ends the retry.
+        self._api_refusals: Dict[str, RunClaim] = {}
 
     def _unavailable(self, exc: BaseException) -> RunCoordinationUnavailableError:
         stats = getattr(self._redis, "stats", None)
@@ -567,19 +578,38 @@ class RedisRunCoordinator:
         return bool(int(freed))
 
     async def release(self, claim: RunClaim, status: str) -> bool:
+        if status == "admission_refused":
+            self._api_refusals.setdefault(claim.run_id, claim)
         try:
-            return await self._run_release(
+            freed = await self._run_release(
                 claim.run_id, claim.conversation_id, claim.user_email,
                 str(claim.generation), status,
             )
+            if status == "admission_refused":
+                self._api_refusals.pop(claim.run_id, None)
+            return freed
         except Exception as exc:
             # The lease expires on its own; the slot is held at most that long.
             self._unavailable(exc)
-            logger.warning(
-                "Could not release run claim %s (%s); it frees itself when its lease expires",
-                claim.run_id, type(exc).__name__,
-            )
+            if status == "admission_refused":
+                logger.warning(
+                    "Could not reconcile refused API admission %s (%s); will retry",
+                    claim.run_id, type(exc).__name__,
+                )
+            else:
+                logger.warning(
+                    "Could not release run claim %s (%s); it frees itself when its lease expires",
+                    claim.run_id, type(exc).__name__,
+                )
             return False
+
+    async def retry_api_refusals(self) -> None:
+        """Retry known refusals even when there are no live local claims."""
+        for run_id, claim in list(self._api_refusals.items()):
+            await self.release(claim, "admission_refused")
+            if run_id in self._api_refusals:
+                # Redis is still unavailable. Try again on the next sweep.
+                break
 
     async def renew(self, claims: Iterable[RunClaim], statuses: Dict[str, str]) -> Dict[str, bool]:
         """Renew concurrently (bounded), so one beat stays well inside the lease

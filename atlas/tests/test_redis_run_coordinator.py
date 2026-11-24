@@ -471,3 +471,17 @@ async def test_api_latest_retention_covers_older_retained_run(server):
     assert abs(await client.pttl(a.keys.api_latest("api-conv")) - first_ttl) < 100
     assert abs(await client.pttl(a.keys.run("second")) - first_ttl) < 100
     assert (await a.read_api_continuation("api-conv"))["run_id"] == "second"
+
+
+async def test_api_claim_source_visible_before_publication(server):
+    a, b = _coordinator(server, "a"), _coordinator(server, "b")
+    claim = await a.claim(
+        run_id="pending", conversation_id="api-conv", user_email=USER,
+        max_runs_per_user=5, source="agent_runs_api",
+        api_continuation=_api_spec(["read"]),
+    )
+    record = await b.read(claim.run_id)
+    assert record["source"] == "agent_runs_api"
+    assert await b.read_api_continuation("api-conv") is None
+    assert await b.read_api_runs() == []
+    await a.release(claim, "failed")

@@ -259,4 +259,7 @@ async def _release(claim: RunClaim, status: str) -> None:
 async def drain_pending_releases() -> None:
     """Wait for scheduled releases to land (shutdown, tests)."""
     while _pending_releases:
-        await asyncio.gather(*list(_pending_releases), return_exceptions=True)
+        pending = tuple(_pending_releases)
+        await asyncio.gather(*pending, return_exceptions=True)
+        # A gather of already-done tasks may not yield to their callbacks.
+        _pending_releases.difference_update(pending)
