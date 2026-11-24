@@ -427,8 +427,9 @@ approval timed out.
 An approval request that arrives while the user is looking at another
 conversation is not shown as a modal there; the conversation is marked "Needs
 approval" in the history list instead. The server keeps the request frames and
-re-sends them when that conversation is opened (`restore_conversation`) or named on
-`list_runs` after a reconnect, so they can still be answered. One agent step
+re-sends them when that conversation is opened (`restore_conversation`) after a
+reconnect; `list_runs` reports the run's status but does not replay them, so
+they can still be answered. One agent step
 may fire several approval-gated tools in parallel, so every outstanding
 request is kept and replayed individually -- not just the latest. Without the
 replay the request ids and arguments would exist nowhere the client could
@@ -499,9 +500,11 @@ These are known and deliberate, not oversights:
   hold cluster-wide), and every replica can read a run's status. A run whose
   replica is lost is reported failed (interrupted) by the others, with its
   finished tool rows kept and nothing retried (see
-  [run coordination](../developer/run-coordination.md)). Stopping and
-  steering a run still needs the replica that owns it; use a single worker,
-  or sticky sessions, until that routing lands (issue #1128).
+  [run coordination](../developer/run-coordination.md)). Stop, steer, tool
+  approval and the auto-approve switch sent to any replica are routed to the
+  replica that owns the run over the control bus, so no sticky sessions are
+  needed (see [run control](../developer/run-control.md)). Without Redis, run
+  state is per process: use a single worker.
 
 ## Troubleshooting
 

@@ -348,7 +348,19 @@ middle child as waiting for input.
 
 Nothing in `test/multireplica/test_run_coordination_gaps.py` is still a gap:
 admission, inspection from a non-owner, owner loss, fencing a paused owner and
-routing stop/steer/approval to the owner are all covered.
+routing stop/steer/approval to the owner are all covered. That file covers the
+browser run path. These pieces are still replica-local and are not gaps in
+that file:
+
+- The Agent Runs API follow-up and list endpoints, and the
+  `atlas_get_subagent_result` and `atlas_get_subagent_runs` tools, read the
+  replica's own run registry. Status by run id (`get_api_run_anywhere`),
+  cancel and the idempotency keys are cluster-wide.
+- Opening a conversation whose run has not saved its first turn
+  (`in_flight.py`) resolves the run through the local registry, so only the
+  owning replica can show its transcript so far.
+- MCP elicitation requests and their responses (`elicitation_manager`) live in
+  the process that issued them.
 
 ## Tests
 
