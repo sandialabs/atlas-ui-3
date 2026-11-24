@@ -63,9 +63,11 @@ function aggregateRunFor(rowIndex, rows, runsByConversation) {
     const priority = priorityOf(run?.status)
     if (!priority) return
     if (!aggregate || priority > priorityOf(aggregate.status)) {
-      aggregate = { status: run.status, count: 1, error: run.error || null }
+      aggregate = { status: run.status, count: 1, error: run.error || null, end_reason: run.end_reason || null }
     } else if (priority === priorityOf(aggregate.status)) {
       aggregate.count += 1
+      // Children that ended differently read as a plain failure.
+      if (aggregate.end_reason !== (run.end_reason || null)) aggregate.end_reason = null
       if (!aggregate.error && run.error) aggregate.error = run.error
     }
   }

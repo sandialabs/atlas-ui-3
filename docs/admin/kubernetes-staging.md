@@ -27,7 +27,7 @@ Everything lives under `deploy/kubernetes/`:
 | `podman_rehearsal.py` | Runs the rendered overlay with podman when no cluster is available |
 
 The bundled Redis, PostgreSQL and MinIO run as one unreplicated instance each,
-sized for validation. Production uses managed or replicated services. To
+sized for validation. Production uses managed or replicated services (Redis with `maxmemory-policy noeviction`; see [Session Store](session-store.md#outages)). To
 use them, point `secrets.env` at those services and remove the bundled ones
 in an overlay of your own.
 
@@ -264,7 +264,7 @@ Run `./staging.sh validate` after each step.
 | Rolling restart | `./staging.sh restart` | One pod at a time; ready capacity never drops below 3 |
 | New image | `ATLAS_IMAGE=...:v0.12.0 ./staging.sh apply` | The first new pod's init container applies any pending migration under the lock; the rest find head |
 | Rollback | `ATLAS_IMAGE=...:v0.11.0 ./staging.sh apply` | The init container warns that the schema is newer and leaves it unchanged |
-| Redis outage | `kubectl --context $ATLAS_KUBE_CONTEXT -n atlas-staging scale deploy/atlas-redis --replicas=0`, then back to 1 | Replicas stay ready. `/api/health` reports `session_store.status: degraded`, and reconnects start fresh sessions that reload history from PostgreSQL. See [Session Store](session-store.md#outages). After Redis returns, health goes back to `ok`. Sessions are stored again on their next write. |
+| Redis outage | `kubectl --context $ATLAS_KUBE_CONTEXT -n atlas-staging scale deploy/atlas-redis --replicas=0`, then back to 1 | Replicas stay ready. `/api/health` reports `session_store.status: degraded`, and reconnects start fresh sessions that reload history from PostgreSQL. New runs are refused while Redis is down. A run in flight is cancelled once the outage outlasts the run lease (default 30 s, `RUN_LEASE_SECONDS`), and its unsaved turn is lost; the user sees an "interrupted" notice. See [Session Store](session-store.md#outages). After Redis returns, health goes back to `ok`. Sessions are stored again on their next write. |
 | PostgreSQL restart | `kubectl ... rollout restart statefulset/atlas-postgres` | Pool pre-ping replaces dead connections. Requests during the restart fail and are logged; no replica restarts |
 
 `./staging.sh status` shows pods, the Service's endpoint slices (one ready

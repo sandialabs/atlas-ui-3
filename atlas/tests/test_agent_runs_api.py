@@ -16,7 +16,7 @@ import pytest
 from fastapi import FastAPI
 
 from atlas.application.chat.runs.context import clear_current_run
-from atlas.application.chat.runs.external_runs import reset_idempotency_cache
+from atlas.application.chat.runs.external_runs import API_SOURCE, reset_idempotency_cache
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry, reset_run_registry
 from atlas.core.agent_runs_paths import is_agent_runs_path
 from atlas.domain.errors import ValidationError
@@ -507,6 +507,513 @@ async def test_a_refused_launch_does_not_burn_its_idempotency_key(factory):
         retried = await client.post("/api/agent-runs", json=body, headers=AUTH)
     assert refused.status_code == 503
     assert retried.status_code == 202
+
+
+@pytest.fixture
+def shared_store():
+    """Bind the Redis idempotency store, as the app factory does with Redis."""
+    import fakeredis
+
+    from atlas.application.chat.runs.idempotency import set_idempotency_store
+    from atlas.infrastructure.redis import RedisClientManager, RedisSettings
+    from atlas.infrastructure.redis.idempotency_store import RedisIdempotencyStore
+
+    manager = RedisClientManager(
+        RedisSettings(url="redis://fake/0"), client=fakeredis.FakeAsyncRedis()
+    )
+    store = RedisIdempotencyStore(manager)
+    set_idempotency_store(store)
+    yield store
+    set_idempotency_store(None)
+
+
+async def test_shared_store_replays_on_another_replica(factory, shared_store):
+    body = {**LAUNCH, "idempotency_key": "xrep-1"}
+    async with _client(factory) as client:
+        first = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        # Another replica has no local record of the run.
+        reset_run_registry()
+        retry = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        conflict = await client.post(
+            "/api/agent-runs", json={**body, "message": "other"}, headers=AUTH
+        )
+    assert first.status_code == 202
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == first.json()["run_id"]
+    assert retry.json()["conversation_id"] == first.json()["conversation_id"]
+    assert retry.json()["idempotent_replay"] is True
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "idempotency_conflict"
+    assert len(get_run_registry().all_records()) == 0  # no second run here
+
+
+async def test_a_slow_admission_keeps_its_reservation_alive(factory, shared_store, monkeypatch):
+    """The key must not lapse while the first request is still admitting."""
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    renewals = []
+    original = shared_store.renew
+
+    async def counting_renew(slot):
+        renewals.append(slot.key)
+        return await original(slot)
+
+    shared_store.renew = counting_renew
+    started = asyncio.Event()
+    gate = asyncio.Event()
+
+    async def slow_resolve(config_manager, model, user_email):
+        started.set()
+        await gate.wait()
+
+    monkeypatch.setattr(f"{module}._resolve_api_model", slow_resolve)
+    body = {**LAUNCH, "idempotency_key": "slow-1"}
+    async with _client(factory) as client:
+        first = asyncio.ensure_future(client.post("/api/agent-runs", json=body, headers=AUTH))
+        await started.wait()
+        await asyncio.sleep(0.1)
+        gate.set()
+        response = await first
+    assert response.status_code == 202
+    assert len(renewals) >= 2
+
+
+async def test_a_failed_handle_write_is_retried_so_the_key_still_replays(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
+    original = shared_store.complete
+    attempts = []
+
+    async def flaky_complete(slot, handle):
+        attempts.append(1)
+        if len(attempts) <= 2:
+            return False  # Redis blip right after the run was admitted
+        return await original(slot, handle)
+
+    shared_store.complete = flaky_complete
+    body = {**LAUNCH, "idempotency_key": "blip-1"}
+    async with _client(factory) as client:
+        first = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        await asyncio.sleep(0.2)
+        reset_run_registry()  # another replica
+        retry = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert first.status_code == 202
+    assert len(attempts) == 3
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == first.json()["run_id"]
+
+
+async def _stalled_admission(factory, monkeypatch, renew):
+    """POST a keyed launch whose admission stalls while ``renew`` runs."""
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_PENDING_TTL_SECONDS", 0.05)
+    started = asyncio.Event()
+
+    async def stalled_resolve(config_manager, model, user_email):
+        started.set()
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(f"{module}._resolve_api_model", stalled_resolve)
+    body = {**LAUNCH, "idempotency_key": "lost-1"}
+    async with _client(factory) as client:
+        return await asyncio.wait_for(
+            client.post("/api/agent-runs", json=body, headers=AUTH), timeout=3
+        )
+
+
+async def test_a_lost_reservation_aborts_the_launch_before_admission(
+    factory, shared_store, monkeypatch
+):
+    async def lost(slot):
+        return False  # another request holds the key now
+
+    shared_store.renew = lost
+    response = await _stalled_admission(factory, monkeypatch, lost)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_renewal_failing_past_the_pending_ttl_aborts_the_launch(
+    factory, shared_store, monkeypatch
+):
+    async def unreachable(slot):
+        return None  # Redis cannot be reached
+
+    shared_store.renew = unreachable
+    response = await _stalled_admission(factory, monkeypatch, unreachable)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_a_renewal_that_hangs_cannot_outlive_the_reservation(
+    factory, shared_store, monkeypatch
+):
+    async def hangs(slot):
+        await asyncio.sleep(30)  # Redis accepts the call and never answers
+
+    shared_store.renew = hangs
+    response = await _stalled_admission(factory, monkeypatch, hangs)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_a_reservation_that_expired_during_reserve_aborts_the_launch(
+    factory, shared_store, monkeypatch
+):
+    """The expiry clock starts before the reserve call, not after it returns."""
+    original_reserve = shared_store.reserve
+
+    async def slow_reserve(*args, **kwargs):
+        result = await original_reserve(*args, **kwargs)
+        await asyncio.sleep(0.2)  # the answer arrives after the pending TTL
+        return result
+
+    shared_store.reserve = slow_reserve
+
+    async def unreachable(slot):
+        return None
+
+    shared_store.renew = unreachable
+    response = await _stalled_admission(factory, monkeypatch, unreachable)
+    assert response.status_code == 503
+    assert len(get_run_registry().all_records()) == 0
+
+
+async def test_a_run_admitted_just_before_the_loss_is_cancelled(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+
+    async def lost(slot):
+        return False
+
+    shared_store.renew = lost
+
+    async def slow_publish(run_id):
+        await asyncio.sleep(5)  # the run exists; the key is lost meanwhile
+
+    monkeypatch.setattr(f"{module}.publish_run_now", slow_publish)
+    body = {**LAUNCH, "idempotency_key": "lost-2"}
+    async with _client(factory) as client:
+        response = await asyncio.wait_for(
+            client.post("/api/agent-runs", json=body, headers=AUTH), timeout=3
+        )
+        retry_slot, _ = await shared_store.reserve(USER, "lost-2", "other-fingerprint")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    records = get_run_registry().all_records()
+    assert all(record.status is RunStatus.CANCELLED for record in records)
+    assert retry_slot is not None  # the lapsed key was released, not left holding a handle
+
+
+async def test_losing_the_reservation_is_recorded_as_a_coordination_event(
+    factory, shared_store, monkeypatch
+):
+    from atlas.core.coordination_metrics import coordination_metrics
+
+    async def lost(slot):
+        return False
+
+    shared_store.renew = lost
+    before = coordination_metrics().counter(
+        "atlas_coordination_events_total", event="idempotency_reservation_lost"
+    )
+    response = await _stalled_admission(factory, monkeypatch, lost)
+    assert response.status_code == 503
+    assert (
+        coordination_metrics().counter(
+            "atlas_coordination_events_total", event="idempotency_reservation_lost"
+        )
+        == before + 1
+    )
+
+
+async def test_follow_up_replay_is_unavailable_when_the_shared_record_is_unreadable(
+    factory, shared_store
+):
+    from types import SimpleNamespace as NS
+
+    from atlas.application.chat.runs.leases import set_lease_guard
+
+    async def broken(run_id):
+        raise RuntimeError("redis down")
+
+    set_lease_guard(NS(read_record=broken))
+    try:
+        async with _client(factory) as client:
+            response = await client.post(
+                "/api/agent-runs/not-here/follow-up",
+                json={"message": "hi", "idempotency_key": "unread-1"},
+                headers=AUTH,
+            )
+    finally:
+        set_lease_guard(None)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+
+
+async def _deferred_retry(factory, shared_store, monkeypatch, key, answers):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
+    attempts = []
+
+    async def scripted(slot, handle):
+        attempts.append(1)
+        return answers[min(len(attempts) - 1, len(answers) - 1)]
+
+    async def gone(slot):
+        return False  # the reservation is no longer there
+
+    shared_store.complete = scripted
+    shared_store.renew = gone
+    body = {**LAUNCH, "idempotency_key": key}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        await asyncio.sleep(0.3)
+    return response, attempts
+
+
+async def test_an_expired_key_is_retaken_by_the_handle_retry(
+    factory, shared_store, monkeypatch
+):
+    response, attempts = await _deferred_retry(
+        factory, shared_store, monkeypatch, "expired-1", [False, True]
+    )
+    assert response.status_code == 202
+    assert len(attempts) == 2  # renew said gone, complete re-took the key
+    records = get_run_registry().all_records()
+    assert len(records) == 1 and records[0].status is not RunStatus.CANCELLED
+
+
+async def test_a_taken_key_cancels_the_run_in_the_handle_retry(
+    factory, shared_store, monkeypatch
+):
+    response, attempts = await _deferred_retry(
+        factory, shared_store, monkeypatch, "taken-2", [False, None]
+    )
+    assert response.status_code == 202
+    assert len(attempts) == 2
+    records = get_run_registry().all_records()
+    assert len(records) == 1 and records[0].status is RunStatus.CANCELLED
+
+
+async def test_the_reservation_stays_renewed_through_a_stalled_handle_write(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    renewals = []
+    original_renew = shared_store.renew
+    original_complete = shared_store.complete
+
+    async def counting_renew(slot):
+        renewals.append(1)
+        return await original_renew(slot)
+
+    async def stalled_complete(slot, handle):
+        before = len(renewals)
+        await asyncio.sleep(0.15)  # the write hangs; the key must stay protected
+        assert len(renewals) > before
+        return await original_complete(slot, handle)
+
+    shared_store.renew = counting_renew
+    shared_store.complete = stalled_complete
+    body = {**LAUNCH, "idempotency_key": "write-1"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        retry = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 202
+    assert retry.status_code == 200 and retry.json()["run_id"] == response.json()["run_id"]
+
+
+async def test_a_loss_during_the_handle_write_does_not_cancel_the_finishing_request(
+    factory, shared_store, monkeypatch
+):
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
+    original_complete = shared_store.complete
+
+    async def lost(slot):
+        return False
+
+    async def slow_complete(slot, handle):
+        await asyncio.sleep(0.1)  # renewal reports the key lost meanwhile
+        return await original_complete(slot, handle)
+
+    shared_store.renew = lost
+    shared_store.complete = slow_complete
+    body = {**LAUNCH, "idempotency_key": "write-2"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 202
+    assert len(get_run_registry().all_records()) == 1
+
+
+async def test_a_refused_final_handle_write_cancels_the_run_and_answers_503(
+    factory, shared_store
+):
+    async def taken(slot, handle):
+        return None  # another request owns the key now
+
+    shared_store.complete = taken
+    body = {**LAUNCH, "idempotency_key": "taken-1"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    records = get_run_registry().all_records()
+    assert len(records) == 1 and records[0].status is RunStatus.CANCELLED
+
+
+async def test_a_completed_key_is_not_reported_lost_by_a_racing_renewal(
+    factory, shared_store, monkeypatch
+):
+    from atlas.core.coordination_metrics import coordination_metrics
+
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    original_complete = shared_store.complete
+
+    async def complete_then_linger(slot, handle):
+        result = await original_complete(slot, handle)
+        await asyncio.sleep(0.1)  # renewals keep running against the completed key
+        return result
+
+    shared_store.complete = complete_then_linger
+    counter = ("atlas_coordination_events_total",)
+    before = coordination_metrics().counter(*counter, event="idempotency_reservation_lost")
+    body = {**LAUNCH, "idempotency_key": "race-done"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 202
+    assert coordination_metrics().counter(*counter, event="idempotency_reservation_lost") == before
+
+
+async def test_follow_up_replay_names_a_sibling_run_on_another_replica(
+    factory, shared_store
+):
+    from types import SimpleNamespace as NS
+
+    from atlas.application.chat.runs.leases import set_lease_guard
+
+    async with _client(factory) as client:
+        first = (await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)).json()
+        factory.release_all()
+        await _settle()
+        get_run_registry().get(first["run_id"]).status = RunStatus.COMPLETED
+        body = {"message": "Again", "idempotency_key": "sib-1"}
+        follow = await client.post(
+            f"/api/agent-runs/{first['run_id']}/follow-up", json=body, headers=AUTH
+        )
+        assert follow.status_code == 202
+        second_id = follow.json()["run_id"]
+        reset_run_registry()  # another replica: no local runs
+
+        async def read_record(run_id):
+            return {
+                "run_id": run_id,
+                "source": API_SOURCE,
+                "conversation_id": first["conversation_id"],
+                "status": "running",
+            }
+
+        set_lease_guard(NS(read_record=read_record))
+        try:
+            retry = await client.post(
+                f"/api/agent-runs/{second_id}/follow-up", json=body, headers=AUTH
+            )
+        finally:
+            set_lease_guard(None)
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == second_id
+
+
+async def test_shared_store_concurrent_requests_launch_once(factory, shared_store):
+    body = {**LAUNCH, "idempotency_key": "xrep-2"}
+    async with _client(factory) as client:
+        responses = await asyncio.gather(
+            *[client.post("/api/agent-runs", json=body, headers=AUTH) for _ in range(4)]
+        )
+    assert len(get_run_registry().all_records()) == 1
+    assert [r.status_code for r in responses].count(202) == 1
+
+
+async def test_shared_store_failed_launch_releases_the_key(factory, shared_store, monkeypatch):
+    """The launch fails after the key is reserved; the key must be free again."""
+    from atlas.application.chat.runs.external_runs import _resolve_api_model as real_resolve
+    from atlas.application.chat.runs.launcher import LaunchRefused
+
+    reserved = []
+    original_reserve = shared_store.reserve
+
+    async def spying_reserve(*args, **kwargs):
+        result = await original_reserve(*args, **kwargs)
+        reserved.append(result[0] is not None)
+        return result
+
+    shared_store.reserve = spying_reserve
+    calls = []
+
+    async def fails_once(config_manager, model, user_email):
+        calls.append(1)
+        if len(calls) == 1:
+            raise LaunchRefused("model gone", code="model_not_available")
+        await real_resolve(config_manager, model, user_email)
+
+    monkeypatch.setattr("atlas.application.chat.runs.external_runs._resolve_api_model", fails_once)
+    body = {**LAUNCH, "idempotency_key": "xrep-3"}
+    async with _client(factory) as client:
+        refused = await client.post("/api/agent-runs", json=body, headers=AUTH)
+        retried = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert reserved == [True, True]  # the failure came after a granted reservation
+    assert refused.status_code == 422
+    assert retried.status_code == 202
+
+
+async def test_shared_store_outage_refuses_keyed_requests_only(factory, shared_store):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    async def down(*args, **kwargs):
+        raise RedisConnectionError("down")
+
+    shared_store._reserve = down
+    async with _client(factory) as client:
+        keyed = await client.post(
+            "/api/agent-runs", json={**LAUNCH, "idempotency_key": "xrep-4"}, headers=AUTH
+        )
+        unkeyed = await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)
+    assert keyed.status_code == 503
+    assert keyed.json()["detail"]["code"] == "unavailable"
+    assert unkeyed.status_code == 202
+    assert len(get_run_registry().all_records()) == 1
+
+
+async def test_shared_store_follow_up_replays_on_another_replica(factory, shared_store):
+    async with _client(factory) as client:
+        launched = (await client.post("/api/agent-runs", json=LAUNCH, headers=AUTH)).json()
+        record = get_run_registry().get(launched["run_id"])
+        factory.release_all()
+        await _settle()
+        record.status = RunStatus.COMPLETED
+        body = {"message": "Again", "idempotency_key": "xrep-5"}
+        first = await client.post(
+            f"/api/agent-runs/{launched['run_id']}/follow-up", json=body, headers=AUTH
+        )
+        reset_run_registry()
+        retry = await client.post(
+            f"/api/agent-runs/{launched['run_id']}/follow-up", json=body, headers=AUTH
+        )
+    assert first.status_code == 202
+    assert retry.status_code == 200
+    assert retry.json()["run_id"] == first.json()["run_id"]
 
 
 # ---------------------------------------------------------------------------

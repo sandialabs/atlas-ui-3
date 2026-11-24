@@ -114,6 +114,13 @@ class AppFactory:
             )
             set_run_coordinator(redis_coordinator)
 
+            # Idempotency reservations for the Agent Runs API (#1220): shared,
+            # so one key sent to two replicas launches one run.
+            from atlas.application.chat.runs.idempotency import set_idempotency_store
+            from atlas.infrastructure.redis.idempotency_store import RedisIdempotencyStore
+
+            set_idempotency_store(RedisIdempotencyStore(self.redis))
+
             # Leases and fencing on top of those claims (#1128): orphan sweep,
             # interrupted-run state, fence checks. Started with the shared
             # infrastructure.
