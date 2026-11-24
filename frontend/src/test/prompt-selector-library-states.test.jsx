@@ -35,6 +35,20 @@ function show(library, entries, activePromptKey = null) {
 beforeEach(() => vi.clearAllMocks())
 
 describe('picker library states', () => {
+  it('shows a privacy-safe fallback when a shared prompt has no owner email', () => {
+    const shared = {
+      ...entry,
+      owner_email: undefined,
+      description: null,
+    }
+    show(
+      { entries: [shared], loading: false, loaded: true, error: null, complete: true, refresh: vi.fn() },
+      [shared],
+    )
+    expect(screen.getByText('Shared with you')).toBeInTheDocument()
+    expect(screen.queryByText('Shared by undefined')).not.toBeInTheDocument()
+  })
+
   it('says it is loading before the first answer', () => {
     show({ entries: [], loading: true, loaded: false, error: null, complete: true, refresh: vi.fn() }, [])
     expect(screen.getByRole('status')).toHaveTextContent(/Loading team prompts/)

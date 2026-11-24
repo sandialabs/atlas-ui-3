@@ -384,7 +384,7 @@ const PromptSelector = () => {
                       {isActive && <span className="text-xs text-blue-400">(active)</span>}
                     </div>
                     <div className="text-xs text-gray-400 mt-1 line-clamp-2">
-                      {p.description || (p.is_owner ? 'Yours' : `Shared by ${p.owner_email}`)}
+                      {p.description || (p.is_owner ? 'Yours' : (p.owner_email ? `Shared by ${p.owner_email}` : 'Shared with you'))}
                     </div>
                   </button>
                 )

@@ -297,7 +297,7 @@ def sharing_view(grants: List[Dict[str, Any]], revision: int) -> Dict[str, Any]:
     }
 
 
-def version_view(version: Dict[str, Any], include_content: bool = True, include_author_email: bool = True) -> Dict[str, Any]:
+def version_view(version: Dict[str, Any], include_content: bool = True, include_author_email: bool = False) -> Dict[str, Any]:
     data = {
         "id": version["id"],
         "prompt_id": version["prompt_id"],

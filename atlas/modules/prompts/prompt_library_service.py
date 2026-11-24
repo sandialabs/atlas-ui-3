@@ -634,7 +634,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             prompt_id, "publish", user_email, version_id=version["id"],
             details={"version_number": version["version_number"], "draft_revision": expected},
         )
-        return version_view(version)
+        return version_view(version, include_author_email=True)
 
     async def fork(
         self,

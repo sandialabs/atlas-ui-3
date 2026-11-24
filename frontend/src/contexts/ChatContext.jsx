@@ -884,7 +884,18 @@ export const ChatProvider = ({ children }) => {
 				}
 				if (!Number.isInteger(data?.prompt_library_pin_revision)) return
 				libraryPinRevisionRef.current = data.prompt_library_pin_revision
-				if ('prompt_library' in data) setConversationTeamPin(data.prompt_library)
+				if ('prompt_library' in data) {
+					setConversationTeamPin(data.prompt_library)
+					// Keep the saved-pin reference synchronized with server
+					// updates, not only with conversation loads and conflicts.
+					// A feature-flag change must not silently unpin a prompt
+					// established during this session.
+					const pin = data.prompt_library
+					conversationLibraryPinRef.current =
+						(pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+							? libraryPromptKey(pin.prompt_id, pin.version_id)
+							: null
+				}
 				if (!conflict) return
 				// Another window changed this conversation's team prompt: show
 				// the stored selection so the next send is an informed one.
@@ -1268,6 +1279,14 @@ export const ChatProvider = ({ children }) => {
 		// Team prompt library (issue #1169): only a reference goes out, and a
 		// selection that is no longer available is refused here rather than
 		// silently replaced by the default prompt.
+		// Disabling the library must not silently unpin an existing
+		// conversation. The selector may clear its disabled-library key,
+		// but the server's stored pin is still authoritative. Refuse the
+		// turn rather than sending library_prompt: null and erasing it.
+		if (!promptLibraryEnabled && conversationLibraryPinRef.current) {
+			toast.error('This conversation has a pinned team prompt. Re-enable the team prompt library or explicitly clear the conversation pin before sending.')
+			return false
+		}
 		// Do not send a stale team-library selection when the feature is off.
 		// React's cleanup effect may not have run before the user presses Send.
 		if (!promptLibraryEnabled &&

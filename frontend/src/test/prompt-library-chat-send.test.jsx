@@ -205,6 +205,92 @@ describe('team prompt library on the chat send path (issue #1169)', () => {
     expect(frame.selected_prompts).toEqual([])
   })
 
+  it('refuses to silently unpin a conversation when the library is disabled', () => {
+    const { result, rerender } = renderChat()
+
+    act(() => {
+      result.current.loadSavedConversation({
+        id: 'conv-disabled-library',
+        messages: [{
+          role: 'user',
+          content: 'hello',
+          message_type: 'chat',
+          timestamp: '2026-01-01T00:00:00Z',
+        }],
+        metadata: {
+          prompt_library: {
+            prompt_id: 'p1',
+            version_id: 'v1',
+            version_number: 1,
+          },
+          prompt_library_pin_revision: 4,
+        },
+      })
+    })
+
+    // The feature is disabled after the pinned conversation is loaded.
+    h.promptLibraryFeature = false
+    rerender()
+
+    let sent
+    act(() => {
+      sent = result.current.sendChatMessage('continue')
+    })
+
+    expect(sent).toBe(false)
+    expect(chatFrames()).toHaveLength(0)
+    expect(h.toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/pinned team prompt/i),
+    )
+  })
+
+  it('preserves a pin received during the session when the library is disabled', () => {
+    const { result, rerender } = renderChat()
+
+    act(() => {
+      result.current.loadSavedConversation({
+        id: 'conv-live-pin',
+        messages: [{
+          role: 'user',
+          content: 'hello',
+          message_type: 'chat',
+          timestamp: '2026-01-01T00:00:00Z',
+        }],
+        metadata: { prompt_library_pin_revision: 0 },
+      })
+    })
+
+    // The conversation was initially unpinned. The server now reports
+    // a newly committed pin while this conversation is open.
+    act(() => {
+      h.wsHandler({
+        type: 'prompt_pin_state',
+        conversation_id: 'conv-live-pin',
+        prompt_library: { prompt_id: 'p1', version_id: 'v1' },
+        prompt_library_pin_revision: 1,
+      })
+    })
+
+    expect(result.current.conversationTeamPin).toEqual({
+      promptId: 'p1',
+      versionId: 'v1',
+    })
+
+    h.promptLibraryFeature = false
+    rerender()
+
+    let sent
+    act(() => {
+      sent = result.current.sendChatMessage('continue')
+    })
+
+    expect(sent).toBe(false)
+    expect(chatFrames()).toHaveLength(0)
+    expect(h.toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/pinned team prompt/i),
+    )
+  })
+
   it('sends a pinned version id when one was chosen', () => {
     h.activeKey = libraryPromptKey('p1', 'v1')
     const { result } = renderChat()
