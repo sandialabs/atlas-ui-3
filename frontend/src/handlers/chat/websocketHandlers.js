@@ -2,6 +2,7 @@
 
 import { isCanvasTool } from '../../constants/atlasTools'
 import { isOpenLegacyRow, isSleepTool, toolStatusFromEvent } from '../../utils/executionState'
+import { interruptedRunNotice } from '../../utils/interruptedRunNotice'
 
 function withIdentity(message, data) {
   const next = { ...message }
@@ -256,6 +257,39 @@ export function cleanupStreamState() {
  * @param {Function} [deps.onContextCompaction] - Receives `context_compaction` progress frames (issue #877).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
  */
+// Runs that need no interruption notice: one already shown, and one seen to
+// finish. A run that completed and is then fenced while its final snapshot is
+// written (issue #1128) delivered its answer and saved it. Module level because
+// the handler is rebuilt on re-render, between the two frames.
+const announcedRuns = new Set()
+const MAX_ANNOUNCED_RUNS = 500
+
+// The newest live run of each conversation, so a late fence frame for an older
+// run does not clear the indicators of a newer one.
+const liveRunByConversation = new Map()
+
+export function resetInterruptedRunNotices() {
+  announcedRuns.clear()
+  liveRunByConversation.clear()
+}
+
+function noteLiveRun(type, run) {
+  if (!run?.conversation_id || !run.run_id) return
+  const live = type === 'run_started' || (run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled')
+  if (!live) {
+    // An ended run is no longer the conversation's current one.
+    if (liveRunByConversation.get(run.conversation_id) === run.run_id) liveRunByConversation.delete(run.conversation_id)
+    return
+  }
+  if (liveRunByConversation.size >= MAX_ANNOUNCED_RUNS) liveRunByConversation.clear()
+  liveRunByConversation.set(run.conversation_id, run.run_id)
+}
+
+function settleRun(runId) {
+  if (announcedRuns.size >= MAX_ANNOUNCED_RUNS) announcedRuns.clear()
+  announcedRuns.add(runId)
+}
+
 export function createWebSocketHandler(deps) {
   const {
     addMessage,
@@ -287,6 +321,30 @@ export function createWebSocketHandler(deps) {
     onContextUsage,
     onContextCompaction,
   } = deps
+
+  // A run the server ended without the user stopping it (issue #1218).
+  function announceInterruptedRun(run) {
+    const notice = interruptedRunNotice(run)
+    // A completed run saved its turn before reporting. Any other ending (stop,
+    // model failure, shutdown) reports before it commits, so only the run's
+    // own `conversation_saved` frame settles it; a fence arriving after that
+    // must not claim the turn was lost.
+    if (run && run.status === 'completed') settleRun(run.run_id)
+    if (!notice || announcedRuns.has(run.run_id)) return
+    // A conversation that is not on screen shows it through the history list
+    // indicator instead; a notice here would land in the wrong chat.
+    if (typeof getVisibleConversationId === 'function' && run.conversation_id !== getVisibleConversationId()) return
+    settleRun(run.run_id)
+    // Only the conversation's current run owns the busy indicators: a newer
+    // run may be executing, and its Stop button must stay.
+    const current = liveRunByConversation.get(run.conversation_id)
+    if (!current || current === run.run_id) {
+      setIsThinking(false)
+      clearAgentRunning()
+      if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
+    }
+    addMessage({ role: 'system', content: notice, type: 'warning', timestamp: new Date().toISOString() })
+  }
 
   // Clear the agent-run-in-flight flag on any terminal agent event. Optional so
   // existing handler tests that don't inject the setter keep working.
@@ -621,6 +679,23 @@ export function createWebSocketHandler(deps) {
       // history list, including for conversations that are not on screen.
       if (data.type === 'run_started' || data.type === 'run_status' || data.type === 'runs_snapshot') {
         if (typeof onRunStatus === 'function') onRunStatus(data)
+        // Live status frames only, not a snapshot of runs that ended earlier.
+        if (data.type === 'run_started') noteLiveRun('run_started', data)
+        // A snapshot after a reconnect replaces what this tab knew about live runs.
+        if (data.type === 'runs_snapshot') {
+          liveRunByConversation.clear()
+          for (const snapshotRun of data.runs || []) {
+            noteLiveRun('runs_snapshot', snapshotRun)
+            // A run already over when the snapshot was taken may or may not have
+            // saved, and nothing here can tell. A missing notice is better than
+            // a false "not saved, send again", so a later fence for it is silent.
+            if (['completed', 'failed', 'cancelled'].includes(snapshotRun?.status)) settleRun(snapshotRun.run_id)
+          }
+        }
+        if (data.type === 'run_status') {
+          announceInterruptedRun(data.run)
+          noteLiveRun('run_status', data.run)
+        }
         // A new chat has no conversation id until the turn is saved, so the
         // server mints one when it admits the run and reports it here. Adopting
         // it now is what lets the routing below recognise this run's own events
@@ -660,6 +735,20 @@ export function createWebSocketHandler(deps) {
       // user may have switched conversations while it timed out, and the
       // repeat is still owed.
       if (data.type === 'error' && typeof retrySteer === 'function' && retrySteer(data)) return
+
+      // A save seen off-screen still settles its run (issue #1218): switching
+      // back before a later fence must not show the turn as lost.
+      if (data.type === 'conversation_saved') {
+        // A save that rebinds the thread to a new conversation id is untagged
+        // (the client must adopt the id) and names its run separately.
+        const savedRunId = data.run_id || data.saved_run_id
+        if (savedRunId) {
+          settleRun(savedRunId)
+          if (!data.run_id && typeof onRunStatus === 'function') {
+            onRunStatus({ type: 'run_saved', run_id: savedRunId, conversation_id: data.saved_from_conversation_id })
+          }
+        }
+      }
 
       if (data.run_id && data.conversation_id && typeof getVisibleConversationId === 'function') {
         const visible = getVisibleConversationId()
@@ -860,6 +949,9 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'conversation_saved': {
+          if (data.run_id && typeof onRunStatus === 'function') {
+            onRunStatus({ type: 'run_saved', run_id: data.run_id, conversation_id: data.conversation_id })
+          }
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)
           }
