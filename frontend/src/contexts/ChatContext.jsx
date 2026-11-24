@@ -90,11 +90,22 @@ const fetchConversationRecord = async (id, { signal } = {}) => {
 
 // How many user and assistant turns a stored record holds. A run's save grows
 // it; the tool rows another replica projects into a live record do not count.
-const savedChatCount = (record) => (
+const savedChatTurns = (record) => (
 	(Array.isArray(record?.messages) ? record.messages : [])
 		.filter(m => (m.role === 'user' || m.role === 'assistant') && (m.message_type || 'chat') === 'chat')
-		.length
 )
+// What a stored record looked like before a run's save: its turn count and the
+// last turn's identity. A run's save changes either (an edit-and-resubmit can
+// shorten the conversation, so growth alone is not the test).
+const savedChatMark = (record) => {
+	const turns = savedChatTurns(record)
+	const last = turns[turns.length - 1]
+	return { count: turns.length, lastTimestamp: last?.timestamp ?? null, lastContent: last?.content ?? null }
+}
+const savedChatChanged = (record, mark) => {
+	const now = savedChatMark(record)
+	return now.count !== mark.count || now.lastTimestamp !== mark.lastTimestamp || now.lastContent !== mark.lastContent
+}
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
 // model's tool output. The renderer's own flags all start with an underscore
@@ -1905,7 +1916,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				fetchConversationRecord(id).then(data => {
 					// Only a response that still reports the run live predates its save.
 					if (remoteWatchRef.current === id && data?.id === id && data.run_elsewhere === true) {
-						remoteBaselineRef.current = savedChatCount(data)
+						remoteBaselineRef.current = savedChatMark(data)
 					}
 				}).catch(() => {})
 			}
@@ -1985,7 +1996,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					}
 					// The record must hold the run's own save. One that still has only
 					// the turns from before the run is the store lagging the end.
-					if (baseline != null && savedChatCount(data) <= baseline) {
+					if (baseline != null && !savedChatChanged(data, baseline)) {
 						throw new Error('record predates the run save')
 					}
 					// This is now the newest read: an older reconnect read still in

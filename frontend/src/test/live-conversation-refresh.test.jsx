@@ -1550,6 +1550,37 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     }
   })
 
+  it('accepts a final record that is shorter than before (edit and resubmit)', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const before = [storedChat('user', 'a'), storedChat('assistant', 'b'),
+        storedChat('user', 'c'), storedChat('assistant', 'd')]
+      h.fetchMock.mockImplementation(async () => ({
+        ok: true, json: async () => ({ id: 'conv-1', run_elsewhere: true, run_id: 'run-1', messages: before }),
+      }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: before })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      const edited = [storedChat('user', 'a'), storedChat('assistant', 'edited answer')]
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', messages: edited }) }))
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(result.current.messages.at(-1).content).toBe('edited answer')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for a stopped run to save before reading the record', async () => {
     vi.useFakeTimers()
     try {
