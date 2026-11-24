@@ -90,7 +90,7 @@ class TestRequiresApproval:
         config_manager = Mock()
         config_manager.tool_approvals_config = None
 
-        # Should not raise; an unreadable policy fails closed (admin-mandated)
+        # Should not raise, an unreadable policy fails closed (admin-mandated)
         needs_approval, allow_edit, admin_required = requires_approval("test_tool", config_manager)
 
         assert needs_approval is True

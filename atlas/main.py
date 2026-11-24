@@ -2836,6 +2836,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 chat_task = None
                 started = False
                 try:
+                    # Announce the run before its task can emit anything.
+                    # The task's first frames are tagged with the run's
+                    # conversation id, and a client that has not yet
+                    # adopted that id (a new chat has none) would file them
+                    # as background activity and drop them from the
+                    # transcript it is showing.
+                    # Sent before the seeding below, which awaits the session
+                    # store: the registry has already scheduled this run's
+                    # `queued` status frame, and a yield here (a Redis-backed
+                    # store always yields) would let it reach the client ahead
+                    # of `run_started` (#1216). The task still starts only
+                    # after seeding, so its first frames see the files.
+                    await websocket.send_json({
+                        "type": "run_started",
+                        "run_id": run_record.run_id,
+                        "conversation_id": run_record.conversation_id,
+                        "title": run_record.title,
+                        # Lets the client tell a model-launched child
+                        # (atlas_launch_subagent) from a run the user started --
+                        # auto-approve is scoped to the latter -- and place
+                        # it under its parent in the history tree
+                        # (issue #1081) before either conversation is saved.
+                        "parent_run_id": run_record.parent_run_id,
+                        "parent_conversation_id": run_record.parent_conversation_id,
+                        "connection_bound": run_record.connection_bound,
+                    })
                     # Files attached via `attach_file` land on the
                     # *connection* session's context, which the run's fresh
                     # session cannot see -- the tool that needs them would
@@ -2851,26 +2877,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         user_email,
                         conversation_id=run_record.conversation_id,
                     )
-                    # Announce the run before its task can emit anything.
-                    # The task's first frames are tagged with the run's
-                    # conversation id, and a client that has not yet
-                    # adopted that id (a new chat has none) would file them
-                    # as background activity and drop them from the
-                    # transcript it is showing.
-                    await websocket.send_json({
-                        "type": "run_started",
-                        "run_id": run_record.run_id,
-                        "conversation_id": run_record.conversation_id,
-                        "title": run_record.title,
-                        # Lets the client tell a model-launched child
-                        # (atlas_launch_subagent) from a run the user started --
-                        # auto-approve is scoped to the latter -- and place
-                        # it under its parent in the history tree
-                        # (issue #1081) before either conversation is saved.
-                        "parent_run_id": run_record.parent_run_id,
-                        "parent_conversation_id": run_record.parent_conversation_id,
-                        "connection_bound": run_record.connection_bound,
-                    })
                     chat_task = asyncio.create_task(handle_chat_guarded())
                     if run_record.connection_bound:
                         work.track(chat_task)

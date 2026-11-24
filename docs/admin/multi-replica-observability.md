@@ -157,6 +157,7 @@ statuses, counts and exception class names, never user identity or content.
 | `run_rejected` | WARNING | Admission refused (`reason`) |
 | `run_finished` | INFO / WARNING if failed | Terminal (`status`, `outcome`, `reason`, `duration_s`, `detached`) |
 | `run_interrupted` | WARNING | Terminal because the replica went away (`reason=replica_shutdown`) |
+| `idempotency_reservation_lost` | ERROR | An Agent Runs API request lost its idempotency reservation while admitting and was aborted, nothing launched (`reason`: `taken` or `expired`) |
 | `replica_shutdown` | INFO / WARNING if runs were interrupted | Shutdown began (`interrupted_runs`) |
 | `dependency_down` | ERROR | First failure of an outage (`dependency`, `op`, `error`) |
 | `dependency_still_down` | ERROR | At most every 30 s while it stays down (`failures`, `down_for_s`) |

@@ -20,7 +20,9 @@ an external caller *is*:
   user started in the browser is not addressable here, even by its id.
 
 State lives in the process-local run registry, exactly like the runs it
-mirrors: status and follow-up are available for the registry's retention
+mirrors (idempotency reservations are the exception: with Redis run
+coordination they are cluster-wide, see ``idempotency.py``): status and
+follow-up are available for the registry's retention
 window (about 30 minutes after a run ends) on the replica that accepted the
 launch, and do not survive a restart. The transcript itself is persisted to
 the user's conversation history like any other run.
@@ -28,16 +30,27 @@ the user's conversation history like any other run.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import functools
 import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional, Set, Tuple
 from uuid import uuid4
 
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
 from atlas.application.chat.runs.follow_up import _revalidate_saved_workspace
+from atlas.application.chat.runs.idempotency import (
+    IDEMPOTENCY_COMPLETE_RETRY_SECONDS,
+    IDEMPOTENCY_PENDING_TTL_SECONDS,
+    IDEMPOTENCY_RENEW_INTERVAL_SECONDS,
+    IdempotencyEntry,
+    IdempotencySlot,
+    InProcessIdempotencyStore,
+    get_idempotency_store,
+)
 from atlas.application.chat.runs.launcher import (
     MAX_PROMPT_CHARS,
     LaunchRefused,
@@ -47,10 +60,10 @@ from atlas.application.chat.runs.launcher import (
     resolve_model,
     resolve_workspace,
 )
-from atlas.application.chat.runs.leases import publish_run_now
+from atlas.application.chat.runs.leases import get_lease_guard, publish_run_now
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry
+from atlas.core.coordination_metrics import CoordinationEvent, coordination_metrics
 from atlas.core.log_sanitizer import sanitize_for_logging
-from atlas.core.user_identity import normalize_user_email
 from atlas.domain.conversation_origin import ORIGIN_AGENT_RUNS_API
 
 __all__ = [
@@ -71,12 +84,6 @@ logger = logging.getLogger(__name__)
 API_SOURCE = ORIGIN_AGENT_RUNS_API
 API_ACTOR = "service"
 
-# Idempotency keys outlive the run record on purpose: a retry that arrives
-# after the run was reaped must still not launch the work a second time.
-IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
-MAX_IDEMPOTENCY_ENTRIES = 10000
-
-
 def agent_runs_api_enabled(app_settings: Any) -> bool:
     """Whether the API is switched on, with the ground a background run needs."""
     if app_settings is None:
@@ -93,22 +100,11 @@ def agent_runs_api_enabled(app_settings: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _IdempotencyEntry:
-    fingerprint: str
-    created_at: float
-    handle: Optional[Dict[str, Any]] = None  # None while the first request is admitting
-    # A follow-up's addressed run and conversation, so a retry can still be
-    # replayed after that run has been reaped from the registry.
-    addressed_run_id: Optional[str] = None
-    conversation_id: Optional[str] = None
-
-
-_idempotency: Dict[Tuple[str, str], _IdempotencyEntry] = {}
-
-
 def reset_idempotency_cache() -> None:
-    _idempotency.clear()
+    """Forget every in-process reservation (tests). A shared store is untouched."""
+    store = get_idempotency_store()
+    if isinstance(store, InProcessIdempotencyStore):
+        store.clear()
 
 
 def _fingerprint(payload: Dict[str, Any]) -> str:
@@ -117,22 +113,7 @@ def _fingerprint(payload: Dict[str, Any]) -> str:
     ).hexdigest()
 
 
-def _prune_idempotency(now: float) -> None:
-    expired = [
-        key
-        for key, entry in _idempotency.items()
-        if now - entry.created_at > IDEMPOTENCY_TTL_SECONDS
-    ]
-    for key in expired:
-        del _idempotency[key]
-    if len(_idempotency) > MAX_IDEMPOTENCY_ENTRIES:
-        oldest = sorted(_idempotency.items(), key=lambda item: item[1].created_at)
-        for key, entry in oldest[: len(_idempotency) - MAX_IDEMPOTENCY_ENTRIES]:
-            if entry.handle is not None:
-                del _idempotency[key]
-
-
-def _replay_or_refuse(entry: _IdempotencyEntry, fingerprint: str) -> Dict[str, Any]:
+async def _replay_or_refuse(entry: IdempotencyEntry, fingerprint: str) -> Dict[str, Any]:
     if entry.fingerprint != fingerprint:
         raise LaunchRefused(
             "This idempotency_key was already used for a different request.",
@@ -144,36 +125,40 @@ def _replay_or_refuse(entry: _IdempotencyEntry, fingerprint: str) -> Dict[str, A
             "Retry shortly.",
             code="idempotency_in_progress",
         )
-    return _replayed(entry.handle)
+    return await _replayed(entry.handle)
 
 
-def _reserve(
+async def _reserve(
     user_email: str,
     key: Optional[str],
     payload: Dict[str, Any],
     addressed_run_id: Optional[str] = None,
-) -> Tuple[Optional[Tuple[str, str]], Optional[Dict[str, Any]]]:
+) -> Tuple[Optional[IdempotencySlot], Optional[Dict[str, Any]]]:
     """Claim ``key`` for this request, or return the handle it already produced.
 
-    Synchronous on purpose: the reservation is made before the first await of
-    admission, so two concurrent requests with one key cannot both launch.
+    The store reserves atomically (in process before the first await of
+    admission; in Redis with one script), so two concurrent requests with one
+    key cannot both launch, on one replica or on two. With a shared store
+    that cannot be reached a keyed request is refused (``unavailable``).
     """
     if not key:
         return None, None
-    now = time.time()
-    _prune_idempotency(now)
-    slot = (normalize_user_email(user_email), key)
     fingerprint = _fingerprint(payload)
-    entry = _idempotency.get(slot)
-    if entry is not None:
-        return slot, _replay_or_refuse(entry, fingerprint)
-    _idempotency[slot] = _IdempotencyEntry(
-        fingerprint=fingerprint,
-        created_at=now,
-        addressed_run_id=addressed_run_id,
-        conversation_id=payload.get("conversation_id"),
-    )
-    return slot, None
+    # Taken before the reserve call: the store's expiry clock starts inside it.
+    started = time.monotonic()
+    try:
+        slot, existing = await get_idempotency_store().reserve(
+            user_email,
+            key,
+            fingerprint,
+            addressed_run_id=addressed_run_id,
+            conversation_id=payload.get("conversation_id"),
+        )
+    except RunCoordinationUnavailableError as exc:
+        raise LaunchRefused(str(exc), code="unavailable") from exc
+    if existing is not None:
+        return None, await _replay_or_refuse(existing, fingerprint)
+    return dataclasses.replace(slot, reserved_at=started), None
 
 
 def _follow_up_payload(
@@ -187,48 +172,251 @@ def _follow_up_payload(
     }
 
 
-def _replay_follow_up_of_reaped_run(
+async def _replay_follow_up_of_reaped_run(
     config_manager: Any,
     run_id: str,
     key: Optional[str],
     message: str,
     allow_approval_pause: bool,
 ) -> Optional[Dict[str, Any]]:
-    """The remembered reply to a follow-up whose addressed run is gone.
+    """The remembered reply to a follow-up whose addressed run is not here.
 
-    The slot is keyed by the run's owner, which can no longer be read from a
-    reaped run, so the entry is found by the run id it addressed instead.
+    The run was reaped, or another replica holds it. The slot is keyed by the
+    run's owner, which can no longer be read from the registry, so the entry
+    is found by the run id it addressed instead.
     """
     if not key:
         return None
-    _prune_idempotency(time.time())
-    for (owner, entry_key), entry in _idempotency.items():
-        if entry_key == key and entry.addressed_run_id == run_id:
-            _check_user_allowed(config_manager, owner)
-            fingerprint = _fingerprint(
-                _follow_up_payload(entry.conversation_id, message, allow_approval_pause)
-            )
-            return _replay_or_refuse(entry, fingerprint)
-    return None
+    try:
+        found = await get_idempotency_store().find_follow_up(
+            run_id, key, *await _shared_conversation(run_id)
+        )
+    except RunCoordinationUnavailableError as exc:
+        raise LaunchRefused(str(exc), code="unavailable") from exc
+    if found is None:
+        return None
+    owner, entry = found
+    _check_user_allowed(config_manager, owner)
+    fingerprint = _fingerprint(
+        _follow_up_payload(entry.conversation_id, message, allow_approval_pause)
+    )
+    return await _replay_or_refuse(entry, fingerprint)
 
 
-def _replayed(handle: Dict[str, Any]) -> Dict[str, Any]:
-    record = get_run_registry().get(handle["run_id"])
+async def _replayed(handle: Dict[str, Any]) -> Dict[str, Any]:
+    """The stored handle with the run's current status.
+
+    The owner replica reads its registry. Another replica reads the shared run
+    record; a read failure keeps the status the handle was stored with, since
+    the replay's job is to name the original run.
+    """
     replay = dict(handle)
-    replay["status"] = record.status.value if record is not None else "expired"
+    record = get_run_registry().get(handle["run_id"])
+    if record is not None:
+        replay["status"] = record.status.value
+    else:
+        replay["status"] = await _shared_status(handle) or (
+            "expired" if get_lease_guard() is None else replay.get("status", "expired")
+        )
     replay["idempotent_replay"] = True
     return replay
 
 
-def _release(slot: Optional[Tuple[str, str]], handle: Optional[Dict[str, Any]]) -> None:
-    if slot is None:
-        return
-    if handle is None:
-        _idempotency.pop(slot, None)
-    else:
-        entry = _idempotency.get(slot)
-        if entry is not None:
-            entry.handle = dict(handle)
+async def _shared_conversation(run_id: str) -> Tuple[Optional[str], Optional[str]]:
+    """``(conversation_id, user)`` of an API run another replica holds, from its
+    shared record, so a follow-up retry naming a sibling run id still replays.
+
+    An unreadable record is not "no such run": a client that gives up on a 404
+    would relaunch work that already exists, so it is refused as unavailable.
+    """
+    guard = get_lease_guard()
+    if guard is None:
+        return None, None
+    try:
+        doc = await guard.read_record(run_id)
+    except Exception as exc:
+        logger.warning("shared run record unreadable on replay: %s", type(exc).__name__)
+        raise LaunchRefused(
+            "The run's record could not be read right now. Try again.", code="unavailable"
+        ) from exc
+    if not doc or doc.get("source") != API_SOURCE:
+        return None, None
+    return doc.get("conversation_id") or None, doc.get("user_email") or None
+
+
+async def _shared_status(handle: Dict[str, Any]) -> Optional[str]:
+    guard = get_lease_guard()
+    if guard is None:
+        return None
+    try:
+        doc = await guard.read_record(handle["run_id"])
+    except Exception as exc:
+        logger.warning("shared run record unreadable on replay: %s", type(exc).__name__)
+        return None
+    if doc is None:
+        return "expired"
+    return doc.get("status") or None
+
+
+class _Hold:
+    """Keeps a pending reservation alive while its request admits a run.
+
+    If the reservation is lost (another request holds the key, or Redis stayed
+    unreachable for as long as the pending TTL), the request is cancelled
+    before it admits a run, so an expired reservation cannot lead to a second
+    run for the same key.
+    """
+
+    def __init__(self, slot: IdempotencySlot):
+        self.slot = slot
+        self.lost = False
+        # Set once the request stops admitting and writes its outcome: the
+        # reservation stays protected through that write, but a loss then
+        # must not cancel a request that is already finishing.
+        self.writing = False
+        self._request = asyncio.current_task()
+        self._task = asyncio.ensure_future(self._run())
+
+    async def _run(self) -> None:
+        store = get_idempotency_store()
+        # The reservation is only good until its last extension plus the
+        # pending TTL, however long a renewal takes to answer. ``last_ok`` is
+        # taken before the call, so the deadline is never later than the
+        # store's own.
+        last_ok = self.slot.reserved_at or time.monotonic()
+        while True:
+            deadline = last_ok + IDEMPOTENCY_PENDING_TTL_SECONDS
+            await asyncio.sleep(max(0.0, min(IDEMPOTENCY_RENEW_INTERVAL_SECONDS, deadline - time.monotonic())))
+            attempt = time.monotonic()
+            remaining = deadline - attempt
+            extended: Optional[bool] = None
+            if remaining > 0:
+                try:
+                    extended = await asyncio.wait_for(store.renew(self.slot), timeout=remaining)
+                except asyncio.TimeoutError:
+                    extended = None
+            if extended:
+                last_ok = attempt
+            elif extended is False or time.monotonic() >= deadline:
+                logger.error("An idempotency reservation was lost while its request was admitting")
+                coordination_metrics().record_event(
+                    CoordinationEvent.IDEMPOTENCY_RESERVATION_LOST,
+                    logging.ERROR,
+                    reason="taken" if extended is False else "expired",
+                )
+                self.lost = True
+                if self._request is not None and not self.writing:
+                    self._request.cancel()
+                return
+
+    async def stop(self) -> None:
+        self._task.cancel()
+        await asyncio.gather(self._task, return_exceptions=True)
+
+
+def _hold(slot: Optional[IdempotencySlot]) -> Optional[_Hold]:
+    return _Hold(slot) if slot is not None else None
+
+
+def _after_cancel(holder: Optional[_Hold], handle: Optional[Dict[str, Any]]) -> NoReturn:
+    """Resolve a cancellation that came from a lost reservation.
+
+    Before a run exists the request is refused (nothing launched, nothing to
+    undo). A run that was admitted just before the loss is cancelled, so the
+    key's lapse cannot leave one run running and a retry free to start a
+    second. Any other cancellation (the client went away) propagates.
+    """
+    if holder is None or not holder.lost:
+        raise asyncio.CancelledError()
+    task = asyncio.current_task()
+    if task is not None:
+        task.uncancel()
+    if handle is not None:
+        get_run_registry().cancel(handle["run_id"], handle["user"])
+    raise LaunchRefused(
+        "The idempotency reservation for this request was lost before the run "
+        "was admitted, so nothing was launched. Retry shortly.",
+        code="unavailable",
+    )
+
+
+_KEY_TAKEN_MESSAGE = (
+    "The idempotency reservation for this request was taken over before the run "
+    "was recorded, so it was cancelled. Retry shortly."
+)
+
+
+def _abandon_run(handle: Dict[str, Any], reason: str = "taken") -> None:
+    """Cancel an admitted run whose idempotency key can no longer be recorded
+    (taken over, or the store stayed unwritable), so no live run is left that a
+    retry of the same request could duplicate."""
+    logger.error("An idempotency key could not be recorded for its run (%s)", reason)
+    coordination_metrics().record_event(
+        CoordinationEvent.IDEMPOTENCY_RESERVATION_LOST, logging.ERROR, reason=reason
+    )
+    get_run_registry().cancel(handle["run_id"], handle["user"])
+
+
+async def _release(
+    slot: Optional[IdempotencySlot],
+    handle: Optional[Dict[str, Any]],
+    holder: Optional[_Hold] = None,
+) -> None:
+    try:
+        if holder is not None:
+            holder.writing = True  # keep renewing until the outcome is written
+        if slot is None:
+            return
+        store = get_idempotency_store()
+        if handle is None:
+            await store.release(slot)
+        else:
+            stored = await store.complete(slot, handle)
+            if stored is None:
+                # The key is another request's: this run must not be handed
+                # out as the key's run, or a retry would replay the other one.
+                _abandon_run(handle)
+                raise LaunchRefused(_KEY_TAKEN_MESSAGE, code="unavailable")
+            if not stored:
+                _complete_later(slot, handle)
+    finally:
+        if holder is not None:
+            await holder.stop()
+
+
+# Strong references: asyncio keeps only weak ones to running tasks.
+_deferred_completions: Set["asyncio.Task[None]"] = set()
+
+
+def _complete_later(slot: IdempotencySlot, handle: Dict[str, Any]) -> None:
+    """Keep retrying to record the run handle after a failed write.
+
+    The run was admitted, but its record is still pending in the store; if it
+    were left to lapse, a client retry would launch the run a second time.
+    """
+    task = asyncio.ensure_future(_retry_complete(slot, handle))
+    _deferred_completions.add(task)
+    task.add_done_callback(_deferred_completions.discard)
+
+
+async def _retry_complete(slot: IdempotencySlot, handle: Dict[str, Any]) -> None:
+    store = get_idempotency_store()
+    deadline = time.monotonic() + IDEMPOTENCY_PENDING_TTL_SECONDS
+    while time.monotonic() < deadline:
+        await asyncio.sleep(IDEMPOTENCY_COMPLETE_RETRY_SECONDS)
+        # A renewal that finds the key gone does not end the attempt: a key
+        # that merely expired is re-taken by ``complete``; one that is another
+        # request's makes ``complete`` answer taken.
+        await store.renew(slot)
+        stored = await store.complete(slot, handle)
+        if stored:
+            return
+        if stored is None:
+            _abandon_run(handle)
+            return
+    # Still unwritable: do not leave a live, unrecorded run that a retry of the
+    # same request could duplicate.
+    _abandon_run(handle, "unrecorded")
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +547,7 @@ async def launch_api_run(
     if not workspace or not model:
         raise LaunchRefused("'workspace' and 'model' are required.", code="invalid_request")
 
-    slot, replay = _reserve(
+    slot, replay = await _reserve(
         user_email,
         idempotency_key,
         {
@@ -374,6 +562,7 @@ async def launch_api_run(
     if replay is not None:
         return replay
     handle: Optional[Dict[str, Any]] = None
+    holder = _hold(slot)
     try:
         resolved = resolve_workspace(factory.workspace_repository, workspace, user_email)
         await _resolve_api_model(config_manager, model, user_email)
@@ -412,8 +601,13 @@ async def launch_api_run(
         # Before the 202: a poll that lands on another replica must find it.
         await publish_run_now(record.run_id)
         return handle
+    except asyncio.CancelledError:
+        admitted = handle
+        if holder is not None and holder.lost:
+            handle = None  # the key is lost: record nothing, release it
+        _after_cancel(holder, admitted)
     finally:
-        _release(slot, handle)
+        await _release(slot, handle, holder)
 
 
 async def _resolve_api_model(config_manager: Any, model: str, user_email: str) -> None:
@@ -626,7 +820,7 @@ async def follow_up_api_run(
     try:
         addressed = _api_record(run_id)
     except LaunchRefused:
-        replay = _replay_follow_up_of_reaped_run(
+        replay = await _replay_follow_up_of_reaped_run(
             config_manager, run_id, idempotency_key, message, allow_approval_pause
         )
         if replay is not None:
@@ -635,7 +829,7 @@ async def follow_up_api_run(
     user_email = addressed.user_email
     _check_user_allowed(config_manager, user_email)
 
-    slot, replay = _reserve(
+    slot, replay = await _reserve(
         user_email,
         idempotency_key,
         _follow_up_payload(addressed.conversation_id, message, allow_approval_pause),
@@ -644,6 +838,7 @@ async def follow_up_api_run(
     if replay is not None:
         return replay
     handle: Optional[Dict[str, Any]] = None
+    holder = _hold(slot)
     try:
         siblings = _api_runs_for_conversation(addressed)
         # Continue from the newest run, whichever id was passed: it carries
@@ -714,8 +909,13 @@ async def follow_up_api_run(
         _audit("follow_up", record, new_spec, previous_run=target.run_id)
         await publish_run_now(record.run_id)
         return handle
+    except asyncio.CancelledError:
+        admitted = handle
+        if holder is not None and holder.lost:
+            handle = None  # the key is lost: record nothing, release it
+        _after_cancel(holder, admitted)
     finally:
-        _release(slot, handle)
+        await _release(slot, handle, holder)
 
 
 def cancel_api_run(run_id: str) -> Dict[str, Any]:

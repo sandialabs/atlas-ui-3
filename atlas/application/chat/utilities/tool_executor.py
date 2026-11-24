@@ -197,6 +197,11 @@ def requires_approval(tool_name: str, config_manager) -> tuple[bool, bool, bool]
         - allow_edit: Whether arguments can be edited (always True)
         - admin_required: Whether this is admin-mandated (True) or user-level (False)
 
+    Note: with ``config_manager=None`` this reports a user-level requirement
+    (``admin_required=False``) for a normal turn, which has no policy to
+    consult. Code that pre-approves unattended work must use
+    ``is_admin_gated``, which treats a missing policy as gated.
+
     Admin-required (True) means user CANNOT toggle auto-approve:
         - FORCE_TOOL_APPROVAL_GLOBALLY=true
         - Per-tool require_approval=true in mcp.json
