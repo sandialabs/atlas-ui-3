@@ -42,7 +42,7 @@ AGENT_RUNS_API_KEY=...
 
 ## Endpoints
 
-A terminal run also carries `end_reason`: `completed`, `user_cancelled`, `error`, `wall_clock_limit`, or `replica_shutdown` when the replica running it shut down (status `failed`; see [Multi-Replica Observability](multi-replica-observability.md)).
+A terminal run also carries `end_reason`: `completed`, `user_cancelled`, `error`, `wall_clock_limit`, `replica_shutdown` when the replica running it shut down, `owner_lost` when the owning replica lost its lease, or `fenced` when execution was interrupted by fencing (see [Multi-Replica Observability](multi-replica-observability.md)).
 
 All requests carry `Authorization: Bearer <AGENT_RUNS_API_KEY>`. The full schema is in the
 server's OpenAPI document (`/openapi.json`, browsable at `/docs`) under the `agent-runs` tag.

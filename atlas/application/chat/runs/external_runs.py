@@ -683,11 +683,20 @@ def _shared_unavailable() -> LaunchRefused:
     return LaunchRefused("The API run record could not be read right now. Try again.", code="unavailable")
 
 
+def _note_shared_api_read_failure(exc: Exception, op: str) -> None:
+    logger.warning("Shared API run read failed (%s): %s", op, type(exc).__name__)
+    try:
+        coordination_metrics().dependency_failed("redis", exc, op=op)
+    except Exception:
+        logger.debug("Recording shared API run read failure failed", exc_info=True)
+
+
 async def _shared_api_record(coordinator: Any, run_id: str) -> Optional[Dict[str, Any]]:
     try:
         raw = await coordinator.read(run_id)
         doc = shared_view(raw)
     except Exception as exc:
+        _note_shared_api_read_failure(exc, "api_run_read")
         raise _shared_unavailable() from exc
     if doc is None or doc.get("source") != API_SOURCE:
         return None
@@ -702,6 +711,7 @@ async def _shared_follow_up_target(coordinator: Any, addressed: Any) -> Any:
         doc = shared_view(raw)
         spec = json.loads(raw["api_spec"]) if raw else None
     except Exception as exc:
+        _note_shared_api_read_failure(exc, "api_continuation_read")
         raise _shared_unavailable() from exc
     if (
         not doc or doc.get("snapshot_unreadable")
@@ -717,12 +727,24 @@ async def _shared_follow_up_target(coordinator: Any, addressed: Any) -> Any:
         raise _shared_unavailable()
     status = doc.get("status")
     if status == RunStatus.WAITING_FOR_INPUT.value:
-        raise LaunchRefused("The conversation is waiting for the user in ATLAS.", code="waiting_for_input")
+        raise LaunchRefused(
+            "The conversation is waiting for the user "
+            f"({doc.get('waiting_on') or 'input'}) and cannot take a follow-up "
+            "until they answer it in ATLAS.",
+            code="waiting_for_input",
+        )
     if status not in ("completed", "failed", "cancelled"):
-        raise LaunchRefused("The conversation is still working. Wait for it to finish first.",
-                            code="conversation_busy")
+        raise LaunchRefused(
+            f"The conversation is still working (run {doc['run_id']}, status "
+            f"{status}). Wait for it to finish first.",
+            code="conversation_busy",
+        )
     if status != "completed" and raw.get("api_completed_before") != "1":
-        raise LaunchRefused("That conversation never completed a turn.", code="not_continuable")
+        raise LaunchRefused(
+            "That conversation never completed a turn, so there is nothing "
+            "to follow up on. Launch a new run instead.",
+            code="not_continuable",
+        )
     return SimpleNamespace(
         run_id=doc["run_id"], conversation_id=doc["conversation_id"],
         user_email=doc["user_email"], title=doc.get("title"), launch_spec=spec,
@@ -857,20 +879,29 @@ async def list_api_runs_anywhere(user_email: Optional[str] = None) -> List[Dict[
 
     try:
         raw_records = await coordinator.read_api_runs(user_email)
-        docs = [shared_view(raw) for raw in raw_records]
         result = []
-        for doc in docs:
-            if not doc or doc.get("source") != API_SOURCE:
-                continue
-            if user_email and normalize_user_email(doc.get("user_email")) != normalize_user_email(user_email):
-                continue
-            if doc.get("snapshot_unreadable"):
-                raise _shared_unavailable()
-            result.append(_status_from_shared(doc))
+        for raw in raw_records:
+            try:
+                doc = shared_view(raw)
+                if not doc or doc.get("source") != API_SOURCE:
+                    continue
+                if user_email and normalize_user_email(doc.get("user_email")) != normalize_user_email(user_email):
+                    continue
+                if doc.get("snapshot_unreadable"):
+                    logger.warning("Skipping unreadable API run snapshot in listing")
+                    continue
+                payload = _status_from_shared(doc)
+                if not isinstance(payload["created_at"], (int, float)) or not isinstance(payload["run_id"], str):
+                    logger.warning("Skipping API run record with invalid listing metadata")
+                    continue
+                result.append(payload)
+            except (TypeError, ValueError, KeyError, AttributeError):
+                logger.warning("Skipping malformed API run record in listing", exc_info=False)
         return sorted(result, key=lambda run: (run["created_at"], run["run_id"]), reverse=True)
     except LaunchRefused:
         raise
     except Exception as exc:
+        _note_shared_api_read_failure(exc, "api_run_listing")
         raise _shared_unavailable() from exc
 
 

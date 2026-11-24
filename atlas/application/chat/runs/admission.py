@@ -141,6 +141,13 @@ async def admit_run(
         if claim is not None:
             release_claim_soon(claim, "failed")
         raise
+    if claim is not None and api_continuation is not None:
+        try:
+            await coordinator.publish_api_admission(claim)
+        except BaseException:
+            registry.remove(record.run_id)
+            release_claim_soon(claim, "admission_refused")
+            raise
     record.claim = claim
     if claim is not None:
         ensure_lease_heartbeat()

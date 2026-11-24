@@ -230,7 +230,7 @@ class RunStatusModel(BaseModel):
         None,
         description=(
             "Why a terminal run ended: completed, user_cancelled, error, "
-            "wall_clock_limit or replica_shutdown (interrupted)."
+            "wall_clock_limit, replica_shutdown, owner_lost or fenced (interrupted)."
         ),
     )
     title: Optional[str] = None

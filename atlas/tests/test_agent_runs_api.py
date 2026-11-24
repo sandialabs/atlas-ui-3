@@ -1306,12 +1306,14 @@ async def test_shared_follow_up_uses_latest_restricted_spec_even_when_addressing
         run_id="first", conversation_id="conv", user_email=USER, max_runs_per_user=5,
         source=API_SOURCE, api_continuation=spec,
     )
+    await a.publish_api_admission(first)
     await a.release(first, "completed")
     second = await a.claim(
         run_id="second", conversation_id="conv", user_email=USER, max_runs_per_user=5,
         source=API_SOURCE, follow_up_of="first",
         api_continuation={**spec, "tools": ["math_add"]},
     )
+    await a.publish_api_admission(second)
     await a.release(second, "failed")
     # The previously lost tool is authorized again today; it must still not
     # be restored by naming the older run.

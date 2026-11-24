@@ -65,7 +65,10 @@ rather than a turn that bypasses the cap.
 
 If the claim's reply is lost (a timeout after Redis applied it), the
 coordinator releases whatever this replica holds under that run id before
-reporting the failure.
+reporting the failure. For API turns, CLAIM stages the continuation spec without
+publishing the API identity or retained indexes. Publication follows the local
+registry insert and checks that the original claim is still held. A refused
+publication removes the local record and attempts to undo the shared claim.
 
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket
@@ -125,7 +128,8 @@ rather than formatting keys by hand.
 | `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
-| `<p>:run-api-latest:<conversation_id>` | string | Latest API admission; compare predecessor inside CLAIM | Same retention as latest run |
+| `<p>:run-api-latest:<conversation_id>` | string | Latest accepted API admission; compare predecessor inside CLAIM, publish after the local insert | Until the last retained API run in the conversation expires |
+| `<p>:run-api-latest:<conversation_id>:retained` | sorted set | Conversation API run IDs scored by expiry; determines the latest pointer and spec lifetime | Expires with its last member |
 | `<p>:runs-api`, `<p>:runs-api-user:<user>` | sorted set | Global and per-user retained API run IDs, scored by record expiry | Prune expired scores on writes and listing; expire the index with its last member |
 | `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Removed on release; after a takeover, once the run's projection is closed |
 | `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; inbox TTL, refreshed per send |

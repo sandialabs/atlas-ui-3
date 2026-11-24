@@ -28,6 +28,7 @@ is documented in ``docs/developer/run-coordination.md``:
     died holding slots frees them within one lease.
 ``<p>:run-api-latest:<conversation_id>`` (string)
     Latest admitted API run id. Checked atomically with a follow-up claim.
+    Its ``:retained`` sorted set tracks the conversation's retention horizon.
 ``<p>:runs-api``, ``<p>:runs-api-user:<user>`` (sorted sets)
     Retained API run ids globally and per normalized user, scored by expiry.
     Expired members are pruned on writes and listing; the sets expire with
@@ -91,6 +92,24 @@ local function refresh_api_index(key, id, expiry)
   local tail = redis.call('ZREVRANGE', key, 0, 0, 'WITHSCORES')
   redis.call('PEXPIREAT', key, math.ceil(tonumber(tail[2])))
 end
+local function refresh_api_retention(p, latest, user_index, id, expiry)
+  local conv_index = latest .. ':retained'
+  refresh_api_index(p .. 'runs-api', id, expiry)
+  refresh_api_index(user_index, id, expiry)
+  refresh_api_index(conv_index, id, expiry)
+  local newest = redis.call('GET', latest)
+  if not newest then return end
+  local tail = redis.call('ZREVRANGE', conv_index, 0, 0, 'WITHSCORES')
+  local until_at = math.ceil(tonumber(tail[2]))
+  redis.call('PEXPIREAT', latest, until_at)
+  local newest_rec = p .. 'run:' .. newest
+  if redis.call('EXISTS', newest_rec) == 1 then
+    redis.call('PEXPIREAT', newest_rec, until_at)
+    refresh_api_index(p .. 'runs-api', newest, until_at)
+    refresh_api_index(user_index, newest, until_at)
+    refresh_api_index(conv_index, newest, until_at)
+  end
+end
 """
 
 # Subtree retention, shared by the scripts that end a run. ``p`` is the key
@@ -125,10 +144,8 @@ local function expire_both(p, id, ms)
   redis.call('PEXPIRE', rec, ms)
   local latest = redis.call('HGET', rec, 'api_latest_key')
   if latest then
-    refresh_api_index(p .. 'runs-api', id, now + ms)
     local user_index = redis.call('HGET', rec, 'api_user_index')
-    if user_index then refresh_api_index(user_index, id, now + ms) end
-    if redis.call('GET', latest) == id then redis.call('PEXPIRE', latest, ms) end
+    if user_index then refresh_api_retention(p, latest, user_index, id, now + ms) end
   end
   redis.call('PEXPIRE', p .. 'run-kids:' .. id, ms)
 end
@@ -213,14 +230,11 @@ redis.call('HSET', KEYS[3],
   'run_id', ARGV[1], 'conversation_id', ARGV[2], 'user_email', ARGV[3],
   'owner', ARGV[4], 'generation', generation, 'status', 'queued',
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
-  'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
+  'source', ARGV[12] == '' and ARGV[8] or '', 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
 if ARGV[12] ~= '' then
-  redis.call('HSET', KEYS[3], 'api_spec', ARGV[12], 'api_latest_key', KEYS[6],
-    'api_completed_before', completed_before, 'api_user_index', KEYS[8])
-  redis.call('SET', KEYS[6], ARGV[1], 'PX', lease + tonumber(ARGV[7]))
-  refresh_api_index(KEYS[7], ARGV[1], expires + tonumber(ARGV[7]))
-  refresh_api_index(KEYS[8], ARGV[1], expires + tonumber(ARGV[7]))
+  redis.call('HSET', KEYS[3], 'api_pending_spec', ARGV[12], 'api_pending_source', ARGV[8],
+    'api_completed_before', completed_before)
 end
 if ARGV[9] ~= '' then
   local kids = ARGV[11] .. 'run-kids:' .. ARGV[9]
@@ -229,6 +243,32 @@ if ARGV[9] ~= '' then
 end
 redis.call('ZADD', KEYS[5], expires, ARGV[1])
 return {'ok', generation, expires}
+"""
+
+# Publish only after the local registry accepted the run. Repeating the
+# operation is safe if the first reply was lost.
+# KEYS: run, conv, api-latest, api-user-index
+# ARGV: run_id, owner, generation, retention_ms, key_prefix
+PUBLISH_API_SCRIPT = _NOW + _API_INDEX + """
+if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[2]
+    or redis.call('HGET', KEYS[1], 'generation') ~= ARGV[3]
+    or redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+local expires = tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0')
+if expires <= now then return 0 end
+if redis.call('HGET', KEYS[1], 'api_spec') then
+  if redis.call('GET', KEYS[3]) == ARGV[1] then return 1 end
+  return 0
+end
+local spec = redis.call('HGET', KEYS[1], 'api_pending_spec')
+if not spec then return 0 end
+local previous = redis.call('HGET', KEYS[1], 'follow_up_of') or ''
+if (redis.call('GET', KEYS[3]) or '') ~= previous then return 0 end
+redis.call('HSET', KEYS[1], 'api_spec', spec, 'api_latest_key', KEYS[3],
+  'api_user_index', KEYS[4], 'source', redis.call('HGET', KEYS[1], 'api_pending_source'))
+redis.call('HDEL', KEYS[1], 'api_pending_spec', 'api_pending_source')
+redis.call('SET', KEYS[3], ARGV[1])
+refresh_api_retention(ARGV[5], KEYS[3], KEYS[4], ARGV[1], expires + tonumber(ARGV[4]))
+return 1
 """
 
 # KEYS: run, conv, user, live
@@ -258,6 +298,33 @@ if redis.call('ZREM', KEYS[3], ARGV[1]) == 1 then
   freed = 1
 end
 redis.call('ZREM', KEYS[4], ARGV[1])
+if generation and (redis.call('HGET', KEYS[1], 'api_pending_spec')
+    or ARGV[4] == 'admission_refused') then
+  -- A refused admission must not remain in the retained API index. If
+  -- publication ran but its reply was lost, restore the prior pointer only
+  -- while this claim still owns the published turn.
+  local latest = redis.call('HGET', KEYS[1], 'api_latest_key')
+  if latest then
+    local user_index = redis.call('HGET', KEYS[1], 'api_user_index')
+    local conv_index = latest .. ':retained'
+    redis.call('ZREM', ARGV[7] .. 'runs-api', ARGV[1])
+    redis.call('ZREM', user_index, ARGV[1])
+    redis.call('ZREM', conv_index, ARGV[1])
+    if redis.call('GET', latest) == ARGV[1] then
+      local previous = redis.call('HGET', KEYS[1], 'follow_up_of') or ''
+      local prev_rec = ARGV[7] .. 'run:' .. previous
+      local ttl = redis.call('PTTL', prev_rec)
+      if previous ~= '' and ttl > 0 then
+        redis.call('SET', latest, previous, 'PX', ttl)
+        refresh_api_retention(ARGV[7], latest, user_index, previous, now + ttl)
+      else
+        redis.call('DEL', latest)
+      end
+    end
+  end
+  redis.call('DEL', KEYS[1])
+  return freed
+end
 if generation then
   redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', 0, 'updated_at', now)
   end_run(ARGV[7], ARGV[1], tonumber(ARGV[5]), tonumber(ARGV[6]))
@@ -387,6 +454,7 @@ class RedisRunCoordinator:
         client = redis_manager.client
         self._claim = client.register_script(CLAIM_SCRIPT)
         self._release = client.register_script(RELEASE_SCRIPT)
+        self._publish_api = client.register_script(PUBLISH_API_SCRIPT)
         self._renew = client.register_script(RENEW_SCRIPT)
 
     def _unavailable(self, exc: BaseException) -> RunCoordinationUnavailableError:
@@ -465,6 +533,23 @@ class RedisRunCoordinator:
             generation=int(result[1]),
             lease_expires_at=int(result[2]) / 1000.0,
         )
+
+    async def publish_api_admission(self, claim: RunClaim) -> None:
+        """Publish the accepted API turn while its original claim is still held."""
+        for attempt in range(2):
+            try:
+                published = await self._publish_api(
+                    keys=[self.keys.run(claim.run_id), self.keys.conversation(claim.conversation_id),
+                          self.keys.api_latest(claim.conversation_id), self.keys.api_index(claim.user_email)],
+                    args=[claim.run_id, claim.owner, str(claim.generation), self._retention_ms, self._prefix],
+                )
+            except Exception as exc:
+                if attempt == 0:
+                    continue
+                raise self._unavailable(exc) from exc
+            if not int(published):
+                raise RunCoordinationUnavailableError("API admission could not be published.")
+            return
 
     async def _run_release(
         self, run_id: str, conversation_id: str, user_email: str, generation: str, status: str

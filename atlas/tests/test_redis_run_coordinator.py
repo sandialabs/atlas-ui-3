@@ -351,11 +351,13 @@ def _api_spec(tools):
 
 
 async def _api_claim(coord, run_id, previous=None, tools=None, user=USER):
-    return await coord.claim(
+    claim = await coord.claim(
         run_id=run_id, conversation_id="api-conv", user_email=user, max_runs_per_user=5,
         source="agent_runs_api", follow_up_of=previous,
         api_continuation=_api_spec(["read"] if tools is None else tools),
     )
+    await coord.publish_api_admission(claim)
+    return claim
 
 
 async def test_api_predecessor_is_checked_atomically_even_after_newer_turn_finishes(server):
@@ -439,6 +441,7 @@ async def test_api_user_index_is_scoped_normalized_and_expires_with_records(serv
         run_id="other", conversation_id="other-conv", user_email="other@example.com",
         max_runs_per_user=5, source="agent_runs_api", api_continuation=_api_spec(["read"]),
     )
+    await a.publish_api_admission(second)
     assert {r["run_id"] for r in await a.read_api_runs()} == {"first", "other"}
     assert {r["run_id"] for r in await a.read_api_runs("ALICE@example.com")} == {"first"}
     assert {r["run_id"] for r in await a.read_api_runs("other@example.com")} == {"other"}
@@ -448,3 +451,23 @@ async def test_api_user_index_is_scoped_normalized_and_expires_with_records(serv
     client = a._redis.client
     for index in (a.keys.api_index(), a.keys.api_index(USER), a.keys.api_index("other@example.com")):
         assert 9000 < await client.pttl(index) <= 10000
+
+
+
+async def test_api_latest_retention_covers_older_retained_run(server):
+    a = _coordinator(server, "a", lease_seconds=5, retention_seconds=10)
+    first = await _api_claim(a, "first")
+    await a.release(first, "completed")
+    second = await _api_claim(a, "second", previous="first")
+    # Simulate a longer-lived descendant of the older run, which refreshes
+    # the ancestor's retention independently of the newest API turn.
+    child = await a.claim(run_id="child", conversation_id="child-conv", user_email=USER,
+                          max_runs_per_user=5, parent_run_id="first")
+    await a.renew([child], {"child": "running"})
+    await a.release(second, "completed")
+    client = a._redis.client
+    first_ttl = await client.pttl(a.keys.run("first"))
+    assert first_ttl > 10000
+    assert abs(await client.pttl(a.keys.api_latest("api-conv")) - first_ttl) < 100
+    assert abs(await client.pttl(a.keys.run("second")) - first_ttl) < 100
+    assert (await a.read_api_continuation("api-conv"))["run_id"] == "second"

@@ -118,6 +118,9 @@ class RunCoordinator(Protocol):
         A refusal claims nothing.
         """
 
+    async def publish_api_admission(self, claim: RunClaim) -> None:
+        """Publish API continuation metadata after local admission succeeds."""
+
     async def release(self, claim: RunClaim, status: str) -> bool:
         """Free the claim, recording the run's final ``status``.
 

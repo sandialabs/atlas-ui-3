@@ -18,3 +18,26 @@ def test_shared_projection_preserves_terminal_reason(status, reason):
     registry.set_status(record.run_id, status, reason=reason)
     shared = _status_from_shared(run_snapshot(record))
     assert shared["end_reason"] == _status(record)["end_reason"] == reason
+
+
+
+@pytest.mark.asyncio
+async def test_shared_listing_skips_unreadable_snapshot(monkeypatch, caplog):
+    from atlas.application.chat.runs import external_runs
+
+    def raw(run_id, snapshot):
+        return {
+            "run_id": run_id, "conversation_id": "conv",
+            "user_email": "owner@example.com", "source": external_runs.API_SOURCE,
+            "status": "completed", "created_at": "1000", "snapshot": snapshot,
+        }
+
+    class Coordinator:
+        async def read_api_runs(self, user_email):
+            return [raw("good", "{}"), raw("bad", "{"), raw("malformed", '{"created_at": "bad"}')]
+
+    monkeypatch.setattr(external_runs, "get_run_coordinator", lambda: Coordinator())
+    records = await external_runs.list_api_runs_anywhere("owner@example.com")
+    assert [record["run_id"] for record in records] == ["good"]
+    assert "Skipping unreadable API run snapshot" in caplog.text
+    assert "Skipping API run record with invalid listing metadata" in caplog.text

@@ -408,3 +408,53 @@ async def test_shutdown_keeps_the_claim_of_a_run_that_will_not_stop(coord):
 
 async def test_in_process_coordinator_has_no_shared_record():
     assert await InProcessRunCoordinator().read("anything") is None
+
+
+
+async def test_refused_api_admission_does_not_publish_continuation(coord):
+    spec = {"source": "agent_runs_api", "tools": ["read"]}
+    first = await admit_run(conversation_id="c1", user_email=USER,
+                            source="agent_runs_api", api_continuation=spec)
+    get_run_registry().set_status(first.run_id, RunStatus.COMPLETED)
+    await drain_pending_releases()
+    calls = 0
+
+    def precheck():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("local refusal")
+
+    with pytest.raises(RuntimeError, match="local refusal"):
+        await admit_run(conversation_id="c1", user_email=USER,
+                        source="agent_runs_api", api_continuation=spec,
+                        follow_up_of=first.run_id, precheck=precheck)
+    await drain_pending_releases()
+    latest = await coord.read_api_continuation("c1")
+    assert latest["run_id"] == first.run_id
+    assert [r["run_id"] for r in await coord.read_api_runs()] == [first.run_id]
+    assert await _slots(coord) == 0
+
+
+async def test_unconfirmed_publication_is_rolled_back(coord, monkeypatch):
+    spec = {"source": "agent_runs_api", "tools": ["read"]}
+    first = await admit_run(conversation_id="c1", user_email=USER,
+                            source="agent_runs_api", api_continuation=spec)
+    get_run_registry().set_status(first.run_id, RunStatus.COMPLETED)
+    await drain_pending_releases()
+    real_publish = coord.publish_api_admission
+
+    async def lose_reply(claim):
+        await real_publish(claim)
+        raise RunCoordinationUnavailableError("lost reply")
+
+    monkeypatch.setattr(coord, "publish_api_admission", lose_reply)
+    with pytest.raises(RunCoordinationUnavailableError):
+        await admit_run(conversation_id="c1", user_email=USER,
+                        source="agent_runs_api", api_continuation=spec,
+                        follow_up_of=first.run_id)
+    await drain_pending_releases()
+    assert not get_run_registry().active_for_user(USER)
+    assert (await coord.read_api_continuation("c1"))["run_id"] == first.run_id
+    assert [r["run_id"] for r in await coord.read_api_runs()] == [first.run_id]
+    assert await _slots(coord) == 0
