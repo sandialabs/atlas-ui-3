@@ -1,19 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { X, GitFork } from 'lucide-react'
 
 /**
  * Version history for a team-library entry (issue #1169). Every published
- * version is immutable; choosing one pins chat to exactly that text, and
- * "Follow latest" picks up each new publication in new conversations (a
- * conversation already in progress keeps the version it started with).
+ * version is immutable; choosing one pins chat to exactly that text.
+ *
+ * "Follow latest" sends no version: each new conversation starts on the
+ * newest publication, and a conversation keeps the version it started with
+ * (the server never moves a pinned conversation on its own). So when the open
+ * conversation is already pinned to this entry (`conversationPinnedVersionId`),
+ * that button would change the label but not what runs; there it is "Use
+ * latest (vN)" instead, which selects that exact version.
  */
-const PromptLibraryVersions = ({ prompt, library, onUseVersion, onFork, onClose, activeVersionId }) => {
+const PromptLibraryVersions = ({
+  prompt, library, onUseVersion, onFork, onClose, activeVersionId, conversationPinnedVersionId = null,
+}) => {
   const [versions, setVersions] = useState([])
   const [total, setTotal] = useState(0)
   const [expanded, setExpanded] = useState(null)
   // Version text, fetched when a version is first expanded: the history
   // listing is paged and carries no prompt text (issue #1169).
   const [contents, setContents] = useState({})
+  // Per version: undefined (not requested), 'loading', or { error }.
+  const [contentState, setContentState] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -51,34 +60,64 @@ const PromptLibraryVersions = ({ prompt, library, onUseVersion, onFork, onClose,
     }
   }
 
-  const toggle = async id => {
+  const loadContent = async id => {
+    setContentState(prev => ({ ...prev, [id]: 'loading' }))
+    try {
+      const version = await getVersion(prompt.id, id)
+      setContents(prev => ({ ...prev, [id]: version.content }))
+      setContentState(prev => ({ ...prev, [id]: undefined }))
+    } catch (e) {
+      // Shown on the version's own row, with a retry: the history list
+      // itself is fine.
+      setContentState(prev => ({ ...prev, [id]: { error: e?.message || 'Could not load this version.' } }))
+    }
+  }
+
+  const toggle = id => {
     if (expanded === id) {
       setExpanded(null)
       return
     }
     setExpanded(id)
-    if (contents[id] !== undefined) return
-    try {
-      const version = await getVersion(prompt.id, id)
-      setContents(prev => ({ ...prev, [id]: version.content }))
-    } catch (e) {
-      setError(e.message)
-    }
+    if (contents[id] !== undefined || contentState[id] === 'loading') return
+    loadContent(id)
   }
+
+  const latest = prompt.latest_version
+  const pinnedHere = Boolean(conversationPinnedVersionId)
+  const latestHelpId = useId()
 
   return (
     <div className="bg-gray-700 rounded-lg p-4 space-y-3 border border-gray-600">
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-medium text-gray-100">Version history</h4>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => onUseVersion(null)}
-            disabled={!prompt.latest_version}
-            className="px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 text-gray-100 text-xs disabled:opacity-50"
-          >
-            Follow latest
-          </button>
+          {pinnedHere ? (
+            <button
+              type="button"
+              onClick={() => latest && onUseVersion(latest.id)}
+              disabled={!latest || latest.id === conversationPinnedVersionId}
+              title="This conversation keeps the version it is pinned to; this moves it to the newest one."
+              className="px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 text-gray-100 text-xs disabled:opacity-50"
+            >
+              {latest ? `Use latest (v${latest.version_number})` : 'Use latest'}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => onUseVersion(null)}
+                disabled={!latest}
+                aria-describedby={latestHelpId}
+                className="px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 text-gray-100 text-xs disabled:opacity-50"
+              >
+                Follow latest
+              </button>
+              <span id={latestHelpId} className="sr-only">
+                New conversations start on the newest version; a conversation keeps the version it started with.
+              </span>
+            </>
+          )}
           <button type="button" aria-label="Close version history" onClick={onClose} className="p-1 rounded bg-gray-600 hover:bg-gray-500 text-gray-200">
             <X className="w-4 h-4" />
           </button>
@@ -125,11 +164,23 @@ const PromptLibraryVersions = ({ prompt, library, onUseVersion, onFork, onClose,
                 <GitFork className="w-4 h-4" />
               </button>
             </div>
-            {expanded === v.id && (
+            {expanded === v.id && (contentState[v.id]?.error && contents[v.id] === undefined ? (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span role="status" className="text-red-300">{contentState[v.id].error}</span>
+                <button
+                  type="button"
+                  onClick={() => loadContent(v.id)}
+                  aria-label={`Retry loading version ${v.version_number}`}
+                  className="px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 text-gray-100"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
               <pre className="mt-2 max-h-60 overflow-auto text-xs text-gray-200 whitespace-pre-wrap bg-gray-900 rounded p-2">
                 {contents[v.id] ?? v.content ?? 'Loading...'}
               </pre>
-            )}
+            ))}
           </li>
         ))}
       </ol>

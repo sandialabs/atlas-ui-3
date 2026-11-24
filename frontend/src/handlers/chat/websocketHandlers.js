@@ -861,6 +861,15 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'prompt_pin_state': {
+          // Issue #1169: this turn committed a team-prompt pin change. The new
+          // revision arrives now, not with the end-of-turn save, so the next
+          // change is decided on it.
+          if (typeof onPromptPinState === 'function' && 'prompt_library_pin_revision' in data) {
+            onPromptPinState(data)
+          }
+          break
+        }
         case 'conversation_saved': {
           if (data.conversation_id && typeof setActiveConversationId === 'function') {
             setActiveConversationId(data.conversation_id)

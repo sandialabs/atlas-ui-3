@@ -66,7 +66,12 @@ Owners and people with manage permission open the share editor:
 
 Access is the union of everything that applies to you: leaving one group does
 not remove access you still have through another group or a direct grant.
-Membership is checked on every request, so changes take effect immediately.
+Sharing changes made in Atlas (unsharing, removing a person, archiving) take
+effect on the next request. Group membership comes from your organization's
+authorization service and Atlas reuses each answer briefly, so a change there
+(someone leaving a group) takes effect within
+`PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS` (30 seconds by default, at most 5
+minutes).
 
 ## Versions and chat
 
@@ -80,7 +85,10 @@ versions**); a version's text loads when you open it.
 The conversation records the exact version it ran with:
 
 - A conversation keeps that version even after a newer one is published.
-  Choose the newer version explicitly to switch.
+  Choose the newer version explicitly to switch: in **Version history** of a
+  conversation that already uses the entry, **Use latest (vN)** moves it to
+  the newest version. Elsewhere, **Follow latest** means each new
+  conversation starts on the newest version.
 - Reopening the conversation from the sidebar re-selects that version, even
   when it also restores the conversation's workspace.
 - If the entry is unshared, archived, or your access is removed (or the library

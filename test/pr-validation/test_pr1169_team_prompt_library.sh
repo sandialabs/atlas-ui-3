@@ -193,6 +193,8 @@ python -m pytest -q -p no:warnings \
     atlas/tests/test_prompt_library_migration_005.py \
     atlas/tests/test_prompt_pin_legacy_compat.py \
     atlas/tests/test_team_prompt_precedence.py \
+    atlas/tests/test_prompt_library_review_followups.py \
+    atlas/tests/test_prompt_library_nov24_review.py \
     atlas/tests/test_conversation_classification_boundaries.py \
     atlas/tests/test_core_auth.py \
     atlas/tests/test_system_prompt_loading.py \
@@ -213,6 +215,7 @@ echo "=== Frontend library tests ==="
     src/test/prompt-library-panel-lifecycle.test.jsx \
     src/test/prompt-selector-library-states.test.jsx \
     src/test/team-prompt-recovery.test.jsx \
+    src/test/prompt-library-nov24-review.test.jsx \
     src/test/useSelections.test.js > "$WORK/vitest.log" 2>&1) \
     || { cat "$WORK/vitest.log"; exit 1; }
 tail -n 4 "$WORK/vitest.log"

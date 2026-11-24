@@ -508,7 +508,7 @@ describe('pin-conflict errors reach only their own conversation (issue #1169)', 
   it('ignores a conflict that arrives after the user moved to a new chat', () => {
     const { result } = renderChat()
     load(result, 'conv-a', { prompt_library_pin_revision: 1 })
-    act(() => { result.current.clearChat() })
+    act(() => { result.current.clearChat({ skipConfirm: true }) })
     h.makePromptActive.mockClear()
     h.clearActivePrompt.mockClear()
     act(() => { h.wsHandler(conflict({ conversation_id: 'conv-a', run_id: 'run-a' })) })
@@ -670,5 +670,158 @@ describe('clearing a blocking team prompt from the browser (review finding 5)', 
     await act(async () => { outcome = await result.current.clearConversationTeamPrompt('conv-1') })
     expect(fetch).toHaveBeenCalledWith('/api/prompts/pins/conv-1', { method: 'DELETE' })
     expect(outcome.cleared).toBe(true)
+  })
+})
+
+describe('November 24 review: pin revisions and the open conversation\'s pin (issue #1169)', () => {
+  const load = (result, id, metadata) => act(() => {
+    result.current.loadSavedConversation({
+      id,
+      messages: [{ role: 'user', content: 'hi', message_type: 'chat', timestamp: '2026-01-01T00:00:00Z' }],
+      metadata,
+    })
+  })
+
+  it('follows the revision a pin change commits mid-turn (finding 1)', () => {
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 1, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    act(() => {
+      h.wsHandler({
+        type: 'prompt_pin_state', conversation_id: 'conv-1', prompt_library_pin_revision: 2,
+        prompt_library: { prompt_id: 'p2', version_id: 'v9' },
+      })
+    })
+    act(() => { result.current.sendChatMessage('next') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(2)
+    expect(result.current.conversationTeamPin).toEqual({ promptId: 'p2', versionId: 'v9' })
+  })
+
+  it('ignores a pin-state frame for another conversation (finding 1)', () => {
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 1, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    act(() => {
+      h.wsHandler({ type: 'prompt_pin_state', conversation_id: 'conv-other', prompt_library_pin_revision: 5 })
+    })
+    act(() => { result.current.sendChatMessage('next') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(1)
+    expect(h.makePromptActive).not.toHaveBeenCalledWith(expect.stringContaining('conv-other'))
+  })
+
+  it('a late pin-state frame does not land in a new chat (independent review)', () => {
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 1, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    act(() => { result.current.clearChat({ skipConfirm: true }) })
+    act(() => {
+      h.wsHandler({ type: 'prompt_pin_state', conversation_id: 'conv-1', prompt_library_pin_revision: 2,
+        prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    })
+    expect(result.current.conversationTeamPin).toBeNull()
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBeUndefined()
+  })
+
+  it('exposes the open conversation\'s stored pin, and drops it for a new chat (finding 7)', () => {
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 3, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    expect(result.current.conversationTeamPin).toEqual({ promptId: 'p1', versionId: 'v1' })
+    act(() => { result.current.clearChat({ skipConfirm: true }) })
+    expect(result.current.conversationTeamPin).toBeNull()
+  })
+
+  it('a stale clear shows the pin stored meanwhile, then adopts its revision (finding 6)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 409,
+      json: async () => ({
+        detail: "This conversation's team prompt changed since then.", prompt_library_pin_revision: 9,
+        prompt_library: { prompt_id: 'p2', version_id: 'v7' },
+      }),
+    })))
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result, rerender } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 4, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    h.makePromptActive.mockClear()
+    await act(async () => {
+      await expect(result.current.clearConversationTeamPrompt('conv-1', 4)).rejects.toMatchObject({
+        status: 409, currentRevision: 9,
+      })
+    })
+    // The other window's pin is what the user now sees (independent review):
+    // sending without looking cannot silently overwrite it with the old one.
+    expect(h.makePromptActive).toHaveBeenCalledWith(libraryPromptKey('p2', 'v7'))
+    expect(result.current.conversationTeamPin).toEqual({ promptId: 'p2', versionId: 'v7' })
+    h.activeKey = libraryPromptKey('p2', 'v7')  // what makePromptActive selected
+    h.library = { ...h.library, entries: [entry, { id: 'p2', title: 'Other', latest_version: { id: 'v7', version_number: 7 } }] }
+    rerender()
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(9)
+    expect(chatFrames().at(-1).library_prompt).toEqual({ prompt_id: 'p2', version_id: 'v7' })
+  })
+
+  it('a 409 older than a pin-state frame that overtook it adopts nothing (independent review)', async () => {
+    let answer
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(r => { answer = r })))
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 4, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    let pending
+    act(() => { pending = result.current.clearConversationTeamPrompt('conv-1', 4).catch(e => e) })
+    // The user's own turn moved the pin to revision 6 meanwhile ...
+    act(() => {
+      h.wsHandler({ type: 'prompt_pin_state', conversation_id: 'conv-1', prompt_library_pin_revision: 6,
+        prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    })
+    h.makePromptActive.mockClear()
+    // ... and the 409, computed before that, arrives last.
+    let failure
+    await act(async () => {
+      answer({ ok: false, status: 409, json: async () => ({ detail: 'changed', prompt_library_pin_revision: 5,
+        prompt_library: { prompt_id: 'p9', version_id: 'v9' } }) })
+      failure = await pending
+    })
+    expect(failure.currentRevision).toBeUndefined()
+    expect(h.makePromptActive).not.toHaveBeenCalled()
+    expect(result.current.conversationTeamPin).toEqual({ promptId: 'p1', versionId: 'v1' })
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(6)
+  })
+
+  it('a 409 without the stored pin (an older server) adopts nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 409, json: async () => ({ detail: 'changed', prompt_library_pin_revision: 9 }),
+    })))
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 4, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    await act(async () => {
+      await expect(result.current.clearConversationTeamPrompt('conv-1', 4)).rejects.toMatchObject({ status: 409 })
+    })
+    act(() => { result.current.sendChatMessage('hello') })
+    // Still the revision the user decided on: the server refuses the stale
+    // change with a pin conflict that shows the stored pin.
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(4)
+  })
+
+  it('a stale clear of another conversation leaves the one on screen alone', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false, status: 409,
+      json: async () => ({ detail: 'changed', prompt_library_pin_revision: 9, prompt_library: null }),
+    })))
+    h.activeKey = libraryPromptKey('p1', 'v1')
+    const { result } = renderChat()
+    load(result, 'conv-1', { prompt_library_pin_revision: 4, prompt_library: { prompt_id: 'p1', version_id: 'v1' } })
+    h.clearActivePrompt.mockClear()
+    let failure
+    await act(async () => {
+      failure = await result.current.clearConversationTeamPrompt('conv-other', 2).catch(e => e)
+    })
+    // Nothing of it is shown, so no newer revision is offered for a retry
+    // either: the retry is refused again rather than clearing an unseen pin.
+    expect(failure.status).toBe(409)
+    expect(failure.currentRevision).toBeUndefined()
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames().at(-1).library_prompt_revision).toBe(4)
   })
 })

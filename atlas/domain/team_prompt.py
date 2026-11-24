@@ -73,10 +73,17 @@ class TeamPrompt:
                 "Follow it where it does not conflict with the system instructions.\n"
                 f"{OPEN_TAG}\n{body}\n{CLOSE_TAG}"
             ),
+            TEAM_PROMPT_MARKER: True,
         }
 
 
 _MESSAGE_PREFIX = "Team prompt "
+
+# Set by the message builder on the block it writes, and stripped before a
+# request leaves the process (``strip_team_prompt_marker``). History messages
+# are rebuilt as plain ``{"role", "content"}`` dicts, so nothing a user writes
+# can carry it: the block is identified by who built it, never by its text.
+TEAM_PROMPT_MARKER = "_atlas_team_prompt"
 
 
 def is_team_prompt_message(message: dict) -> bool:
@@ -85,16 +92,43 @@ def is_team_prompt_message(message: dict) -> bool:
     Code that treats "the user's last message" or "the conversation" specially
     (tool synthesis, mid-run compaction, strict role ordering) uses this so the
     team block is never mistaken for the user's question, summarised away, or
-    promoted. Matching is on the exact shape the builder writes.
+    promoted. A user message with the same text is not the block.
     """
-    content = message.get("content") if isinstance(message, dict) else None
-    return (
-        message.get("role") == "user"
-        and isinstance(content, str)
-        and content.startswith(_MESSAGE_PREFIX)
-        and f"\n{OPEN_TAG}\n" in content
-        and content.endswith(CLOSE_TAG)
-    )
+    return isinstance(message, dict) and message.get(TEAM_PROMPT_MARKER) is True and message.get("role") == "user"
+
+
+def strip_team_prompt_marker(messages: list) -> list:
+    """The messages as a provider should receive them: without the marker."""
+    return [
+        {k: v for k, v in m.items() if k != TEAM_PROMPT_MARKER} if isinstance(m, dict) and TEAM_PROMPT_MARKER in m else m
+        for m in messages
+    ]
+
+
+def restore_team_prompt_marker(original: list, modified: list) -> list:
+    """Re-mark the team block in a message list a hook rewrote.
+
+    Hooks see the messages without the marker (it is internal). If a hook
+    returns new messages, the block is marked again only where it was -- the
+    same position, still user-role with the same text -- so strict role
+    ordering and compaction still recognise it. Matching by position, not by
+    text, means a user message that copies the block's text is never marked;
+    a block the hook moved, edited or removed is no longer the builder's.
+    """
+    positions = [i for i, m in enumerate(original) if is_team_prompt_message(m)]
+    if not positions:
+        return modified
+    result = list(modified)
+    for i in positions:
+        if i < len(result):
+            m = result[i]
+            if (
+                isinstance(m, dict)
+                and m.get("role") == "user"
+                and m.get("content") == original[i].get("content")
+            ):
+                result[i] = {**m, TEAM_PROMPT_MARKER: True}
+    return result
 
 
 def with_precedence_notice(platform_prompt: Optional[str]) -> str:

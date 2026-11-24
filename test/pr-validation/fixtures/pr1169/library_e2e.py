@@ -300,6 +300,10 @@ async def main():
     stale = (frame.get("prompt_library_pin_revision") or 0) + 100
     s, _ = api("DELETE", f"/api/prompts/pins/{conv}?expected_revision={stale}", MEMBER)
     check(s == 409, "a clear naming a revision the pin no longer has is refused (409), nothing cleared")
+    s, conflict = api("DELETE", f"/api/prompts/pins/{conv}?expected_revision={stale}", MEMBER)
+    check(s == 409 and conflict.get("prompt_library_pin_revision") == frame.get("prompt_library_pin_revision")
+          and (conflict.get("prompt_library") or {}).get("version_id") == v1["id"],
+          "the 409 carries the stored pin and revision, so the browser shows it before a retry")
     s, body = api("DELETE", f"/api/prompts/pins/{conv}?expected_revision={frame.get('prompt_library_pin_revision')}", MEMBER)
     check(s == 200 and body.get("cleared") is True, "the owner clears the unavailable pin")
     status, _ = await chat(MEMBER, conv, ...)
@@ -321,8 +325,32 @@ async def main():
     check(s == 200 and {"create", "publish", "share"} <= kinds and not kinds & {"use", "use_denied"},
           "management events stay reachable on their own page")
 
-    # --- Fork and audit ----------------------------------------------------
+    # --- A pin change reports its revision before the model runs ----------
     share(pid, ["eng"])
+    conv = str(uuid.uuid4())
+    status, saved = await chat(MEMBER, conv, {"prompt_id": pid, "version_id": v1["id"]})
+    seen = saved.get("prompt_library_pin_revision")
+    async with websockets.connect(WS, additional_headers={"X-User-Email": MEMBER}) as ws:
+        await ws.send(json.dumps({
+            "type": "chat", "content": "Please review this function.", "model": MODEL, "save_mode": "server",
+            "conversation_id": conv, "selected_tools": [], "library_prompt": None, "library_prompt_revision": seen,
+        }))
+        frames = []
+        async with asyncio.timeout(60):
+            while not frames or frames[-1].get("type") not in ("conversation_saved", "error"):
+                frames.append(json.loads(await ws.recv()))
+        types = [f.get("type") for f in frames]
+        pin_frames = [f for f in frames if f.get("type") == "prompt_pin_state"]
+        check(len(pin_frames) == 1 and types.index("prompt_pin_state") < types.index("conversation_saved")
+              and pin_frames[0]["prompt_library_pin_revision"] == frames[-1].get("prompt_library_pin_revision")
+              == seen + 1 and pin_frames[0]["prompt_library"] is None,
+              "a pin change sends prompt_pin_state with the stored revision before the turn ends")
+        # The client changes its mind again on the revision it was just told.
+        status, again = await turn_on(ws, conv, {"prompt_id": pid, "version_id": v1["id"]},
+                                      {"library_prompt_revision": pin_frames[0]["prompt_library_pin_revision"]})
+        check(status == "ok", "the next change on the reported revision is not a false conflict")
+
+    # --- Fork and audit ----------------------------------------------------
     s, body = api("POST", f"/api/prompts/{pid}/fork", MEMBER, {"version_id": v1["id"]})
     check(s == 200 and body["prompt"]["is_owner"] and body["prompt"]["draft_content"] == V1,
           "member forks v1 into a private copy")

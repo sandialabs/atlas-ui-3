@@ -63,10 +63,16 @@ Membership answers are bounded and reused (`prompt_library_membership.py`):
   `edit`/`manage` exist only as direct user grants; only the owner changes
   `manage` grants.
 - Effective level is the maximum over all applicable grants (union).
-- Membership is never cached by the library; every request (and chat turn)
-  asks again, so revocation applies to the next request on every replica.
-- A group check that raises is "not a member" (fail closed). The real
-  `is_user_in_group` already returns `False` on an authorizer error.
+- Group membership is reused for up to `PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS`
+  (above), so removing someone from a group in the authorization service
+  takes effect within that window (default 30 s, at most 300 s), not
+  immediately. Grants, unsharing and archiving are read from the database on
+  every request and apply to the next one on every replica.
+- A group check that fails, times out, or is cut off by the per-entry bounds
+  (`MAX_PROMPT_GROUP_CHECKS`, `PROMPT_GROUP_CHECK_TIMEOUT_S` = 5 s; a chat turn
+  stops at the first confirmed group) is "unknown": never access (fail
+  closed), and a pinned turn gets the transient "could not be confirmed"
+  refusal rather than "no longer available".
 - Callers with no access get the same `PromptNotFound` as a missing id; 403 is
   only for callers who can already see the entry.
 - Sharing into a group requires the sharer to be a member of it, and the

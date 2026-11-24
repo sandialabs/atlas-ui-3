@@ -167,6 +167,16 @@ class PromptLibraryGrantStore:
                         if prompt is None or prompt.archived_at is not None:
                             return None
                         raise PromptConflictError("sharing")
+                    if not self._may_manage(session, prompt_id, actor_email):
+                        # Re-checked under the row the claim above locked: the
+                        # caller's manage permission was checked before this
+                        # transaction. Every grant change bumps the sharing
+                        # revision, so a revocation through the service is
+                        # already caught by the compare-and-set; this also
+                        # covers one that is not (a grant removed outside this
+                        # service). Answered like any other loss of access.
+                        session.rollback()
+                        return None
                     existing = {(r.grantee_type, r.grantee): r for r in self._grants_query(session, prompt_id)}
                     for key, record in existing.items():
                         if key not in desired:
@@ -186,6 +196,21 @@ class PromptLibraryGrantStore:
                     raise PromptConflictError("sharing") from None
                 raise
         return revision, self.list_grants(prompt_id)
+
+    @staticmethod
+    def _may_manage(session: Session, prompt_id: str, user_email: str) -> bool:
+        """Owner, or a direct manage grant, read in the caller's transaction."""
+        owner_email = session.query(PromptLibraryPromptRecord.owner_email).filter(
+            PromptLibraryPromptRecord.id == prompt_id
+        ).scalar()
+        if owner_email == user_email:
+            return True
+        return session.query(PromptLibraryGrantRecord.id).filter(
+            PromptLibraryGrantRecord.prompt_id == prompt_id,
+            PromptLibraryGrantRecord.grantee_type == GRANTEE_USER,
+            PromptLibraryGrantRecord.grantee == user_email,
+            PromptLibraryGrantRecord.permission == "manage",
+        ).first() is not None
 
     @guarded("list grants")
     def prompt_ids_granted_to_user(self, user_email: str) -> Dict[str, str]:

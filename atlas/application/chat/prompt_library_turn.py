@@ -84,12 +84,23 @@ PIN_HISTORY_CONTEXT_KEY = "prompt_library_pin_history"
 PIN_REVISION_CONTEXT_KEY = "prompt_library_pin_revision"
 # Set when the conversation's stored pin could not be read (failed load).
 PIN_UNKNOWN_CONTEXT_KEY = "prompt_library_pin_unknown"
+# The unbroken run of stored revisions this session wrote itself:
+# {"from": revision before its first write, "to": revision after its last}.
+# A client that has not yet heard about those writes (the revision reaches it
+# with the pin-state frame or the end-of-turn save) still decided on a state
+# this session produced, so its stale revision is not a change made elsewhere.
+PIN_OWN_WRITES_CONTEXT_KEY = "prompt_library_pin_own_writes"
 PIN_STATE_CONTEXT_KEYS = (
     PIN_CONTEXT_KEY,
     PIN_HISTORY_CONTEXT_KEY,
     PIN_REVISION_CONTEXT_KEY,
     PIN_UNKNOWN_CONTEXT_KEY,
+    PIN_OWN_WRITES_CONTEXT_KEY,
 )
+# Set (and removed by the caller) when this turn committed a pin change to the
+# stored conversation, so the caller can tell the client the new revision at
+# once instead of at the end-of-turn save.
+PIN_COMMITTED_CONTEXT_KEY = "prompt_library_pin_committed"
 
 CONFLICTING_PROMPTS_MESSAGE = (
     "Choose either a team library prompt or a custom prompt, not both."
@@ -361,7 +372,7 @@ async def _change_pin(
     if stored and store_pin is None:
         return
     current_revision = session_revision(context)
-    if stored and observed != current_revision:
+    if stored and observed != current_revision and not _own_writes_cover(context, observed, current_revision):
         # The client (or this session) decided on an older pin than the one
         # stored: refuse rather than overwrite what it never saw. Only a
         # stored conversation has a pin another window could have changed; an
@@ -400,6 +411,44 @@ async def _change_pin(
     if result["status"] == "conflict":
         logger.info("Refused a stale team-prompt pin change (revision moved)")
         raise PromptPinConflictError(result["state"], conversation_id=context.get("conversation_id"))
+    new_revision = session_revision(context)
+    own = context.get(PIN_OWN_WRITES_CONTEXT_KEY)
+    if isinstance(own, dict) and own.get("to") == current_revision and isinstance(own.get("from"), int):
+        context[PIN_OWN_WRITES_CONTEXT_KEY] = {"from": own["from"], "to": new_revision}
+    else:
+        context[PIN_OWN_WRITES_CONTEXT_KEY] = {"from": current_revision, "to": new_revision}
+    context[PIN_COMMITTED_CONTEXT_KEY] = True
+
+
+def _own_writes_cover(context: Dict[str, Any], observed: int, current: int) -> bool:
+    """Whether every write between ``observed`` and ``current`` was this session's.
+
+    Only while the stored revision is still the one this session's last write
+    produced: once anyone else writes after it, the run is broken and a stale
+    view is refused again.
+    """
+    own = context.get(PIN_OWN_WRITES_CONTEXT_KEY)
+    if not isinstance(own, dict):
+        return False
+    start, end = own.get("from"), own.get("to")
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (start, end)):
+        return False
+    return end == current and start <= observed < current
+
+
+def pin_state_frame(context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The ``prompt_pin_state`` frame for a pin change this turn committed, or None.
+
+    Pops the marker: one frame per committed change.
+    """
+    if not context.pop(PIN_COMMITTED_CONTEXT_KEY, False):
+        return None
+    return {
+        "type": "prompt_pin_state",
+        "conversation_id": context.get("conversation_id"),
+        "prompt_library": _valid_pin(context.get(PIN_CONTEXT_KEY)),
+        "prompt_library_pin_revision": session_revision(context),
+    }
 
 
 def _refusal_message(context: Dict[str, Any], from_pin_only: bool, default: Optional[str]) -> str:

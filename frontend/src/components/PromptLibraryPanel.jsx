@@ -28,7 +28,7 @@ const FILTERS = [
 ]
 
 const PromptLibraryPanel = () => {
-  const { promptLibrary: library, activePromptKey, makePromptActive } = useChat()
+  const { promptLibrary: library, activePromptKey, makePromptActive, conversationTeamPin } = useChat()
   const [scope, setScope] = useState('all')
   const [query, setQuery] = useState('')
   const [items, setItems] = useState([])
@@ -247,6 +247,7 @@ const PromptLibraryPanel = () => {
           prompt={detail}
           library={library}
           activeVersionId={active && active.promptId === prompt.id ? active.versionId : undefined}
+          conversationPinnedVersionId={conversationTeamPin?.promptId === prompt.id ? conversationTeamPin.versionId : null}
           onUseVersion={versionId => selectEntry(prompt.id, versionId)}
           onFork={versionId => fork(prompt, versionId)}
           onClose={close}

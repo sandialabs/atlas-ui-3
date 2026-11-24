@@ -798,23 +798,35 @@ class ChatService:
         # server-side, from a reference -- never from client text -- after a
         # fresh authorization check, and the exact version is pinned to the
         # conversation. A refusal raises before the turn runs or is saved.
-        library_text = await library_turn.resolve_library_prompt_for_turn(
-            context=session.context,
-            user_email=user_email,
-            request=kwargs.pop("library_prompt", UNSET),
-            # A persona counts as another prompt for direct callers too (the
-            # WebSocket also rejects the combination on the raw frame).
-            other_prompt_selected=bool(kwargs.get("custom_system_prompt"))
-            or kwargs.get("persona_id") not in (None, ""),
-            library=getattr(self, "prompt_library_service", None),
-            message_index=len(session.history.messages),
-            omitted=UNSET,
-            load_metadata=self._conversation_metadata_loader(session, user_email),
-            store_pin=self._conversation_pin_writer(session, user_email, turn_is_incognito),
-            # The pin revision the client last saw (optional): a pin change
-            # decided on an older one is refused, not applied blindly.
-            observed_revision=kwargs.pop("library_prompt_revision", None),
-        )
+        try:
+            library_text = await library_turn.resolve_library_prompt_for_turn(
+                context=session.context,
+                user_email=user_email,
+                request=kwargs.pop("library_prompt", UNSET),
+                # A persona counts as another prompt for direct callers too (the
+                # WebSocket also rejects the combination on the raw frame).
+                other_prompt_selected=bool(kwargs.get("custom_system_prompt"))
+                or kwargs.get("persona_id") not in (None, ""),
+                library=getattr(self, "prompt_library_service", None),
+                message_index=len(session.history.messages),
+                omitted=UNSET,
+                load_metadata=self._conversation_metadata_loader(session, user_email),
+                store_pin=self._conversation_pin_writer(session, user_email, turn_is_incognito),
+                # The pin revision the client last saw (optional): a pin change
+                # decided on an older one is refused, not applied blindly.
+                observed_revision=kwargs.pop("library_prompt_revision", None),
+            )
+        finally:
+            # A pin change this turn committed is reported now, before the
+            # model runs: the end-of-turn save is minutes away for an agent
+            # run and never comes for a turn that fails, and until the client
+            # hears the new revision its next change would look stale.
+            pin_frame = library_turn.pin_state_frame(session.context)
+        if pin_frame is not None and update_callback:
+            try:
+                await update_callback(pin_frame)
+            except Exception:  # pragma: no cover - a closed socket must not fail the turn
+                logger.debug("Could not send the prompt pin state frame", exc_info=True)
         if library_text is not None:
             kwargs["custom_system_prompt"] = library_text
 
@@ -1941,6 +1953,25 @@ class ChatService:
                 was_pinned = getattr(repository, "conversation_was_pinned", None)
                 if callable(was_pinned) and was_pinned(conversation_id, user_email) is False:
                     return {}
+                raise
+            except Exception:
+                # The read itself failed (a transient storage error). Before
+                # the library a turn never read this, so refusing would break
+                # conversations that have nothing to do with it. The marker
+                # (a separate, small read) still says whether a pin can exist:
+                # never pinned -> nothing to lose, the turn runs as before;
+                # pinned, or the marker cannot be read either -> fail closed.
+                was_pinned = getattr(repository, "conversation_was_pinned", None)
+                if callable(was_pinned):
+                    try:
+                        never_pinned = was_pinned(conversation_id, user_email) is False
+                    except Exception:
+                        never_pinned = False
+                    if never_pinned:
+                        logger.warning(
+                            "Conversation metadata read failed; its pin marker shows no pin, so the turn proceeds"
+                        )
+                        return {}
                 raise
 
         async def load():

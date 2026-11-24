@@ -43,7 +43,7 @@ that thread, so no session is shared across threads. Storage failures become
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from atlas.core.user_identity import normalize_user_email
 from atlas.modules.chat_history.prompt_library_repository import (
@@ -113,6 +113,15 @@ LISTING_GROUP_CHECK_TIMEOUT_S = 10.0
 # an unchecked group is never presented as one the caller may share with.
 MAX_SHAREABLE_GROUP_CHECKS = 100
 SHAREABLE_GROUP_CHECK_TIMEOUT_S = 10.0
+# One entry's group grants, checked when it is opened or run (a chat turn
+# waits on this). At most this many groups (sorted by name, so the bound is
+# deterministic; MAX_GRANTS already keeps real entries within it) and within
+# this many seconds. A chat turn stops at the first confirmed group. Past
+# either bound, an unchecked group is "unknown": never access (fail closed),
+# and a turn gets the transient "could not be confirmed" refusal, not "no
+# longer available".
+MAX_PROMPT_GROUP_CHECKS = 100
+PROMPT_GROUP_CHECK_TIMEOUT_S = 5.0
 # Version history pages, and how many versions (with content) one export holds.
 DEFAULT_VERSION_PAGE_SIZE = 50
 # Audit trail: refused uses are one counted row per actor, prompt and window;
@@ -199,29 +208,6 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         ``prompt_library_membership``."""
         return await self._resolver.membership(user_email, group)
 
-    async def _member_groups(
-        self, user_email: str, groups: Iterable[str], unknown: Optional[Set[str]] = None
-    ) -> Set[str]:
-        """The groups among ``groups`` the user is in, names as given (case kept).
-
-        A group whose check could not be answered is not a member (fail
-        closed); when ``unknown`` is given, it is also added there.
-        """
-        names = sorted({g for g in groups if g and not is_org_wide_group(g)})
-        if not names:
-            return set()
-        semaphore = asyncio.Semaphore(GROUP_CHECK_CONCURRENCY)
-
-        async def check(group: str) -> Optional[str]:
-            async with semaphore:
-                answer = await self._membership(user_email, group)
-            if answer is None and unknown is not None:
-                unknown.add(group)
-            return group if answer else None
-
-        results = await asyncio.gather(*(check(g) for g in names))
-        return {g for g in results if g}
-
     async def _member_groups_within(
         self, user_email: str, groups: List[str], timeout_s: float
     ) -> Tuple[Set[str], bool]:
@@ -260,6 +246,65 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
                 members.add(group)
         return members, not failed
 
+    async def _prompt_member_groups(
+        self,
+        user_email: str,
+        groups: List[str],
+        unknown: Optional[Set[str]],
+        first_only: bool = False,
+    ) -> Set[str]:
+        """The user's groups among one entry's grants, within the per-entry bounds.
+
+        ``MAX_PROMPT_GROUP_CHECKS`` groups at most, within
+        ``PROMPT_GROUP_CHECK_TIMEOUT_S``; with ``first_only`` (a chat turn) the
+        checks stop at the first confirmed group. A group that was not checked,
+        timed out or failed is not a member (fail closed) and goes into
+        ``unknown`` -- unless membership was already confirmed, in which case
+        nothing is unknown about the outcome.
+        """
+        names = sorted({g for g in groups if g and not is_org_wide_group(g)})
+        if not names:
+            return set()
+        checked, skipped = names[:MAX_PROMPT_GROUP_CHECKS], names[MAX_PROMPT_GROUP_CHECKS:]
+        if skipped:
+            logger.warning("Prompt-library access checked only %d of an entry's groups", MAX_PROMPT_GROUP_CHECKS)
+        semaphore = asyncio.Semaphore(GROUP_CHECK_CONCURRENCY)
+
+        async def check(group: str) -> Tuple[str, Optional[bool]]:
+            async with semaphore:
+                return group, await self._membership(user_email, group)
+
+        tasks = [asyncio.ensure_future(check(g)) for g in checked]
+        members: Set[str] = set()
+        open_names: Set[str] = set(checked)
+        deadline = asyncio.get_running_loop().time() + PROMPT_GROUP_CHECK_TIMEOUT_S
+        pending = set(tasks)
+        try:
+            while pending and not (first_only and members):
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                done, pending = await asyncio.wait(pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    if task.cancelled() or task.exception() is not None:
+                        continue
+                    group, answer = task.result()
+                    if answer is not None:
+                        open_names.discard(group)
+                    if answer:
+                        members.add(group)
+        finally:
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        if open_names or skipped:
+            if not members:
+                logger.warning("Prompt-library group checks for an entry did not finish; access is unknown")
+            if unknown is not None and not members:
+                unknown.update(open_names, skipped)
+        return members
+
     async def _listing_member_groups(self, user_email: str) -> Tuple[Set[str], bool]:
         """The caller's groups among those granted, and whether the check was complete."""
         groups = await self._db(self._repo.granted_groups_by_use, MAX_LISTING_GROUP_CHECKS + 1)
@@ -286,6 +331,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         member_groups: Optional[Set[str]] = None,
         history: bool = False,
         unknown_groups: Optional[Set[str]] = None,
+        first_only: bool = False,
     ) -> Access:
         """The caller's level on ``prompt``.
 
@@ -315,10 +361,15 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             if g["grantee_type"] == GRANTEE_GROUP and not is_org_wide_group(g["grantee"])
         ]
         if group_names:
-            if member_groups is None:
-                matched = await self._member_groups(user_email, group_names, unknown_groups)
-            else:
+            if member_groups is not None:
                 matched = {g for g in group_names if g in member_groups}
+            elif first_only and level >= LEVEL_USE:
+                # Running only needs "use", which a direct grant already gives.
+                matched = set()
+            else:
+                matched = await self._prompt_member_groups(
+                    user_email, group_names, unknown_groups, first_only=first_only
+                )
             if matched:
                 level = max(level, LEVEL_USE)
                 via.extend(sorted(matched))
@@ -655,7 +706,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
             raise PromptUnavailable()
         grants = await self._db(self._repo.list_grants, prompt_id)
         unknown: Set[str] = set()
-        access = await self._access(user_email, prompt, grants, unknown_groups=unknown)
+        access = await self._access(user_email, prompt, grants, unknown_groups=unknown, first_only=True)
         if access.level == LEVEL_NONE and unknown and not prompt.get("archived_at"):
             # Not a confirmed denial: a group grant could not be checked. Not
             # recorded as a refused use; the caller sees the same message.

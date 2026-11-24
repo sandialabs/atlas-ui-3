@@ -27,6 +27,7 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from atlas.core.log_sanitizer import get_current_user
@@ -413,10 +414,17 @@ async def clear_conversation_pin(
         raise HTTPException(status_code=404, detail="Conversation not found")
     revision = {"prompt_library_pin_revision": result["revision"]} if result.get("revision") is not None else {}
     if result.get("conflict"):
-        raise HTTPException(
-            status_code=409,
-            detail="This conversation's team prompt changed since then. Nothing was cleared; reload and check it.",
-        )
+        # The caller owns the conversation (404 otherwise), so its stored
+        # pin and revision are theirs to know -- the same fields a pin
+        # conflict on a chat turn carries. The browser shows that pin before
+        # adopting the revision, so neither a retry nor the next message acts
+        # on a pin the user never saw.
+        return JSONResponse(status_code=409, content={
+            "detail": "This conversation's team prompt changed since then. Nothing was cleared; "
+                      "check the selected prompt before clearing it.",
+            "prompt_library": result.get("pin"),
+            **revision,
+        })
     if result.get("recovered"):
         # The stored pin state was unreadable and has been reset (nothing in
         # it could be trusted, so nothing from it is audited).

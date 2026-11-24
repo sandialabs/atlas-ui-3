@@ -187,7 +187,8 @@ class ConversationPinStore:
                 }
             state = pin_state(current)
             if expected_revision is not None and state["revision"] != expected_revision:
-                return {"removed": None, "revision": state["revision"], "conflict": True}
+                return {"removed": None, "revision": state["revision"], "conflict": True,
+                        "pin": state.get("pin")}
             status, updated = apply_pin_change(current, None, None, None)
             if status == "ok":
                 conv.metadata_json = json.dumps(updated)

@@ -421,6 +421,18 @@ export const ChatProvider = ({ children }) => {
 	// the server named, never on whatever is on screen; only when that is the
 	// conversation shown does the local selection follow the cleared pin, and
 	// the caller tells the user so.
+	// The open conversation's stored team-prompt pin, { promptId, versionId }
+	// or null (issue #1169): what its next turn runs when the picker names the
+	// same entry without a version. The version history uses it so "latest"
+	// never claims a version this conversation will not run.
+	const [conversationTeamPin, setConversationTeamPinState] = useState(null)
+	const setConversationTeamPin = useCallback(pin => {
+		setConversationTeamPinState(
+			(pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+				? { promptId: pin.prompt_id, versionId: pin.version_id }
+				: null,
+		)
+	}, [])
 	const clearConversationTeamPrompt = useCallback(async (conversationId, expectedRevision = null) => {
 		if (typeof conversationId !== 'string' || !conversationId) throw new Error('No conversation to clear.')
 		// With the revision the refusal saw, a pin changed since (another tab)
@@ -435,10 +447,37 @@ export const ChatProvider = ({ children }) => {
 				: (data && typeof data.detail === 'string' ? data.detail : `Could not clear the team prompt (${res.status}).`)
 			const error = new Error(message)
 			error.status = res.status
+			if (
+				res.status === 409 && data && 'prompt_library' in data
+				&& Number.isInteger(data.prompt_library_pin_revision)
+				&& conversationId === activeConversationIdRef.current
+				// A newer revision already arrived (a turn's prompt_pin_state
+				// overtook this answer): the 409 is older news, adopt nothing.
+				&& !(Number.isInteger(libraryPinRevisionRef.current)
+					&& data.prompt_library_pin_revision < libraryPinRevisionRef.current)
+			) {
+				// The pin changed since the refusal (another window). As with a
+				// pin conflict on a turn, show the stored pin first and only then
+				// adopt its revision: the retry and the next message then act on
+				// the pin the user can see, never on one they did not. Only for
+				// the conversation on screen -- elsewhere nothing is shown, so the
+				// retry keeps the old revision and is refused again (safe).
+				error.currentRevision = data.prompt_library_pin_revision
+				const pin = data.prompt_library
+				const key = (pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+					? libraryPromptKey(pin.prompt_id, pin.version_id)
+					: null
+				conversationLibraryPinRef.current = key
+				setConversationTeamPin(pin)
+				if (key) selectionsRef.current?.makePromptActive?.(key)
+				else selectionsRef.current?.clearActivePrompt?.()
+				libraryPinRevisionRef.current = data.prompt_library_pin_revision
+			}
 			throw error
 		}
 		if (conversationId === activeConversationIdRef.current) {
 			conversationLibraryPinRef.current = null
+			setConversationTeamPin(null)
 			// Follow the revision the clear stored, so the next pin change is
 			// decided on it (not refused as a change made elsewhere).
 			if (Number.isInteger(data?.prompt_library_pin_revision)) libraryPinRevisionRef.current = data.prompt_library_pin_revision
@@ -446,7 +485,7 @@ export const ChatProvider = ({ children }) => {
 			if (isLibraryPromptKey(key) || isLibraryDraftKey(key)) selectionsRef.current.clearActivePrompt()
 		}
 		return { cleared: !!data?.cleared, recovered: !!data?.recovered, classificationUnknown: !!data?.classification_unknown }
-	}, [])
+	}, [setConversationTeamPin])
 	const testDraft = promptLibrary.testDraft
 	useEffect(() => {
 		if (isLibraryDraftKey(activePromptKey) && !testDraft) clearActivePrompt()
@@ -819,7 +858,11 @@ export const ChatProvider = ({ children }) => {
 			onPromptPinState: (data) => {
 				const shown = activeConversationIdRef.current
 				const conflict = data?.error_type === 'prompt_pin_conflict'
-				if (conflict) {
+				if (conflict || data?.type === 'prompt_pin_state') {
+					// prompt_pin_state is only sent for a stored conversation
+					// (never a new chat's first turn), so it too must name the
+					// conversation on screen: a late frame from a conversation
+					// the user has left must not land in the new one.
 					// A conflict replaces the user's selection, so it must name
 					// the conversation on screen. One that names none, or another
 					// conversation (the user switched, or started a new chat,
@@ -834,6 +877,7 @@ export const ChatProvider = ({ children }) => {
 				}
 				if (!Number.isInteger(data?.prompt_library_pin_revision)) return
 				libraryPinRevisionRef.current = data.prompt_library_pin_revision
+				if ('prompt_library' in data) setConversationTeamPin(data.prompt_library)
 				if (!conflict) return
 				// Another window changed this conversation's team prompt: show
 				// the stored selection so the next send is an informed one.
@@ -1565,6 +1609,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		pendingWorkspaceRestoreRef.current = null
 		conversationLibraryPinRef.current = null
 		libraryPinRevisionRef.current = null
+		setConversationTeamPin(null)
 		conversationWorkspaceIdRef.current = null
 		conversationClassificationRef.current = null
 		setActiveConversationClassification(null)
@@ -1605,7 +1650,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			undoOfferRef.current = { token, toastId }
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId, setConversationTeamPin])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {
@@ -1846,6 +1891,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// version rather than whatever the picker last held. Recorded before
 			// the workspace restore so that restore (now or deferred) keeps it.
 			const pin = meta.prompt_library
+			setConversationTeamPin(pin)
 			libraryPinRevisionRef.current = Number.isInteger(meta.prompt_library_pin_revision)
 				? meta.prompt_library_pin_revision
 				: 0
@@ -2734,6 +2780,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// Team-shared prompt library (issue #1169)
 		promptLibrary: promptLibraryEnabled ? promptLibrary : null,
 		clearConversationTeamPrompt,
+		conversationTeamPin,
 		libraryPrompts: promptLibraryEnabled ? promptLibrary.entries : [],
 		userPrompts: userPrompts.prompts,
 		userPromptsLoading: userPrompts.loading,

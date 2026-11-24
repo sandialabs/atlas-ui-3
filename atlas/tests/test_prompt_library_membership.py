@@ -281,12 +281,18 @@ async def test_concurrent_identical_checks_share_one_call():
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_check_releases_its_waiters_and_still_propagates():
-    started = asyncio.Event()
+async def test_a_caller_that_stops_waiting_does_not_end_the_shared_check():
+    """Cancelling one caller (a bound ran out, or it only needed one group)
+    must not give the other callers sharing that check "unknown": the check
+    finishes, they get the real answer, and it is cached (November 24 review,
+    independent-review follow-up)."""
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
 
     async def check(user, group):
+        calls.append(group)
         started.set()
-        await asyncio.sleep(10)
+        await release.wait()
         return True
 
     resolver, store = _resolver(check)
@@ -297,27 +303,31 @@ async def test_a_cancelled_check_releases_its_waiters_and_still_propagates():
     first.cancel()
     await asyncio.wait([first])
     with pytest.raises(asyncio.CancelledError):
-        first.result()
-    # The waiter shared the cancelled check: it is told "unknown", promptly.
-    assert await asyncio.wait_for(waiter, 1) is None
-    assert len(store._entries) == 0  # nothing was cached for the cancelled check
+        first.result()  # the cancelled caller still sees its cancellation
+    release.set()
+    assert await asyncio.wait_for(waiter, 1) is True
+    assert len(calls) == 1 and len(store._entries) == 1
+    assert await resolver.membership(ALICE, "eng") is True and len(calls) == 1  # reused
 
 
 @pytest.mark.asyncio
-async def test_interpreter_exits_are_not_swallowed():
-    calls = []
+async def test_a_check_nobody_waits_for_any_more_still_fills_the_cache():
+    """A check every caller gave up on (an authorizer slower than the turn's
+    bound) still completes and is reused, so the next turn does not wait the
+    same way again."""
+    release = asyncio.Event()
 
     async def check(user, group):
-        calls.append(group)
-        if len(calls) == 1:
-            raise KeyboardInterrupt
+        await release.wait()
         return True
 
-    resolver, _ = _resolver(check)
-    with pytest.raises(KeyboardInterrupt):
-        await resolver.membership(ALICE, "eng")
-    # The in-flight slot was released: the next call asks again.
-    assert await resolver.membership(ALICE, "eng") is True and len(calls) == 2
+    resolver, store = _resolver(check)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(resolver.membership(ALICE, "eng"), 0.05)
+    release.set()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert await asyncio.wait_for(resolver.membership(ALICE, "eng"), 0.05) is True
 
 
 @pytest.mark.asyncio
@@ -397,3 +407,30 @@ async def test_replicas_share_answers_through_redis_and_expire_them():
             async for key in manager.client.scan_iter(f"{prefix}:*"):
                 await manager.client.delete(key)
             await manager.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_check_that_never_returns_is_bounded_and_retried(monkeypatch):
+    """Second independent-review follow-up: the shared check has a hard bound
+    of its own, so one that never returns cannot hold its concurrency slot or
+    answer "unknown" to every later caller for good."""
+    from atlas.modules.prompts import prompt_library_membership as membership
+
+    monkeypatch.setattr(membership, "CHECK_TIMEOUT_S", 0.1)
+    calls, hang = [], {"eng"}
+
+    async def check(user, group):
+        calls.append(group)
+        if group in hang:
+            await asyncio.Event().wait()  # never returns
+        return True
+
+    resolver, store = _resolver(check, max_concurrent=1)
+    assert await asyncio.wait_for(resolver.membership(ALICE, "eng"), 1) is None  # unknown, not cached
+    assert len(store._entries) == 0
+    # The slot was freed (max_concurrent=1): another group is answered.
+    assert await asyncio.wait_for(resolver.membership(ALICE, "ops"), 1) is True
+    # And the stuck group is asked again, not served the old stuck task.
+    hang.clear()
+    assert await asyncio.wait_for(resolver.membership(ALICE, "eng"), 1) is True
+    assert calls == ["eng", "ops", "eng"]

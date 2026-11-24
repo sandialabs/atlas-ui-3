@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from atlas.domain.sessions.models import Session
-from atlas.domain.team_prompt import TeamPrompt, with_precedence_notice
+from atlas.domain.team_prompt import TeamPrompt, is_team_prompt_message, with_precedence_notice
 from atlas.modules.prompts.prompt_provider import PromptProvider
 
 from ..utilities import file_processor
@@ -218,7 +218,10 @@ class MessageBuilder:
                 # Replace the last user message with a multimodal version
                 last_user_idx = None
                 for i in range(len(messages) - 1, -1, -1):
-                    if messages[i].get("role") == "user":
+                    # Never the team-prompt block (issue #1169): files belong
+                    # to the user's own message, and rebuilding the block
+                    # would drop its marker.
+                    if messages[i].get("role") == "user" and not is_team_prompt_message(messages[i]):
                         last_user_idx = i
                         break
                 if last_user_idx is not None:

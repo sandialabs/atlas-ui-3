@@ -100,6 +100,11 @@ class RedisMembershipCache:
         await self._redis.client.set(self._key(key), b"1" if value else b"0", ex=ttl)
 
 
+# How long one shared authorizer check may run before it counts as "unknown"
+# (not cached, so the next request asks again).
+CHECK_TIMEOUT_S = 30.0
+
+
 class MembershipResolver:
     """``membership(user, group)`` -> True / False / None (unknown), bounded and reused."""
 
@@ -143,24 +148,27 @@ class MembershipResolver:
                 return cached
 
         semaphore, inflight = self._state()
-        pending = inflight.get(key)
-        if pending is not None:
-            # Same identity and group already being asked: share the answer.
-            return await asyncio.shield(pending)
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        inflight[key] = future
-        answer = None
+        task = inflight.get(key)
+        if task is None:
+            # One check per identity and group at a time, run as its own task:
+            # a caller that stops waiting (a bound ran out, its request was
+            # cancelled, or it only needed one confirmed group) stops waiting
+            # for the answer, not the check. The check finishes, every other
+            # caller sharing it gets the real answer, and it is cached for the
+            # next request. Each check is bounded by the authorizer client's
+            # own timeout and the per-process concurrency limit.
+            task = asyncio.ensure_future(self._check_and_store(semaphore, key, user_email, group, store, ttl))
+            inflight[key] = task
+            task.add_done_callback(lambda done, key=key: inflight.pop(key, None) if inflight.get(key) is done else None)
+        return await asyncio.shield(task)
+
+    async def _check_and_store(
+        self, semaphore: asyncio.Semaphore, key: str, user_email: str, group: str, store: Any, ttl: int
+    ) -> Optional[bool]:
         try:
             answer = await self._ask(semaphore, user_email, group)
         except Exception:  # _ask fails closed already; this is belt and braces
             answer = None
-        finally:
-            # Cancellation (or any other BaseException) still propagates, but
-            # the waiters sharing this check get "unknown" instead of hanging.
-            if not future.done():
-                future.set_result(answer)
-            inflight.pop(key, None)
-
         if answer is not None and store is not None:
             try:
                 await store.put(key, answer, ttl)
@@ -171,7 +179,13 @@ class MembershipResolver:
     async def _ask(self, semaphore: asyncio.Semaphore, user_email: str, group: str) -> Optional[bool]:
         async with semaphore:
             try:
-                answer = await self._check()(user_email, group)
+                # A hard bound of its own: callers stop waiting at their own
+                # (shorter) bounds, but the shared check must also end, or one
+                # that never returns would hold its concurrency slot and answer
+                # "unknown" to every later caller for good. The built-in
+                # authorizer's HTTP timeout is per phase, and a customised
+                # ``is_user_in_group`` may have none.
+                answer = await asyncio.wait_for(self._check()(user_email, group), CHECK_TIMEOUT_S)
             except Exception as e:
                 # Fail closed: an authorizer outage must not grant access, and
                 # it is "unknown", not "not a member".

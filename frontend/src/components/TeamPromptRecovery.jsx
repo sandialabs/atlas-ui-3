@@ -18,6 +18,11 @@ export default function TeamPromptRecovery({ conversationId, problem = null, rev
   const [state, setState] = useState('idle')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  // The pin revision the clear names. It starts as the one the refusal saw;
+  // a 409 (the pin changed since) reports the revision now stored, and the
+  // retry -- after the user confirms again -- uses that one instead of
+  // failing the same way.
+  const [expectedRevision, setExpectedRevision] = useState(revision)
   const confirmRef = useRef(null)
   const startRef = useRef(null)
 
@@ -31,10 +36,16 @@ export default function TeamPromptRecovery({ conversationId, problem = null, rev
     setState('clearing')
     setError(null)
     try {
-      setResult(await clearConversationTeamPrompt(conversationId, revision))
+      setResult(await clearConversationTeamPrompt(conversationId, expectedRevision))
       setState('done')
     } catch (e) {
-      setError(e?.message || 'Could not clear the team prompt.')
+      if (e?.status === 409 && Number.isInteger(e.currentRevision)) {
+        setExpectedRevision(e.currentRevision)
+        setError("This conversation's team prompt changed since then, so nothing was cleared. "
+          + 'Check the selected prompt; if you still want to clear it, try again.')
+      } else {
+        setError(e?.message || 'Could not clear the team prompt.')
+      }
       setState('failed')
     }
   }
