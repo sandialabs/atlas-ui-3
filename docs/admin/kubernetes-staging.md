@@ -295,15 +295,17 @@ connection budgets, no committed credentials, and no fixed UIDs on OpenShift.
 
 ## Not shared between replicas (yet)
 
+Run state that is shared through Redis: the run cap, run status, stop, steer,
+approval responses and the auto-approve switch (see
+[Session Store](session-store.md#limits-of-the-shared-store)).
+
 These are per-replica in this deployment. They are known gaps, not
 configuration mistakes:
 
 - **The live transcript of a tracked run** that has not yet been saved, the
   Agent Runs API follow-up and listing endpoints, the
   `atlas_get_subagent_result` and `atlas_get_subagent_runs` tools, and MCP
-  elicitation prompts stay on the replica that runs the work. The run cap,
-  run status, stop, steer, approvals and the auto-approve switch are shared
-  through Redis (see [Session Store](session-store.md#limits-of-the-shared-store)).
+  elicitation prompts stay on the replica that runs the work.
 - **MCP OAuth pending state** (the PKCE verifier of a login in progress) is
   held in the process that handled `/oauth/start`; a callback that lands on
   another replica fails with `invalid_state`. **OAuth client registrations**
@@ -335,5 +337,5 @@ capacity and limits here when they are measured.
 
 - [Session Store](session-store.md): Redis sessions, reconnect, outages
 - [Chat History](chat-history.md): PostgreSQL, pool settings, Alembic
-- [Parallel Conversation Runs](parallel-conversation-runs.md): process-local run limits
+- [Parallel Conversation Runs](parallel-conversation-runs.md): run limits, approvals and cross-replica run control
 - `test/multireplica/README.md`: the per-PR multi-process harness

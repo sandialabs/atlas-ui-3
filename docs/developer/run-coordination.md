@@ -344,7 +344,7 @@ wrapper's own run belongs to a descendant. `observe_tool_callback` and
 or its own run id, so a grandchild's approval request does not mark the
 middle child as waiting for input.
 
-## Still open in #1128
+## Beyond #1128: what stays replica-local
 
 Nothing in `test/multireplica/test_run_coordination_gaps.py` is still a gap:
 admission, inspection from a non-owner, owner loss, fencing a paused owner and
