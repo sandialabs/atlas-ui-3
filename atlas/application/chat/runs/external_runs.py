@@ -346,11 +346,13 @@ _KEY_TAKEN_MESSAGE = (
 )
 
 
-def _abandon_run(handle: Dict[str, Any]) -> None:
-    """Cancel the run admitted under a key that is no longer this request's."""
-    logger.error("An idempotency key was taken over while its run was being recorded")
+def _abandon_run(handle: Dict[str, Any], reason: str = "taken") -> None:
+    """Cancel an admitted run whose idempotency key can no longer be recorded
+    (taken over, or the store stayed unwritable), so no live run is left that a
+    retry of the same request could duplicate."""
+    logger.error("An idempotency key could not be recorded for its run (%s)", reason)
     coordination_metrics().record_event(
-        CoordinationEvent.IDEMPOTENCY_RESERVATION_LOST, logging.ERROR, reason="taken"
+        CoordinationEvent.IDEMPOTENCY_RESERVATION_LOST, logging.ERROR, reason=reason
     )
     get_run_registry().cancel(handle["run_id"], handle["user"])
 
@@ -402,19 +404,19 @@ async def _retry_complete(slot: IdempotencySlot, handle: Dict[str, Any]) -> None
     deadline = time.monotonic() + IDEMPOTENCY_PENDING_TTL_SECONDS
     while time.monotonic() < deadline:
         await asyncio.sleep(IDEMPOTENCY_COMPLETE_RETRY_SECONDS)
-        if await store.renew(slot) is False:
-            break  # the key is gone or another request's: nothing left to record
+        # A renewal that finds the key gone does not end the attempt: a key
+        # that merely expired is re-taken by ``complete``; one that is another
+        # request's makes ``complete`` answer taken.
+        await store.renew(slot)
         stored = await store.complete(slot, handle)
         if stored:
             return
         if stored is None:
             _abandon_run(handle)
             return
-    logger.error(
-        "Could not record the run handle for run %s's idempotency key; a retry "
-        "of that request may launch it again",
-        handle.get("run_id"),
-    )
+    # Still unwritable: do not leave a live, unrecorded run that a retry of the
+    # same request could duplicate.
+    _abandon_run(handle, "unrecorded")
 
 
 # ---------------------------------------------------------------------------

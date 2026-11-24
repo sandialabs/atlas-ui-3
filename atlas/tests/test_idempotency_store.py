@@ -323,3 +323,27 @@ async def test_redis_follow_up_index_is_not_taken_over_by_another_caller(server)
     await store.complete(theirs, {"run_id": "other"})
     owner, entry = await store.find_follow_up("run-1", "ix", "conv-1")
     assert owner == "alice@example.com" and entry.handle == HANDLE
+
+
+async def test_redis_renew_and_release_leave_another_owners_indexes(server):
+    store = RedisIdempotencyStore(_manager(server))
+    client = store._redis.client
+    slot, _ = await store.reserve(
+        USER, "idx", "fp", addressed_run_id="run-x", conversation_id="conv-x"
+    )
+    addr = store._addr_key("run-x", "idx")
+    conv = store._conv_key("conv-x", "idx")
+    # Our own indexes follow the reservation.
+    await client.pexpire(addr, 5000)
+    await store.renew(slot)
+    assert await client.pttl(addr) > (IDEMPOTENCY_PENDING_TTL_SECONDS - 5) * 1000
+    # Another user's index at the same address is neither shortened nor deleted.
+    for index in (addr, conv):
+        await client.set(index, "bob@example.com", px=3_600_000)
+    await store.renew(slot)
+    for index in (addr, conv):
+        assert await client.pttl(index) > 60_000
+    await store.release(slot)
+    for index in (addr, conv):
+        assert await client.get(index) == b"bob@example.com"
+    assert await client.exists(store._record_key(USER, "idx")) == 0

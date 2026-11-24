@@ -759,28 +759,49 @@ async def test_follow_up_replay_is_unavailable_when_the_shared_record_is_unreada
     assert response.json()["detail"]["code"] == "unavailable"
 
 
-async def test_the_handle_retry_stops_when_the_key_is_no_longer_ours(
-    factory, shared_store, monkeypatch
-):
+async def _deferred_retry(factory, shared_store, monkeypatch, key, answers):
     module = "atlas.application.chat.runs.external_runs"
     monkeypatch.setattr(f"{module}.IDEMPOTENCY_COMPLETE_RETRY_SECONDS", 0.01)
     attempts = []
 
-    async def refused(slot, handle):
+    async def scripted(slot, handle):
         attempts.append(1)
-        return False
+        return answers[min(len(attempts) - 1, len(answers) - 1)]
 
     async def gone(slot):
-        return False
+        return False  # the reservation is no longer there
 
-    shared_store.complete = refused
+    shared_store.complete = scripted
     shared_store.renew = gone
-    body = {**LAUNCH, "idempotency_key": "gone-1"}
+    body = {**LAUNCH, "idempotency_key": key}
     async with _client(factory) as client:
         response = await client.post("/api/agent-runs", json=body, headers=AUTH)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
+    return response, attempts
+
+
+async def test_an_expired_key_is_retaken_by_the_handle_retry(
+    factory, shared_store, monkeypatch
+):
+    response, attempts = await _deferred_retry(
+        factory, shared_store, monkeypatch, "expired-1", [False, True]
+    )
     assert response.status_code == 202
-    assert len(attempts) == 1  # one write, then renew said the key is gone: no more retries
+    assert len(attempts) == 2  # renew said gone, complete re-took the key
+    records = get_run_registry().all_records()
+    assert len(records) == 1 and records[0].status is not RunStatus.CANCELLED
+
+
+async def test_a_taken_key_cancels_the_run_in_the_handle_retry(
+    factory, shared_store, monkeypatch
+):
+    response, attempts = await _deferred_retry(
+        factory, shared_store, monkeypatch, "taken-2", [False, None]
+    )
+    assert response.status_code == 202
+    assert len(attempts) == 2
+    records = get_run_registry().all_records()
+    assert len(records) == 1 and records[0].status is RunStatus.CANCELLED
 
 
 async def test_the_reservation_stays_renewed_through_a_stalled_handle_write(

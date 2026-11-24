@@ -55,6 +55,12 @@ local function claim_index(k, owner, ttl)
     redis.call('PEXPIRE', k, ttl)
   end
 end
+local function touch_index(k, owner, ttl)
+  if redis.call('GET', k) == owner then redis.call('PEXPIRE', k, ttl) end
+end
+local function drop_index(k, owner)
+  if redis.call('GET', k) == owner then redis.call('DEL', k) end
+end
 """
 
 # KEYS: record, addr_index, conv_index (unused when the request addresses no run)
@@ -97,31 +103,32 @@ return 1
 """
 
 # KEYS: record, addr_index, conv_index
-# ARGV: token, pending_ms, addressed_run_id, conversation_id
+# ARGV: token, pending_ms, addressed_run_id, conversation_id, user_email
 # Extends a reservation that is still ours and still pending. Returns 2 when
 # it is ours but already completed (nothing to extend, nothing lost), 0 when
 # it is gone or another request's.
-RENEW_SCRIPT = """
+RENEW_SCRIPT = _CLAIM_INDEX + """
 if redis.call('HGET', KEYS[1], 'token') ~= ARGV[1] then return 0 end
 if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 2 end
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
 if ARGV[3] ~= '' then
-  redis.call('PEXPIRE', KEYS[2], ARGV[2])
-  if ARGV[4] ~= '' then redis.call('PEXPIRE', KEYS[3], ARGV[2]) end
+  touch_index(KEYS[2], ARGV[5], ARGV[2])
+  if ARGV[4] ~= '' then touch_index(KEYS[3], ARGV[5], ARGV[2]) end
 end
 return 1
 """
 
 # KEYS: record, addr_index, conv_index
-# ARGV: token, addressed_run_id, conversation_id
-# Deletes the reservation only while it is still ours and still pending.
-RELEASE_SCRIPT = """
+# ARGV: token, addressed_run_id, conversation_id, user_email
+# Deletes the reservation only while it is still ours and still pending, and
+# only the index slots that belong to this owner.
+RELEASE_SCRIPT = _CLAIM_INDEX + """
 if redis.call('HGET', KEYS[1], 'token') ~= ARGV[1] then return 0 end
 if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 0 end
 redis.call('DEL', KEYS[1])
 if ARGV[2] ~= '' then
-  redis.call('DEL', KEYS[2])
-  if ARGV[3] ~= '' then redis.call('DEL', KEYS[3]) end
+  drop_index(KEYS[2], ARGV[4])
+  if ARGV[3] ~= '' then drop_index(KEYS[3], ARGV[4]) end
 end
 return 1
 """
@@ -260,6 +267,7 @@ class RedisIdempotencyStore:
                     self._pending_ms,
                     slot.addressed_run_id or "",
                     slot.conversation_id or "",
+                    slot.user_email,
                 ],
             )
         except Exception as exc:
@@ -277,7 +285,12 @@ class RedisIdempotencyStore:
                 keys=self._keys(
                     slot.user_email, slot.key, slot.addressed_run_id, slot.conversation_id
                 ),
-                args=[slot.token, slot.addressed_run_id or "", slot.conversation_id or ""],
+                args=[
+                    slot.token,
+                    slot.addressed_run_id or "",
+                    slot.conversation_id or "",
+                    slot.user_email,
+                ],
             )
         except Exception as exc:
             self._unavailable(exc)
