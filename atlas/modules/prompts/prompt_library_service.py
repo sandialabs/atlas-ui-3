@@ -439,10 +439,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         """
         _check_page(limit, offset)
         # History stays readable after archiving (see _access).
-        await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
+        _, _, access = await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
         total, versions = await self._db(self._repo.page_versions, prompt_id, limit, offset, False)
         return {
-            "versions": [version_view(v, include_content=False) for v in versions],
+            "versions": [version_view(v, include_content=False, include_author_email=access.level >= LEVEL_EDIT) for v in versions],
             "total": total,
             "limit": limit,
             "offset": offset,
@@ -450,11 +450,11 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
 
     async def get_version(self, user_email: str, prompt_id: str, version_id: str) -> Dict[str, Any]:
         # History stays readable after archiving (see _access).
-        await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
+        _, _, access = await self._authorize(user_email, prompt_id, LEVEL_USE, history=True)
         version = await self._db(self._repo.get_version, prompt_id, version_id)
         if version is None:
             raise PromptNotFound()
-        return version_view(version)
+        return version_view(version, include_author_email=access.level >= LEVEL_EDIT)
 
     async def export_prompt(self, user_email: str, prompt_id: str, offset: int = 0) -> Dict[str, Any]:
         """A portable JSON view: the entry plus its published versions with content.
@@ -473,7 +473,7 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
         detail.pop("latest_content", None)
         detail["archived"] = bool(prompt.get("archived_at"))
         total, versions = await self._db(self._repo.page_versions, prompt_id, MAX_EXPORT_VERSIONS, offset, True)
-        detail["versions"] = [version_view(v) for v in versions]
+        detail["versions"] = [version_view(v, include_author_email=access.level >= LEVEL_EDIT) for v in versions]
         detail["versions_total"] = total
         detail["versions_offset"] = offset
         detail["versions_truncated"] = offset + len(versions) < total

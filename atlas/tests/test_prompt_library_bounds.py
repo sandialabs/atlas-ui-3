@@ -81,7 +81,7 @@ async def test_history_is_paged_newest_first_without_prompt_text(tmp_path):
     assert [v["version_number"] for v in first["versions"]] == [7, 6, 5]
     assert all("content" not in v for v in first["versions"])
     assert set(first["versions"][0]) == {
-        "id", "prompt_id", "version_number", "title", "change_description", "author_email", "created_at",
+        "id", "prompt_id", "version_number", "title", "change_description", "created_at",
     }
     rest = await lib.list_versions(ALICE, prompt["id"], limit=3, offset=6)
     assert [v["version_number"] for v in rest["versions"]] == [1] and rest["total"] == 7

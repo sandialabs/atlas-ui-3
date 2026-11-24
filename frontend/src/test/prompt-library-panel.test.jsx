@@ -23,7 +23,7 @@ const owned = {
   has_unpublished_changes: false,
 }
 const teamUse = {
-  id: 'p-team', title: 'Team helper', description: '', owner_email: 'lead@x.com', is_owner: false,
+  id: 'p-team', title: 'Team helper', description: '', is_owner: false,
   permission: 'use', access_via: ['eng'], latest_version: { id: 'v7', version_number: 7 },
   can_edit: false, can_manage: false, shared: true,
 }
@@ -40,7 +40,7 @@ function makeLibrary(items = [owned, teamUse]) {
     updatePrompt: vi.fn(async (id, fields, rev) => ({ ...owned, ...fields, draft_content: fields.content, draft_revision: rev + 1 })),
     publishPrompt: vi.fn(async () => ({ id: 'v2', version_number: 2 })),
     listVersions: vi.fn(async () => ({
-      versions: [{ id: 'v7', version_number: 7, change_description: 'tone', author_email: 'lead@x.com' }],
+      versions: [{ id: 'v7', version_number: 7, change_description: 'tone' }],
       total: 1,
     })),
     getVersion: vi.fn(async () => ({ id: 'v7', version_number: 7, content: 'seventh' })),
@@ -77,7 +77,7 @@ describe('PromptLibraryPanel', () => {
     expect(within(team).queryByLabelText('Share Team helper')).toBeNull()
     expect(within(team).queryByLabelText('Archive Team helper')).toBeNull()
     expect(within(team).getByLabelText('Fork Team helper')).toBeInTheDocument()
-    expect(within(team).getByText(/Owner: lead@x.com/)).toBeInTheDocument()
+    expect(within(team).getByText('Shared with you')).toBeInTheDocument()
     expect(within(team).getByText('v7')).toBeInTheDocument()
     expect(within(team).getByText(/your access: use/)).toBeInTheDocument()
   })
@@ -98,7 +98,9 @@ describe('PromptLibraryPanel', () => {
     fireEvent.click(within(team).getByRole('button', { name: 'Use' }))
     expect(makePromptActive).toHaveBeenCalledWith(libraryPromptKey('p-team'))
     fireEvent.click(within(team).getByLabelText('Version history for Team helper'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Use this version' }))
+    expect(await screen.findByRole('button', { name: 'Use this version' })).toBeInTheDocument()
+    expect(screen.queryByText(/undefined/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Use this version' }))
     expect(makePromptActive).toHaveBeenLastCalledWith(libraryPromptKey('p-team', 'v7'))
   })
 

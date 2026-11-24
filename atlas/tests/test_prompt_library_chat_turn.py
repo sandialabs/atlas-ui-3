@@ -421,10 +421,99 @@ async def test_clients_that_omit_the_field_get_an_actionable_refusal(env):
         await _turn(cli, uuid4(), conv)
     assert f"DELETE /api/prompts/pins/{conv}" in exc.value.message
     assert "v1 body" not in exc.value.message and cli_calls == []
-    # A browser naming the prompt still gets the generic refusal.
-    with pytest.raises(AuthorizationError) as browser_exc:
+    # The browser sends the same pinned reference explicitly.
+    # It must receive a recoverable error, not a generic refusal.
+    from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+
+    with pytest.raises(PromptPinBlockedError) as browser_exc:
         await _turn(browser, uuid4(), conv, library_prompt={"prompt_id": prompt["id"], "version_id": None})
-    assert "DELETE" not in browser_exc.value.message
+
+    assert browser_exc.value.conversation_id == conv
+    assert browser_exc.value.reason == "unavailable"
+    assert browser_exc.value.revision == 1
+
+
+
+@pytest.mark.asyncio
+async def test_explicit_archived_pin_offers_recovery(env):
+    from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+
+    lib = env["library"]
+    prompt, version = await _shared_prompt(lib)
+    service, _, _ = _service(env)
+    conv = str(uuid4())
+
+    await _turn(
+        service, uuid4(), conv,
+        library_prompt={"prompt_id": prompt["id"], "version_id": None},
+    )
+    await lib.archive(OWNER, prompt["id"])
+
+    with pytest.raises(PromptPinBlockedError) as exc:
+        await _turn(
+            service, uuid4(), conv,
+            library_prompt={"prompt_id": prompt["id"], "version_id": version["id"]},
+        )
+
+    assert exc.value.conversation_id == conv
+    assert exc.value.reason == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_different_prompt_does_not_offer_pin_recovery(env):
+    from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+
+    lib = env["library"]
+    original, _ = await _shared_prompt(lib)
+    service, _, _ = _service(env)
+    conv = str(uuid4())
+
+    await _turn(
+        service, uuid4(), conv,
+        library_prompt={"prompt_id": original["id"], "version_id": None},
+    )
+
+    private = await lib.create_prompt(OWNER, "Private", "private content")
+    await _publish(lib, OWNER, private["id"])
+
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(
+            service, uuid4(), conv,
+            library_prompt={"prompt_id": private["id"], "version_id": None},
+        )
+
+    assert not isinstance(exc.value, PromptPinBlockedError)
+    assert _stored_meta(env, conv)["prompt_library"]["prompt_id"] == original["id"]
+
+
+@pytest.mark.asyncio
+async def test_temporary_membership_failure_does_not_offer_recovery(env, monkeypatch):
+    from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+    from atlas.modules.prompts.prompt_library_policy import PromptMembershipUnknown
+
+    lib = env["library"]
+    prompt, version = await _shared_prompt(lib)
+    service, _, _ = _service(env)
+    conv = str(uuid4())
+
+    await _turn(
+        service, uuid4(), conv,
+        library_prompt={"prompt_id": prompt["id"], "version_id": None},
+    )
+
+    monkeypatch.setattr(
+        lib, "resolve_for_execution",
+        AsyncMock(side_effect=PromptMembershipUnknown()),
+    )
+
+    with pytest.raises(AuthorizationError) as exc:
+        await _turn(
+            service, uuid4(), conv,
+            library_prompt={"prompt_id": prompt["id"], "version_id": version["id"]},
+        )
+
+    assert not isinstance(exc.value, PromptPinBlockedError)
+    assert _stored_meta(env, conv)["prompt_library"]["version_id"] == version["id"]
 
 
 @pytest.mark.asyncio
@@ -531,6 +620,25 @@ async def test_conflicting_prompts_are_rejected_before_any_lookup(env, monkeypat
     # Nothing was attempted, so nothing is audited (no use, no denial).
     assert len(lib.repository.list_audit_events(prompt["id"])) == events_before
     assert env["conversations"].get_conversation(conv, USER) is None
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_custom_prompt_does_not_conflict_with_library(env):
+    lib = env["library"]
+    prompt, version = await _shared_prompt(lib)
+    service, calls, _ = _service(env)
+    conv = str(uuid4())
+
+    await _turn(
+        service,
+        uuid4(),
+        conv,
+        library_prompt={"prompt_id": prompt["id"], "version_id": None},
+        custom_system_prompt="   ",
+    )
+
+    assert len(calls) == 1
+    assert _stored_meta(env, conv)["prompt_library"]["version_id"] == version["id"]
 
 
 @pytest.mark.asyncio

@@ -540,9 +540,21 @@ async def resolve_library_prompt_for_turn(
             # version it pinned.
             version_id = current["version_id"]
 
+    # Browsers send their selected prompt on every turn. An explicit
+    # reference to the stored pin deserves the same recovery action as
+    # an omitted reference when that pin is no longer available.
+    # A different selection must not receive stored-pin recovery.
+    matches_stored_pin = (
+        stored
+        and current is not None
+        and current["prompt_id"] == prompt_id
+        and current["version_id"] == version_id
+    )
+    refusal_from_pin = from_pin_only or matches_stored_pin
+
     if library is None or not user_email:
         logger.warning("Library prompt requested but the prompt library is unavailable")
-        raise _pin_refusal(context, from_pin_only, None, stored)
+        raise _pin_refusal(context, refusal_from_pin, None, stored)
 
     from atlas.modules.prompts.prompt_library_policy import (
         PromptLibraryError,
@@ -569,7 +581,7 @@ async def resolve_library_prompt_for_turn(
     except PromptLibraryError as e:
         # Nothing client-supplied is logged: the prompt id came from the frame.
         logger.warning("Refused a team-library prompt for this turn (%s)", type(e).__name__)
-        raise _pin_refusal(context, from_pin_only, e.message, stored)
+        raise _pin_refusal(context, refusal_from_pin, e.message, stored)
 
     if current is None or current["version_id"] != version["id"]:
         target = {

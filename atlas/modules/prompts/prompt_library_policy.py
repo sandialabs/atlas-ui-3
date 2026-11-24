@@ -243,12 +243,12 @@ def summary_view(
         }
         if latest is not None:
             latest_ref["created_at"] = latest.get("created_at")
-            latest_ref["author_email"] = latest.get("author_email")
+            if access.level >= LEVEL_EDIT:
+                latest_ref["author_email"] = latest.get("author_email")
     data: Dict[str, Any] = {
         "id": prompt["id"],
         "title": prompt["title"],
         "description": prompt.get("description"),
-        "owner_email": prompt["owner_email"],
         "is_owner": access.level == LEVEL_OWNER,
         "permission": access.name,
         "access_via": access.via,
@@ -259,6 +259,7 @@ def summary_view(
         "can_manage": access.level >= LEVEL_MANAGE,
     }
     if access.level >= LEVEL_EDIT:
+        data["owner_email"] = prompt["owner_email"]
         # The draft revision an edit or publish must name (optimistic concurrency).
         data["draft_revision"] = prompt.get("draft_revision", 1)
         data["forked_from_prompt_id"] = prompt.get("forked_from_prompt_id")
@@ -296,16 +297,17 @@ def sharing_view(grants: List[Dict[str, Any]], revision: int) -> Dict[str, Any]:
     }
 
 
-def version_view(version: Dict[str, Any], include_content: bool = True) -> Dict[str, Any]:
+def version_view(version: Dict[str, Any], include_content: bool = True, include_author_email: bool = True) -> Dict[str, Any]:
     data = {
         "id": version["id"],
         "prompt_id": version["prompt_id"],
         "version_number": version["version_number"],
         "title": version["title"],
         "change_description": version.get("change_description"),
-        "author_email": version["author_email"],
         "created_at": version.get("created_at"),
     }
+    if include_author_email:
+        data["author_email"] = version["author_email"]
     if include_content:
         data["content"] = version["content"]
     return data

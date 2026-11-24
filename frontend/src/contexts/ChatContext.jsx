@@ -405,11 +405,18 @@ export const ChatProvider = ({ children }) => {
 	}, [storedComplianceFilter, complianceLevels, complianceRequired, defaultComplianceLevel, storeComplianceFilter])
 
 	useEffect(() => {
-		if (!config.configReady || customPromptsEnabled) return
-		if (isUserPromptKey(activePromptKey) || isLibraryPromptKey(activePromptKey) || isLibraryDraftKey(activePromptKey)) {
+		if (!config.configReady) return
+
+		const unavailableUserPrompt =
+			!customPromptsEnabled && isUserPromptKey(activePromptKey)
+		const unavailableLibraryPrompt =
+			!promptLibraryEnabled &&
+			(isLibraryPromptKey(activePromptKey) || isLibraryDraftKey(activePromptKey))
+
+		if (unavailableUserPrompt || unavailableLibraryPrompt) {
 			clearActivePrompt()
 		}
-	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
+	}, [config.configReady, customPromptsEnabled, promptLibraryEnabled, activePromptKey, clearActivePrompt])
 
 	// A draft under test lives in memory only; after a reload the persisted key
 	// has nothing behind it. Clearing it here is safe: the draft was never a
@@ -1261,6 +1268,15 @@ export const ChatProvider = ({ children }) => {
 		// Team prompt library (issue #1169): only a reference goes out, and a
 		// selection that is no longer available is refused here rather than
 		// silently replaced by the default prompt.
+		// Do not send a stale team-library selection when the feature is off.
+		// React's cleanup effect may not have run before the user presses Send.
+		if (!promptLibraryEnabled &&
+			(isLibraryPromptKey(selections.activePromptKey) ||
+			 isLibraryDraftKey(selections.activePromptKey))) {
+			toast.error('The team prompt library is disabled. Choose another prompt before sending.')
+			clearActivePrompt()
+			return false
+		}
 		const librarySelection = resolveLibrarySelection(selections.activePromptKey, promptLibrary)
 		if (librarySelection.kind === 'blocked') {
 			toast.error(librarySelection.message)
@@ -1474,7 +1490,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting, promptLibrary])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting, promptLibrary, promptLibraryEnabled, clearActivePrompt])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped

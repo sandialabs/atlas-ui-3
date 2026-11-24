@@ -152,6 +152,38 @@ async def test_group_membership_grants_use_not_edit_or_share(lib):
 
 
 @pytest.mark.asyncio
+async def test_use_only_access_hides_owner_and_author_emails(lib):
+    prompt = await _published(
+        lib,
+        groups_=["eng"],
+        users=[{"email": BOB, "permission": "edit"}],
+    )
+    prompt_id = prompt["id"]
+    owner_version = (await lib.list_versions(OWNER, prompt_id))["versions"][0]
+    version_id = owner_version["id"]
+
+    listing = (await _list(lib, ALICE))[0]
+    detail = await lib.get_prompt(ALICE, prompt_id)
+    exported = await lib.export_prompt(ALICE, prompt_id)
+    history = (await lib.list_versions(ALICE, prompt_id))["versions"]
+    version = await lib.get_version(ALICE, prompt_id, version_id)
+
+    for view in (listing, detail, exported):
+        assert "owner_email" not in view
+        assert "author_email" not in view["latest_version"]
+
+    for view in (*history, version, *exported["versions"]):
+        assert "author_email" not in view
+
+    # Editors still receive the attribution needed for management.
+    editor_detail = await lib.get_prompt(BOB, prompt_id)
+    editor_version = await lib.get_version(BOB, prompt_id, version_id)
+    assert editor_detail["owner_email"] == OWNER
+    assert editor_detail["latest_version"]["author_email"] == OWNER
+    assert editor_version["author_email"] == OWNER
+
+
+@pytest.mark.asyncio
 async def test_group_grants_cannot_carry_edit(lib):
     prompt = await _published(lib)
     # The API only accepts group names; the service always stores them as use.

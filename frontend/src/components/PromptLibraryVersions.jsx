@@ -143,7 +143,7 @@ const PromptLibraryVersions = ({
                   {activeVersionId === v.id && <span className="ml-2 text-xs text-blue-400">(selected)</span>}
                 </div>
                 <div className="text-xs text-gray-400 truncate">
-                  {v.change_description || 'No change description'} -- {v.author_email}
+                  {v.change_description || 'No change description'}{v.author_email ? ` -- ${v.author_email}` : ''}
                   {v.created_at ? `, ${new Date(v.created_at).toLocaleString()}` : ''}
                 </div>
               </button>

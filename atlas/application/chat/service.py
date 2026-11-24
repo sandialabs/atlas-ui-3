@@ -805,8 +805,10 @@ class ChatService:
                 request=kwargs.pop("library_prompt", UNSET),
                 # A persona counts as another prompt for direct callers too (the
                 # WebSocket also rejects the combination on the raw frame).
-                other_prompt_selected=bool(kwargs.get("custom_system_prompt"))
-                or kwargs.get("persona_id") not in (None, ""),
+                other_prompt_selected=(
+                    isinstance(kwargs.get("custom_system_prompt"), str)
+                    and bool(kwargs["custom_system_prompt"].strip())
+                ) or kwargs.get("persona_id") not in (None, ""),
                 library=getattr(self, "prompt_library_service", None),
                 message_index=len(session.history.messages),
                 omitted=UNSET,

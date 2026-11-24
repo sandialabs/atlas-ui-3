@@ -360,7 +360,7 @@ const PromptLibraryPanel = () => {
                     </div>
                     {p.description && <p className="text-sm text-gray-400 mt-1 line-clamp-2">{p.description}</p>}
                     <div className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
-                      <span>{p.is_owner ? 'Owned by you' : `Owner: ${p.owner_email}`}</span>
+                      <span>{p.is_owner ? 'Owned by you' : (p.owner_email ? `Owner: ${p.owner_email}` : 'Shared with you')}</span>
                       <span className="flex items-center gap-1">
                         {p.shared || sharedGroups.length ? <Users className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
                         {sharedGroups.length ? sharedGroups.join(', ') : (p.shared ? 'shared' : 'private')}

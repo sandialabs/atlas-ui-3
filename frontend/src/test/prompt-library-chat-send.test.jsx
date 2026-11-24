@@ -544,6 +544,42 @@ describe('pin-conflict errors reach only their own conversation (issue #1169)', 
 })
 
 
+describe('disabled team library selections (November 24 review)', () => {
+  it.each(['libprompt:p1@latest', 'libdraft:p1'])(
+    'clears and blocks a stale selection: %s',
+    key => {
+      h.promptLibraryFeature = false
+      h.activeKey = key
+
+      const { result } = renderChat()
+
+      expect(h.libraryEnabledArgs.at(-1)).toBe(false)
+      expect(h.clearActivePrompt).toHaveBeenCalled()
+
+      let sent
+      act(() => { sent = result.current.sendChatMessage('hello') })
+
+      expect(sent).toBe(false)
+      expect(chatFrames()).toHaveLength(0)
+      expect(h.toastError).toHaveBeenCalledWith(
+        expect.stringMatching(/library is disabled/i)
+      )
+    }
+  )
+
+  it('preserves private prompt selections when only the team library is off', () => {
+    h.promptLibraryFeature = false
+    h.activeKey = 'userprompt:u1'
+
+    const { result } = renderChat()
+
+    expect(h.clearActivePrompt).not.toHaveBeenCalled()
+
+    act(() => { result.current.sendChatMessage('hello') })
+    expect(chatFrames()).toHaveLength(1)
+  })
+})
+
 describe('the library has its own flag (review note 11)', () => {
   it('is off unless features.prompt_library is on, even with custom prompts on', () => {
     h.promptLibraryFeature = false
