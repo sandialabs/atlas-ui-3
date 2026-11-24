@@ -348,8 +348,13 @@ async def read_stored_reply(
         return None
     from atlas.application.chat.runs.launcher import _content_text
 
+    # A steering message sent into a running turn is a user message too, but
+    # it does not start a run of its own.
     if single_run and sum(
-        1 for message in conversation.get("messages", []) if message.get("role") == "user"
+        1
+        for message in conversation.get("messages", [])
+        if message.get("role") == "user"
+        and not (message.get("metadata") or {}).get("steered")
     ) > 1:
         return None
 

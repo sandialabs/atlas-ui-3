@@ -730,3 +730,15 @@ async def test_fenced_run_writes_no_outcome(repo, monkeypatch):
     await _record_outcome(SimpleNamespace(conversation_repository=repo), record, RunStatus.CANCELLED)
 
     assert "latest_status" not in repo.get_conversation("kid", USER)["metadata"]
+
+
+async def test_steering_is_not_a_follow_up(cluster, store):
+    store.add("child-conv", USER, "parent-conv", launch_run_id="child-run")
+    store.rows["child-conv"]["messages"].insert(
+        1, {"role": "user", "content": "nudge", "metadata": {"steered": True}}
+    )
+    context, factory = _on_replica_b(store)
+
+    result = await get_child_result("child-run", context, factory)
+
+    assert result["result"] == "stored answer"
