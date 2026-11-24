@@ -8,6 +8,8 @@ SS="$ROOT/docs/admin/session-store.md"
 KS="$ROOT/docs/admin/kubernetes-staging.md"
 PCR="$ROOT/docs/admin/parallel-conversation-runs.md"
 RC="$ROOT/docs/developer/run-coordination.md"
+OBS="$ROOT/docs/admin/multi-replica-observability.md"
+CTX="$ROOT/frontend/src/contexts/ChatContext.jsx"
 FAILED=0
 
 present() {
@@ -36,5 +38,10 @@ present "$PCR" "does not replay them"
 present "$PCR" "routed to the"
 present "$RC" "still replica-local"
 present "$RC" "elicitation"
+absent "$OBS" "are **not** reported interrupted by anyone yet"
+present "$OBS" "the orphan sweep on any surviving replica"
+present "$OBS" "marked interrupted"
+absent "$CTX" "reaches only the runs"
+present "$CTX" "routes it to the runs other replicas own"
 
 if [ "$FAILED" -eq 0 ]; then echo "All checks passed"; else echo "$FAILED check(s) failed"; exit 1; fi
