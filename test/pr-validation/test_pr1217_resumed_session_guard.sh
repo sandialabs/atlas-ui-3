@@ -20,6 +20,7 @@ fail() { echo "FAILED: $1"; exit 1; }
 python -m pytest atlas/tests/test_resumed_session_new_chat.py \
     atlas/tests/test_resumed_session_fresh_history.py \
     atlas/tests/test_websocket_session_resume.py -q || fail "resume guard"
-bash test/multireplica_tests.sh || fail "multi-replica harness"
+# Only this change's cases; the whole harness is a separate required run.
+bash test/multireplica_tests.sh -k resumed_session || fail "multi-replica harness"
 
 echo "PASSED: PR 1217 resumed-session guard validation"
