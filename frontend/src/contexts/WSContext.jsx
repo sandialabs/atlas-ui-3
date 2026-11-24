@@ -7,6 +7,10 @@ const WSContext = createContext()
 const INITIAL_HEALTH_CHECK_INTERVAL = 5000 // 5 seconds for first retry
 const MAX_HEALTH_CHECK_INTERVAL = 300000 // 5 minutes max
 
+// Frames that change which conversation the server session is in. They are
+// kept and replayed on the next open when they could not be sent.
+const NAVIGATION_FRAME_TYPES = ['reset_session', 'restore_conversation']
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const useWS = () => {
   const context = useContext(WSContext)
@@ -30,6 +34,11 @@ export const WSProvider = ({ children }) => {
   // balancer picks -- instead of starting over. Held for the page's lifetime
   // only: a reload starts a fresh UI, so it must start a fresh session too.
   const serverSessionIdRef = useRef('')
+  // The last navigation frame (reset_session / restore_conversation) sent while
+  // the socket was not open. Delivered first on the next open, so a New Chat
+  // clicked while disconnected is not lost (issue #1217). One slot: the latest
+  // navigation supersedes any earlier one.
+  const pendingNavigationRef = useRef(null)
 
   const connectWebSocket = () => {
     // The server sends a `session_ended` frame and closes with 4401 when the
@@ -51,6 +60,16 @@ export const WSProvider = ({ children }) => {
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {
+        const pending = pendingNavigationRef.current
+        if (pending) {
+          pendingNavigationRef.current = null
+          try {
+            wsRef.current.send(JSON.stringify(pending))
+          } catch {
+            // Keep it for the next open; the connected state still gets set.
+            pendingNavigationRef.current = pending
+          }
+        }
         setIsConnected(true)
         setConnectionStatus('Connected')
       }
@@ -100,13 +119,30 @@ export const WSProvider = ({ children }) => {
     }
   }
 
-  // Returns true if the message was handed to an open socket, false otherwise.
+  // Returns true if the message was handed to an open socket, 'queued' if it is a
+  // navigation frame held for the next open, false otherwise (dropped).
   // Callers use the return value to avoid leaving the UI in a "waiting" state
   // (e.g. an eternal "Thinking..." spinner) when the socket is disconnected.
   const sendMessage = (message) => {
+    const isNavigation = NAVIGATION_FRAME_TYPES.includes(message?.type)
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message))
-      return true
+      try {
+        wsRef.current.send(JSON.stringify(message))
+        // A navigation frame that got through supersedes any held one.
+        if (isNavigation) pendingNavigationRef.current = null
+        return true
+      } catch (error) {
+        // A socket that reports OPEN but is closing can throw. Treat it like a
+        // closed socket below: queue a navigation frame, fail anything else.
+        console.error('WebSocket send failed:', error)
+      }
+    }
+    if (isNavigation) {
+      // Kept for the next open, so this is not an error. 'queued' is truthy but
+      // not `true`: the frame has not reached the server yet.
+      pendingNavigationRef.current = message
+      console.warn('WebSocket is not connected; queued', message.type, 'for the next open')
+      return 'queued'
     }
     console.error('WebSocket is not connected, readyState:', wsRef.current?.readyState)
     return false
