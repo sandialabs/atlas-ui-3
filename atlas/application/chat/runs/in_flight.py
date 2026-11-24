@@ -29,6 +29,11 @@ from atlas.domain.conversation_origin import (
 
 TITLE_MAX_CHARS = 200
 
+# Runs whose claim says another replica must not serve a view of them: an
+# off-record turn shares nothing, and a connection-bound turn lives on its
+# socket's own session (the owner's own lookup refuses both).
+HIDDEN_SCOPES = frozenset({"off_record", "connection_bound"})
+
 
 def _iso(epoch: float) -> str:
     """The stored shape's timestamp format (ISO, UTC) from a time.time() value."""
@@ -83,24 +88,15 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
     owner's transcript.
     """
     from atlas.application.chat.runs.control_bus import get_run_control_bus
-    from atlas.application.chat.runs.execution_state import _TERMINAL_RUN, get_execution_store
     from atlas.application.chat.runs.run_control import RunDirectoryUnavailable, conversation_entry
     from atlas.core.user_identity import normalize_user_email
 
     bus = get_run_control_bus()
     if bus is None:
         return None
-    # The caller's own projection first. It is keyed by user and conversation,
-    # so an id the caller has no run in never reaches the global run key (no
-    # way to probe other users' runs), and a run that shares nothing -- an
-    # off-record turn publishes no projection -- is not served here, as the
-    # owner's own guard refuses it too.
-    try:
-        doc = await get_execution_store().get(conversation_id, user_email)
-    except Exception:
-        return None
-    if not doc or doc.get("status") in _TERMINAL_RUN:
-        return None
+    # Liveness comes from the shared claim, which exists from admission: a
+    # text-only first turn publishes no execution projection until its first
+    # tool or terminal event, so the projection cannot decide it.
     try:
         entry = await conversation_entry(conversation_id)
     except RunDirectoryUnavailable:
@@ -109,7 +105,7 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
         entry is None
         or entry.get("replica") == bus.replica_id
         or entry.get("user_email") != normalize_user_email(user_email)
-        or (doc.get("run_id") and entry.get("run_id") != doc.get("run_id"))
+        or entry.get("scope") in HIDDEN_SCOPES
     ):
         return None
     now = datetime.now(tz=timezone.utc).isoformat()
@@ -128,6 +124,36 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
         "run_id": entry.get("run_id"),
         "run_status": entry.get("status") or "running",
     }
+
+
+async def remote_live_runs(user_email: str) -> list:
+    """The user's live runs that other replicas own, as ``list_runs`` entries.
+
+    Read from the shared claims, so a run that has published no execution
+    projection yet (a text-only first turn) is still listed. Raises when the
+    directory cannot be read, so the caller can mark its list degraded.
+    """
+    from atlas.application.chat.runs.control_bus import get_run_control_bus
+
+    bus = get_run_control_bus()
+    if bus is None:
+        return []
+    out = []
+    for entry in await bus.runs_for_user(user_email):
+        if (
+            entry.get("replica") == bus.replica_id
+            or entry.get("scope") in HIDDEN_SCOPES
+            or not entry.get("conversation_id")
+        ):
+            continue
+        out.append({
+            "run_id": entry.get("run_id"),
+            "conversation_id": entry["conversation_id"],
+            "status": entry.get("status") or "running",
+            "parent_run_id": entry.get("parent_run_id") or None,
+            "detached": True,
+        })
+    return out
 
 
 async def in_flight_conversation(

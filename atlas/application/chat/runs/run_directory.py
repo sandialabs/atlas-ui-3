@@ -60,6 +60,7 @@ def owner_entry(record: Optional[Dict[str, str]], *, include_terminal: bool = Fa
         "source": record.get("source") or "",
         "parent_run_id": record.get("parent_run_id") or "",
         "follow_up_of": record.get("follow_up_of") or "",
+        "scope": record.get("scope") or "",
         "terminal": terminal,
     }
 

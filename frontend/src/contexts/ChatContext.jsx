@@ -18,6 +18,7 @@ import { newRequestId, rememberSteerFrame, takeSteerRetry } from '../utils/steer
 import { usePersistentState } from '../hooks/chat/usePersistentState'
 import { createWebSocketHandler, cleanupStreamState } from '../handlers/chat/websocketHandlers'
 import { useConversationRuns, isRunActive } from '../hooks/chat/useConversationRuns'
+import { interruptedRunNotice } from '../utils/interruptedRunNotice'
 import { useContextCompaction } from '../hooks/chat/useContextCompaction'
 import { usePollingWithBackoff } from '../hooks/usePollingWithBackoff'
 import { saveConversation as saveLocalConv } from '../utils/localConversationDB'
@@ -86,6 +87,14 @@ const fetchConversationRecord = async (id, { signal } = {}) => {
 	if (!res.ok) throw new Error(`conversation refresh failed: ${res.status}`)
 	return res.json()
 }
+
+// How many user and assistant turns a stored record holds. A run's save grows
+// it; the tool rows another replica projects into a live record do not count.
+const savedChatCount = (record) => (
+	(Array.isArray(record?.messages) ? record.messages : [])
+		.filter(m => (m.role === 'user' || m.role === 'assistant') && (m.message_type || 'chat') === 'chat')
+		.length
+)
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
 // model's tool output. The renderer's own flags all start with an underscore
@@ -1883,11 +1892,22 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// that never reported, and read the stored conversation. The saved turn can
 	// lag the run's end on the replica that answers, so the read is retried.
 	const remoteWatchRef = useRef(null)
+	const remoteBaselineRef = useRef(null)
 	useEffect(() => {
 		const id = activeConversationId
 		const run = id ? runs.runsByConversation[id] : null
 		if (id && isRunActive(run) && run.detached === true) {
-			remoteWatchRef.current = id
+			if (remoteWatchRef.current !== id) {
+				remoteWatchRef.current = id
+				// What the store holds while the run is live: the turns before
+				// it. The run's own save is the first record with more than this.
+				remoteBaselineRef.current = null
+				fetchConversationRecord(id).then(data => {
+					if (remoteWatchRef.current === id && data?.id === id) {
+						remoteBaselineRef.current = savedChatCount(data)
+					}
+				}).catch(() => {})
+			}
 			return
 		}
 		// Still running, now tracked by this socket (it reconnected to the
@@ -1900,6 +1920,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (!watched) return
 		remoteWatchRef.current = null
 		if (watched !== id) return
+		// A terminal status that arrived as this socket's own `run_status` frame
+		// is handled by the frame handlers (including the interrupted-run
+		// notice); this path is for a run only the run list reported ended.
+		if (run && run.detached !== true) return
+		const baseline = remoteBaselineRef.current
 		// Sending a turn bumps this; a read that predates it must not replace
 		// the transcript the new turn is building.
 		const generation = reconnectResyncGenerationRef.current
@@ -1914,8 +1939,16 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					? { ...m, status: 'interrupted' }
 					: m
 			)))
-			if (run && run.status && run.status !== 'completed') {
-				toast.error('This run ended before it finished.')
+			// The same notice a run's own socket shows for a fenced run, else a
+			// plain one for any other failure; a stop by the user needs none.
+			if (run && run.status === 'failed') {
+				addMessage({
+					role: 'system',
+					content: interruptedRunNotice(run)
+						|| 'This response was interrupted before it finished. Send your message again to retry.',
+					type: 'warning',
+					timestamp: new Date().toISOString(),
+				})
 			}
 			// A stopped or failed run reports its status before the owner has
 			// written the interrupted turn; give that save time to land, as the
@@ -1948,6 +1981,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 							return
 						}
 						throw new Error('run still reported live')
+					}
+					// The record must hold the run's own save. One that still has only
+					// the turns from before the run is the store lagging the end.
+					if (baseline != null && savedChatCount(data) <= baseline) {
+						throw new Error('record predates the run save')
 					}
 					// This is now the newest read: an older reconnect read still in
 					// the air must not replace it with an earlier turn.

@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { applyRunEndRefresh } from '../utils/runEndRefresh'
+import { resetInterruptedRunNotices } from '../handlers/chat/websocketHandlers'
 
 const h = vi.hoisted(() => ({
   sendMessage: vi.fn(() => true),
@@ -211,6 +212,7 @@ const liveRecord = (extraToolRow, streamingText) => ({
 })
 
 beforeEach(() => {
+  resetInterruptedRunNotices()
   vi.clearAllMocks()
   h.sendMessage.mockImplementation(() => true)
   h.handlers.clear()
@@ -1361,6 +1363,150 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
       expect(result.current.messages.at(-1).content).toBe('hello')
       await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
       expect(result.current.messages.at(-1).content).toBe('done')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a live remote run outranks a retained finished run of the conversation', async () => {
+    const { result, unmount } = renderChat()
+    await act(async () => {
+      await result.current.loadSavedConversation({
+        id: 'conv-1', messages: [storedChat('user', 'hello')],
+      })
+    })
+    dispatchFrame({
+      type: 'runs_snapshot',
+      runs: [
+        { conversation_id: 'conv-1', run_id: 'run-0', status: 'completed', created_at: 100 },
+        { conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true },
+      ],
+    })
+    expect(result.current.isAgentRunning).toBe(true)
+    unmount()
+  })
+
+  it('does not interrupt a run that moved to this socket (handoff)', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      dispatchFrame({
+        type: 'tool_start', conversation_id: 'conv-1', run_id: 'run-1',
+        tool_call_id: 'call-a', tool_name: 'basic_fns_bash', arguments: {},
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running' }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+      const row = result.current.messages.find(m => m.tool_call_id === 'call-a')
+      expect(row?.status).not.toBe('interrupted')
+      expect(result.current.isAgentRunning).toBe(true)
+      expect(h.toastError).not.toHaveBeenCalled()
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not load a record that predates the ended run\'s save', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const stored = [storedChat('user', 'first'), storedChat('assistant', 'one')]
+      h.fetchMock.mockImplementation(async () => ({
+        ok: true, json: async () => ({ id: 'conv-1', run_elsewhere: true, run_id: 'run-1', messages: stored }),
+      }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: stored })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      // The run ends, but the record is still the previous turn for a while.
+      let saved = false
+      h.fetchMock.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          id: 'conv-1',
+          messages: saved ? [...stored, storedChat('user', 'second'), storedChat('assistant', 'two')] : stored,
+        }),
+      }))
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      // The stale record was refused: the view still has its own rows.
+      expect(result.current.messages.at(-1).content).not.toBe('two')
+      saved = true
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(result.current.messages.at(-1).content).toBe('two')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows one interrupted-run notice when the end arrives as the socket\'s own frame', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      // This socket now owns the run and reports how it ended.
+      dispatchFrame({
+        type: 'run_status',
+        run: { conversation_id: 'conv-1', run_id: 'run-1', status: 'failed', end_reason: 'fenced' },
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      const notices = result.current.messages.filter(m => m.type === 'warning')
+      expect(notices).toHaveLength(1)
+      expect(notices[0].content).toMatch(/interrupted/)
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows an interrupted notice once when a remote run ends as failed', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      await act(async () => {
+        await result.current.loadSavedConversation({
+          id: 'conv-1', messages: [storedChat('user', 'hello')],
+        })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'failed', end_reason: 'owner_lost', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(result.current.messages.filter(m => m.type === 'warning')).toHaveLength(1)
       unmount()
     } finally {
       vi.useRealTimers()

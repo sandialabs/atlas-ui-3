@@ -57,6 +57,15 @@ async def test_claim_writes_the_contract_record(server):
     assert int(record["lease_expires_at"]) == int(claim.lease_expires_at * 1000)
 
 
+async def test_claim_records_the_scope(server):
+    a = _coordinator(server, "replica-a")
+    await a.claim(run_id="run-s", conversation_id="conv-s", user_email=USER,
+                  max_runs_per_user=5, scope="off_record")
+    await _claim(a, "run-p", conversation_id="conv-p")
+    assert (await a.read("run-s"))["scope"] == "off_record"
+    assert (await a.read("run-p"))["scope"] == ""
+
+
 async def test_busy_conversation_refused_on_another_replica(server):
     a, b = _coordinator(server, "a"), _coordinator(server, "b")
     await _claim(a, "run-1", "conv-1")

@@ -131,7 +131,7 @@ end
 
 # KEYS: conv, user, run, fence, live
 # ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms,
-#       source, parent_run_id, follow_up_of, key_prefix
+#       source, parent_run_id, follow_up_of, key_prefix, scope
 CLAIM_SCRIPT = _NOW + """
 local lease = tonumber(ARGV[6])
 local holder = redis.call('GET', KEYS[1])
@@ -161,7 +161,8 @@ redis.call('HSET', KEYS[3],
   'run_id', ARGV[1], 'conversation_id', ARGV[2], 'user_email', ARGV[3],
   'owner', ARGV[4], 'generation', generation, 'status', 'queued',
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
-  'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
+  'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10],
+  'scope', ARGV[12])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
 if ARGV[9] ~= '' then
   local kids = ARGV[11] .. 'run-kids:' .. ARGV[9]
@@ -338,6 +339,7 @@ class RedisRunCoordinator:
         source: str = "",
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
+        scope: str = "",
     ) -> Optional[RunClaim]:
         owner_email = normalize_user_email(user_email)
         try:
@@ -361,6 +363,7 @@ class RedisRunCoordinator:
                     parent_run_id or "",
                     follow_up_of or "",
                     self._prefix,
+                    scope or "",
                 ],
             )
         except Exception as exc:

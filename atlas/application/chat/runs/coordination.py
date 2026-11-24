@@ -104,12 +104,15 @@ class RunCoordinator(Protocol):
         source: str = "",
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
+        scope: str = "",
     ) -> Optional[RunClaim]:
         """Claim the conversation and one of the user's run slots, atomically.
 
         ``source``, ``parent_run_id`` and ``follow_up_of`` are known at
         admission and written into the shared record with the claim, so any
-        replica can route by them from the first moment.
+        replica can route by them from the first moment. ``scope`` is
+        ``off_record`` or ``connection_bound`` for a run another replica must
+        not serve a view of (empty otherwise).
 
         Returns the claim, or ``None`` when this coordinator does not track
         claims (the in-process default). Raises ``ConversationBusyError``,

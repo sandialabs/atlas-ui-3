@@ -51,7 +51,15 @@ export function useConversationRuns() {
 			for (const run of data.runs || []) {
 				const existing = next[run.conversation_id]
 				// Several runs can share a conversation over time; the newest wins.
-				if (!existing || (run.created_at || 0) >= (existing.created_at || 0)) {
+				// A conversation holds one live run at a time, so a live run beats
+				// a finished one whatever their timestamps: a run another replica
+				// owns carries no `created_at`, and must not lose to an earlier
+				// finished run this replica still retains (issue #1219).
+				const outranks = !existing
+					|| (isRunActive(run) !== isRunActive(existing)
+						? isRunActive(run)
+						: (run.created_at || 0) >= (existing.created_at || 0))
+				if (outranks) {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.
 					const prior = runsRef.current[run.conversation_id]

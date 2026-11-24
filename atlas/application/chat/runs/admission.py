@@ -122,6 +122,11 @@ async def admit_run(
         source=source,
         parent_run_id=start_kwargs.get("parent_run_id"),
         follow_up_of=follow_up_of,
+        scope=(
+            "off_record" if start_kwargs.get("off_record")
+            else "connection_bound" if start_kwargs.get("connection_bound")
+            else ""
+        ),
     )
     try:
         # Synchronous from here: the precheck and the insert cannot be

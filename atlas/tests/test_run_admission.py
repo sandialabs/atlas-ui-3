@@ -406,5 +406,16 @@ async def test_shutdown_keeps_the_claim_of_a_run_that_will_not_stop(coord):
     assert await task is None
 
 
+@pytest.mark.parametrize(
+    "kwargs, scope",
+    [({"off_record": True}, "off_record"), ({"connection_bound": True}, "connection_bound"), ({}, "")],
+)
+async def test_admission_records_the_run_scope(kwargs, scope):
+    coordinator = _coordinator(fakeredis.FakeServer())
+    set_run_coordinator(coordinator)
+    record = await admit_run(conversation_id="conv-scope", user_email=USER, **kwargs)
+    assert (await coordinator.read(record.run_id))["scope"] == scope
+
+
 async def test_in_process_coordinator_has_no_shared_record():
     assert await InProcessRunCoordinator().read("anything") is None

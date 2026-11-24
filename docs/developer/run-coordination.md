@@ -149,6 +149,7 @@ Run record fields:
 | `source` | The run's launch source (`api` for agent-runs API runs, empty otherwise), written at claim. The snapshot write repeats it |
 | `parent_run_id` | The run that launched this one (empty for a top-level run), written at claim; the scripts walk it to keep a finished parent readable while a descendant is live |
 | `follow_up_of` | The run an API follow-up continues (empty otherwise), written at claim |
+| `scope` | `off_record` or `connection_bound` for a run another replica must not serve a view of, empty otherwise, written at claim |
 | `error` | The run's error, if any |
 | `interrupted` | `1` once an orphan sweep took the run over (see below) |
 | `interrupted_by` | Replica id that took it over |
@@ -347,12 +348,11 @@ replica answers from the shared records and does not stream tokens:
   "messages": []}`. For a conversation with saved turns the route returns the
   stored record with those three fields added; for an unsaved first turn it is
   the empty view above, with the tool rows the owner has projected so far
-  merged in by `attach_execution`. The view needs the caller's own execution
-  projection of the run (written a moment after `run_started`) as well as the
-  run record, so an off-record turn, which publishes no projection, is never
-  served, and an id the caller has no run in does not reach the global run
-  key. Until the projection exists the read is a miss, which the client's
-  retry covers. It is never a 404 while the run is live.
+  merged in by `attach_execution`. Liveness comes from the shared claim, which
+  exists from admission, so a text-only first turn (no projection yet) is
+  covered. A claim whose `scope` is `off_record` or `connection_bound` is never
+  served: the owner's own lookup refuses those runs too. It is never a 404
+  while the run is live.
   `in_flight` stays unset, because the replay and live-poll paths that read it
   need the owner's transcript. Another user's conversation id reads as missing.
   `restore_conversation` replies with its usual `conversation_restored` frame
@@ -361,8 +361,9 @@ replica answers from the shared records and does not stream tokens:
   enforced compliance levels a request that supplies a level is refused with
   409 until the run ends. The lookup is one Redis read on a registry miss, and
   only when run coordination is on.
-- `list_runs` already merges the shared execution projections, so a run owned
-  elsewhere is listed with `detached: true`. If the shared projections cannot
+- `list_runs` merges the shared execution projections and the user's other live
+  claims, so a run owned elsewhere is listed with `detached: true` even before
+  it has published a projection. If the shared projections cannot
   be read, the frame carries `degraded: true` and the client keeps its remote
   runs instead of reading their absence as an end. A finished run is dropped from the
   list, unless the frame carries `watch_end: true` and a `conversation_id`: then
