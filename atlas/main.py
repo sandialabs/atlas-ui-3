@@ -2729,7 +2729,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
                         turn_failure.append("validation")
-                        log_metric("error", user_email, error_type="validation")
+                        log_metric(
+                            "error", user_email,
+                            error_type=(
+                                "prompt_pin_conflict"
+                                if isinstance(e, PromptPinConflictError)
+                                else "validation"
+                            ),
+                        )
                         # A conversation-classification refusal (issue #1042)
                         # keeps its own type so the client can say why.
                         error_type = (
@@ -2759,9 +2766,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     except AuthorizationError as e:
                         logger.warning(f"Authorization error in chat handler: {e}")
                         turn_failure.append("authorization")
-                        log_metric("error", user_email, error_type="authorization")
-                        recovery = {}
                         from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+
+                        if isinstance(e, PromptPinBlockedError):
+                            log_metric(
+                                "error", user_email,
+                                error_type="prompt_pin_blocked",
+                                pin_problem=e.reason,
+                            )
+                        else:
+                            log_metric("error", user_email, error_type="authorization")
+                        recovery = {}
 
                         if isinstance(e, PromptPinBlockedError):
                             # Issue #1169: a stored pin blocks this conversation.

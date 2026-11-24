@@ -144,3 +144,68 @@ async def test_only_a_stored_pin_raises_the_recoverable_refusal():
     assert type(not_stored) is AuthorizationError
     new_selection = library_turn._pin_refusal(context, False, "Not available.", True)
     assert type(new_selection) is AuthorizationError and new_selection.message == "Not available."
+
+
+# --- Operational monitoring: distinct pin-failure metrics -----------------
+
+
+def test_pin_conflict_emits_distinct_metric(conflicting_service):
+    with patch("main.log_metric") as metrics:
+        with TestClient(app).websocket_connect(
+            "/ws", headers={"X-User-Email": USER}
+        ) as ws:
+            ws.send_json({
+                "type": "chat",
+                "content": "hi",
+                "model": "m",
+                "conversation_id": "conv-a",
+                "library_prompt": None,
+                "library_prompt_revision": 1,
+            })
+            frame = _error_frame(ws)
+
+    assert frame["error_type"] == "prompt_pin_conflict"
+    metrics.assert_any_call(
+        "error", USER, error_type="prompt_pin_conflict"
+    )
+
+
+def test_blocked_pin_emits_recoverable_metric(blocked_service):
+    with patch("main.log_metric") as metrics:
+        with TestClient(app).websocket_connect(
+            "/ws", headers={"X-User-Email": USER}
+        ) as ws:
+            ws.send_json({
+                "type": "chat",
+                "content": "hi",
+                "model": "m",
+                "conversation_id": "conv-a",
+            })
+            frame = _error_frame(ws)
+
+    assert frame["recovery"] == "clear_team_prompt"
+    metrics.assert_any_call(
+        "error", USER,
+        error_type="prompt_pin_blocked",
+        pin_problem="unavailable",
+    )
+
+
+def test_regular_authorization_error_keeps_its_metric(blocked_service):
+    with patch("main.log_metric") as metrics:
+        with TestClient(app).websocket_connect(
+            "/ws", headers={"X-User-Email": USER}
+        ) as ws:
+            ws.send_json({
+                "type": "chat",
+                "content": "hi",
+                "model": "m",
+                "conversation_id": "conv-plain",
+            })
+            frame = _error_frame(ws)
+
+    assert frame["error_type"] == "authorization"
+    assert "recovery" not in frame
+    metrics.assert_any_call(
+        "error", USER, error_type="authorization"
+    )
