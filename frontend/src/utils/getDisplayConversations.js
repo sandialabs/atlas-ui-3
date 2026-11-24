@@ -79,7 +79,7 @@ export function getDisplayConversations({
         }
         continue
       }
-      if (['completed', 'failed', 'cancelled'].includes(run.status)) continue
+      if (['completed', 'failed', 'cancelled'].includes(run.status) && !(run.status === 'failed' && run.end_reason === 'fenced')) continue // a fenced run's turn is never saved: keep its row, flagged (issue #1218)
       list.unshift({
         id: run.conversation_id,
         title: run.title || 'Conversation in progress',

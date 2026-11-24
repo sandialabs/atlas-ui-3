@@ -18,14 +18,19 @@ export function RunIndicator({ run, count = 0 }) {
   // `completed` is deliberately absent: a finished run is just a conversation
   // with new messages in it, and a permanent green tick on every row it ever
   // touched would be noise.
-  const style = run && RUN_INDICATORS[run.status]
+  let style = run && RUN_INDICATORS[run.status]
   if (!style) return null
+  // The server ended this run (its coordination service was lost) and its
+  // turn was not saved: not an error the run itself hit (issue #1218).
+  if (run.status === 'failed' && run.end_reason === 'fenced') {
+    style = { ...style, label: 'Interrupted', hint: 'Interrupted because the server lost its coordination service. This response was not saved; send the message again.' }
+  }
   // A collapsed parent folds its subtree's runs into one marker. The count
   // says how many conversations are in that state, not how many runs -- a
   // conversation has at most one non-terminal run.
   const label = count > 1 ? `${style.label} (${count})` : style.label
   return (
-    <span className={`flex items-center gap-1 text-xs whitespace-nowrap ${style.text}`} title={run.error || label}>
+    <span className={`flex items-center gap-1 text-xs whitespace-nowrap ${style.text}`} title={style.hint || run.error || label}>
       <span className={`h-1.5 w-1.5 rounded-full ${style.dot} ${style.pulse ? 'animate-pulse' : ''}`} />
       {label}
     </span>

@@ -43,7 +43,11 @@ from atlas.application.chat.runs.admission_errors import (
     ConversationBusyError,
     RunRegistryError,
 )
-from atlas.application.chat.runs.context import set_current_run, tag_event
+from atlas.application.chat.runs.context import (
+    is_foreign_run_frame,
+    set_current_run,
+    tag_event,
+)
 from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
 from atlas.application.chat.runs.launch_models import list_launchable_models
 from atlas.application.chat.runs.leases import ensure_current_run_may_act
@@ -455,7 +459,11 @@ class _ChildConnection:
     async def send_json(self, data: Dict[str, Any]) -> None:
         try:
             tagged = tag_event(data, self._run_id, self._conversation_id)
-            get_run_registry().note_event(self._run_id, tagged)
+            # Only this run's own frames describe this run. A deeper
+            # descendant's frames pass through here too (depth 2), and its
+            # approval request must not mark this run as waiting.
+            if not is_foreign_run_frame(tagged, self._run_id):
+                get_run_registry().note_event(self._run_id, tagged)
             if self._update_callback is not None:
                 await self._update_callback(tagged)
         except Exception:
