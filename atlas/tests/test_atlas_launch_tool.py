@@ -30,7 +30,12 @@ from atlas.application.chat.runs.launcher import (
     resolve_child_tools,
     resolve_workspace,
 )
-from atlas.application.chat.runs.registry import RunRegistry, RunStatus, reset_run_registry
+from atlas.application.chat.runs.registry import (
+    RunRegistry,
+    RunStatus,
+    get_run_registry,
+    reset_run_registry,
+)
 from atlas.domain.messages.models import ToolCall
 from atlas.modules.mcp_tools.atlas_server import (
     ATLAS_TOOL_SCHEMAS,
@@ -2376,3 +2381,71 @@ async def test_a_fenced_parent_cannot_admit_a_child():
     finally:
         set_lease_guard(None)
     assert [r.run_id for r in registry.all_records()] == [parent.run_id]
+
+
+@pytest.mark.asyncio
+async def test_child_frames_through_the_real_tool_executor_keep_child_identity():
+    """The launch tool's callback is the executor's own wrapper chain (#1221)."""
+    import json as _json
+
+    from atlas.application.chat.runs.execution_state import (
+        get_execution_store,
+        reset_execution_store,
+    )
+    from atlas.application.chat.utilities.tool_executor import execute_single_tool
+    from atlas.domain.messages.models import ToolResult
+
+    reset_execution_store()
+    registry = get_run_registry()
+    parent = registry.start(conversation_id="conv-parent", user_email="user@example.com")
+    set_current_run(parent.run_id, parent.conversation_id)
+    factory = _Factory(_ChatService)
+    wire = []
+
+    async def _socket(frame):
+        wire.append(frame)
+
+    class _Manager:
+        async def execute_tool(self, tool_call, context):
+            handle = await launch_sub_conversation(
+                tool_call.arguments, context, factory=factory
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id, content=_json.dumps(handle), success=True
+            )
+
+    session_context = {
+        "user_email": "user@example.com",
+        "conversation_id": "conv-parent",
+        "run_id": parent.run_id,
+        "agent_step": 1,
+        "launch_discovery": dict(_DISCOVERY),
+    }
+    call = SimpleNamespace(
+        id="call_1",
+        function=SimpleNamespace(
+            name=LAUNCH_TOOL_NAME,
+            arguments=_json.dumps({"workspace": "Research", "model": "gpt-4o", "prompt": "go"}),
+        ),
+    )
+    result = await execute_single_tool(
+        call, session_context, _Manager(), _socket, skip_approval=True
+    )
+    assert result.success, result.content
+    handle = _json.loads(result.content)
+
+    service = factory.services[0]
+    await asyncio.wait_for(service.started.wait(), timeout=1)
+    service.release.set()
+    await asyncio.sleep(0.05)
+
+    child_frames = [f for f in wire if f.get("run_id") == handle["run_id"]]
+    assert [f["type"] for f in child_frames] == ["token_stream"]
+    for key in ("tool_name", "tool_call_id", "invocation_id", "step"):
+        assert key not in child_frames[0]
+    parent_frames = [f for f in wire if f.get("run_id") == parent.run_id]
+    assert parent_frames
+    assert all(f["tool_name"] == LAUNCH_TOOL_NAME for f in parent_frames)
+    child_doc = await get_execution_store().get(handle["conversation_id"], "user@example.com")
+    assert not child_doc or not child_doc.get("invocations")
+    reset_execution_store()
