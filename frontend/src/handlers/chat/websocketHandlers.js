@@ -871,7 +871,16 @@ export function createWebSocketHandler(deps) {
           break
         }
         case 'conversation_saved': {
-          if (data.conversation_id && typeof setActiveConversationId === 'function') {
+          // A background save must not replace the conversation on screen.
+          // The first save of a new conversation may establish its ID.
+          const visibleId = typeof getVisibleConversationId === 'function'
+            ? getVisibleConversationId()
+            : null
+          if (
+            data.conversation_id &&
+            (!visibleId || data.conversation_id === visibleId) &&
+            typeof setActiveConversationId === 'function'
+          ) {
             setActiveConversationId(data.conversation_id)
           }
           if (data.conversation_id && typeof onConversationSaved === 'function') {
