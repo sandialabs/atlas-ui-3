@@ -26,6 +26,12 @@ is documented in ``docs/developer/run-coordination.md``:
     The user's claimed run ids, scored by lease expiry (epoch ms). Members
     whose lease has passed are pruned before every count, so a replica that
     died holding slots frees them within one lease.
+``<p>:run-api-latest:<conversation_id>`` (string)
+    Latest admitted API run id. Checked atomically with a follow-up claim.
+``<p>:runs-api``, ``<p>:runs-api-user:<user>`` (sorted sets)
+    Retained API run ids globally and per normalized user, scored by expiry.
+    Expired members are pruned on writes and listing; the sets expire with
+    their last retained record.
 ``<p>:run-fence`` (string counter)
     Source of fencing generations. One counter, only ever incremented (by
     claims and by takeovers of a lost run, ``run_leases.py``), and floored at
@@ -47,6 +53,7 @@ with skewed clocks still agree on whether a lease has expired.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, Dict, Iterable, Optional
 
@@ -75,12 +82,23 @@ local t = redis.call('TIME')
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 """
 
+# Index score is the expiry of each retained record. Expired entries are
+# pruned on writes, and the index itself expires when its last member does.
+_API_INDEX = """
+local function refresh_api_index(key, id, expiry)
+  redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
+  redis.call('ZADD', key, expiry, id)
+  local tail = redis.call('ZREVRANGE', key, 0, 0, 'WITHSCORES')
+  redis.call('PEXPIREAT', key, math.ceil(tonumber(tail[2])))
+end
+"""
+
 # Subtree retention, shared by the scripts that end a run. ``p`` is the key
 # prefix (``<p>:``), because the keys of a run's ancestors and descendants are
 # not known to the caller. A run with a live descendant keeps its record, so a
 # stop or cancel through another replica still finds it; the ancestor walk is
 # bounded like the registry's (``MAX_SUBTREE_DEPTH``).
-_SUBTREE = """
+_SUBTREE = _API_INDEX + """
 local function terminal(status)
   return status == 'completed' or status == 'failed' or status == 'cancelled'
 end
@@ -103,7 +121,15 @@ local function live_below(p, id, depth)
   return false
 end
 local function expire_both(p, id, ms)
-  redis.call('PEXPIRE', p .. 'run:' .. id, ms)
+  local rec = p .. 'run:' .. id
+  redis.call('PEXPIRE', rec, ms)
+  local latest = redis.call('HGET', rec, 'api_latest_key')
+  if latest then
+    refresh_api_index(p .. 'runs-api', id, now + ms)
+    local user_index = redis.call('HGET', rec, 'api_user_index')
+    if user_index then refresh_api_index(user_index, id, now + ms) end
+    if redis.call('GET', latest) == id then redis.call('PEXPIRE', latest, ms) end
+  end
   redis.call('PEXPIRE', p .. 'run-kids:' .. id, ms)
 end
 -- A run just ended: its record keeps `retention` after the last descendant
@@ -129,14 +155,40 @@ local function end_run(p, id, retention, lease)
 end
 """
 
-# KEYS: conv, user, run, fence, live
+# KEYS: conv, user, run, fence, live, api-latest, api-index, api-user-index
 # ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms,
-#       source, parent_run_id, follow_up_of, key_prefix
-CLAIM_SCRIPT = _NOW + """
+#       source, parent_run_id, follow_up_of, key_prefix, api_continuation_json
+CLAIM_SCRIPT = _NOW + _API_INDEX + """
 local lease = tonumber(ARGV[6])
 local holder = redis.call('GET', KEYS[1])
 if holder and holder ~= ARGV[1] then
   return {'busy', holder}
+end
+local completed_before = '0'
+if ARGV[12] ~= '' then
+  local latest = redis.call('GET', KEYS[6])
+  if ARGV[10] ~= '' then
+    if not latest then return {'continuation_unavailable'} end
+    if latest ~= ARGV[10] then return {'stale_continuation'} end
+    local previous = ARGV[11] .. 'run:' .. latest
+    if redis.call('HGET', previous, 'source') ~= ARGV[8]
+        or redis.call('HGET', previous, 'user_email') ~= ARGV[3]
+        or redis.call('HGET', previous, 'conversation_id') ~= ARGV[2]
+        or not redis.call('HGET', previous, 'api_spec') then
+      return {'continuation_unavailable'}
+    end
+    local status = redis.call('HGET', previous, 'status')
+    if status ~= 'completed' and status ~= 'failed' and status ~= 'cancelled' then
+      return {'busy', latest}
+    end
+    if status == 'completed' or redis.call('HGET', previous, 'api_completed_before') == '1' then
+      completed_before = '1'
+    else
+      return {'continuation_unavailable'}
+    end
+  elseif latest then
+    return {'stale_continuation'}
+  end
 end
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
 local count = redis.call('ZCARD', KEYS[2])
@@ -163,6 +215,13 @@ redis.call('HSET', KEYS[3],
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
   'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
+if ARGV[12] ~= '' then
+  redis.call('HSET', KEYS[3], 'api_spec', ARGV[12], 'api_latest_key', KEYS[6],
+    'api_completed_before', completed_before, 'api_user_index', KEYS[8])
+  redis.call('SET', KEYS[6], ARGV[1], 'PX', lease + tonumber(ARGV[7]))
+  refresh_api_index(KEYS[7], ARGV[1], expires + tonumber(ARGV[7]))
+  refresh_api_index(KEYS[8], ARGV[1], expires + tonumber(ARGV[7]))
+end
 if ARGV[9] ~= '' then
   local kids = ARGV[11] .. 'run-kids:' .. ARGV[9]
   redis.call('SADD', kids, ARGV[1])
@@ -226,7 +285,7 @@ redis.call('SET', KEYS[2], ARGV[1], 'PX', lease)
 redis.call('ZADD', KEYS[3], expires, ARGV[1])
 redis.call('PEXPIRE', KEYS[3], lease * 2)
 redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', expires, 'updated_at', now)
-redis.call('PEXPIRE', KEYS[1], lease + tonumber(ARGV[6]))
+expire_both(ARGV[7], ARGV[1], lease + tonumber(ARGV[6]))
 redis.call('ZADD', KEYS[4], expires, ARGV[1])
 -- A finished ancestor stays readable while this run is live.
 local cur = redis.call('HGET', KEYS[1], 'parent_run_id')
@@ -270,6 +329,14 @@ class RunCoordinationKeys:
 
     def user(self, user_email: str) -> str:
         return self._redis.key("run-user", key_part(normalize_user_email(user_email)))
+
+    def api_latest(self, conversation_id: str) -> str:
+        return self._redis.key("run-api-latest", key_part(conversation_id))
+
+    def api_index(self, user_email: Optional[str] = None) -> str:
+        if user_email is not None:
+            return self._redis.key("runs-api-user", key_part(normalize_user_email(user_email)))
+        return self._redis.key("runs-api")
 
     def fence(self) -> str:
         return self._redis.key("run-fence")
@@ -338,6 +405,7 @@ class RedisRunCoordinator:
         source: str = "",
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
+        api_continuation: Optional[dict] = None,
     ) -> Optional[RunClaim]:
         owner_email = normalize_user_email(user_email)
         try:
@@ -348,6 +416,9 @@ class RedisRunCoordinator:
                     self.keys.run(run_id),
                     self.keys.fence(),
                     self.keys.live(),
+                    self.keys.api_latest(conversation_id),
+                    self.keys.api_index(),
+                    self.keys.api_index(owner_email),
                 ],
                 args=[
                     run_id,
@@ -361,6 +432,7 @@ class RedisRunCoordinator:
                     parent_run_id or "",
                     follow_up_of or "",
                     self._prefix,
+                    json.dumps(api_continuation) if api_continuation is not None else "",
                 ],
             )
         except Exception as exc:
@@ -381,6 +453,10 @@ class RedisRunCoordinator:
             raise ConversationBusyError("This conversation already has a run in progress.")
         if outcome == "limit":
             raise ConcurrencyLimitError(max(1, int(max_runs_per_user)))
+        if outcome == "stale_continuation":
+            raise ConversationBusyError("A newer API turn was admitted. Retry the follow-up.")
+        if outcome == "continuation_unavailable":
+            raise RunCoordinationUnavailableError("API continuation is unavailable.")
         return RunClaim(
             run_id=run_id,
             conversation_id=conversation_id,
@@ -456,6 +532,24 @@ class RedisRunCoordinator:
 
         results = await asyncio.gather(*(_one(c) for c in claims))
         return {run_id: held for run_id, held in results if held is not None}
+
+    async def read_api_continuation(self, conversation_id: str) -> Optional[Dict[str, str]]:
+        latest = await self._redis.client.get(self.keys.api_latest(conversation_id))
+        return await self.read(_text(latest)) if latest else None
+
+    async def read_api_runs(self, user_email: Optional[str] = None) -> list[Dict[str, str]]:
+        client = self._redis.client
+        seconds, micros = await client.time()
+        now = seconds * 1000 + micros // 1000
+        index = self.keys.api_index(user_email)
+        await client.zremrangebyscore(index, "-inf", now)
+        ids = await client.zrange(index, 0, -1)
+        # Read in bounded batches; a record can expire between index and read.
+        records = []
+        for start in range(0, len(ids), 100):
+            batch = await asyncio.gather(*(self.read(_text(i)) for i in ids[start:start + 100]))
+            records.extend(record for record in batch if record is not None)
+        return records
 
     async def read(self, run_id: str) -> Optional[Dict[str, str]]:
         """The shared run record at ``RunCoordinationKeys.run(run_id)``, or ``None``.

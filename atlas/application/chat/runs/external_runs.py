@@ -19,13 +19,10 @@ an external caller *is*:
 * **Scope is by origin.** The API sees only runs the API started; a run the
   user started in the browser is not addressable here, even by its id.
 
-State lives in the process-local run registry, exactly like the runs it
-mirrors (idempotency reservations are the exception: with Redis run
-coordination they are cluster-wide, see ``idempotency.py``): status and
-follow-up are available for the registry's retention
-window (about 30 minutes after a run ends) on the replica that accepted the
-launch, and do not survive a restart. The transcript itself is persisted to
-the user's conversation history like any other run.
+Without Redis, state lives in the process-local run registry. With Redis
+coordination, API run identity, continuation settings, and retained listing
+are shared, while the task itself still executes on its admitting replica.
+The transcript is persisted to the user's conversation history as usual.
 """
 
 from __future__ import annotations
@@ -37,10 +34,11 @@ import hashlib
 import json
 import logging
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, List, NoReturn, Optional, Set, Tuple
 from uuid import uuid4
 
-from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError, get_run_coordinator
 from atlas.application.chat.runs.follow_up import _revalidate_saved_workspace
 from atlas.application.chat.runs.idempotency import (
     IDEMPOTENCY_COMPLETE_RETRY_SECONDS,
@@ -60,7 +58,7 @@ from atlas.application.chat.runs.launcher import (
     resolve_model,
     resolve_workspace,
 )
-from atlas.application.chat.runs.leases import get_lease_guard, publish_run_now
+from atlas.application.chat.runs.leases import get_lease_guard, publish_run_now, shared_view
 from atlas.application.chat.runs.registry import RunStatus, get_run_registry
 from atlas.core.coordination_metrics import CoordinationEvent, coordination_metrics
 from atlas.core.log_sanitizer import sanitize_for_logging
@@ -75,6 +73,7 @@ __all__ = [
     "get_api_run_anywhere",
     "launch_api_run",
     "list_api_runs",
+    "list_api_runs_anywhere",
     "list_api_options",
     "reset_idempotency_cache",
 ]
@@ -665,7 +664,7 @@ def _api_record(run_id: str) -> Any:
     if record is None or (record.launch_spec or {}).get("source") != API_SOURCE:
         raise LaunchRefused(
             "No agent run with that id. Runs are kept for about 30 minutes "
-            "after they finish, on the server that accepted them.",
+            "after they finish.",
             code="run_not_found",
         )
     return record
@@ -678,6 +677,56 @@ def _api_runs_for_conversation(record: Any) -> List[Any]:
         if other.conversation_id == record.conversation_id
         and (other.launch_spec or {}).get("source") == API_SOURCE
     ]
+
+
+def _shared_unavailable() -> LaunchRefused:
+    return LaunchRefused("The API run record could not be read right now. Try again.", code="unavailable")
+
+
+async def _shared_api_record(coordinator: Any, run_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        raw = await coordinator.read(run_id)
+        doc = shared_view(raw)
+    except Exception as exc:
+        raise _shared_unavailable() from exc
+    if doc is None or doc.get("source") != API_SOURCE:
+        return None
+    if doc.get("snapshot_unreadable") or not doc.get("user_email") or not doc.get("conversation_id"):
+        raise _shared_unavailable()
+    return doc
+
+
+async def _shared_follow_up_target(coordinator: Any, addressed: Any) -> Any:
+    try:
+        raw = await coordinator.read_api_continuation(addressed.conversation_id)
+        doc = shared_view(raw)
+        spec = json.loads(raw["api_spec"]) if raw else None
+    except Exception as exc:
+        raise _shared_unavailable() from exc
+    if (
+        not doc or doc.get("snapshot_unreadable")
+        or doc.get("source") != API_SOURCE
+        or doc.get("user_email") != addressed.user_email
+        or doc.get("conversation_id") != addressed.conversation_id
+        or not isinstance(spec, dict) or spec.get("source") != API_SOURCE
+        or not all(isinstance(spec.get(k), str) and spec[k] for k in ("model", "workspace_id"))
+        or not all(isinstance(spec.get(k), list) and all(isinstance(v, str) for v in spec[k])
+                   for k in ("tools", "data_sources", "requested_data_sources"))
+        or "compliance_level" not in spec
+    ):
+        raise _shared_unavailable()
+    status = doc.get("status")
+    if status == RunStatus.WAITING_FOR_INPUT.value:
+        raise LaunchRefused("The conversation is waiting for the user in ATLAS.", code="waiting_for_input")
+    if status not in ("completed", "failed", "cancelled"):
+        raise LaunchRefused("The conversation is still working. Wait for it to finish first.",
+                            code="conversation_busy")
+    if status != "completed" and raw.get("api_completed_before") != "1":
+        raise LaunchRefused("That conversation never completed a turn.", code="not_continuable")
+    return SimpleNamespace(
+        run_id=doc["run_id"], conversation_id=doc["conversation_id"],
+        user_email=doc["user_email"], title=doc.get("title"), launch_spec=spec,
+    )
 
 
 def _status(record: Any) -> Dict[str, Any]:
@@ -719,7 +768,7 @@ def _status_from_shared(doc: Dict[str, Any]) -> Dict[str, Any]:
         key: doc.get(key)
         for key in (
             "run_id", "conversation_id", "status", "waiting_on", "created_at",
-            "updated_at", "ended_at", "error", "title", "parent_run_id",
+            "updated_at", "ended_at", "error", "end_reason", "title", "parent_run_id",
             "parent_conversation_id", "workspace", "model", "compliance_level",
             "previous_run_id",
         )
@@ -800,6 +849,31 @@ def list_api_runs(user_email: Optional[str] = None) -> List[Dict[str, Any]]:
     ]
 
 
+async def list_api_runs_anywhere(user_email: Optional[str] = None) -> List[Dict[str, Any]]:
+    coordinator = get_run_coordinator()
+    if not hasattr(coordinator, "read_api_runs"):
+        return list_api_runs(user_email)
+    from atlas.core.user_identity import normalize_user_email
+
+    try:
+        raw_records = await coordinator.read_api_runs(user_email)
+        docs = [shared_view(raw) for raw in raw_records]
+        result = []
+        for doc in docs:
+            if not doc or doc.get("source") != API_SOURCE:
+                continue
+            if user_email and normalize_user_email(doc.get("user_email")) != normalize_user_email(user_email):
+                continue
+            if doc.get("snapshot_unreadable"):
+                raise _shared_unavailable()
+            result.append(_status_from_shared(doc))
+        return sorted(result, key=lambda run: (run["created_at"], run["run_id"]), reverse=True)
+    except LaunchRefused:
+        raise
+    except Exception as exc:
+        raise _shared_unavailable() from exc
+
+
 async def follow_up_api_run(
     factory: Any,
     run_id: str,
@@ -817,9 +891,24 @@ async def follow_up_api_run(
     """
     config_manager = _require_ground(factory)
     message = _check_message(message)
+    coordinator = get_run_coordinator()
+    shared = hasattr(coordinator, "read_api_continuation")
     try:
-        addressed = _api_record(run_id)
-    except LaunchRefused:
+        if shared:
+            doc = await _shared_api_record(coordinator, run_id)
+            if doc is None:
+                # A retained local record without shared metadata is not safe to continue.
+                try:
+                    _api_record(run_id)
+                except LaunchRefused:
+                    raise LaunchRefused("No retained API run with that id.", code="run_not_found")
+                raise _shared_unavailable()
+            addressed = SimpleNamespace(**doc)
+        else:
+            addressed = _api_record(run_id)
+    except LaunchRefused as exc:
+        if exc.code != "run_not_found":
+            raise
         replay = await _replay_follow_up_of_reaped_run(
             config_manager, run_id, idempotency_key, message, allow_approval_pause
         )
@@ -840,32 +929,35 @@ async def follow_up_api_run(
     handle: Optional[Dict[str, Any]] = None
     holder = _hold(slot)
     try:
-        siblings = _api_runs_for_conversation(addressed)
-        # Continue from the newest run, whichever id was passed: it carries
-        # the narrowest spec, and an older id must not resurrect a tool a
-        # later follow-up already lost.
-        target = max(siblings, key=lambda r: r.created_at)
-        registry = get_run_registry()
-        active = registry.active_for_conversation(target.conversation_id, user_email)
-        if active is not None and active.status is RunStatus.WAITING_FOR_INPUT:
-            raise LaunchRefused(
-                "The conversation is waiting for the user "
-                f"({active.waiting_on or 'input'}) and cannot take a follow-up "
-                "until they answer it in ATLAS.",
-                code="waiting_for_input",
-            )
-        if active is not None:
-            raise LaunchRefused(
-                f"The conversation is still working (run {active.run_id}, status "
-                f"{active.status.value}). Wait for it to finish first.",
-                code="conversation_busy",
-            )
-        if not any(r.status is RunStatus.COMPLETED for r in siblings):
-            raise LaunchRefused(
-                "That conversation never completed a turn, so there is nothing "
-                "to follow up on. Launch a new run instead.",
-                code="not_continuable",
-            )
+        if shared:
+            target = await _shared_follow_up_target(coordinator, addressed)
+        else:
+            siblings = _api_runs_for_conversation(addressed)
+            # Continue from the newest run, whichever id was passed: it carries
+            # the narrowest spec, and an older id must not resurrect a tool a
+            # later follow-up already lost.
+            target = max(siblings, key=lambda r: r.created_at)
+            registry = get_run_registry()
+            active = registry.active_for_conversation(target.conversation_id, user_email)
+            if active is not None and active.status is RunStatus.WAITING_FOR_INPUT:
+                raise LaunchRefused(
+                    "The conversation is waiting for the user "
+                    f"({active.waiting_on or 'input'}) and cannot take a follow-up "
+                    "until they answer it in ATLAS.",
+                    code="waiting_for_input",
+                )
+            if active is not None:
+                raise LaunchRefused(
+                    f"The conversation is still working (run {active.run_id}, status "
+                    f"{active.status.value}). Wait for it to finish first.",
+                    code="conversation_busy",
+                )
+            if not any(r.status is RunStatus.COMPLETED for r in siblings):
+                raise LaunchRefused(
+                    "That conversation never completed a turn, so there is nothing "
+                    "to follow up on. Launch a new run instead.",
+                    code="not_continuable",
+                )
         spec = target.launch_spec or {}
         if not spec.get("model"):
             raise LaunchRefused(

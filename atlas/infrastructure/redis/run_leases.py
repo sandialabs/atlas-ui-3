@@ -39,7 +39,7 @@ if (not status) or status == 'completed' or status == 'failed' or status == 'can
     -- keeps failing cannot starve them) and keeps the record, so the
     -- obligation to close cannot expire before the close is confirmed.
     redis.call('ZADD', KEYS[5], now + tonumber(ARGV[5]), ARGV[1])
-    redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
+    expire_both(ARGV[7], ARGV[1], tonumber(ARGV[4]))
     return -1
   end
   redis.call('ZREM', KEYS[5], ARGV[1])

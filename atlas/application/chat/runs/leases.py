@@ -153,6 +153,7 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     if raw.get("error"):
         view["error"] = raw["error"]
     if raw.get("interrupted") == "1":
+        view["end_reason"] = EndReason.OWNER_LOST.value
         view["ended_at"] = int(raw.get("updated_at") or 0) / 1000.0
         view["updated_at"] = view["ended_at"]
     return view

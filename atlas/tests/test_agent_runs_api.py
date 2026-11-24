@@ -1277,3 +1277,61 @@ def test_the_openapi_document_covers_every_endpoint(factory):
     assert {"LaunchRequest", "FollowUpRequest", "RunHandle", "RunStatusModel", "ErrorResponse"} <= set(
         schema["components"]["schemas"]
     )
+
+
+async def test_shared_follow_up_uses_latest_restricted_spec_even_when_addressing_older_run(factory):
+    import fakeredis
+
+    from atlas.application.chat.runs.admission import stop_lease_heartbeat
+    from atlas.application.chat.runs.coordination import drain_pending_releases, set_run_coordinator
+    from atlas.infrastructure.redis import RedisClientManager, RedisSettings
+    from atlas.infrastructure.redis.run_coordinator import RedisRunCoordinator
+
+    server = fakeredis.FakeServer()
+
+    def coordinator(name):
+        manager = RedisClientManager(
+            RedisSettings(url="redis://fake/0", key_prefix="t"),
+            client=fakeredis.FakeAsyncRedis(server=server),
+        )
+        return RedisRunCoordinator(manager, replica_id=name)
+
+    a, b = coordinator("a"), coordinator("b")
+    spec = {
+        "source": API_SOURCE, "model": LAUNCH["model"], "workspace_id": WORKSPACE["id"],
+        "workspace_name": WORKSPACE["name"], "tools": ["math_add", "filesystem_read"],
+        "data_sources": [], "requested_data_sources": [], "compliance_level": "Internal",
+    }
+    first = await a.claim(
+        run_id="first", conversation_id="conv", user_email=USER, max_runs_per_user=5,
+        source=API_SOURCE, api_continuation=spec,
+    )
+    await a.release(first, "completed")
+    second = await a.claim(
+        run_id="second", conversation_id="conv", user_email=USER, max_runs_per_user=5,
+        source=API_SOURCE, follow_up_of="first",
+        api_continuation={**spec, "tools": ["math_add"]},
+    )
+    await a.release(second, "failed")
+    # The previously lost tool is authorized again today; it must still not
+    # be restored by naming the older run.
+    factory.service_kwargs["authorized"] = ("math_add", "filesystem_read")
+    set_run_coordinator(b)
+    try:
+        async with _client(factory) as client:
+            response = await client.post(
+                "/api/agent-runs/first/follow-up", json={"message": "continue"}, headers=AUTH,
+            )
+        assert response.status_code == 202, response.text
+        handle = response.json()
+        assert handle["previous_run_id"] == "second"
+        assert handle["tools"] == ["math_add"]
+        assert handle["compliance_level"] == "Internal"
+        await factory.services[-1].started.wait()
+        assert factory.services[-1].calls[0]["conversation_id"] == "conv"
+    finally:
+        factory.release_all()
+        await _settle()
+        await drain_pending_releases()
+        await stop_lease_heartbeat()
+        set_run_coordinator(None)

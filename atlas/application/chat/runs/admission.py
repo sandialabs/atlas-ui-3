@@ -88,6 +88,7 @@ async def admit_run(
     precheck: Optional[Callable[[], None]] = None,
     source: str = "",
     follow_up_of: Optional[str] = None,
+    api_continuation: Optional[dict] = None,
     **start_kwargs: Any,
 ) -> RunRecord:
     """Admit one run cluster-wide and register it locally, or raise.
@@ -122,6 +123,7 @@ async def admit_run(
         source=source,
         parent_run_id=start_kwargs.get("parent_run_id"),
         follow_up_of=follow_up_of,
+        **({"api_continuation": api_continuation} if api_continuation is not None else {}),
     )
     try:
         # Synchronous from here: the precheck and the insert cannot be

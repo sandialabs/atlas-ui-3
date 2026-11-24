@@ -340,3 +340,111 @@ async def test_parent_record_expires_normally_without_live_children(server):
     parent = await _claim(a, "parent", "conv-p")
     assert await a.release(parent, "completed")
     assert 0 < await a._redis.client.pttl(a.keys.run("parent")) <= 100_000
+
+
+def _api_spec(tools):
+    return {
+        "source": "agent_runs_api", "model": "model", "workspace_id": "ws",
+        "tools": tools, "data_sources": [], "requested_data_sources": [],
+        "compliance_level": None,
+    }
+
+
+async def _api_claim(coord, run_id, previous=None, tools=None, user=USER):
+    return await coord.claim(
+        run_id=run_id, conversation_id="api-conv", user_email=user, max_runs_per_user=5,
+        source="agent_runs_api", follow_up_of=previous,
+        api_continuation=_api_spec(["read"] if tools is None else tools),
+    )
+
+
+async def test_api_predecessor_is_checked_atomically_even_after_newer_turn_finishes(server):
+    import json
+
+    a, b = _coordinator(server, "a"), _coordinator(server, "b")
+    first = await _api_claim(a, "first", tools=["read", "write"])
+    await a.release(first, "completed")
+    observed = await b.read_api_continuation("api-conv")
+    assert observed["run_id"] == "first"
+    second = await _api_claim(a, "second", previous="first")
+    await a.release(second, "failed")
+
+    # B read first before A's narrower turn. Even with no active holder,
+    # the old predecessor cannot authorize a new claim.
+    with pytest.raises(ConversationBusyError):
+        await _api_claim(b, "stale", previous=observed["run_id"], tools=["read", "write"])
+    assert await b.read("stale") is None
+    latest = await b.read_api_continuation("api-conv")
+    assert latest["run_id"] == "second"
+    assert latest["api_completed_before"] == "1"
+    assert json.loads(latest["api_spec"])["tools"] == ["read"]
+    third = await _api_claim(b, "third", previous="second")
+    await b.release(third, "completed")
+
+
+async def test_api_continuation_fails_closed_when_latest_missing_or_wrong_user(server):
+    a, b = _coordinator(server, "a"), _coordinator(server, "b")
+    first = await _api_claim(a, "first")
+    await a.release(first, "completed")
+    with pytest.raises(RunCoordinationUnavailableError):
+        await _api_claim(b, "wrong-user", previous="first", user="other@example.com")
+    await a._redis.client.delete(a.keys.api_latest("api-conv"))
+    with pytest.raises(RunCoordinationUnavailableError):
+        await _api_claim(b, "missing", previous="first")
+    assert await b.read("wrong-user") is None
+    assert await b.read("missing") is None
+
+
+async def test_api_latest_without_a_completed_turn_is_not_continuable(server):
+    a, b = _coordinator(server, "a"), _coordinator(server, "b")
+    first = await _api_claim(a, "first")
+    await a.release(first, "failed")
+    with pytest.raises(RunCoordinationUnavailableError):
+        await _api_claim(b, "next", previous="first")
+    assert await b.read("next") is None
+
+
+async def test_api_index_retains_terminal_runs_but_excludes_browser_runs(server):
+    a, b = _coordinator(server, "a"), _coordinator(server, "b")
+    first = await _api_claim(a, "first")
+    await _claim(b, "browser", conversation_id="browser-conv")
+    assert {r["run_id"] for r in await b.read_api_runs()} == {"first"}
+    await a.release(first, "completed")
+    assert {r["run_id"] for r in await b.read_api_runs()} == {"first"}
+    await a._redis.client.delete(a.keys.run("first"))
+    assert await b.read_api_runs() == []
+
+
+async def test_api_latest_and_index_expiry_follow_run_renewal_and_release(server):
+    a = _coordinator(server, "a", lease_seconds=5, retention_seconds=10)
+    first = await _api_claim(a, "first")
+    client = a._redis.client
+    latest_key = a.keys.api_latest("api-conv")
+    run_key = a.keys.run("first")
+    assert 14000 < await client.pttl(latest_key) <= 15000
+    assert await a.renew([first], {"first": "running"}) == {"first": True}
+    assert abs(await client.pttl(latest_key) - await client.pttl(run_key)) < 100
+    await a.release(first, "completed")
+    assert 9000 < await client.pttl(latest_key) <= 10000
+    assert abs(await client.pttl(latest_key) - await client.pttl(run_key)) < 100
+    seconds, micros = await client.time()
+    expires = await client.zscore(a.keys.api_index(), "first")
+    assert 9000 < expires - (seconds * 1000 + micros // 1000) <= 10000
+
+
+async def test_api_user_index_is_scoped_normalized_and_expires_with_records(server):
+    a = _coordinator(server, "a", lease_seconds=5, retention_seconds=10)
+    first = await _api_claim(a, "first")
+    second = await a.claim(
+        run_id="other", conversation_id="other-conv", user_email="other@example.com",
+        max_runs_per_user=5, source="agent_runs_api", api_continuation=_api_spec(["read"]),
+    )
+    assert {r["run_id"] for r in await a.read_api_runs()} == {"first", "other"}
+    assert {r["run_id"] for r in await a.read_api_runs("ALICE@example.com")} == {"first"}
+    assert {r["run_id"] for r in await a.read_api_runs("other@example.com")} == {"other"}
+    assert await a.read_api_runs("missing@example.com") == []
+    await a.release(first, "completed")
+    await a.release(second, "completed")
+    client = a._redis.client
+    for index in (a.keys.api_index(), a.keys.api_index(USER), a.keys.api_index("other@example.com")):
+        assert 9000 < await client.pttl(index) <= 10000

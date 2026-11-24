@@ -32,7 +32,7 @@ from atlas.application.chat.runs.external_runs import (
     get_api_run_anywhere,
     launch_api_run,
     list_api_options,
-    list_api_runs,
+    list_api_runs_anywhere,
 )
 from atlas.application.chat.runs.launcher import LaunchRefused
 from atlas.core.agent_runs_paths import AGENT_RUNS_PREFIX
@@ -353,7 +353,10 @@ async def list_runs(
     user: Optional[str] = Query(None, min_length=1, max_length=320, pattern=r"^\S+$"),
 ):
     """API-started runs still retained, newest first, optionally for one user."""
-    return {"runs": list_api_runs(user)}
+    try:
+        return {"runs": await list_api_runs_anywhere(user)}
+    except LaunchRefused as e:
+        raise _refused(e)
 
 
 @router.get("/{run_id}", response_model=RunStatusModel, responses=_ERRORS)

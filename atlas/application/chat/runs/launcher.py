@@ -61,7 +61,7 @@ from atlas.core.model_access import (
     ModelAccessDecision,
     check_model_access,
 )
-from atlas.domain.conversation_origin import origin_for_run_source
+from atlas.domain.conversation_origin import ORIGIN_AGENT_RUNS_API, origin_for_run_source
 from atlas.domain.messages.models import ToolResult
 from atlas.modules.mcp_tools.atlas_server import (
     GET_RUNS_TOOL_NAME,
@@ -881,6 +881,23 @@ async def _start_child_run(
             chat_service, model, tools, data_sources, compliance_level, user_email
         )
 
+    spec = {
+        "model": model,
+        "tools": tools,
+        "data_sources": data_sources,
+        # Unlike tools, sources are re-authorized from the *launch-time* list
+        # on every follow-up rather than from the last narrowed one: a source
+        # is authorized again when the child queries it, so carrying the list
+        # forward widens nothing, and a RAG discovery outage during one
+        # follow-up must not strip the sources from every later turn.
+        "requested_data_sources": requested_sources,
+        "workspace_id": workspace_id,
+        "workspace_name": workspace_name,
+        "compliance_level": compliance_level,
+        "source": source,
+        "actor": actor,
+    }
+
     # Admission is check-then-insert, and it must be atomic: several
     # ``atlas_launch_subagent`` calls in one agent step run concurrently, and a check
     # separated from the insert by an await would let all of them pass a cap of
@@ -906,6 +923,7 @@ async def _start_child_run(
             title=title,
             source=source,
             follow_up_of=follow_up_of,
+            api_continuation=spec if source == ORIGIN_AGENT_RUNS_API else None,
         )
     except ConcurrencyLimitError as e:
         raise LaunchRefused(str(e), code="concurrency_limit") from e
@@ -916,22 +934,6 @@ async def _start_child_run(
     except RunRegistryError as e:  # pragma: no cover - defensive
         raise LaunchRefused(f"The sub-conversation could not be started: {e}") from e
 
-    spec = {
-        "model": model,
-        "tools": tools,
-        "data_sources": data_sources,
-        # Unlike tools, sources are re-authorized from the *launch-time* list
-        # on every follow-up rather than from the last narrowed one: a source
-        # is authorized again when the child queries it, so carrying the list
-        # forward widens nothing, and a RAG discovery outage during one
-        # follow-up must not strip the sources from every later turn.
-        "requested_data_sources": requested_sources,
-        "workspace_id": workspace_id,
-        "workspace_name": workspace_name,
-        "compliance_level": compliance_level,
-        "source": source,
-        "actor": actor,
-    }
     record.launch_spec = spec
     connection.bind_run(record.run_id)
 

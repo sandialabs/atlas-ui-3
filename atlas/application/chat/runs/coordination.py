@@ -104,6 +104,7 @@ class RunCoordinator(Protocol):
         source: str = "",
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
+        api_continuation: Optional[dict] = None,
     ) -> Optional[RunClaim]:
         """Claim the conversation and one of the user's run slots, atomically.
 

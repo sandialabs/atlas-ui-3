@@ -398,6 +398,7 @@ async def test_non_owner_reads_the_shared_record_api_runs_only(server):
     assert status["status"] == "failed"
     assert status["interrupted"] is True
     assert status["error"] == INTERRUPTED_ERROR
+    assert status["end_reason"] == "owner_lost"
     task.cancel()
     browser_task.cancel()
 
