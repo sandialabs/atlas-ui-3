@@ -205,7 +205,7 @@ describe('team prompt library on the chat send path (issue #1169)', () => {
     expect(frame.selected_prompts).toEqual([])
   })
 
-  it('refuses to silently unpin a conversation when the library is disabled', () => {
+  it('preserves the stored pin and permits server recovery when the library is disabled', () => {
     const { result, rerender } = renderChat()
 
     act(() => {
@@ -228,7 +228,8 @@ describe('team prompt library on the chat send path (issue #1169)', () => {
       })
     })
 
-    // The feature is disabled after the pinned conversation is loaded.
+    // A stale library selection must not erase the conversation's stored pin.
+    h.activeKey = libraryPromptKey('p1', 'v1')
     h.promptLibraryFeature = false
     rerender()
 
@@ -237,14 +238,13 @@ describe('team prompt library on the chat send path (issue #1169)', () => {
       sent = result.current.sendChatMessage('continue')
     })
 
-    expect(sent).toBe(false)
-    expect(chatFrames()).toHaveLength(0)
-    expect(h.toastError).toHaveBeenCalledWith(
-      expect.stringMatching(/pinned team prompt/i),
-    )
+    expect(sent).toBe(true)
+    expect(chatFrames()).toHaveLength(1)
+    expect(chatFrames()[0]).not.toHaveProperty('library_prompt')
+    expect(h.toastError).not.toHaveBeenCalled()
   })
 
-  it('preserves a pin received during the session when the library is disabled', () => {
+  it('preserves a live pin through server recovery when the library is disabled', () => {
     const { result, rerender } = renderChat()
 
     act(() => {
@@ -284,11 +284,10 @@ describe('team prompt library on the chat send path (issue #1169)', () => {
       sent = result.current.sendChatMessage('continue')
     })
 
-    expect(sent).toBe(false)
-    expect(chatFrames()).toHaveLength(0)
-    expect(h.toastError).toHaveBeenCalledWith(
-      expect.stringMatching(/pinned team prompt/i),
-    )
+    expect(sent).toBe(true)
+    expect(chatFrames()).toHaveLength(1)
+    expect(chatFrames()[0]).not.toHaveProperty('library_prompt')
+    expect(h.toastError).not.toHaveBeenCalled()
   })
 
   it('sends a pinned version id when one was chosen', () => {

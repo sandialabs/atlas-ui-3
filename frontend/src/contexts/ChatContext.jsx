@@ -1279,24 +1279,24 @@ export const ChatProvider = ({ children }) => {
 		// Team prompt library (issue #1169): only a reference goes out, and a
 		// selection that is no longer available is refused here rather than
 		// silently replaced by the default prompt.
-		// Disabling the library must not silently unpin an existing
-		// conversation. The selector may clear its disabled-library key,
-		// but the server's stored pin is still authoritative. Refuse the
-		// turn rather than sending library_prompt: null and erasing it.
-		if (!promptLibraryEnabled && conversationLibraryPinRef.current) {
-			toast.error('This conversation has a pinned team prompt. Re-enable the team prompt library or explicitly clear the conversation pin before sending.')
-			return false
-		}
-		// Do not send a stale team-library selection when the feature is off.
-		// React's cleanup effect may not have run before the user presses Send.
-		if (!promptLibraryEnabled &&
+		// Omitting library_prompt preserves the server's stored pin. Unlike
+		// explicit null, omission allows the server to return a recoverable
+		// refusal and display the clear-team-prompt action in chat.
+		const disabledPinnedConversation =
+			!promptLibraryEnabled && !!conversationLibraryPinRef.current
+		const staleDisabledLibrarySelection = !promptLibraryEnabled &&
 			(isLibraryPromptKey(selections.activePromptKey) ||
-			 isLibraryDraftKey(selections.activePromptKey))) {
-			toast.error('The team prompt library is disabled. Choose another prompt before sending.')
+			 isLibraryDraftKey(selections.activePromptKey))
+		if (staleDisabledLibrarySelection) {
 			clearActivePrompt()
-			return false
+			if (!disabledPinnedConversation) {
+				toast.error('The team prompt library is disabled. Choose another prompt before sending.')
+				return false
+			}
 		}
-		const librarySelection = resolveLibrarySelection(selections.activePromptKey, promptLibrary)
+		const librarySelection = disabledPinnedConversation
+			? { kind: 'none' }
+			: resolveLibrarySelection(selections.activePromptKey, promptLibrary)
 		if (librarySelection.kind === 'blocked') {
 			toast.error(librarySelection.message)
 			return false
@@ -1367,7 +1367,7 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona || librarySelection.kind !== 'none') ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona || staleDisabledLibrarySelection || librarySelection.kind !== 'none') ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
 			custom_system_prompt: librarySelection.kind === 'draft'
 				? librarySelection.content
 				: (activeUserPrompt ? activeUserPrompt.content : undefined),
@@ -1378,7 +1378,7 @@ export const ChatProvider = ({ children }) => {
 			// Explicit null (not omitted) when no library prompt is selected:
 			// the server keeps a conversation's pinned version only while the
 			// client keeps naming it, so choosing another prompt unpins.
-			library_prompt: librarySelection.kind === 'library' ? librarySelection.ref : null,
+			...(disabledPinnedConversation ? {} : { library_prompt: librarySelection.kind === 'library' ? librarySelection.ref : null }),
 			library_prompt_revision: typeof libraryPinRevisionRef.current === 'number' ? libraryPinRevisionRef.current : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
