@@ -72,10 +72,21 @@ checks that the original claim is still held. A refused publication removes
 the local record and attempts to undo the shared claim. Its original publication
 identity permits metadata cleanup after lease expiry or orphan takeover, without
 releasing a different run's lock or overwriting a newer continuation pointer.
-The owner's orphan sweep retries known refusals if Redis was unreachable during
-cleanup; the retry queue is process-local. If the owner process is lost before
-it can reconcile an ambiguous publication, the normal orphan and retention
-rules apply.
+Publication also records a provisional marker in the shared run hash. The
+marker is cleared by a successful running-state lease renewal (required before
+the API task begins work), or a normal terminal release after acknowledged
+admission. Before that point, the prior continuation is retained for at least
+the provisional pointer's lifetime. A shutdown or cancel during publication
+releases the admission as refused, not as an accepted terminal turn.
+
+The owner's orphan sweep retries known refusals promptly. If the owner
+disappears before cleanup succeeds, any replica's existing orphan sweep rolls
+back the expired provisional publication atomically, restores a still-retained
+predecessor, and removes the refused run from the retained indexes. A tombstone
+keeps the projection-close obligation until that close is confirmed. Runs that
+reached the execution boundary instead retain the normal owner-lost outcome.
+The marker tracks shared admission/activation, not receipt of the HTTP response
+by the client; it cannot provide exactly-once HTTP delivery.
 
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket

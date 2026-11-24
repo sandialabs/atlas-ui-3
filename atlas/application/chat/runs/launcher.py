@@ -48,7 +48,7 @@ from atlas.application.chat.runs.context import (
     set_current_run,
     tag_event,
 )
-from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError, get_run_coordinator
 from atlas.application.chat.runs.launch_models import list_launchable_models
 from atlas.application.chat.runs.leases import ensure_current_run_may_act
 from atlas.application.chat.runs.registry import (
@@ -622,6 +622,16 @@ async def _run_child(
     outcome = RunStatus.COMPLETED
     error: Optional[str] = None
     try:
+        # Do not start API work until shared coordination records that the
+        # publication was acknowledged and the local task was scheduled.
+        claim = record.claim
+        if record.source == ORIGIN_AGENT_RUNS_API:
+            if record.is_terminal or record.lost_claim is not None:
+                raise RunCoordinationUnavailableError("API execution admission unavailable")
+            if claim is not None:
+                held = await get_run_coordinator().renew([claim], {record.run_id: RunStatus.RUNNING.value})
+                if held.get(record.run_id) is not True or record.is_terminal or record.claim is not claim:
+                    raise RunCoordinationUnavailableError("API execution admission unavailable")
         response = await chat_service.handle_chat_message(
             session_id=record.session_id,
             content=prompt,

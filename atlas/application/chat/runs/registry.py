@@ -215,6 +215,7 @@ class RunRecord:
     # when the run reaches a terminal state; renewed by the lease heartbeat
     # while it is live. Server-side only.
     claim: Optional[Any] = field(default=None, repr=False, compare=False)
+    api_admission_pending: bool = field(default=False, repr=False, compare=False)
     # The claim lease renewal refused, moved out of ``claim`` the first time
     # (so it is neither renewed nor reported again). Kept for fencing: its
     # ``generation`` is the one this replica held.
@@ -760,7 +761,7 @@ class RunRegistry:
         claim, record.claim = record.claim, None
         if claim is None:
             return
-        release_claim_soon(claim, record.status.value)
+        release_claim_soon(claim, "admission_refused" if record.api_admission_pending else record.status.value)
 
     def _publish_terminal(self, record: "RunRecord") -> None:
         """Tell every replica this run finished.

@@ -108,8 +108,45 @@ local function refresh_api_retention(p, latest, user_index, id, expiry)
     refresh_api_index(p .. 'runs-api', newest, until_at)
     refresh_api_index(user_index, newest, until_at)
     refresh_api_index(conv_index, newest, until_at)
+    -- While publication is ambiguous, the predecessor must survive as
+    -- long as the provisional pointer, including ancestor retention updates.
+    if redis.call('HGET', newest_rec, 'api_admission_unconfirmed') then
+      local previous = redis.call('HGET', newest_rec, 'follow_up_of') or ''
+      local prev_rec = p .. 'run:' .. previous
+      local ttl = redis.call('PTTL', prev_rec)
+      if previous ~= '' and ttl > 0 and now + ttl < until_at then
+        redis.call('PEXPIREAT', prev_rec, until_at)
+        refresh_api_index(p .. 'runs-api', previous, until_at)
+        refresh_api_index(user_index, previous, until_at)
+        refresh_api_index(conv_index, previous, until_at)
+      end
+    end
   end
 end
+local function rollback_api_publication(p, rec, id)
+  local latest = redis.call('HGET', rec, 'api_latest_key')
+  if latest then
+    local user_index = redis.call('HGET', rec, 'api_user_index')
+    local conv_index = latest .. ':retained'
+    redis.call('ZREM', p .. 'runs-api', id)
+    redis.call('ZREM', user_index, id)
+    redis.call('ZREM', conv_index, id)
+    if redis.call('GET', latest) == id then
+      local previous = redis.call('HGET', rec, 'follow_up_of') or ''
+      local prev_rec = p .. 'run:' .. previous
+      local ttl = redis.call('PTTL', prev_rec)
+      if previous ~= '' and ttl > 0 then
+        redis.call('SET', latest, previous, 'PX', ttl)
+        refresh_api_retention(p, latest, user_index, previous, now + ttl)
+      else
+        redis.call('DEL', latest)
+      end
+    end
+  end
+  redis.call('HDEL', rec, 'api_spec', 'api_pending_spec', 'api_latest_key',
+    'api_user_index', 'api_admission_unconfirmed')
+end
+
 """
 
 # Subtree retention, shared by the scripts that end a run. ``p`` is the key
@@ -195,6 +232,9 @@ if ARGV[12] ~= '' then
       return {'continuation_unavailable'}
     end
     local status = redis.call('HGET', previous, 'status')
+    if redis.call('HGET', previous, 'api_admission_unconfirmed') then
+      return {'busy', latest}
+    end
     if status ~= 'completed' and status ~= 'failed' and status ~= 'cancelled' then
       return {'busy', latest}
     end
@@ -265,7 +305,7 @@ local previous = redis.call('HGET', KEYS[1], 'follow_up_of') or ''
 if (redis.call('GET', KEYS[3]) or '') ~= previous then return 0 end
 redis.call('HSET', KEYS[1], 'api_spec', spec, 'api_latest_key', KEYS[3],
   'api_user_index', KEYS[4], 'api_admission_owner', ARGV[2],
-  'api_admission_generation', ARGV[3])
+  'api_admission_generation', ARGV[3], 'api_admission_unconfirmed', '1')
 redis.call('HDEL', KEYS[1], 'api_pending_spec')
 redis.call('SET', KEYS[3], ARGV[1])
 refresh_api_retention(ARGV[5], KEYS[3], KEYS[4], ARGV[1], expires + tonumber(ARGV[4]))
@@ -288,6 +328,13 @@ local same_publication = refused and ARGV[3] ~= ''
     and redis.call('HGET', KEYS[1], 'api_admission_generation') == ARGV[3]
 if generation then
   if not same_claim and not same_publication then return 0 end
+  -- A delayed refusal cannot erase an activated run or the sweep's
+  -- outstanding projection-close obligation.
+  if refused and (redis.call('HGET', KEYS[1], 'api_admission_discarded')
+      or (redis.call('HGET', KEYS[1], 'api_spec')
+          and not redis.call('HGET', KEYS[1], 'api_admission_unconfirmed'))) then
+    return 0
+  end
   -- Like renew: once a live run's lease has passed it is no longer ours to
   -- end, even before a sweep has recorded the takeover (run_leases.py).
   local current = redis.call('HGET', KEYS[1], 'status')
@@ -311,30 +358,13 @@ if generation and (redis.call('HGET', KEYS[1], 'api_pending_spec')
   -- A refused admission must not remain in the retained API index. If
   -- publication ran but its reply was lost, restore the prior pointer only
   -- while this claim still owns the published turn.
-  local latest = redis.call('HGET', KEYS[1], 'api_latest_key')
-  if latest then
-    local user_index = redis.call('HGET', KEYS[1], 'api_user_index')
-    local conv_index = latest .. ':retained'
-    redis.call('ZREM', ARGV[7] .. 'runs-api', ARGV[1])
-    redis.call('ZREM', user_index, ARGV[1])
-    redis.call('ZREM', conv_index, ARGV[1])
-    if redis.call('GET', latest) == ARGV[1] then
-      local previous = redis.call('HGET', KEYS[1], 'follow_up_of') or ''
-      local prev_rec = ARGV[7] .. 'run:' .. previous
-      local ttl = redis.call('PTTL', prev_rec)
-      if previous ~= '' and ttl > 0 then
-        redis.call('SET', latest, previous, 'PX', ttl)
-        refresh_api_retention(ARGV[7], latest, user_index, previous, now + ttl)
-      else
-        redis.call('DEL', latest)
-      end
-    end
-  end
+  rollback_api_publication(ARGV[7], KEYS[1], ARGV[1])
   redis.call('DEL', KEYS[1])
   return freed
 end
 if generation then
   redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', 0, 'updated_at', now)
+  redis.call('HDEL', KEYS[1], 'api_admission_unconfirmed')
   end_run(ARGV[7], ARGV[1], tonumber(ARGV[5]), tonumber(ARGV[6]))
 end
 return freed
@@ -360,6 +390,9 @@ redis.call('SET', KEYS[2], ARGV[1], 'PX', lease)
 redis.call('ZADD', KEYS[3], expires, ARGV[1])
 redis.call('PEXPIRE', KEYS[3], lease * 2)
 redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', expires, 'updated_at', now)
+if ARGV[4] ~= 'queued' then
+  redis.call('HDEL', KEYS[1], 'api_admission_unconfirmed')
+end
 expire_both(ARGV[7], ARGV[1], lease + tonumber(ARGV[6]))
 redis.call('ZADD', KEYS[4], expires, ARGV[1])
 -- A finished ancestor stays readable while this run is live.

@@ -414,7 +414,7 @@ class RunLeaseGuard:
             record.status.value,
             json.dumps(run_snapshot(record), default=str),
             record.error or "",
-            (record.launch_spec or {}).get("source") or "",
+            (record.launch_spec or {}).get("source") or record.source or "",
         )
 
     async def publish_now(self, run_id: str) -> None:

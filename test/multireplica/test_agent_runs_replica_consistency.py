@@ -173,12 +173,11 @@ def test_refused_publication_reconciles_after_lease_expiry(shared_infra, monkeyp
                 released = await a.release(refused, "admission_refused")
                 assert not released
                 await asyncio.sleep(0.7)
-                takeover = await RedisRunLeases(b).interrupt(
-                    refused.run_id, refused.conversation_id, refused.user_email, "owner lost",
-                )
-                assert takeover and takeover > 0
-
-            guard = RunLeaseGuard(a, RedisRunLeases(a), RunRegistry())
+            # The original coordinator and its process-local retry queue are
+            # no longer available. A fresh replica must discover the obligation.
+            recovered = RedisRunCoordinator(manager, replica_id="replacement",
+                                            lease_seconds=0.5, retention_seconds=30)
+            guard = RunLeaseGuard(recovered, RedisRunLeases(recovered), RunRegistry())
             await guard.sweep_once()
             latest = await b.read_api_continuation("conversation")
             assert latest["run_id"] == first.run_id
@@ -189,8 +188,19 @@ def test_refused_publication_reconciles_after_lease_expiry(shared_infra, monkeyp
             # Repeating cleanup must not change a subsequently admitted turn.
             next_run = await claim("next", first.run_id)
             await a.publish_api_admission(next_run)
+            held = await a.renew([next_run], {next_run.run_id: "running"})
+            assert held == {next_run.run_id: True}
             await a.release(refused, "admission_refused")
             assert (await b.read_api_continuation("conversation"))["run_id"] == next_run.run_id
-            await a.release(next_run, "completed")
+            # A genuinely activated run must survive owner loss as interrupted,
+            # not roll back to the previous turn.
+            await asyncio.sleep(0.7)
+            await guard.sweep_once()
+            latest = await b.read_api_continuation("conversation")
+            assert latest["run_id"] == next_run.run_id
+            assert latest["interrupted"] == "1"
+            assert latest["status"] == "failed"
+            await a.release(next_run, "admission_refused")
+            assert (await b.read_api_continuation("conversation"))["run_id"] == next_run.run_id
 
     asyncio.run(exercise())

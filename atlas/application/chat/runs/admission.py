@@ -147,10 +147,12 @@ async def admit_run(
     if claim is not None:
         ensure_lease_heartbeat()
     if claim is not None and api_continuation is not None:
+        record.api_admission_pending = True
         try:
             await coordinator.publish_api_admission(claim)
             if record.is_terminal or record.claim is not claim or _admission_closed:
                 raise RunCoordinationUnavailableError("API admission interrupted")
+            record.api_admission_pending = False
         except BaseException:
             record.claim = None
             registry.remove(record.run_id)
@@ -324,7 +326,7 @@ async def shut_down_live_runs(timeout: float = 10.0) -> int:
             continue
         if not record.is_terminal:
             registry.set_status(record.run_id, RunStatus.FAILED, error="The server shut down")
-        release_claim_soon(claim, record.status.value)
+        release_claim_soon(claim, "admission_refused" if record.api_admission_pending else record.status.value)
         released += 1
     return released
 
