@@ -836,6 +836,46 @@ async def test_a_loss_during_the_handle_write_does_not_cancel_the_finishing_requ
     assert len(get_run_registry().all_records()) == 1
 
 
+async def test_a_refused_final_handle_write_cancels_the_run_and_answers_503(
+    factory, shared_store
+):
+    async def taken(slot, handle):
+        return None  # another request owns the key now
+
+    shared_store.complete = taken
+    body = {**LAUNCH, "idempotency_key": "taken-1"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unavailable"
+    records = get_run_registry().all_records()
+    assert len(records) == 1 and records[0].status is RunStatus.CANCELLED
+
+
+async def test_a_completed_key_is_not_reported_lost_by_a_racing_renewal(
+    factory, shared_store, monkeypatch
+):
+    from atlas.core.coordination_metrics import coordination_metrics
+
+    module = "atlas.application.chat.runs.external_runs"
+    monkeypatch.setattr(f"{module}.IDEMPOTENCY_RENEW_INTERVAL_SECONDS", 0.01)
+    original_complete = shared_store.complete
+
+    async def complete_then_linger(slot, handle):
+        result = await original_complete(slot, handle)
+        await asyncio.sleep(0.1)  # renewals keep running against the completed key
+        return result
+
+    shared_store.complete = complete_then_linger
+    counter = ("atlas_coordination_events_total",)
+    before = coordination_metrics().counter(*counter, event="idempotency_reservation_lost")
+    body = {**LAUNCH, "idempotency_key": "race-done"}
+    async with _client(factory) as client:
+        response = await client.post("/api/agent-runs", json=body, headers=AUTH)
+    assert response.status_code == 202
+    assert coordination_metrics().counter(*counter, event="idempotency_reservation_lost") == before
+
+
 async def test_follow_up_replay_names_a_sibling_run_on_another_replica(
     factory, shared_store
 ):

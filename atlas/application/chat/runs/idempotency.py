@@ -114,11 +114,13 @@ class IdempotencyStore(Protocol):
         shared store cannot be reached.
         """
 
-    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> bool:
+    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> Optional[bool]:
         """Record the run handle on the reservation and keep it for the full TTL.
 
-        Returns ``False`` when the write could not be made (a shared store that
-        is unreachable) and should be retried; the run already exists.
+        ``True`` recorded. ``False`` the write could not be made (a shared store
+        that is unreachable) and should be retried; the run already exists.
+        ``None`` the key is another request's now: the handle must not be
+        returned to this request's caller as the key's run.
         """
 
     async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
@@ -205,12 +207,13 @@ class InProcessIdempotencyStore:
             None,
         )
 
-    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> bool:
+    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> Optional[bool]:
         slot_key = (slot.user_email, slot.key)
         entry = self._entries.get(slot_key)
         if entry is not None and self._tokens.get(slot_key) == slot.token:
             entry.handle = dict(handle)
-        return True
+            return True
+        return None
 
     async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
         # In-process reservations do not expire while pending.

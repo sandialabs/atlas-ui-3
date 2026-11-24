@@ -262,13 +262,13 @@ async def test_renew_reports_extended_lost_and_unreachable(make_store, server):
         assert await store.renew(slot) is None
 
 
-async def test_redis_complete_reports_false_when_another_request_holds_the_key(server):
+async def test_redis_complete_reports_taken_when_another_request_holds_it(server):
     store = RedisIdempotencyStore(_manager(server))
     stale, _ = await store.reserve(USER, "held", "fp")
     await store._redis.client.delete(store._record_key(USER, "held"))
     other, _ = await store.reserve(USER, "held", "fp")
     assert other is not None
-    assert await store.complete(stale, {"run_id": "stale"}) is False
+    assert await store.complete(stale, {"run_id": "stale"}) is None  # key taken
     assert await store.complete(other, HANDLE) is True
 
 
@@ -293,3 +293,33 @@ async def test_find_follow_up_is_scoped_to_the_owner_when_given(make_store):
     await store.complete(slot, HANDLE)
     assert await store.find_follow_up("run-2", "own", "conv-1", "alice@example.com") is not None
     assert await store.find_follow_up("run-2", "own", "conv-1", "mallory@example.com") is None
+
+
+async def test_complete_reports_taken_for_a_slot_that_is_not_the_owner(make_store):
+    store = make_store()
+    old, _ = await store.reserve(USER, "tk", "fp")
+    await store.release(old)
+    new, _ = await store.reserve(USER, "tk", "fp")
+    assert await store.complete(old, HANDLE) is None
+    assert await store.complete(new, HANDLE) is True
+
+
+async def test_renewing_a_completed_reservation_is_not_a_loss(make_store):
+    store = make_store()
+    slot, _ = await store.reserve(USER, "done", "fp")
+    await store.complete(slot, HANDLE)
+    assert await store.renew(slot) is True
+
+
+async def test_redis_follow_up_index_is_not_taken_over_by_another_caller(server):
+    store = RedisIdempotencyStore(_manager(server))
+    mine, _ = await store.reserve(
+        "alice@example.com", "ix", "fp", addressed_run_id="run-1", conversation_id="conv-1"
+    )
+    await store.complete(mine, HANDLE)
+    theirs, _ = await store.reserve(
+        "mallory@example.com", "ix", "fp", addressed_run_id="run-1", conversation_id="conv-1"
+    )
+    await store.complete(theirs, {"run_id": "other"})
+    owner, entry = await store.find_follow_up("run-1", "ix", "conv-1")
+    assert owner == "alice@example.com" and entry.handle == HANDLE

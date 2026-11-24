@@ -340,6 +340,21 @@ def _after_cancel(holder: Optional[_Hold], handle: Optional[Dict[str, Any]]) -> 
     )
 
 
+_KEY_TAKEN_MESSAGE = (
+    "The idempotency reservation for this request was taken over before the run "
+    "was recorded, so it was cancelled. Retry shortly."
+)
+
+
+def _abandon_run(handle: Dict[str, Any]) -> None:
+    """Cancel the run admitted under a key that is no longer this request's."""
+    logger.error("An idempotency key was taken over while its run was being recorded")
+    coordination_metrics().record_event(
+        CoordinationEvent.IDEMPOTENCY_RESERVATION_LOST, logging.ERROR, reason="taken"
+    )
+    get_run_registry().cancel(handle["run_id"], handle["user"])
+
+
 async def _release(
     slot: Optional[IdempotencySlot],
     handle: Optional[Dict[str, Any]],
@@ -353,8 +368,15 @@ async def _release(
         store = get_idempotency_store()
         if handle is None:
             await store.release(slot)
-        elif not await store.complete(slot, handle):
-            _complete_later(slot, handle)
+        else:
+            stored = await store.complete(slot, handle)
+            if stored is None:
+                # The key is another request's: this run must not be handed
+                # out as the key's run, or a retry would replay the other one.
+                _abandon_run(handle)
+                raise LaunchRefused(_KEY_TAKEN_MESSAGE, code="unavailable")
+            if not stored:
+                _complete_later(slot, handle)
     finally:
         if holder is not None:
             await holder.stop()
@@ -382,7 +404,11 @@ async def _retry_complete(slot: IdempotencySlot, handle: Dict[str, Any]) -> None
         await asyncio.sleep(IDEMPOTENCY_COMPLETE_RETRY_SECONDS)
         if await store.renew(slot) is False:
             break  # the key is gone or another request's: nothing left to record
-        if await store.complete(slot, handle):
+        stored = await store.complete(slot, handle)
+        if stored:
+            return
+        if stored is None:
+            _abandon_run(handle)
             return
     logger.error(
         "Could not record the run handle for run %s's idempotency key; a retry "

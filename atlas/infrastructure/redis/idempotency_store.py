@@ -43,12 +43,26 @@ from atlas.infrastructure.redis.run_coordinator import key_part
 
 logger = logging.getLogger(__name__)
 
+# An index slot is written only if absent (or already this owner's): another
+# caller reusing a run id and key cannot take over the slot. Shared by the
+# scripts that write indexes.
+_CLAIM_INDEX = """
+local function claim_index(k, owner, ttl)
+  local cur = redis.call('GET', k)
+  if not cur then
+    redis.call('SET', k, owner, 'PX', ttl)
+  elseif cur == owner then
+    redis.call('PEXPIRE', k, ttl)
+  end
+end
+"""
+
 # KEYS: record, addr_index, conv_index (unused when the request addresses no run)
 # ARGV: token, fingerprint, created_at, addressed_run_id, conversation_id,
 #       pending_ms, user_email
 # Returns {} when the key was taken by this call, else the existing hash as a
 # flat field/value list.
-RESERVE_SCRIPT = """
+RESERVE_SCRIPT = _CLAIM_INDEX + """
 if redis.call('EXISTS', KEYS[1]) == 1 then
   return redis.call('HGETALL', KEYS[1])
 end
@@ -56,8 +70,8 @@ redis.call('HSET', KEYS[1], 'token', ARGV[1], 'fingerprint', ARGV[2],
   'created_at', ARGV[3], 'addressed_run_id', ARGV[4], 'conversation_id', ARGV[5])
 redis.call('PEXPIRE', KEYS[1], ARGV[6])
 if ARGV[4] ~= '' then
-  redis.call('SET', KEYS[2], ARGV[7], 'PX', ARGV[6])
-  if ARGV[5] ~= '' then redis.call('SET', KEYS[3], ARGV[7], 'PX', ARGV[6]) end
+  claim_index(KEYS[2], ARGV[7], ARGV[6])
+  if ARGV[5] ~= '' then claim_index(KEYS[3], ARGV[7], ARGV[6]) end
 end
 return {}
 """
@@ -68,7 +82,7 @@ return {}
 # Records the handle unless another request now holds the key. A reservation
 # that already expired is re-taken (with its full fields), so a slow launch
 # still leaves its handle.
-COMPLETE_SCRIPT = """
+COMPLETE_SCRIPT = _CLAIM_INDEX + """
 local tok = redis.call('HGET', KEYS[1], 'token')
 if tok and tok ~= ARGV[1] then return 0 end
 redis.call('HSET', KEYS[1], 'token', ARGV[1], 'handle', ARGV[2],
@@ -76,18 +90,20 @@ redis.call('HSET', KEYS[1], 'token', ARGV[1], 'handle', ARGV[2],
   'conversation_id', ARGV[8])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
 if ARGV[5] ~= '' then
-  redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3])
-  if ARGV[8] ~= '' then redis.call('SET', KEYS[3], ARGV[4], 'PX', ARGV[3]) end
+  claim_index(KEYS[2], ARGV[4], ARGV[3])
+  if ARGV[8] ~= '' then claim_index(KEYS[3], ARGV[4], ARGV[3]) end
 end
 return 1
 """
 
 # KEYS: record, addr_index, conv_index
 # ARGV: token, pending_ms, addressed_run_id, conversation_id
-# Extends a reservation that is still ours and still pending.
+# Extends a reservation that is still ours and still pending. Returns 2 when
+# it is ours but already completed (nothing to extend, nothing lost), 0 when
+# it is gone or another request's.
 RENEW_SCRIPT = """
 if redis.call('HGET', KEYS[1], 'token') ~= ARGV[1] then return 0 end
-if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'handle') == 1 then return 2 end
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
 if ARGV[3] ~= '' then
   redis.call('PEXPIRE', KEYS[2], ARGV[2])
@@ -205,7 +221,7 @@ class RedisIdempotencyStore:
         items = [_text(item) for item in raw]
         return None, _entry_from_fields(dict(zip(items[::2], items[1::2])))
 
-    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> bool:
+    async def complete(self, slot: IdempotencySlot, handle: Dict[str, Any]) -> Optional[bool]:
         try:
             stored = await self._complete(
                 keys=self._keys(
@@ -231,7 +247,7 @@ class RedisIdempotencyStore:
             )
             return False
         # 0: another request holds the key now, so there is nothing to record.
-        return bool(stored)
+        return True if stored else None
 
     async def renew(self, slot: IdempotencySlot) -> Optional[bool]:
         try:
@@ -253,7 +269,7 @@ class RedisIdempotencyStore:
                 "Could not extend an idempotency reservation: %s", type(exc).__name__
             )
             return None
-        return bool(extended)
+        return bool(extended)  # 1 extended, 2 already completed (ours): both fine
 
     async def release(self, slot: IdempotencySlot) -> None:
         try:
