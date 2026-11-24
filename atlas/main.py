@@ -958,6 +958,30 @@ _RUN_SESSION_MARKER = "tracked_run_session"
 RESUME_SESSION_PARAM = "resume_session"
 
 
+async def _conversation_may_be_stored(chat_service, conversation_id) -> bool:
+    """Whether writing into ``conversation_id`` could overwrite a stored record.
+
+    Answered fail closed. False only when there is nothing to overwrite: no
+    conversation store at all, or a store that answers and has no record. A
+    record of any owner, a failing lookup and a store that cannot answer
+    ownership questions all count as "may be stored". Failing closed is cheap:
+    the only effect is that the resumed session's next chat starts in a fresh
+    conversation, while a wrong "not stored" risks saving over a real one.
+    """
+    repository = getattr(chat_service, "conversation_repository", None)
+    if repository is None or not conversation_id:
+        return False
+    lookup = getattr(repository, "get_conversation_owner", None)
+    if not callable(lookup):
+        return True
+    try:
+        # Synchronous store query: keep it off the event loop.
+        return await asyncio.to_thread(lookup, str(conversation_id)) is not None
+    except Exception:
+        logger.warning("Could not check whether a resumed conversation is stored", exc_info=True)
+        return True
+
+
 async def _resume_connection_session(chat_service, requested, user_email):
     """Take over the session a reconnecting client names, or return None.
 
@@ -1013,6 +1037,15 @@ async def _resume_connection_session(chat_service, requested, user_email):
     session = decode_session(encode_session(session), session.store_version)
     session.active = True
     session.connection_owner = chat_service.connection_id
+    # Issue #1217: the client may have started a new chat while it was
+    # disconnected, and its reset_session frame went nowhere. The session
+    # still names the conversation the previous connection was in, so decide
+    # here, once, that the next chat is a new conversation. A client that is
+    # continuing the old one names it on its frames and is hydrated from the
+    # store as always. The decision is part of the adopted snapshot: there is
+    # no per-frame state to arm, consume or lose on a refused or failed frame.
+    if await _conversation_may_be_stored(chat_service, session.context.get("conversation_id")):
+        chat_service.rebind_to_new_conversation(session)
     if not await chat_service.persist_session(session, adopt=True):
         return None
     chat_service.restore_connection_state(session)
