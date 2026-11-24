@@ -684,7 +684,13 @@ export function createWebSocketHandler(deps) {
         // A snapshot after a reconnect replaces what this tab knew about live runs.
         if (data.type === 'runs_snapshot') {
           liveRunByConversation.clear()
-          for (const snapshotRun of data.runs || []) noteLiveRun('runs_snapshot', snapshotRun)
+          for (const snapshotRun of data.runs || []) {
+            noteLiveRun('runs_snapshot', snapshotRun)
+            // A run already over when the snapshot was taken may or may not have
+            // saved, and nothing here can tell. A missing notice is better than
+            // a false "not saved, send again", so a later fence for it is silent.
+            if (['completed', 'failed', 'cancelled'].includes(snapshotRun?.status)) settleRun(snapshotRun.run_id)
+          }
         }
         if (data.type === 'run_status') {
           announceInterruptedRun(data.run)

@@ -93,7 +93,7 @@ def _chat_service():
     return chat, session
 
 
-async def test_skipped_save_log_says_no_takeover_when_none_was_observed(server, caplog):
+async def test_skipped_save_log_names_a_lapse_without_proof(server, caplog):
     from atlas.application.chat.runs import registry as registry_module
 
     a = Replica(server, "A")
@@ -102,19 +102,19 @@ async def test_skipped_save_log_says_no_takeover_when_none_was_observed(server, 
     registry_module._registry = a.registry
     chat, session = _chat_service()
 
-    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, "lease lapsed without proof")
+    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, leases_module.FENCE_REASON_NO_PROOF)
     with caplog.at_level(logging.WARNING):
         await asyncio.get_running_loop().create_task(_commit_as(chat, record, session))
 
     assert chat._save_conversation.call_count == 0
     messages = [r.getMessage() for r in caplog.records if "Not saving the turn" in r.getMessage()]
     assert len(messages) == 1
-    assert "lease lapsed without proof" in messages[0]
-    assert "no takeover was observed" in messages[0]
+    assert leases_module.FENCE_REASON_NO_PROOF in messages[0]
+    assert "takeover" not in messages[0]
     task.cancel()
 
 
-async def test_skipped_save_log_says_takeover_when_the_sweep_observed_one(server, caplog):
+async def test_skipped_save_log_names_a_refused_renewal_without_claiming_a_holder(server, caplog):
     from atlas.application.chat.runs import registry as registry_module
 
     a = Replica(server, "A")
@@ -123,13 +123,16 @@ async def test_skipped_save_log_says_takeover_when_the_sweep_observed_one(server
     registry_module._registry = a.registry
     chat, session = _chat_service()
 
-    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, leases_module.FENCE_REASON_TAKEN_OVER)
+    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, leases_module.FENCE_REASON_RENEWAL_REFUSED)
     with caplog.at_level(logging.WARNING):
         await asyncio.get_running_loop().create_task(_commit_as(chat, record, session))
 
     messages = [r.getMessage() for r in caplog.records if "Not saving the turn" in r.getMessage()]
     assert len(messages) == 1
-    assert "a takeover by another replica was observed" in messages[0]
+    # Redis refuses a lapsed lease and a held one alike: the text says so
+    # rather than asserting either.
+    assert "lapsed or another replica holds the run" in messages[0]
+    assert "no takeover" not in messages[0]
     task.cancel()
 
 
@@ -185,11 +188,29 @@ async def test_orphan_sweep_keeps_the_traceback_for_an_unexpected_error(server, 
 async def test_own_sweep_takeover_replaces_an_earlier_fence_reason(server):
     a = Replica(server, "A")
     record, task = await a.start()
-    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, "lease lapsed without proof")
-    assert a.guard.fence_reason(record.run_id) == "lease lapsed without proof"
+    a.guard._fence_local(a.guard._leases[record.run_id], record.run_id, leases_module.FENCE_REASON_NO_PROOF)
+    assert a.guard.fence_reason(record.run_id) == leases_module.FENCE_REASON_NO_PROOF
 
     await a.expire(record)
     assert await a.guard.sweep_once() == [record.run_id]
 
     assert a.guard.fence_reason(record.run_id) == leases_module.FENCE_REASON_TAKEN_OVER
     task.cancel()
+
+
+async def test_projection_close_failure_during_an_outage_feeds_the_dependency_state(monkeypatch, caplog):
+    from atlas.application.chat.runs import execution_state
+    from atlas.core.coordination_metrics import coordination_metrics
+
+    class DownStore:
+        async def apply_event(self, event):
+            raise RedisConnectionError("redis is down")
+
+    monkeypatch.setattr(execution_state, "get_execution_store", lambda: DownStore())
+    with caplog.at_level(logging.WARNING):
+        closed = await leases_module._close_projection("run-x", {"conversation_id": "c", "user_email": EMAIL})
+
+    assert closed is False
+    assert coordination_metrics().dependencies()["redis"]["status"] == "unavailable"
+    (record,) = [r for r in caplog.records if r.name == leases_module.logger.name]
+    assert record.exc_info is None

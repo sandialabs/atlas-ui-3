@@ -132,6 +132,13 @@ describe('interrupted run notice in the transcript', () => {
     expect(back.deps.addMessage).not.toHaveBeenCalled()
   })
 
+  it.each(['error', 'replica_shutdown'])('warns when a run that ended with %s is fenced before any save was seen', (end_reason) => {
+    const { deps, handler } = makeHandler()
+    handler(statusFrame(run({ end_reason })))
+    handler(statusFrame(run()))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('still warns when a stopped run is fenced before its turn was saved', () => {
     const { deps, handler } = makeHandler()
     handler(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' })))
@@ -168,6 +175,32 @@ describe('interrupted run notice in the transcript', () => {
     const { deps, handler } = makeHandler('conv-1')
     handler({ type: 'conversation_saved', conversation_id: 'bg-branch', saved_run_id: 'bg-run', saved_from_conversation_id: 'bg-conv' })
     handler(statusFrame(run({ run_id: 'visible-run' })))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['completed', 'completed'],
+    ['failed', 'error'],
+    ['cancelled', 'user_cancelled'],
+  ])('stays silent for a fence after a snapshot reported the run %s', (status, end_reason) => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'runs_snapshot', runs: [run({ status, end_reason })] })
+    handler(statusFrame(run()))
+    expect(deps.addMessage).not.toHaveBeenCalled()
+  })
+
+  it('still announces a fence for a run a snapshot reported as live', () => {
+    const { deps, handler } = makeHandler()
+    handler({ type: 'runs_snapshot', runs: [run({ status: 'running', end_reason: null })] })
+    handler(statusFrame(run()))
+    expect(deps.addMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not repeat a notice already shown when the reconnect snapshot reports the fence', () => {
+    const { deps, handler } = makeHandler()
+    handler(statusFrame(run()))
+    handler({ type: 'runs_snapshot', runs: [run()] })
+    handler(statusFrame(run()))
     expect(deps.addMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -293,6 +326,27 @@ describe('completed run later fenced', () => {
     act(() => result.current.handleRunFrame(statusFrame(run({ run_id: 'run-new', status: 'running', end_reason: null }))))
     act(() => result.current.handleRunFrame(statusFrame(run({ run_id: 'run-old' }))))
     expect(result.current.runsByConversation['conv-1']).toMatchObject({ run_id: 'run-new', status: 'running' })
+  })
+
+  it('keeps a completed record when a reconnect snapshot reports the fence', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'completed', end_reason: 'completed' }))))
+    act(() => result.current.handleRunFrame({ type: 'runs_snapshot', runs: [run()] }))
+    expect(result.current.runsByConversation['conv-1']).toMatchObject({ status: 'completed', end_reason: 'completed' })
+  })
+
+  it('keeps a saved record when a reconnect snapshot reports the fence', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame(statusFrame(run({ status: 'cancelled', end_reason: 'user_cancelled' }))))
+    act(() => result.current.handleRunFrame({ type: 'run_saved', run_id: 'run-1', conversation_id: 'conv-1' }))
+    act(() => result.current.handleRunFrame({ type: 'runs_snapshot', runs: [run()] }))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe('user_cancelled')
+  })
+
+  it('shows a snapshot fence for a run this tab knows nothing about', () => {
+    const { result } = renderHook(() => useConversationRuns())
+    act(() => result.current.handleRunFrame({ type: 'runs_snapshot', runs: [run()] }))
+    expect(result.current.runsByConversation['conv-1'].end_reason).toBe('fenced')
   })
 
   it('records a fence on a run that was still running', () => {

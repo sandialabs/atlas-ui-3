@@ -1053,15 +1053,13 @@ class ChatService:
             # conversation may have a newer turn saved since, and a save
             # replaces the stored message set, so this partial turn is not
             # written. Its finished tool calls stay in the execution projection.
-            from atlas.application.chat.runs.leases import FENCE_REASON_TAKEN_OVER, current_run_fence_reason
+            from atlas.application.chat.runs.leases import current_run_fence_reason
 
-            reason = current_run_fence_reason() or "reason not recorded"
+            # The reason is what this replica observed. It cannot tell a lapse
+            # from a takeover by another replica (Redis refuses both alike).
             logger.warning(
-                "Not saving the turn of a run that lost its claim (%s); %s",
-                reason,
-                "a takeover by another replica was observed"
-                if reason == FENCE_REASON_TAKEN_OVER
-                else "no takeover was observed on this replica",
+                "Not saving the turn of a run that lost its claim (%s)",
+                current_run_fence_reason() or "reason not recorded",
             )
             return
         # Messages accumulated while the session was incognito must never

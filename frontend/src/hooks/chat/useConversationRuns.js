@@ -55,6 +55,16 @@ export function useConversationRuns() {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.
 					const prior = runsRef.current[run.conversation_id]
+					// A snapshot reporting a fence for a run this tab knows completed or
+					// saved is the late fence again (issue #1218): keep what is known.
+					if (
+						run.end_reason === 'fenced'
+						&& prior?.run_id === run.run_id
+						&& (prior.status === 'completed' || prior.saved)
+					) {
+						next[run.conversation_id] = { ...prior }
+						continue
+					}
 					// Likewise how the run was launched (issue #1187): a replica that
 					// does not hold the run lists it without the origin, and that
 					// must not erase one this tab already learned for the same run.

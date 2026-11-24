@@ -56,7 +56,13 @@ INTERRUPTED_ERROR = (
 # The API returns at most 20,000 characters (``launcher.MAX_RESULT_CHARS``).
 # One more is kept so a reader can still tell the reply was truncated.
 MAX_SNAPSHOT_RESULT_CHARS = 20_001
-FENCE_REASON_TAKEN_OVER = "interrupted by orphan sweep"
+# What this replica knows when it fences a run, worded as observations only.
+# Whether another replica held the run is not knowable here: Redis refuses a
+# renewal both when the lease merely lapsed and when another holder took over.
+FENCE_REASON_RENEWAL_REFUSED = "lease renewal refused: the lease lapsed or another replica holds the run"
+FENCE_REASON_WRITE_REFUSED = "snapshot write refused: the lease lapsed or another replica holds the run"
+FENCE_REASON_NO_PROOF = "lease lapsed without proof of ownership (Redis unreachable or silent)"
+FENCE_REASON_TAKEN_OVER = "marked interrupted by an orphan sweep after its lease lapsed"
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -313,7 +319,7 @@ class RunLeaseGuard:
             lease = self._track(record, claim)
         if lease is None or lease.fenced:
             return
-        self._fence_local(lease, record.run_id, "lease renewal refused")
+        self._fence_local(lease, record.run_id, FENCE_REASON_RENEWAL_REFUSED)
         await self._take_over(record.run_id)
 
     # -- snapshot mirror ---------------------------------------------------------
@@ -348,7 +354,7 @@ class RunLeaseGuard:
                 terminal = record.is_terminal
                 written = await self._write_snapshot(lease, record)
                 if not written:
-                    self._fence_local(lease, run_id, "snapshot write refused")
+                    self._fence_local(lease, run_id, FENCE_REASON_WRITE_REFUSED)
                 elif terminal:
                     lease.done = True
                     await self._release_held(run_id, lease)
@@ -477,7 +483,7 @@ class RunLeaseGuard:
         if answer is False:
             # Refused: another owner or generation holds the run, or its lease
             # passed; another replica may already have taken it over.
-            self._fence_local(lease, run_id, "lease renewal refused")
+            self._fence_local(lease, run_id, FENCE_REASON_RENEWAL_REFUSED)
             with contextlib.suppress(Exception):
                 await self._take_over(run_id)
             return False
@@ -500,7 +506,7 @@ class RunLeaseGuard:
         if self._clock() - lease.verified_at < self.lease_seconds:
             logger.warning("lease check for %s got no answer; still inside the lease", run_id)
             return True
-        self._fence_local(lease, run_id, "lease lapsed without proof")
+        self._fence_local(lease, run_id, FENCE_REASON_NO_PROOF)
         return False
 
     async def ensure_may_act(self, run_id: Optional[str]) -> None:
@@ -592,6 +598,7 @@ async def _close_projection(run_id: str, raw: Dict[str, str]) -> bool:
         doc = await store.get(conversation_id, user_email) if conversation_id and user_email else None
     except Exception as exc:
         if _is_redis_unreachable(exc):
+            _note_redis_unreachable(exc, "projection_close")
             logger.warning("could not close the projection of an interrupted run: Redis unreachable (%s)", type(exc).__name__)
         else:
             logger.warning("could not close the projection of an interrupted run", exc_info=True)
