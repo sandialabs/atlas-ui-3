@@ -11,6 +11,7 @@ contract that later lease, routing and failover work builds on.
 |-------|----------|-----|
 | The live task, steering channel, MCP clients, replay buffers | The owning replica's `RunRegistry` (`atlas/application/chat/runs/registry.py`) | Python objects; they cannot move between processes |
 | Admission (one run per conversation, `MAX_CONCURRENT_RUNS_PER_USER` per user), run ownership, leases, fencing generations | Redis, through the `RunCoordinator` | Every replica must see the same answer at the same moment |
+| Agent Runs API idempotency keys (`(user, key)` to request fingerprint and run handle) | Redis, through the `IdempotencyStore` (`atlas/application/chat/runs/idempotency.py`) | A client retry through a load balancer lands on any replica. Keyed requests fail closed when Redis is unreachable; the store is process-local without Redis |
 | Transcripts, conversation metadata, anything that must survive a Redis restart | PostgreSQL (chat history) | Source of truth |
 
 Redis coordinates live work and is not the source of truth. If Redis is
@@ -110,6 +111,8 @@ rather than formatting keys by hand.
 | `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; inbox TTL, refreshed per send |
 | `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | reply TTL |
 | `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending TTL, then done TTL |
+| `<p>:idem:<user>:<key>` | hash | Agent Runs API idempotency reservation (#1220): `token`, `fingerprint`, `created_at`, `handle` (JSON, absent while the first request is admitting), `addressed_run_id`, `conversation_id`. Written by `RedisIdempotencyStore` (`atlas/infrastructure/redis/idempotency_store.py`) with one Lua script per step (reserve, complete, release); without Redis `InProcessIdempotencyStore` keeps the same contract in a dict | 2 minutes while pending, extended every 40 s by the admitting request (a crash between reserve and launch frees the key); 24 hours once the handle is recorded |
+| `<p>:idem-addr:<run_id>:<key>`, `<p>:idem-conv:<conversation_id>:<key>` | string | The user whose follow-up of `run_id` (in `conversation_id`) used `key`, so a retry finds its record after the run is reaped, on another replica, or naming a sibling run of the conversation (resolved through the run's shared record) | As its `idem` hash |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
 Run record fields:
@@ -332,13 +335,14 @@ routing stop/steer/approval to the owner are all covered.
 - `atlas/tests/test_redis_run_coordinator.py`: the Lua scripts under
   fakeredis (`fakeredis[lua]`), including races between coordinators with
   different replica ids.
+- `atlas/tests/test_idempotency_store.py`: both idempotency stores (atomic reserve under concurrency, different body, release, pending TTL expiry, Redis down fails closed).
 - `atlas/tests/test_run_admission.py`: `admit_run`, including cleanup after
   every kind of failed admission.
 - `atlas/tests/test_run_leases.py`: the lease guard on the same scripts with
   two replicas: mirror, sweep, takeover generation, stale-owner refusal,
   frozen owner, Redis outage after the lease lapsed, projection and tool
   guards, non-owner reads.
-- `test/multireplica/test_cluster_admission.py`, `test_run_leases.py` and
+- `test/multireplica/test_idempotency_across_replicas.py`, `test_cluster_admission.py`, `test_run_leases.py` and
   `test_run_coordination_gaps.py`: two real replicas with shared Redis and
   PostgreSQL (`bash test/multireplica_tests.sh`), including SIGKILL and
   SIGSTOP of the owner with the side-effect counter proving nothing was
