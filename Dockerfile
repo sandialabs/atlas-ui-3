@@ -1,7 +1,7 @@
 # Keep the builder and runtime Python ABI identical.
 FROM docker.io/library/python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS python-base
 
-FROM docker.io/library/node:26-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS frontend-build
+FROM docker.io/library/node:26-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 ENV NPM_CONFIG_CACHE=/app/.npm
@@ -23,7 +23,7 @@ ARG APP_VERSION="unknown"
 ENV GIT_HASH=${GIT_HASH} APP_VERSION=${APP_VERSION}
 RUN npm run build
 
-FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 FROM python-base AS python-build
 COPY --from=uv /uv /usr/local/bin/uv

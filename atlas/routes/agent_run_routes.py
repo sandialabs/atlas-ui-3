@@ -48,7 +48,6 @@ _STATUS_FOR_CODE = {
     "workspace_not_found": 404,
     "run_not_found": 404,
     "model_not_available": 422,
-    "no_static_model_source": 422,
     "no_authorized_tools": 422,
     "classification_refused": 422,
     "approval_required": 409,

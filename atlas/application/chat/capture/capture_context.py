@@ -159,11 +159,17 @@ def _sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     each message; tool-call fragments stored as attribute objects are
     normalized to dicts so the snapshot serializes cleanly.
     """
+    # Imported here: the LLM package imports this module, so a top-level
+    # import would be circular.
+    from atlas.modules.llm.reasoning_capture import strip_reasoning
+
     out: List[Dict[str, Any]] = []
     for msg in messages or []:
         if not isinstance(msg, dict):
             continue
-        copy = dict(msg)
+        # Reasoning sent back within a turn (issue #1230) is model-internal
+        # working state, not training data the user consented to share.
+        copy = strip_reasoning(dict(msg))
         if copy.get("tool_calls"):
             copy["tool_calls"] = normalize_tool_calls(copy["tool_calls"])
         out.append(copy)

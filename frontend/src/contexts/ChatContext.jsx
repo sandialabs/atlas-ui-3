@@ -81,7 +81,8 @@ const fetchConversationRecord = async (id, { signal } = {}) => {
 
 // Stored metadata is data the store round-tripped, some of it shaped by a
 // model's tool output. The renderer's own flags all start with an underscore
-// (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`),
+// (`_streaming`, `_replayed`, `_transcriptRefresh`, `_agentInput`, `_seed`,
+// `_seedProgress`, `_stepAdvanced`),
 // and a persisted key of that shape would let stored content hide, reorder or
 // drop rows in the view. Strip them on the way in; nothing legitimately
 // persists them.
@@ -279,6 +280,16 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	// Adopt a conversation id the server announced (`run_started`, or
+	// `conversation_saved`) so the routing sees it at once. The ref above only
+	// catches up when React next renders, and the run's first tagged frames can
+	// arrive before that: they would not match the still-empty id, be filed as
+	// background activity, and leave a new chat's answer out of the transcript
+	// (issue #1216).
+	const adoptConversationId = useCallback((id) => {
+		activeConversationIdRef.current = id
+		setActiveConversationId(id)
+	}, [])
 	// Canvas documents this tab has shown for the open conversation. A
 	// reconnect or joined poll compares the stored artifact with this, not
 	// with the panel text, which a file view clears (issue #1157).
@@ -722,7 +733,7 @@ export const ChatProvider = ({ children }) => {
 			addAttachment,
 			resolvePendingFileEvent,
 			setPendingElicitation,
-			setActiveConversationId,
+			setActiveConversationId: adoptConversationId,
 			streamToken,
 			streamEnd,
 			getVisibleConversationId: () => activeConversationIdRef.current,
@@ -780,6 +791,25 @@ export const ChatProvider = ({ children }) => {
 						}
 					}
 				}
+				if (
+					data?.type === 'run_status' &&
+					data.run &&
+					!isRunActive(data.run) &&
+					data.run.conversation_id &&
+					data.run.conversation_id === activeConversationIdRef.current
+				) {
+					// A run that ends on screen must not leave the turn looking busy:
+					// one that fails before any token (a start-up failure) sends no
+					// other frame to clear it. Skipped when the tracker holds a
+					// different run for this conversation -- a newer turn is live and
+					// the terminal frame belongs to the older one.
+					const tracked = runs.getRun(data.run.conversation_id)
+					if (!tracked || !tracked.run_id || tracked.run_id === data.run.run_id) {
+						setIsThinking(false)
+						setIsAgentRunning(false)
+						setIsSynthesizing(false)
+					}
+				}
 				runs.handleRunFrame(data)
 			},
 			// The joined conversation's turn is on disk: reload now rather than
@@ -820,7 +850,7 @@ export const ChatProvider = ({ children }) => {
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, runs.handleRunFrame])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, adoptConversationId, streamToken, streamEnd, runs.handleRunFrame])
 
 	// Refs so the message handler above (rebuilt only when its deps change)
 	// sees the current settings and socket without re-subscribing per change.
@@ -1526,7 +1556,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
-		setActiveConversationId(null)
+		// Through the adopt helper so frames from the abandoned conversation
+		// that land before the next render are not routed to the fresh chat.
+		adoptConversationId(null)
 		setFollowUpSuggestions([])
 		// A deferred workspace restore queued by a previous load must not
 		// fire into the fresh chat once the workspace list finishes loading.
@@ -1573,7 +1605,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			undoOfferRef.current = { token, toastId }
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {
@@ -1730,9 +1762,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// the reply starts at its first word, not the token that happened to
 		// be current when the user came back. The restore below replays the
 		// same segment again (a newer snapshot), which replaces this seed, and
-		// the live stream continues from there. Runs until the turn ends, so
-		// the bubble keeps its "in progress" marker (Message.jsx) until the
-		// reload that replaces it with the stored transcript.
+		// the live stream continues from there. The placeholder itself lasts
+		// until the turn ends -- the mid-run poll is gated on it and fills it
+		// with each later segment -- but its "in progress" notice does not
+		// (issue #1193): that describes one unfinished answer segment, not the
+		// run. A text bubble keeps it while its segment is open; the reducer
+		// marks an empty seed `_stepAdvanced` as soon as the transcript moves
+		// past the snapshot loaded here, and the notice goes with it.
 		if (conversationData.streaming_text) {
 			streamToken(conversationData.streaming_text, true)
 		} else if (conversationData.in_flight === true) {
@@ -1740,7 +1776,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// tools, parked on an approval). The transcript still needs a sign
 			// of life: an empty bubble carrying the marker, which the next
 			// segment's first token fills in this run's own tab, and the
-			// run-end reload replaces everywhere.
+			// run-end reload replaces everywhere. The marker is for this
+			// first view only; the next step the view shows retires it.
 			streamToken('', true)
 		}
 
@@ -2041,6 +2078,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 
 		// A live pass keeps the open bubble showing the segment the run is
 		// streaming now, or the marker-only seed while it is between segments.
+		// A segment that has closed empties its bubble into a seed that is
+		// already past its notice (useMessages.js, issue #1193): the run being
+		// in flight is not the same as this answer segment being incomplete.
 		// It runs only here -- after the active-conversation guard above and a
 		// successful alignment -- because a stale poll that resolves after the
 		// user switched conversations (or a diverged record) must not touch the
@@ -2658,6 +2698,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		user: config.user,
 		models: config.models,
 		llmGateways: config.llmGateways,
+		modelPickerOrder: config.modelPickerOrder,
 		tools: config.tools,
 		prompts: config.prompts,
 		dataSources: config.dataSources,

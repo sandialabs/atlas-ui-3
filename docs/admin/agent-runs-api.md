@@ -1,6 +1,6 @@
 # Agent Runs REST API
 
-Last updated: 2026-11-08
+Last updated: 2026-11-20
 
 The agent-runs API lets one trusted external service -- a scheduler, a CI job, a webhook
 relay -- start an ATLAS agent conversation on behalf of a user, with no browser or CLI session,
@@ -49,7 +49,7 @@ server's OpenAPI document (`/openapi.json`, browsable at `/docs`) under the `age
 
 | Method and path | Mirrors | Purpose |
 |---|---|---|
-| `GET /api/agent-runs/options?user=` | `atlas_discover_subagent_options` | Workspaces and models the user may launch with |
+| `GET /api/agent-runs/options?user=` | `atlas_discover_subagent_options` | Workspaces and models the user may launch with, LiteLLM gateway team models included (not filtered by compliance level; the launch request's level is checked at admission) |
 | `POST /api/agent-runs` | `atlas_launch_subagent` | Start a run in a new top-level conversation |
 | `GET /api/agent-runs?user=` | `atlas_get_subagent_runs` | API-started runs still retained (optionally one user's) |
 | `GET /api/agent-runs/{run_id}` | `atlas_get_subagent_result` | Status, timestamps, error, `end_reason` and final reply |

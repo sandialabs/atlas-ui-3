@@ -483,7 +483,10 @@ class AppSettings(BaseSettings):
     )
     mcp_discovery_timeout: int = Field(
         default=30,
-        description="Timeout in seconds for MCP discovery calls (list_tools, list_prompts)",
+        description=(
+            "Timeout in seconds for MCP discovery: the startup connection attempt "
+            "and each list_tools / list_prompts call"
+        ),
         validation_alias="MCP_DISCOVERY_TIMEOUT"
     )
     mcp_call_timeout: int = Field(

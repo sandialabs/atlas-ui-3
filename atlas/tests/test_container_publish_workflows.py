@@ -166,9 +166,9 @@ def test_validation_images_stay_single_platform():
         for _, step in _build_pushes(_load("ci.yml"))
         if step.get("name") not in publication_names
     ]
-    # production image, runtime validation image, the 3.14 test image, and the
-    # per-version test image. All stay on the runner's architecture.
-    assert len(validation_builds) == 4
+    # production image, runtime validation image, the two hardened-image
+    # builds, the 3.14 test image, and the per-version test image. All stay on the runner's architecture.
+    assert len(validation_builds) == 6
     for build in validation_builds:
         inputs = build["with"]
         assert inputs.get("platforms", "linux/amd64") == "linux/amd64"
@@ -207,9 +207,10 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
         "python-versions",
         "production-image",
         "runtime-only-image",
+        "hardened-image",
         "publish-image",
     }
-    for name in ("test", "production-image", "runtime-only-image"):
+    for name in ("test", "production-image", "runtime-only-image", "hardened-image"):
         assert "needs" not in jobs[name]
 
     test_steps = {step.get("name"): step for step in jobs["test"]["steps"]}
@@ -246,7 +247,9 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
     assert "PYTHON_VERSION" not in str(test_build["with"].get("build-args", ""))
     pr_job_names = set()
     for job_id, step_job in jobs.items():
-        if job_id == "publish-image":
+        # hardened-image is advisory until a :hardened tag is published, so the
+        # release gate does not require it yet.
+        if job_id in ("publish-image", "hardened-image"):
             continue
         display = step_job.get("name", job_id)
         versions = step_job.get("strategy", {}).get("matrix", {}).get("python")
@@ -258,3 +261,39 @@ def test_ci_jobs_run_independently_and_pr_tests_are_not_redundant():
             pr_job_names.add(display)
     assert pr_job_names <= set(required_checks)
     assert "build-and-test" not in required_checks
+
+
+def test_pr1200_hardened_image_job_validates_and_scans_report_only():
+    ci = _load("ci.yml")
+    job = ci["jobs"]["hardened-image"]
+    builds = [s for s in job["steps"] if s.get("uses", "").startswith("docker/build-push-action@")]
+    assert builds and all(b["with"]["file"] == "./Dockerfile.hardened" for b in builds)
+    assert all(b["with"].get("load") is True for b in builds)
+    assert any("ATLAS_STDIO_MCP_SERVERS=calculator" in b["with"]["build-args"] for b in builds)
+    runs = " ".join(s.get("run", "") for s in job["steps"])
+    assert "test_pr1200_hardened_image.sh" in runs
+    trivies = [s for s in job["steps"] if s.get("uses", "").startswith("aquasecurity/trivy-action@")]
+    assert {t["with"]["vuln-type"] for t in trivies} == {"os", "library"}
+    # Report-only: scan output stays visible but never fails the job.
+    assert all(t["with"]["exit-code"] == "0" for t in trivies)
+    # Publishing a :hardened tag is a follow-up; the publish gate must not wait on it.
+    assert "hardened-image" not in ci["jobs"]["publish-image"]["needs"]
+
+
+def test_hardened_dockerfile_is_distroless_and_pinned():
+    path = Path(__file__).resolve().parents[2] / "Dockerfile.hardened"
+    if not path.exists():
+        pytest.skip("Dockerfile.hardened not present (test image does not COPY top-level Dockerfiles)")
+    text = path.read_text(encoding="utf-8")
+    assert 'ARG ATLAS_STDIO_MCP_SERVERS=""' in text
+    final = text[text.index("FROM scratch AS runtime"):]
+    # No shell exists in the final stage, so any RUN there must be exec-form.
+    for line in final.splitlines():
+        if line.startswith("RUN "):
+            assert line.startswith("RUN ["), line
+    assert "USER 10001:10001" in final
+    assert 'CMD ["python", "main.py"]' in final
+    assert 'CMD ["python", "-c", "import os, urllib.request' in final
+    for line in text.splitlines():
+        if line.startswith("FROM ") and " AS " in line and "scratch" not in line:
+            assert "@sha256:" in line, line

@@ -276,9 +276,17 @@ async def list_models(*, json_output: bool = False) -> int:
         print(json.dumps({
             "models": out,
             "litellm_gateways": [
-                {"name": name, "base_url": gw.base_url, "description": gw.description or ""}
+                {
+                    "name": name,
+                    "base_url": gw.base_url,
+                    "description": gw.description or "",
+                    "default_team": getattr(gw, "default_team", None),
+                    "default_model": getattr(gw, "default_model", None),
+                }
                 for name, gw in gateways.items()
             ],
+            "default_model": getattr(llm_config, "default_model", None),
+            "model_picker_order": getattr(llm_config, "model_picker_order", "models_first"),
         }, indent=2))
         return 0 if (models or gateways) else 1
 
@@ -302,6 +310,15 @@ async def list_models(*, json_output: bool = False) -> int:
         for name, gw in gateways.items():
             desc = f"  ({gw.description})" if gw.description else ""
             print(f"  {name}: {gw.base_url}{desc}")
+            default_key = gw.default_model_key(name) if hasattr(gw, "default_model_key") else None
+            if default_key:
+                print(f"    default: {default_key}")
+            elif getattr(gw, "default_team", None):
+                print(f"    default team: {gw.default_team}")
+    default_model = getattr(llm_config, "default_model", None)
+    if default_model:
+        print()
+        print(f"Default model: {default_model}")
     return 0
 
 

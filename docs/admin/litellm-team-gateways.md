@@ -1,6 +1,6 @@
 # Enterprise LiteLLM Team Gateways
 
-Last updated: 2026-10-31
+Last updated: 2026-11-20
 
 Some deployments reach their models through an enterprise
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) where access and
@@ -25,11 +25,12 @@ entry nor a gateway still fails validation. A gateway that is configured but
 unreachable (or rejects the credentials) is a discovery-time failure reported
 by the model picker and chat errors -- not a configuration-validation error.
 
-One limitation: sub-conversation launches (`atlas_launch_subagent` and the agent-runs
-REST API) enumerate statically configured models, so a gateway-only deployment
-refuses launch discovery with a message asking for a static model. A gateway
-model names a LiteLLM team, which only the signed-in user's proxy session can
-enumerate, so child runs cannot yet be pointed at one.
+Sub-conversation launches (`atlas_discover_subagent_options`,
+`atlas_launch_subagent` and the agent-runs REST API) offer gateway models too
+(issue #1227): discovery lists every model of every team the gateway reports for
+the user, as `<gateway>::<team_id>::<model_id>` names, the same set the model
+picker offers. A gateway that is unreachable or refuses the user's credential is
+skipped (logged as a warning) so the other models stay launchable.
 
 ## Configuration
 
@@ -85,6 +86,8 @@ litellm_gateways:
 | `models` | `{}` (all) | Admin allowlist of LiteLLM model ids. When set, only these models are offered and callable through the gateway (see [Limiting the models](#limiting-the-models)). Each entry may set `allowed_data_classifications` or `compliance_level`, and any field `model_defaults` may, for that model (see [Per-model settings](#per-model-settings)). A plain list (`models: [gpt-4.1, claude-sonnet]`) allows models without per-model settings. |
 | `extra_headers` | - | Static headers sent on every chat request. |
 | `model_defaults` | `{}` | Any [model field](llm-config.md#configuration-fields-explained) except the identity and access fields (`model_name`, `model_url`, `api_key`, `api_key_source`, `globus_scope`, `groups`, `compliance_level`, `allowed_data_classifications`, `extra_headers`, `delegation`). Validated when the file loads: one of those, an unknown field or a bad value is refused. |
+| `default_team` | - | LiteLLM team id preselected in the picker; with `default_model`, the team a new session starts in (see [Defaults and picker order](#defaults-and-picker-order)). |
+| `default_model` | - | LiteLLM model id a new session starts on in `default_team`. Requires `default_team`. |
 
 A gateway name must not contain `::`, and no model in the top-level `models`
 may start with `<gateway>::`.
@@ -162,6 +165,89 @@ litellm_gateways:
   an unknown field or a bad value.
 - **Models not in `models`:** with no allowlist, every model gets
   `model_defaults`; to give models their own settings, list them.
+
+### Defaults and picker order
+
+Three optional `llmconfig.yml` keys decide where the gateways sit in the model
+picker and which model a user starts on. All three live in `llmconfig.yml`;
+there is no `.env` setting for them.
+
+```yaml
+# Top level, next to `models` and `litellm_gateways`.
+model_picker_order: gateways_first   # or models_first (the default)
+default_model: "enterprise::team-alpha-7f3a::gpt-4.1"   # optional
+
+litellm_gateways:
+  enterprise:
+    base_url: "${ENTERPRISE_LITELLM_URL}"
+    auth_type: "delegated"
+    delegation:
+      scope: "https://litellm.example.gov/user_impersonation"
+    default_team: "team-alpha-7f3a"  # preselected in the team dropdown
+    default_model: "gpt-4.1"         # with default_team: the model a new session starts on
+```
+
+| Key | Where | Default | Meaning |
+|---|---|---|---|
+| `model_picker_order` | top level | `models_first` | `gateways_first` puts every gateway's team picker above the static models in the dropdown. Gateways keep their file order. |
+| `default_model` | top level | - | The model a user with no saved pick starts on: a static model name, or a gateway model key `<gateway>::<team_id>::<model_id>`. |
+| `default_team` | gateway | - | LiteLLM team id preselected in this gateway's team dropdown when the user has not picked a team on it yet. |
+| `default_model` | gateway | - | LiteLLM model id (the `id` from `/models?team_id=`) a new session starts on in `default_team`. Requires `default_team`, and must be in the gateway's `models` allowlist when one is set. Marked "default" in the team's model list. |
+
+**Which model a user starts on.** A model the user picked themselves always
+wins while the configuration still offers it. A model Atlas chose for them (a
+default or a fallback) is not treated as their pick: it is re-resolved on every
+load, so a changed default -- or a team default whose check failed last time --
+still reaches users who never chose a model. Without a pick of their own, Atlas
+tries in order:
+
+1. the top-level `default_model`;
+2. each gateway's `default_team` + `default_model`, in file order;
+3. the first static model the user may use.
+
+A static candidate is used when the user's groups allow it. A gateway candidate
+is used only when the user may use the gateway (`groups`), the gateway lists
+`default_team` for the user, and that team offers the model -- the same checks
+every chat turn makes. A user outside the default team, or a gateway that is
+unreachable, falls through to the next candidate, so nobody is started on a
+model they cannot call. A gateway-only deployment where no default fits the
+user leaves the choice to them, as before.
+
+The same order applies to `atlas-chat` / `AtlasClient.chat()` when no model is
+named, resolved for the CLI identity (`TEST_USER`). `atlas-chat
+--list-models` prints the configured defaults.
+
+**Validation.** Each key is checked when the file loads: an unknown
+`model_picker_order`, a top-level `default_model` that names neither a static
+model nor a key on a configured gateway (and its allowlist), a gateway
+`default_model` without `default_team` or outside the allowlist, and a
+`default_team` containing `::` all fail validation. Whether the user is in the
+team is a per-user, runtime check, not a load-time one.
+
+**Visibility.** `default_team_id` / `default_model_id` in a gateway summary,
+and a gateway-key `default_model` in `/api/config`, are the configured values.
+They are sent to every user the gateway's `groups` allow, whether or not the
+user is in that team, so they are not access-controlled: do not put anything
+in them you would not show those users. They grant nothing -- team membership
+is checked on every team listing, model listing and chat call, and
+`GET /api/llm/default-model` only returns a team model to a member.
+
+**Validation (whitespace).** Surrounding whitespace in `default_team` and
+`default_model` is stripped at load; a blank value is refused.
+
+**Observability.** A gateway default the user cannot use is skipped with an
+INFO log (an unreachable gateway or a non-member); a team that is listed but
+does not offer the configured model logs a WARNING naming the default, which
+usually means a typo or a model removed from the team. Gateway defaults are
+checked concurrently, so several gateways do not add up their discovery
+timeouts, and the UI shows the static default at once and switches to the team
+default when the check confirms it.
+
+**Team preselection.** The team dropdown first shows the team of the selected
+model, then the last team the user picked on that gateway (remembered in their
+browser), then `default_team` -- each only while the gateway still lists it for
+the user. `default_team` alone (without `default_model`) only preselects the
+team; it does not start anyone on a model.
 
 ### Authentication
 
@@ -272,8 +358,10 @@ completion. Validate that path in staging before relying on it.
   request reaches LiteLLM. With a shared service key this check is what keeps
   users inside their teams, so removing a user from a team takes effect within
   `discovery_cache_seconds`.
-- **Not yet covered:** `atlas_launch_subagent` sub-conversations choose from the
-  statically configured models only.
+- **Subagents:** `atlas_discover_subagent_options` lists the user's team models
+  alongside the static ones, filtered by the same groups, team membership,
+  allowlist and (at the turn's compliance level) data classifications as the
+  picker, so a subagent can run on any model the user can chat with.
 - **Access control** (`groups`) and **compliance** (`compliance_level`) apply
   to every gateway model exactly as they do to configured models. A gateway a
   user may not use is absent from `/api/config` and its endpoints answer 404.
@@ -282,7 +370,8 @@ completion. Validate that path in staging before relying on it.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/config`, `GET /api/config/shell` | `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, model_capabilities?, compliance_level?, compliance_levels?, model_compliance_levels?}]`. `supports_*` are the gateway's `model_defaults`; `model_capabilities` maps each allowlisted model id to its own `{supports_vision, supports_pdf, supports_tools}`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). `model_allowed_data_classifications` maps each allowlisted model id to its classifications and `model_classifications` lists them, which is what the picker filters on. |
+| `GET /api/config`, `GET /api/config/shell` | `model_picker_order` (`models_first` or `gateways_first`) and `default_model` (the top-level setting, or `null` when unset or not usable by this user's groups). `llm_gateways`: `[{name, display_name, description, supports_tools, supports_vision, supports_pdf, default_team_id?, default_model_id?, model_capabilities?, compliance_level?, compliance_levels?, model_compliance_levels?}]`. `supports_*` are the gateway's `model_defaults`; `model_capabilities` maps each allowlisted model id to its own `{supports_vision, supports_pdf, supports_tools}`. With compliance levels on, `compliance_levels` lists every level a gateway model can have, and `model_compliance_levels` maps each allowlisted model id to its level (`null` when the model is unleveled). `model_allowed_data_classifications` maps each allowlisted model id to its classifications and `model_classifications` lists them, which is what the picker filters on. |
+| `GET /api/llm/default-model` | `{model, source, team_label}`: the model the current user starts on without a saved pick (see [Defaults and picker order](#defaults-and-picker-order)). `model` is a static model name, a gateway model key, or `null`; `source` is `configured`, `first_model`, or `null`; `team_label` is the LiteLLM team's label for a gateway model (else `null`), which the picker shows as "model (Team)". |
 | `GET /api/llm/gateways/{gateway}/teams[?refresh=true]` | `{gateway, teams: [{team_id, label}]}` |
 | `GET /api/llm/gateways/{gateway}/models?team_id=...[&refresh=true]` | `{gateway, team_id, team_label, models: [{name, model_id, label, supports_vision, supports_pdf, supports_tools, compliance_level?, allowed_data_classifications?}]}`, limited to the allowlist when one is set; each model's capabilities are its own ([Per-model settings](#per-model-settings)) |
 

@@ -229,6 +229,82 @@ jobs:
     - name: Validate compatibility recipe
       run: docker build --build-arg ATLAS_RUNTIME_IMAGE=runtime-only-image:latest -f Dockerfile.runtimeonly .
 
+  hardened-image:
+    # Distroless image from Dockerfile.hardened. Not part of the publish gate
+    # yet; publishing a :hardened tag is a follow-up.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Get build metadata
+      id: build_meta
+      run: |
+        echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "version=$(grep '^VERSION' atlas/version.py | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
+    - name: Build hardened image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile.hardened
+        load: true
+        build-args: |
+          VITE_APP_NAME=ATLAS
+          VITE_FEATURE_ANIMATED_LOGO=true
+          VITE_FEATURE_POWERED_BY_ATLAS=false
+          VITE_FEATURE_RAG_CITATIONS=false
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
+        tags: hardened-image:latest
+        cache-from: type=gha,scope=atlas-hardened
+        cache-to: type=gha,scope=atlas-hardened,mode=max
+
+    - name: Validate hardened image
+      run: ATLAS_TEST_IMAGE=hardened-image:latest bash test/pr-validation/test_pr1200_hardened_image.sh
+
+    - name: Build hardened image with an opt-in stdio MCP server
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ./Dockerfile.hardened
+        load: true
+        build-args: |
+          ATLAS_STDIO_MCP_SERVERS=calculator
+          GIT_HASH=${{ steps.build_meta.outputs.sha_short }}
+          APP_VERSION=${{ steps.build_meta.outputs.version }}
+        tags: hardened-image:calculator
+        cache-from: type=gha,scope=atlas-hardened
+        cache-to: type=gha,scope=atlas-hardened,mode=max
+
+    - name: Validate hardened image with stdio MCP
+      run: |
+        ATLAS_TEST_IMAGE=hardened-image:calculator \
+        ATLAS_EXPECT_STDIO_MCP=calculator \
+        bash test/pr-validation/test_pr1200_hardened_image.sh
+
+    - name: Trivy scan, OS packages (report only)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: hardened-image:latest
+        vuln-type: os
+        severity: CRITICAL,HIGH
+        ignore-unfixed: true
+        exit-code: '0'
+
+    - name: Trivy scan, Python libraries (report only)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: hardened-image:latest
+        vuln-type: library
+        severity: CRITICAL,HIGH
+        ignore-unfixed: true
+        exit-code: '0'
+
   python-versions:
     # Classifiers and requires-python claim 3.11 through 3.14. ci-test keeps
     # its bare check name and runs the full suite on the shipped interpreter

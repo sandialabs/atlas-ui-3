@@ -4,7 +4,7 @@
 [![Security Checks](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml/badge.svg)](https://github.com/sandialabs/atlas-ui-3/actions/workflows/security.yml)
 [![Docker Image](https://ghcr-badge.egpl.dev/sandialabs/atlas-ui-3/latest_tag?trim=major&label=latest)](https://github.com/sandialabs/atlas-ui-3/pkgs/container/atlas-ui-3)
 [![PyPI version](https://badge.fury.io/py/atlas-chat.svg)](https://badge.fury.io/py/atlas-chat)
-![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Python 3.11.5+](https://img.shields.io/badge/python-3.11.5+-blue.svg)
 ![React 19](https://img.shields.io/badge/react-19.2-blue.svg)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
@@ -12,7 +12,7 @@ Atlas UI 3 is an open-source AI agent platform for secure enterprise and enginee
 
 It is designed for regulated and security-conscious organizations that need more than a chatbot: configurable model access, delegated authentication, group-based authorization, tool approval controls, data classification controls, RAG, auditable workflows, and containerized deployment options to help teams understand, govern, and operate the full AI application stack.
 
-![Screenshot](docs/readme_img/screenshot-11-6-2025image.png)
+![Atlas agent writing a half-page report with a PDF tool and opening it in the canvas](docs/readme_img/atlas-demo.gif)
 
 ## About the Project
 
@@ -217,6 +217,8 @@ podman run -p 127.0.0.1:8000:8000 \
 ```
 
 Proxy-secret enforcement is on by default, so reach the UI through an authenticating reverse proxy that injects `X-Proxy-Secret` and a verified identity header. The `HEALTHCHECK` only probes `/api/heartbeat`; it does not test authentication. The container seeds `/app/config` from package defaults at build time; mount your local `config/` folder to override `llmconfig.yml`, `mcp.json`, etc. without rebuilding.
+
+A distroless, shell-less variant is available as `Dockerfile.hardened` (opt-in stdio MCP servers via `--build-arg ATLAS_STDIO_MCP_SERVERS`); see [docs/admin/hardened-image.md](./docs/admin/hardened-image.md).
 
 ### Runtime-only Image (compatibility entry point)
 

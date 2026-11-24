@@ -1,6 +1,6 @@
 # Configuration Architecture
 
-Last updated: 2026-11-08
+Last updated: 2026-11-20
 
 The application uses a layered configuration system that loads settings from two primary sources in the following order of precedence:
 
@@ -58,12 +58,15 @@ MCP_RECONNECT_MAX_INTERVAL=300
 # Multiplier for exponential backoff (default: 2.0)
 MCP_RECONNECT_BACKOFF_MULTIPLIER=2.0
 
-# Timeout in seconds for MCP discovery calls - list_tools, list_prompts (default: 30)
+# Timeout in seconds for MCP discovery: connecting to a server at startup, and each
+# list_tools / list_prompts call (default: 30)
 MCP_DISCOVERY_TIMEOUT=30
 
 # Timeout in seconds for MCP tool calls (default: 120)
 MCP_CALL_TIMEOUT=120
 ```
+
+`MCP_DISCOVERY_TIMEOUT` also bounds the connection attempt itself during startup discovery. A server that never completes the MCP handshake (for example a stdio process that exits or stays silent after it is spawned) is recorded as failed with `Timeout connecting to MCP server` after that many seconds, and startup continues with the other servers instead of waiting indefinitely. Tools and prompts are discovered in two passes and servers are handled in parallel within each pass, so one server that never connects delays startup by about twice `MCP_DISCOVERY_TIMEOUT`. The upper bound is four times that value, for a server that connects just inside the deadline and then never answers `list_tools` / `list_prompts`.
 
 When `FEATURE_MCP_AUTO_RECONNECT_ENABLED=true`, the backend starts a background task that periodically retries connections for servers that previously failed to initialize.
 
@@ -112,6 +115,11 @@ tool (issue #925). A subagent is a sub-conversation: the model supplies a `works
 `model` and a `prompt`; the call returns the new conversation's id and a run id immediately
 and does not wait for it to finish. The child's transcript is its own conversation in the
 user's history.
+
+`atlas_discover_subagent_options` returns the models the main chat model picker offers the
+user: the static `models` their groups allow plus the team models of each Enterprise LiteLLM
+gateway they may use (issue #1227). With compliance levels enabled, only models approved for the
+conversation's current level are listed, since launching on any other is refused.
 
 #### Tool names and the deprecated aliases
 

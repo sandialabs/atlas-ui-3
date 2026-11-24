@@ -45,6 +45,7 @@ from atlas.application.chat.runs.admission_errors import (
 )
 from atlas.application.chat.runs.context import set_current_run, tag_event
 from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.launch_models import list_launchable_models
 from atlas.application.chat.runs.leases import ensure_current_run_may_act
 from atlas.application.chat.runs.registry import (
     RunStatus,
@@ -55,7 +56,6 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.model_access import (
     ModelAccessDecision,
     check_model_access,
-    filter_authorized_models,
 )
 from atlas.domain.conversation_origin import origin_for_run_source
 from atlas.domain.messages.models import ToolResult
@@ -183,12 +183,17 @@ async def resolve_model(config_manager: Any, model: str, user_email: str) -> str
     )
 
 
-async def list_launch_options(factory: Any, user_email: str) -> Dict[str, Any]:
+async def list_launch_options(
+    factory: Any, user_email: str, *, compliance_level: Any = None
+) -> Dict[str, Any]:
     """The workspaces and models ``user_email`` may launch with right now.
 
     The ungated core of launch discovery: the feature check and the per-turn
     bookkeeping belong to the caller (the discovery tool, or the agent-runs
     REST API), so both read the same lists through the same ACL filters.
+    Models are the ones the main chat model picker offers, LiteLLM gateway
+    team models included (issue #1227); ``compliance_level`` is the launching
+    turn's level, and models not approved for it are left out.
     """
     config_manager = factory.get_config_manager()
     repository = getattr(factory, "workspace_repository", None)
@@ -213,38 +218,17 @@ async def list_launch_options(factory: Any, user_email: str) -> Dict[str, Any]:
         return allowed
 
     try:
-        models = await filter_authorized_models(
-            getattr(getattr(config_manager, "llm_config", None), "models", None) or {},
+        models = await list_launchable_models(
+            config_manager,
             user_email,
-            auth_check_func=_cached_group_auth,
+            _cached_group_auth,
+            compliance_level=compliance_level if isinstance(compliance_level, str) else None,
         )
     except Exception as exc:
         logger.warning("Launch option discovery failed for models", exc_info=True)
         raise LaunchRefused(
             "Launch discovery failed while loading models. Try again.", code="unavailable"
         ) from exc
-    if not models:
-        llm_config = getattr(config_manager, "llm_config", None)
-        configured_models = getattr(llm_config, "models", None) or {}
-        gateways = getattr(llm_config, "litellm_gateways", None) or {}
-        if not configured_models and gateways:
-            # Gateway models are picked per team in the model picker, so
-            # discovery cannot enumerate what this user may call without a
-            # round trip to the proxy; child runs need a statically configured
-            # model (issue #1134). A clear refusal rather than a generic "no
-            # models" that reads as a broken deployment. The decision reads
-            # the *configured* models -- a user merely unauthorized for every
-            # static model of a mixed deployment gets the generic refusal
-            # below instead -- and names no gateway, whose groups this user
-            # may not pass.
-            raise LaunchRefused(
-                "Launch discovery found no statically configured LLM models: this "
-                "deployment serves its models through LiteLLM gateway(s), whose "
-                "team-scoped models are not launchable as child-run models. Ask "
-                "the operator to configure at least one static model under "
-                "'models' in llmconfig.yml.",
-                code="no_static_model_source",
-            )
     return {
         "workspaces": [
             {"id": str(item.get("id")), "name": str(item.get("name"))}
@@ -278,7 +262,9 @@ async def discover_launch_options(
         _mark_discovery_failed(context)
         raise LaunchRefused("Launch discovery requires an authenticated user.")
     try:
-        options = await list_launch_options(factory, user_email)
+        options = await list_launch_options(
+            factory, user_email, compliance_level=(context or {}).get("compliance_level")
+        )
     except LaunchRefused:
         _mark_discovery_failed(context)
         raise

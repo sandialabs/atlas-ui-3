@@ -19,6 +19,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from .reasoning_capture import reasoning_text_for_estimate
+
 logger = logging.getLogger(__name__)
 
 METHOD_TOKENIZER = "tokenizer"
@@ -77,6 +79,10 @@ def _text_only_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, 
             # Tool-call arguments are sent to the model and count; the
             # tokenizer only reads plain dicts, so normalize them here.
             clean["content"] = f"{clean['content']}\n{json.dumps(tool_calls, default=_jsonable)}"
+        reasoning = reasoning_text_for_estimate(msg)
+        if reasoning:
+            # Reasoning returned within a turn (#1230) is sent and counts.
+            clean["content"] = f"{clean['content']}\n{reasoning}"
         stripped.append(clean)
     return stripped, media_tokens
 

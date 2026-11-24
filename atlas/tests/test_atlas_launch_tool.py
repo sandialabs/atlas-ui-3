@@ -238,37 +238,10 @@ async def test_launch_is_blocked_when_discovery_has_no_choices():
 
 
 @pytest.mark.asyncio
-async def test_gateway_only_deployment_gets_a_clear_launch_refusal():
-    """A deployment whose only model source is a LiteLLM gateway cannot list
-    launchable models (they are picked per team in the model picker), so
-    discovery refuses with the reason instead of a generic "no models"
-    (issue #1134). The refusal names no gateway: the caller may be someone
-    the gateways' groups exclude."""
-    factory = _Factory(lambda c: _ChatService(c), models={})
-
-    def _gateway_only_config_manager():
-        return SimpleNamespace(
-            app_settings=factory._settings,
-            llm_config=SimpleNamespace(
-                models={}, litellm_gateways={"enterprise": SimpleNamespace()}
-            ),
-        )
-
-    factory.get_config_manager = _gateway_only_config_manager
-    context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
-
-    with pytest.raises(LaunchRefused, match="no statically configured LLM models") as excinfo:
-        await discover_launch_options(context, factory=factory)
-    assert excinfo.value.code == "no_static_model_source"
-    assert "enterprise" not in str(excinfo.value)
-    assert context["launch_discovery"] == {"_failed": True}
-
-
-@pytest.mark.asyncio
-async def test_unauthorized_static_models_do_not_read_as_gateway_only():
-    """In a mixed deployment, a user authorized for none of the static
-    models gets the generic refusal -- the "gateway-only" message is for
-    deployments that truly have no static model configured."""
+async def test_unauthorized_static_models_leave_no_launchable_model():
+    """A user authorized for none of the static models, with no gateway
+    model reachable, gets the generic "no models" refusal. Gateway model
+    discovery itself is covered in test_launch_gateway_models.py (#1227)."""
     factory = _Factory(_ChatService, models={"restricted-model": SimpleNamespace(groups=["engineering"])})
 
     def _mixed_config_manager():
@@ -283,9 +256,8 @@ async def test_unauthorized_static_models_do_not_read_as_gateway_only():
     factory.get_config_manager = _mixed_config_manager
     context = {"user_email": "user@example.com", "launch_discovery": dict(_DISCOVERY)}
 
-    with pytest.raises(LaunchRefused, match="no valid LLM models") as excinfo:
+    with pytest.raises(LaunchRefused, match="no valid LLM models"):
         await discover_launch_options(context, factory=factory)
-    assert excinfo.value.code != "no_static_model_source"
 
 
 @pytest.mark.asyncio

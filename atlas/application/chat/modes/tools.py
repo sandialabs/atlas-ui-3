@@ -303,11 +303,11 @@ class ToolsModeRunner:
                 # Append the assistant message with tool_calls as plain dicts so they
                 # round-trip to the next LLM call (streaming yields SimpleNamespace
                 # objects, which serialize to an empty array and get rejected).
-                messages.append({
-                    "role": "assistant",
-                    "content": current_response.content,
-                    "tool_calls": [self._tool_call_dict(tc) for tc in tool_calls],
-                })
+                # The model's reasoning rides along so reasoning models that
+                # require it back accept the next call (issue #1230).
+                messages.append(current_response.assistant_message(
+                    [self._tool_call_dict(tc) for tc in tool_calls],
+                ))
 
                 def _is_fresh(tc) -> bool:
                     signature = self._tool_call_signature(tc)

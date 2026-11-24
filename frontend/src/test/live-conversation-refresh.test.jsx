@@ -573,6 +573,78 @@ describe('mid-run live refresh of a joined conversation', () => {
     }
   })
 
+  it('retires the reopen notice as the run advances and keeps one placeholder for 22 tool steps (issue #1193)', async () => {
+    vi.useFakeTimers()
+    try {
+      const toolRows = n => Array.from({ length: n }, (_, i) => storedToolCall(`call-${i + 1}`, 'notes_search'))
+      const record = (n, streamingText) => ({
+        id: 'conv-1',
+        in_flight: true,
+        run_id: 'run-1',
+        metadata: {},
+        streaming_text: streamingText,
+        messages: [storedChat('user', 'Tidy my notes'), ...toolRows(n)],
+      })
+      // One poll interval per step: a longer step would drift until two polls
+      // share one act(), and the second would read the list before React
+      // had committed the first.
+      const STEP_MS = 3000
+      let current = record(1)
+      h.fetchMock.mockImplementation(async (url) => {
+        if (String(url).includes('/api/conversations/conv-1')) return { ok: true, json: async () => current }
+        return { ok: false, status: 404, json: async () => ({}) }
+      })
+
+      const { result } = renderChat()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ run_id: 'run-1', conversation_id: 'conv-1', status: 'running', created_at: 1 }],
+      })
+      // Reopened between steps: one finished tool call, no open segment.
+      await act(async () => { await result.current.loadSavedConversation(record(1)) })
+      const placeholders = () => result.current.messages.filter(m => m._streaming)
+      expect(placeholders()).toHaveLength(1)
+      expect(placeholders()[0]._seed).toBe(true)
+      expect(placeholders()[0]._stepAdvanced).toBe(false)
+
+      // A poll that finds the same record is not progress: the notice stands.
+      await act(async () => { await vi.advanceTimersByTimeAsync(STEP_MS) })
+      expect(placeholders()[0]._stepAdvanced).toBe(false)
+
+      const firstRow = result.current.messages.find(m => m.tool_call_id === 'call-1')
+      for (let n = 2; n <= 22; n += 1) {
+        current = record(n)
+        await act(async () => { await vi.advanceTimersByTimeAsync(STEP_MS) })
+        expect(result.current.messages.filter(m => m.type === 'tool_call')).toHaveLength(n)
+        // Still exactly one placeholder -- the poll is gated on it -- and it
+        // is last, but it no longer claims an unfinished answer.
+        expect(placeholders()).toHaveLength(1)
+        expect(placeholders()[0]._seed).toBe(true)
+        expect(placeholders()[0]._stepAdvanced).toBe(true)
+        expect(result.current.messages.at(-1)).toBe(placeholders()[0])
+      }
+      // Rows already on screen kept their identity through every pass.
+      expect(result.current.messages.find(m => m.tool_call_id === 'call-1')).toBe(firstRow)
+      // The run is still reported as running.
+      expect(result.current.isAgentRunning).toBe(true)
+
+      // A segment the run opens later is a genuinely incomplete answer again.
+      current = record(22, 'Here is what I')
+      await act(async () => { await vi.advanceTimersByTimeAsync(STEP_MS) })
+      expect(placeholders()).toHaveLength(1)
+      expect(placeholders()[0]).toMatchObject({ content: 'Here is what I', _seed: false, _replayed: true })
+      expect(placeholders()[0]._stepAdvanced).toBeUndefined()
+
+      // ...and once that segment closes, the notice does not outlive it.
+      current = record(22)
+      await act(async () => { await vi.advanceTimersByTimeAsync(STEP_MS) })
+      expect(placeholders()).toHaveLength(1)
+      expect(placeholders()[0]).toMatchObject({ content: '', _seed: true, _stepAdvanced: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops polling once the run reaches a terminal state', async () => {
     vi.useFakeTimers()
     try {

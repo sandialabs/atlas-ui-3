@@ -24,6 +24,7 @@ from .atlas_server import (
     normalize_tool_name,
     search_tools_enabled,
 )
+from .mcp_connect_timeout import connected_client
 from .mcp_errors import _is_unauthorized_error
 from .sleep_tool import sleep_tool_enabled
 
@@ -207,7 +208,7 @@ class DiscoveryMixin:
         logger.debug("Server config (sanitized): %s", safe_config)
         try:
             logger.debug("Opening client connection for %s", safe_server_name)
-            async with client:
+            async with connected_client(client, discovery_timeout):
                 logger.debug("Client connected for %s; listing tools", safe_server_name)
                 tools = await asyncio.wait_for(client.list_tools(), timeout=discovery_timeout)
                 logger.debug("Got %d tools from %s: %s", len(tools), safe_server_name, [tool.name for tool in tools])
@@ -247,6 +248,10 @@ class DiscoveryMixin:
                     logger.error("    → SSL/HTTPS error detected")
                     logger.error("    → On Windows, ensure SSL certificates are properly configured")
                     logger.error("    → Try setting REQUESTS_CA_BUNDLE or SSL_CERT_FILE environment variables")
+            elif "timeout connecting" in error_lower:
+                logger.error(f"DEBUG: Timeout connecting to '{safe_server_name}' for tool discovery")
+                logger.error("    → Server did not complete the MCP handshake within MCP_DISCOVERY_TIMEOUT")
+                logger.error("    → For a stdio server, check that its command starts and stays running")
             elif "timeout" in error_lower:
                 logger.error(f"DEBUG: Timeout during tool discovery for '{safe_server_name}'")
                 logger.error("    → Server is slow to respond to list_tools() request")
@@ -350,7 +355,7 @@ class DiscoveryMixin:
         logger.debug(f"Attempting to discover prompts from {safe_server_name}")
         try:
             logger.debug(f"Opening client connection for {safe_server_name}")
-            async with client:
+            async with connected_client(client, discovery_timeout):
                 logger.debug(f"Client connected for {safe_server_name}, listing prompts...")
                 try:
                     prompts = await asyncio.wait_for(client.list_prompts(), timeout=discovery_timeout)
@@ -392,6 +397,9 @@ class DiscoveryMixin:
                 if "ssl" in error_lower or "certificate" in error_lower or "https" in error_lower:
                     logger.error("    → SSL/HTTPS error detected")
                     logger.error("    → On Windows, ensure SSL certificates are properly configured")
+            elif "timeout connecting" in error_lower:
+                logger.error(f"DEBUG: Timeout connecting to '{safe_server_name}' for prompt discovery")
+                logger.error("    → Server did not complete the MCP handshake within MCP_DISCOVERY_TIMEOUT")
             elif "timeout" in error_lower:
                 logger.error(f"DEBUG: Timeout during prompt discovery for '{safe_server_name}'")
                 logger.error("    → Server is slow to respond to list_prompts() request")
