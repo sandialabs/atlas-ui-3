@@ -114,7 +114,24 @@ describe('navigation frames sent while disconnected', () => {
     expect(first.sent).toEqual([frame])
   })
 
-  it('keeps the frame and still marks the socket connected when send throws on open', () => {
+  it('keeps the frame, closes the socket and is not connected when the replay throws', () => {
+    const first = FakeWebSocket.instances[0]
+    const close = vi.spyOn(first, 'close')
+    act(() => probe.sendMessage({ type: 'reset_session' }))
+    const realSend = first.send.bind(first)
+    first.send = () => {
+      throw new Error('socket closing')
+    }
+    act(() => first.open())
+    expect(probe.isConnected).toBe(false)
+    expect(close).toHaveBeenCalled()
+
+    first.send = realSend
+    const second = reconnect()
+    expect(second.sent).toEqual([{ type: 'reset_session' }])
+  })
+
+  it('sends a held navigation before a chat frame on an already OPEN socket', () => {
     const first = FakeWebSocket.instances[0]
     act(() => probe.sendMessage({ type: 'reset_session' }))
     const realSend = first.send.bind(first)
@@ -122,11 +139,50 @@ describe('navigation frames sent while disconnected', () => {
       throw new Error('socket closing')
     }
     act(() => first.open())
-    expect(probe.isConnected).toBe(true)
-
     first.send = realSend
+
+    let sent
+    act(() => {
+      sent = probe.sendMessage({ type: 'chat', content: 'hello' })
+    })
+    expect(sent).toBe(true)
+    expect(first.sent.map((m) => m.type)).toEqual(['reset_session', 'chat'])
+  })
+
+  it('does not send a chat frame while the held navigation cannot be sent', () => {
+    const first = FakeWebSocket.instances[0]
+    act(() => probe.sendMessage({ type: 'reset_session' }))
+    first.readyState = 1
+    first.send = () => {
+      throw new Error('socket closing')
+    }
+
+    let sent
+    act(() => {
+      sent = probe.sendMessage({ type: 'chat', content: 'hello' })
+    })
+    expect(sent).toBe(false)
+  })
+
+  it('drops a held navigation when the session ends', () => {
+    const first = FakeWebSocket.instances[0]
+    act(() => probe.sendMessage({ type: 'restore_conversation', conversation_id: 'c1', messages: [] }))
+    act(() => first.onmessage({ data: JSON.stringify({ type: 'session_ended', reason: 'x' }) }))
     const second = reconnect()
-    expect(second.sent).toEqual([{ type: 'reset_session' }])
+    expect(second.sent).toEqual([])
+  })
+
+  it('reports failure for a frame that cannot be serialized, without queueing it', () => {
+    const circular = { type: 'reset_session' }
+    circular.self = circular
+    let sent
+    act(() => {
+      sent = probe.sendMessage(circular)
+    })
+    expect(sent).toBe(false)
+    const first = FakeWebSocket.instances[0]
+    act(() => first.open())
+    expect(first.sent).toEqual([])
   })
 
   it('drops a held frame when a newer navigation frame is sent successfully', () => {

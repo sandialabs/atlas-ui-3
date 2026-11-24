@@ -40,6 +40,20 @@ export const WSProvider = ({ children }) => {
   // navigation supersedes any earlier one.
   const pendingNavigationRef = useRef(null)
 
+  // Sends the held navigation frame, if any. Returns false when it is still
+  // held because the send threw.
+  const flushPendingNavigation = (ws) => {
+    const pending = pendingNavigationRef.current
+    if (!pending) return true
+    try {
+      ws.send(JSON.stringify(pending))
+      pendingNavigationRef.current = null
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const connectWebSocket = () => {
     // The server sends a `session_ended` frame and closes with 4401 when the
     // OIDC login behind the socket was refused by the IdP. Backing off as if
@@ -48,6 +62,9 @@ export const WSProvider = ({ children }) => {
     const markSessionEnded = (reason) => {
       if (sessionEndedRef.current) return
       sessionEndedRef.current = true
+      // Never replay a held navigation into whatever identity holds the socket
+      // after the user signs in again.
+      pendingNavigationRef.current = null
       setSessionEnded(true)
       setConnectionStatus(`Unauthenticated: ${reason || 'Your session ended. Sign in again to continue.'}`)
     }
@@ -60,15 +77,18 @@ export const WSProvider = ({ children }) => {
       wsRef.current = new WebSocket(wsUrl)
 
       wsRef.current.onopen = () => {
-        const pending = pendingNavigationRef.current
-        if (pending) {
-          pendingNavigationRef.current = null
+        if (!flushPendingNavigation(wsRef.current)) {
+          // The held navigation did not go out. Do not offer this connection
+          // for chat frames (they would land in the un-reset session); drop it
+          // so the next reconnect retries, with the frame still held.
+          console.error('Could not replay the queued navigation frame; reconnecting')
+          setConnectionStatus('Connection Failed')
           try {
-            wsRef.current.send(JSON.stringify(pending))
+            wsRef.current.close()
           } catch {
-            // Keep it for the next open; the connected state still gets set.
-            pendingNavigationRef.current = pending
+            // Already closing.
           }
+          return
         }
         setIsConnected(true)
         setConnectionStatus('Connected')
@@ -125,9 +145,24 @@ export const WSProvider = ({ children }) => {
   // (e.g. an eternal "Thinking..." spinner) when the socket is disconnected.
   const sendMessage = (message) => {
     const isNavigation = NAVIGATION_FRAME_TYPES.includes(message?.type)
+    // Serialize first, so an unserializable frame is a plain failure and never
+    // occupies the queue.
+    let payload
+    try {
+      payload = JSON.stringify(message)
+    } catch (error) {
+      console.error('Cannot serialize WebSocket message:', error)
+      return false
+    }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // A held navigation goes out before anything else, so no frame reaches
+      // the server ahead of it.
+      if (!isNavigation && !flushPendingNavigation(wsRef.current)) {
+        console.error('WebSocket send blocked: queued navigation could not be sent')
+        return false
+      }
       try {
-        wsRef.current.send(JSON.stringify(message))
+        wsRef.current.send(payload)
         // A navigation frame that got through supersedes any held one.
         if (isNavigation) pendingNavigationRef.current = null
         return true
