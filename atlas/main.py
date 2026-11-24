@@ -1016,6 +1016,7 @@ async def _confirm_resumed_conversation(chat_service, session_id, start_empty=Fa
         if session is not None and session.context.pop(_RESUMED_CONVERSATION_KEY, None):
             if start_empty:
                 session.history.messages.clear()
+                chat_service.reset_save_floor(session)
             await _persist_session(chat_service, session)
     except Exception:
         # Best effort: the turn is already admitted, and nothing here may stop
@@ -2520,9 +2521,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             "error_type": "domain",
                         })
                         continue
-                    if resumed_unconfirmed and turn_conversation_id is None:
+                    # Decided on what the client sent, before any id is minted
+                    # (an agent turn mints its own above): a frame that named
+                    # no conversation is the new chat whichever way it got one.
+                    resumed_fresh_id = resumed_unconfirmed and frame_conversation_id is None
+                    if resumed_fresh_id and turn_conversation_id is None:
                         turn_conversation_id = str(uuid4())
-                        resumed_fresh_id = True
                         logger.info(
                             "Resumed session %s: chat frame names no conversation, "
                             "starting a new one",

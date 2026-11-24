@@ -1227,6 +1227,18 @@ class ChatService:
             if floor.get("locked") is True:
                 self._save_floor_locked.add(session.id)
 
+    def reset_save_floor(self, session: Session) -> None:
+        """Forget the incognito save floor of a session whose history was emptied.
+
+        The floor counts leading history messages that were never saved. Once
+        the history is cleared there is nothing below it to protect, and a
+        floor left larger than the next turn's messages would leave nothing
+        savable (the conversation would be rejected, not stored).
+        """
+        session.context.pop(_SAVE_FLOOR_KEY, None)
+        self._incognito_save_floor.pop(session.id, None)
+        self._save_floor_locked.discard(session.id)
+
     def validate_conversation_id_owner(
         self,
         conversation_id: str,
