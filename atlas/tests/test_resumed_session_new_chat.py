@@ -144,9 +144,17 @@ def _wait(predicate, seconds=10.0):
 
 
 def _send(ws, w, content, expected_turns, **frame):
+    """Send a chat and read until its run has ended (bounded), so the next frame
+    does not race the turn's commit."""
     ws.send_json({"type": "chat", "content": content, "model": "m", "save_mode": "server", **frame})
-    assert _wait(lambda: len(w.seen) >= expected_turns), "the turn never started"
-    time.sleep(0.6)  # let the turn commit and its run end before the next frame
+    for _ in range(200):
+        reply = ws.receive_json()
+        if reply.get("type") == "error":
+            break
+        run = reply.get("run") if reply.get("type") == "run_status" else None
+        if run and run.get("status") in ("completed", "failed", "cancelled"):
+            break
+    assert len(w.seen) >= expected_turns, "the turn never started"
 
 
 def _saved_ids(w):

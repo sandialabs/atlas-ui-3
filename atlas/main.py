@@ -958,6 +958,12 @@ _RUN_SESSION_MARKER = "tracked_run_session"
 RESUME_SESSION_PARAM = "resume_session"
 
 
+# How long the resume waits for the conversation store to say whether the
+# conversation a session carries is stored. A store that does not answer counts
+# as "stored" (fail closed).
+_STORE_LOOKUP_TIMEOUT_SECONDS = 5.0
+
+
 async def _conversation_may_be_stored(chat_service, conversation_id) -> bool:
     """Whether writing into ``conversation_id`` could overwrite a stored record.
 
@@ -975,8 +981,15 @@ async def _conversation_may_be_stored(chat_service, conversation_id) -> bool:
     if not callable(lookup):
         return True
     try:
-        # Synchronous store query: keep it off the event loop.
-        return await asyncio.to_thread(lookup, str(conversation_id)) is not None
+        # Synchronous store query: keep it off the event loop, and do not let a
+        # hung store hold the handshake (the thread itself cannot be cancelled).
+        found = await asyncio.wait_for(
+            asyncio.to_thread(lookup, str(conversation_id)), _STORE_LOOKUP_TIMEOUT_SECONDS
+        )
+        return found is not None
+    except asyncio.TimeoutError:
+        logger.warning("Checking whether a resumed conversation is stored timed out; assuming it is")
+        return True
     except Exception:
         logger.warning("Could not check whether a resumed conversation is stored", exc_info=True)
         return True
@@ -1044,8 +1057,18 @@ async def _resume_connection_session(chat_service, requested, user_email):
     # continuing the old one names it on its frames and is hydrated from the
     # store as always. The decision is part of the adopted snapshot: there is
     # no per-frame state to arm, consume or lose on a refused or failed frame.
-    if await _conversation_may_be_stored(chat_service, session.context.get("conversation_id")):
-        chat_service.rebind_to_new_conversation(session)
+    carried_conversation = session.context.get("conversation_id")
+    if await _conversation_may_be_stored(chat_service, carried_conversation):
+        new_conversation = chat_service.rebind_to_new_conversation(session)
+        # A tracked run of the abandoned conversation may still be going; its
+        # artifacts must not come home to the new one (as for New Chat).
+        forget_run_conversations(session)
+        logger.info(
+            "Resumed session %s: rebound from conversation %s to new conversation %s",
+            sanitize_for_logging(str(session_id)),
+            sanitize_for_logging(str(carried_conversation)),
+            sanitize_for_logging(new_conversation),
+        )
     if not await chat_service.persist_session(session, adopt=True):
         return None
     chat_service.restore_connection_state(session)
