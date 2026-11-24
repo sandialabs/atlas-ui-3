@@ -105,7 +105,8 @@ def test_missing_continuation_refuses_on_both_replicas(cluster):
     cluster.wait_terminal(cluster.b, first["run_id"])
     key = f"{cluster.infra.redis_key_prefix}:run-api-latest:{first['conversation_id']}"
     with redis.Redis.from_url(cluster.infra.redis_url) as client:
-        assert client.delete(key) == 1
+        deleted = client.delete(key)
+        assert deleted == 1
     for replica in (cluster.a, cluster.b):
         status, body = cluster.call(
             replica, "POST", f"/api/agent-runs/{first['run_id']}/follow-up",
