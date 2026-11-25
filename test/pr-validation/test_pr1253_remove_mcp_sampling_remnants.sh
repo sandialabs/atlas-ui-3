@@ -16,6 +16,13 @@ FAILED=0
 pass() { echo "PASS $1"; }
 fail() { echo "FAIL $1"; FAILED=$((FAILED+1)); }
 
+# The tree checks read tracked files through git. Without git (or outside a
+# work tree) they would find nothing and pass vacuously, so stop instead.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1 || [ -z "$(git ls-files -- atlas | head -n 1)" ]; then
+    echo "FAIL git work tree with tracked files is required for this validation"
+    exit 1
+fi
+
 # 1. No tracked file is named after sampling.
 NAMED=$(git ls-files | grep -iE 'sampling|tool_planner' | grep -v "^test/pr-validation/test_pr1253_")
 if [ -z "$NAMED" ]; then pass "no tracked file named after sampling"; else fail "sampling-named files: $NAMED"; fi
@@ -31,7 +38,7 @@ if [ -z "$HITS" ]; then pass "no MCP sampling identifiers or notes"; else fail "
 OTHER=$(git grep -niE 'sampling' -- . \
     ':!CHANGELOG.md' ':!docs/archive' ':!pyproject.toml' ':!.github/dependabot.yml' ':!uv.lock' \
     ':!changes/1253.internal.md' ':!test/pr-validation/test_pr1253_remove_mcp_sampling_remnants.sh' \
-    | grep -viE 'deterministic|sampling temperature|resource sampling|^test/loadtest/')
+    | grep -viE 'deterministic sampling|deterministic: sampling a second empty reply|sampling temperature|resource sampling|^test/loadtest/')
 if [ -z "$OTHER" ]; then pass "remaining 'sampling' wording is LLM/load-test only"; else fail "unexpected 'sampling' wording:"; echo "$OTHER"; fi
 
 # 4. The live MCP tool manager exposes no sampling surface, and the MCP
