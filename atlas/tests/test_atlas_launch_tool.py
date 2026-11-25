@@ -1199,7 +1199,9 @@ async def test_an_admin_mandated_tool_still_prompts_inside_the_child(monkeypatch
     )
 
     assert handle["tools_needing_approval"] == ["math_add"]
-    assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is False
+    # Pre-approved all the same: the executor keeps only the mandatory tools
+    # on the gate (see test_child_approval_scope.py).
+    assert factory.services[0].agent_mode.agent_loop_factory.skip_approval is True
     for service in factory.services:
         service.release.set()
 
@@ -2381,6 +2383,33 @@ async def test_a_fenced_parent_cannot_admit_a_child():
     finally:
         set_lease_guard(None)
     assert [r.run_id for r in registry.all_records()] == [parent.run_id]
+
+
+@pytest.mark.asyncio
+async def test_follow_up_handle_text_names_only_gated(monkeypatch):
+    """#1225: the follow-up summary says only the mandatory tools pause."""
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.requires_approval",
+        lambda name, cfg: (True, True, True),
+    )
+    registry = _install_registry()
+    _start_parent(registry)
+    factory, _ = _follow_up_factory()
+    handle = await _launch_and_finish(factory, registry, _context())
+
+    result = await execute_follow_up_tool(
+        ToolCall(
+            id="call-1",
+            name=FOLLOW_UP_TOOL_NAME,
+            arguments={"run_id": handle["run_id"], "message": "again"},
+        ),
+        _context(factory=factory),
+    )
+
+    assert result.success, result.content
+    assert "Only these tools will pause for approval" in result.content
+    assert "other tools run without asking" in result.content
+    factory.services[-1].release.set()
 
 
 @pytest.mark.asyncio

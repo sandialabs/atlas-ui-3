@@ -18,7 +18,11 @@ from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
 from atlas.domain import conversation_classification as conv_class
-from atlas.domain.conversation_lineage import parent_conversation_id_from_metadata
+from atlas.domain.conversation_lineage import (
+    LAUNCH_RUN_METADATA_KEY,
+    launch_run_id_from_metadata,
+    parent_conversation_id_from_metadata,
+)
 from atlas.domain.conversation_origin import (
     ORIGIN_METADATA_KEY,
     origin_for_run_source,
@@ -589,6 +593,7 @@ class ChatService:
         steering: Optional[Any] = None,
         parent_conversation_id: Optional[str] = None,
         launch_origin: Optional[str] = None,
+        launch_run_id: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -755,6 +760,14 @@ class ChatService:
         launch_origin = origin_for_run_source(launch_origin)
         if launch_origin and not session.context.get(ORIGIN_METADATA_KEY):
             session.context[ORIGIN_METADATA_KEY] = launch_origin
+
+        # The run that launched this conversation (issue #1222), recorded on
+        # the first save so a later turn on another replica, or after the run
+        # records are gone, can still find the conversation by the run id the
+        # launch handed back. Applied like the parent link: a stored record's
+        # value wins, so a follow-up never replaces it.
+        if launch_run_id and not session.context.get(LAUNCH_RUN_METADATA_KEY):
+            session.context[LAUNCH_RUN_METADATA_KEY] = str(launch_run_id)
 
         # The active workspace (issue #829): the frontend sends the workspace
         # id whose selections are loaded for this turn so the conversation can
@@ -1287,6 +1300,33 @@ class ChatService:
                     self._incognito_save_floor[session.id] = value
             if floor.get("locked") is True:
                 self._save_floor_locked.add(session.id)
+
+    def rebind_to_new_conversation(self, session: Session) -> str:
+        """Point ``session`` at a brand-new conversation and return its id.
+
+        Used when a session resumed after a reconnect may still name a
+        conversation the user has already left (issue #1217): the next chat
+        must not run in, or be saved over, that conversation. Everything the
+        old conversation owned goes with it: its messages (the stored record is
+        the source for anyone naming it), restore marker, lineage, launch
+        origin, classification binding, workspace binding and incognito state
+        and save floor. Each turn states its own incognito mode, so a new chat
+        starts from neither the old conversation's flag nor its workspace.
+
+        An off-record session needs no special case: the shared store never
+        holds its messages (see ``encode_session``), so a resumed one arrives
+        with an empty history already.
+        """
+        new_id = str(uuid4())
+        session.context["conversation_id"] = new_id
+        for key in ("_restored", "parent_conversation_id", ORIGIN_METADATA_KEY,
+                    SAVE_FLOOR_CONTEXT_KEY, conv_class.SESSION_BINDING_KEY,
+                    "workspace_id", "incognito"):
+            session.context.pop(key, None)
+        self._incognito_save_floor.pop(session.id, None)
+        self._save_floor_locked.discard(session.id)
+        session.history.messages.clear()
+        return new_id
 
     def validate_conversation_id_owner(
         self,
@@ -2045,6 +2085,7 @@ class ChatService:
             # Nor does the previous conversation's team-prompt pin travel.
             if previous_conversation_id != conversation_id:
                 library_turn.clear_pin(session.context)
+            session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             return 0
 
         # The caller only gets here when the session's bound conversation
@@ -2067,6 +2108,8 @@ class ChatService:
         # And for the pinned team-library prompt version (issue #1169).
         previous_pin = library_turn.save_pin_state(session.context)
         library_turn.clear_pin(session.context)
+        previous_launch_run = session.context.get(LAUNCH_RUN_METADATA_KEY, UNSET)
+        session.context[LAUNCH_RUN_METADATA_KEY] = None
 
         try:
             # Off the event loop: get_conversation issues several synchronous
@@ -2132,6 +2175,13 @@ class ChatService:
                 session.context.update(previous_pin)
             else:
                 library_turn.mark_pin_unknown(session.context)
+            if (
+                previous_launch_run is not UNSET
+                and previous_conversation_id == conversation_id
+            ):
+                session.context[LAUNCH_RUN_METADATA_KEY] = previous_launch_run
+            else:
+                session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             logger.error(
                 "Could not load conversation %s for rehydration: %s",
                 sanitize_for_logging(conversation_id),
@@ -2175,6 +2225,7 @@ class ChatService:
             library_turn.mark_pin_unknown(session.context)
         else:
             library_turn.load_pin_from_metadata(session.context, conv_metadata)
+        session.context[LAUNCH_RUN_METADATA_KEY] = launch_run_id_from_metadata(conv_metadata)
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
         # The history the session holds belongs to the previous conversation,
@@ -2280,6 +2331,7 @@ class ChatService:
             # ... which the user started, whatever launched the conversation
             # it branched from (issue #1187).
             session.context.pop(ORIGIN_METADATA_KEY, None)
+            session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             # The segment is a new conversation, so it gets a title from its
             # own first prompt rather than inheriting the original's.
             session.context.pop("_restored", None)
@@ -2316,6 +2368,10 @@ class ChatService:
         launch_origin = origin_for_run_source(session.context.get(ORIGIN_METADATA_KEY))
         if launch_origin:
             metadata[ORIGIN_METADATA_KEY] = launch_origin
+        # The run that launched a sub-conversation (issue #1222).
+        launch_run_id = session.context.get(LAUNCH_RUN_METADATA_KEY)
+        if isinstance(launch_run_id, str) and launch_run_id:
+            metadata[LAUNCH_RUN_METADATA_KEY] = launch_run_id
         # Server-managed classification record (issue #1042), from the binding
         # the turn gate checked -- never from a client field. Legacy history
         # is written without one; the repository refuses any change.
