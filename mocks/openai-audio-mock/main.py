@@ -7,7 +7,7 @@ they can be exercised without a speech model:
   POST /v1/audio/transcriptions   multipart upload -> {"text": "..."}
   POST /v1/audio/speech           JSON -> a short WAV tone
   GET  /health                    -> {"status": "ok"}
-  GET  /mock/requests             -> what was received (fields and sizes; no audio or text)
+  GET  /mock/requests             -> what was received (fields, sizes and a hash of the credential; no audio or text)
   DELETE /mock/requests
 
 Environment:
@@ -27,12 +27,13 @@ Run:  python mocks/openai-audio-mock/main.py
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import math
 import os
 import struct
 import wave
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response
 
@@ -55,6 +56,17 @@ def tone_wav(seconds: float = 1.0, frequency: float = 440.0) -> bytes:
             )
         )
     return buffer.getvalue()
+
+
+def _fingerprint(request: Request) -> Optional[str]:
+    """SHA-256 of the Authorization header, or None when there is none.
+
+    The request log is readable without a credential, so it records which
+    credential arrived (a test can hash the one it expects) and not the
+    credential itself.
+    """
+    header = request.headers.get("authorization")
+    return hashlib.sha256(header.encode()).hexdigest() if header else None
 
 
 def _authorize(request: Request) -> None:
@@ -101,7 +113,7 @@ def get_app() -> FastAPI:
                 "filename": upload.filename,
                 "content_type": upload.content_type,
                 "bytes": len(content),
-                "authorization": request.headers.get("authorization"),
+                "authorization_sha256": _fingerprint(request),
             }
         )
         await _delay()
@@ -122,7 +134,7 @@ def get_app() -> FastAPI:
                 "voice": body.get("voice"),
                 "response_format": body.get("response_format"),
                 "input_chars": len(text),
-                "authorization": request.headers.get("authorization"),
+                "authorization_sha256": _fingerprint(request),
             }
         )
         await _delay()

@@ -179,11 +179,16 @@ export function useDictation({ maxDurationSeconds = 300, maxAudioBytes, complian
     attempt.ticker = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - attempt.startedAt) / 1000))
     }, 1000)
-    attempt.limitTimer = setTimeout(() => {
-      if (attemptRef.current !== attempt || recorder.state === 'inactive') return
-      callbacksRef.current.onNotice?.(`Recording stopped at the ${maxDurationSeconds}-second limit.`)
-      recorder.stop()
-    }, maxDurationSeconds * 1000)
+    // No usable limit (a config response without one) means no auto-stop,
+    // not a zero-length recording: setTimeout treats NaN as 0. The server's
+    // size limit still applies.
+    if (Number.isFinite(maxDurationSeconds) && maxDurationSeconds > 0) {
+      attempt.limitTimer = setTimeout(() => {
+        if (attemptRef.current !== attempt || recorder.state === 'inactive') return
+        callbacksRef.current.onNotice?.(`Recording stopped at the ${maxDurationSeconds}-second limit.`)
+        recorder.stop()
+      }, maxDurationSeconds * 1000)
+    }
   }, [finish, release, transcribe, maxDurationSeconds])
 
   // Leaving the page section must not leave the microphone open.

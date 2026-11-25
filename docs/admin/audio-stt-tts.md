@@ -79,6 +79,10 @@ are never sent to the browser and are masked in the admin configuration view.
 | -------- | ------- | ------- |
 | `AUDIO_MAX_CONCURRENT_REQUESTS` | `8` | Audio requests (both kinds together) that one backend process relays at once. Further requests get 503 with `Retry-After` |
 
+The bundled `docker-compose.yml` passes every one of these variables through
+to the `atlas-ui` service from your shell environment or the `.env` file next
+to it, with the defaults above, so they are set the same way there.
+
 A capability that is switched on but incompletely configured (no base URL,
 a base URL that is not `http(s)`, no model, no voice for text-to-speech, or
 an unknown response format) stays **off**: its button is hidden and its

@@ -14,6 +14,7 @@ refuse it -- and the reason is logged once for the operator.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -170,10 +171,10 @@ async def user_may_use(config: AudioCapabilityConfig, user_email: str) -> bool:
         return True
     from atlas.core.auth import is_user_in_group
 
-    for group in config.groups:
-        if await is_user_in_group(user_email, group):
-            return True
-    return False
+    # Asked together: with an external authorizer each lookup is a round trip,
+    # and this runs on the page-load config fetch.
+    memberships = await asyncio.gather(*(is_user_in_group(user_email, group) for group in config.groups))
+    return any(memberships)
 
 
 def _classifications_for_client(config: AudioCapabilityConfig, compliance_enabled: bool) -> Optional[List[str]]:
@@ -192,8 +193,7 @@ async def public_audio_config(settings: Any, user_email: str) -> Dict[str, Any]:
     stt = resolve_stt_config(settings)
     tts = resolve_tts_config(settings)
     compliance_enabled = bool(getattr(settings, "feature_compliance_levels_enabled", False))
-    stt_enabled = await user_may_use(stt, user_email)
-    tts_enabled = await user_may_use(tts, user_email)
+    stt_enabled, tts_enabled = await asyncio.gather(user_may_use(stt, user_email), user_may_use(tts, user_email))
     result: Dict[str, Any] = {
         "stt": {
             "enabled": stt_enabled,

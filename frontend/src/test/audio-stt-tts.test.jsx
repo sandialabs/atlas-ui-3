@@ -16,6 +16,8 @@
  *   speed locally
  */
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, cleanup, waitFor } from '@testing-library/react'
 
@@ -144,6 +146,29 @@ describe('speech text', () => {
     expect(spoken).toContain('(code block omitted)')
     expect(spoken).toContain('item one')
     expect(toSpeechText(null)).toBe('')
+  })
+
+  it('keeps what the author marked as inline code, and comparisons in prose', () => {
+    // Inside backticks nothing is markup: not a tag, not a link.
+    expect(toSpeechText('Use `Array<String>` here.')).toBe('Use Array<String> here.')
+    expect(toSpeechText('Index with `a[1](2)` first.')).toBe('Index with a[1](2) first.')
+    expect(toSpeechText('Keep `**stars**` and `_under_` literal.')).toBe('Keep **stars** and _under_ literal.')
+    // A bare "<" in prose is a comparison, not the start of a tag.
+    expect(toSpeechText('Run it if a < b > c holds.')).toBe('Run it if a < b > c holds.')
+    expect(toSpeechText('When x<5 and y>2.')).toBe('When x<5 and y>2.')
+    // Real tags still go.
+    expect(toSpeechText('Line one<br>line two <span class="x">kept</span>.')).toBe('Line one line two kept .')
+  })
+
+  it('never cuts through the middle of an emoji', () => {
+    const rocket = '\u{1F680}'
+    const text = `${'a'.repeat(9)}${rocket}${'b'.repeat(20)}`
+    // The limit lands between the two halves of the surrogate pair.
+    const fitted = fitSpeechText(text, 10)
+    expect(fitted).toEqual({ text: 'a'.repeat(9), truncated: true })
+    expect(/[\uD800-\uDBFF]$/.test(fitted.text)).toBe(false)
+    // A limit past the pair keeps it whole.
+    expect(fitSpeechText(text, 11).text).toBe(`${'a'.repeat(9)}${rocket}`)
   })
 
   it('cuts over-long text at a sentence end and says so', () => {
@@ -299,6 +324,22 @@ describe('dictation button', () => {
     expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/Recording stopped at the .*limit/))
   })
 
+  it.each([[undefined], [null], [NaN], [0], ['soon']])('keeps recording when the duration limit is %s', async (limit) => {
+    installMicrophone()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { text: 'still here' })))
+    const onTranscript = vi.fn()
+    render(withToast(<DictationButton onTranscript={onTranscript} maxDurationSeconds={limit} maxAudioBytes={1000} />))
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    await screen.findByTestId('dictation-stop')
+    // An unusable limit must not become a zero-length recording.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)) })
+    expect(screen.getByTestId('dictation-stop')).toBeTruthy()
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(onTranscript).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('dictation-stop'))
+    await waitFor(() => expect(onTranscript).toHaveBeenCalledWith('still here'))
+  })
+
   it('releases the microphone when cancelled during the permission prompt', async () => {
     const track = { stop: vi.fn() }
     let grant
@@ -381,6 +422,18 @@ class FakeAudio {
 
 describe('read-aloud button', () => {
   let fetchMock
+
+  it('is revealed without hover on touch devices, like the other message buttons', () => {
+    const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8')
+    const touchBlock = css.slice(css.indexOf('@media (hover: none)'))
+    const rule = touchBlock.slice(0, touchBlock.indexOf('}'))
+    expect(rule).toContain('.read-aloud-button')
+    expect(rule).toContain('.copy-message-button')
+    expect(rule).toMatch(/opacity:\s*1/)
+    // The class the rule targets is the one the idle button actually carries.
+    render(withToast(<ReadAloudButton content="Hello" />))
+    expect(screen.getByRole('button', { name: 'Read message aloud' }).className).toContain('read-aloud-button')
+  })
 
   beforeEach(() => {
     FakeAudio.instances = []

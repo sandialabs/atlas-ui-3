@@ -9,8 +9,9 @@ implements the two routes Atlas calls:
 | `POST /v1/audio/transcriptions` | multipart `file`, `model`, optional `language` | `{"text": "..."}` |
 | `POST /v1/audio/speech` | JSON `model`, `input`, `voice`, `response_format` | a WAV tone (`audio/wav`) |
 
-`GET /mock/requests` lists what was received (field values, the
-`Authorization` header and sizes, never the audio or text), and `DELETE /mock/requests` clears the list.
+`GET /mock/requests` lists what was received (field values, sizes and the
+SHA-256 of the `Authorization` header, never the credential, the audio or the
+text), and `DELETE /mock/requests` clears the list.
 
 ## Try it
 

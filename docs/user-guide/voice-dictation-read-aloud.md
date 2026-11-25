@@ -14,6 +14,10 @@ or neither.
    **cancel** (X) button appears beside it.
 3. Click **stop** to finish. Atlas transcribes the recording and puts the
    text into the message box at the cursor.
+   ![The message box while recording: a red stop button with a timer and a cancel button](voice-dictation-recording.png)
+
+   ![The transcript placed in the message box, ready to edit](voice-dictation-transcript.png)
+
 4. Read it over, fix anything that was misheard, add to it, and press
    **Send** when you are ready. Dictation never sends a message for you.
 
@@ -37,6 +41,11 @@ the address bar) and try again.
    remembered.
 3. Starting another reply stops the one that is playing.
 
+![An assistant reply being read aloud, with pause, stop and speed controls in its header](voice-read-aloud-playing.png)
+
+On a phone or tablet the speaker button is always shown; with a mouse it
+appears when you point at the reply.
+
 Code blocks are skipped rather than read character by character. A very long
 reply is read up to the limit your administrator set, and Atlas tells you
 when it has shortened one.
@@ -47,6 +56,8 @@ Open **Settings**, go to **General**, and find **Voice**. There is one
 switch for the microphone button and one for the read-aloud button. Until
 you change a switch it follows your administrator's default. Your choice is
 saved in this browser.
+
+![The Voice section of Settings, with a switch for each button](voice-settings.png)
 
 A switch only appears for a feature your administrator has made available to
 you. If neither is available, the Voice section is not shown.

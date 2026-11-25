@@ -235,13 +235,14 @@ PY
 print_result $? "Text is synthesized and playable binary audio is relayed"
 
 curl -s "$MOCK_URL/mock/requests" | python3 -c "
-import sys, json
+import sys, json, hashlib
 stt, tts = json.load(sys.stdin)['requests']
 assert stt['route'] == 'transcriptions' and stt['model'] == 'validation-whisper', stt
 assert stt['language'] == 'en' and stt['filename'] == 'audio.wav' and stt['content_type'] == 'audio/wav', stt
-assert stt['authorization'] == 'Bearer $STT_KEY', stt
+sha = lambda key: hashlib.sha256(('Bearer ' + key).encode()).hexdigest()
+assert stt['authorization_sha256'] == sha('$STT_KEY'), stt
 assert tts['route'] == 'speech' and tts['model'] == 'validation-tts' and tts['voice'] == 'validation-voice', tts
-assert tts['response_format'] == 'wav' and tts['authorization'] == 'Bearer $TTS_KEY', tts
+assert tts['response_format'] == 'wav' and tts['authorization_sha256'] == sha('$TTS_KEY'), tts
 print(stt); print(tts)
 "
 print_result $? "The audio server got the configured model, voice and each capability's own credential"
