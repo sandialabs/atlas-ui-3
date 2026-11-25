@@ -2478,3 +2478,41 @@ async def test_child_frames_through_the_real_tool_executor_keep_child_identity()
     child_doc = await get_execution_store().get(handle["conversation_id"], "user@example.com")
     assert not child_doc or not child_doc.get("invocations")
     reset_execution_store()
+
+
+@pytest.mark.parametrize(
+    "replies,expected_calls,success",
+    [([None, True], 2, True), ([False], 1, False), ([None, None, None], 3, False)],
+)
+async def test_api_activation_retries_only_unknown_replies(replies, expected_calls, success):
+    from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+    from atlas.application.chat.runs.launcher import _confirm_api_activation
+
+    claim = object()
+    record = SimpleNamespace(claim=claim, lost_claim=None, is_terminal=False)
+    coordinator = SimpleNamespace(activate_api=AsyncMock(side_effect=replies))
+    with patch("atlas.application.chat.runs.launcher.get_run_coordinator", return_value=coordinator):
+        if success:
+            await _confirm_api_activation(record, claim)
+        else:
+            with pytest.raises(RunCoordinationUnavailableError):
+                await _confirm_api_activation(record, claim)
+    assert coordinator.activate_api.await_count == expected_calls
+
+
+async def test_api_activation_rechecks_local_terminal_state():
+    from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+    from atlas.application.chat.runs.launcher import _confirm_api_activation
+
+    claim = object()
+    record = SimpleNamespace(claim=claim, lost_claim=None, is_terminal=False)
+
+    async def activate(_claim):
+        record.is_terminal = True
+        return True
+
+    coordinator = SimpleNamespace(activate_api=AsyncMock(side_effect=activate))
+    with patch("atlas.application.chat.runs.launcher.get_run_coordinator", return_value=coordinator):
+        with pytest.raises(RunCoordinationUnavailableError):
+            await _confirm_api_activation(record, claim)
+    coordinator.activate_api.assert_awaited_once_with(claim)
