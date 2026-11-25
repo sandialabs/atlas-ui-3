@@ -104,18 +104,32 @@ class RunCoordinator(Protocol):
         source: str = "",
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
+        api_continuation: Optional[dict] = None,
+        parent_conversation_id: Optional[str] = None,
+        title: Optional[str] = None,
+        launch_origin: Optional[str] = None,
+        depth: int = 0,
     ) -> Optional[RunClaim]:
         """Claim the conversation and one of the user's run slots, atomically.
 
         ``source``, ``parent_run_id`` and ``follow_up_of`` are known at
         admission and written into the shared record with the claim, so any
-        replica can route by them from the first moment.
+        replica can route by them from the first moment. So are the lineage
+        fields (``parent_conversation_id``, ``title``, ``launch_origin``,
+        ``depth``): a replica that lists a run it does not own keeps its place
+        in the conversation tree.
 
         Returns the claim, or ``None`` when this coordinator does not track
         claims (the in-process default). Raises ``ConversationBusyError``,
         ``ConcurrencyLimitError`` or :class:`RunCoordinationUnavailableError`.
         A refusal claims nothing.
         """
+
+    async def publish_api_admission(self, claim: RunClaim) -> None:
+        """Publish API continuation metadata after local admission succeeds."""
+
+    async def activate_api(self, claim: RunClaim) -> Optional[bool]:
+        """Confirm execution activation: True held, False lost, None unknown."""
 
     async def release(self, claim: RunClaim, status: str) -> bool:
         """Free the claim, recording the run's final ``status``.
@@ -174,6 +188,9 @@ class InProcessRunCoordinator:
 
     async def claim(self, **_kwargs) -> Optional[RunClaim]:
         return None
+
+    async def activate_api(self, claim: RunClaim) -> Optional[bool]:
+        return True
 
     async def release(self, claim: RunClaim, status: str) -> bool:
         return False
@@ -255,4 +272,7 @@ async def _release(claim: RunClaim, status: str) -> None:
 async def drain_pending_releases() -> None:
     """Wait for scheduled releases to land (shutdown, tests)."""
     while _pending_releases:
-        await asyncio.gather(*list(_pending_releases), return_exceptions=True)
+        pending = tuple(_pending_releases)
+        await asyncio.gather(*pending, return_exceptions=True)
+        # A gather of already-done tasks may not yield to their callbacks.
+        _pending_releases.difference_update(pending)

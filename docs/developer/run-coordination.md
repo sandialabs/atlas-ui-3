@@ -11,6 +11,7 @@ contract that later lease, routing and failover work builds on.
 |-------|----------|-----|
 | The live task, steering channel, MCP clients, replay buffers | The owning replica's `RunRegistry` (`atlas/application/chat/runs/registry.py`) | Python objects; they cannot move between processes |
 | Admission (one run per conversation, `MAX_CONCURRENT_RUNS_PER_USER` per user), run ownership, leases, fencing generations | Redis, through the `RunCoordinator` | Every replica must see the same answer at the same moment |
+| Agent Runs API idempotency keys (`(user, key)` to request fingerprint and run handle) | Redis, through the `IdempotencyStore` (`atlas/application/chat/runs/idempotency.py`) | A client retry through a load balancer lands on any replica. Keyed requests fail closed when Redis is unreachable; the store is process-local without Redis |
 | Transcripts, conversation metadata, anything that must survive a Redis restart | PostgreSQL (chat history) | Source of truth |
 
 Redis coordinates live work and is not the source of truth. If Redis is
@@ -64,7 +65,29 @@ rather than a turn that bypasses the cap.
 
 If the claim's reply is lost (a timeout after Redis applied it), the
 coordinator releases whatever this replica holds under that run id before
-reporting the failure.
+reporting the failure. For API turns, CLAIM exposes the routing source but stages
+the continuation spec without updating the latest pointer or retained indexes.
+The local record holds the claim before publication can suspend. Publication
+checks that the original claim is still held. A refused publication removes
+the local record and attempts to undo the shared claim. Its original publication
+identity permits metadata cleanup after lease expiry or orphan takeover, without
+releasing a different run's lock or overwriting a newer continuation pointer.
+Publication also records a provisional marker in the shared run hash. The
+marker is cleared by an explicit successful activation renewal at the API task
+execution gate, or a normal terminal release after acknowledged admission.
+Routine heartbeat renewals never activate a provisional run. The gate retries
+unknown renewal replies twice, but never starts work without confirmed ownership. Before that point, the prior continuation is retained for at least
+the provisional pointer's lifetime. A shutdown or cancel during publication
+releases the admission as refused, not as an accepted terminal turn.
+
+The owner's orphan sweep retries known refusals promptly. If the owner
+disappears before cleanup succeeds, any replica's existing orphan sweep rolls
+back the expired provisional publication atomically, restores a still-retained
+predecessor, and removes the refused run from the retained indexes. A tombstone
+keeps the projection-close obligation until that close is confirmed. Runs that
+reached the execution boundary instead retain the normal owner-lost outcome.
+The marker tracks shared admission/activation, not receipt of the HTTP response
+by the client; it cannot provide exactly-once HTTP delivery.
 
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket
@@ -74,10 +97,28 @@ setting to fall back to local admission while Redis is configured. A
 single-replica deployment that does not want the dependency runs without
 Redis (below).
 
-Runs already executing when Redis goes away keep going. If the outage outlasts
-the lease (30 s), their claims lapse: each is reported lost once (see
-"Renewal reports loss") and, until those runs finish, the cluster-wide cap and
-conversation lock no longer count them. Nothing re-claims them automatically.
+Runs already executing when Redis goes away keep going only while their lease
+holds. An unreachable Redis is an unknown answer, not a refusal: once a whole
+lease (`RUN_LEASE_SECONDS`, default 30 s) has passed since the last proven renewal, the
+run is fenced at its next tool call or projection write, and when Redis
+returns, its renewal finds the conversation lease expired and reports the claim
+lost. Either way the run is cancelled and its partial turn is **not saved**
+(see "Fence" below): an outage longer than the lease loses the unsaved turn of
+every run in flight, on every replica. Nothing re-claims a lapsed run. This is
+deliberate: with Redis unreachable nothing can show that no other replica took
+the run over, and a save replaces the stored message set.
+
+The same happens without an outage when the shared record is gone or expired:
+a flush, a failover that loses recent writes, or an evicting `maxmemory-policy`
+(Redis must run `noeviction`). The run's claim is refused at its next renewal.
+
+The user is told: the owner's `run_status` frame carries `status: failed`,
+`end_reason: fenced` (sent from local state, so it does not need Redis), and
+the frontend shows a notice that the response was interrupted, was not saved
+and can be sent again; the history list marks the conversation Interrupted.
+The server log has `Run ... lost its claim` and `Not saving the turn of a run
+that lost its claim`, which says whether a takeover was observed here. A
+fenced run's work is never saved: it is a retry for the user.
 
 The WebSocket handler also guards the window between a granted admission and
 the run's task being attached (seeding the run's session files, sending
@@ -106,10 +147,15 @@ rather than formatting keys by hand.
 | `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
+| `<p>:run-api-latest:<conversation_id>` | string | Latest accepted API admission; compare predecessor inside CLAIM, publish after the local insert | Until the last retained API run in the conversation expires |
+| `<p>:run-api-latest:<conversation_id>:retained` | sorted set | Conversation API run IDs scored by expiry; determines the latest pointer and spec lifetime | Expires with its last member |
+| `<p>:runs-api`, `<p>:runs-api-user:<user>` | sorted set | Global and per-user retained API run IDs, scored by record expiry | Prune expired scores on writes and listing; expire the index with its last member |
 | `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Removed on release; after a takeover, once the run's projection is closed |
 | `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; inbox TTL, refreshed per send |
 | `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | reply TTL |
 | `<p>:ctl-done:<scope>` | string | Dedup record: `pending`, then the reply once the command took effect | pending TTL, then done TTL |
+| `<p>:idem:<user>:<key>` | hash | Agent Runs API idempotency reservation (#1220): `token`, `fingerprint`, `created_at`, `handle` (JSON, absent while the first request is admitting), `addressed_run_id`, `conversation_id`. Written by `RedisIdempotencyStore` (`atlas/infrastructure/redis/idempotency_store.py`) with one Lua script per step (reserve, complete, release); without Redis `InProcessIdempotencyStore` keeps the same contract in a dict | 2 minutes while pending, extended every 40 s by the admitting request (a crash between reserve and launch frees the key); 24 hours once the handle is recorded |
+| `<p>:idem-addr:<run_id>:<key>`, `<p>:idem-conv:<conversation_id>:<key>` | string | The user whose follow-up of `run_id` (in `conversation_id`) used `key`, so a retry finds its record after the run is reaped, on another replica, or naming a sibling run of the conversation (resolved through the run's shared record) | As its `idem` hash |
 | `<p>:replica:<replica_id>` | string/hash | **Reserved** for replica liveness | (not written yet) |
 
 Run record fields:
@@ -128,6 +174,7 @@ Run record fields:
 | `source` | The run's launch source (`api` for agent-runs API runs, empty otherwise), written at claim. The snapshot write repeats it |
 | `parent_run_id` | The run that launched this one (empty for a top-level run), written at claim; the scripts walk it to keep a finished parent readable while a descendant is live |
 | `follow_up_of` | The run an API follow-up continues (empty otherwise), written at claim |
+| `parent_conversation_id`, `title`, `launch_origin`, `depth` | The run's place in the conversation tree (issue #1222), written at claim: the conversation that launched it (empty for a top-level run), the prompt that started it (first 200 characters; never written for an off-record run), the published launch origin (`agent_runs_api` or empty) and its launch depth. A replica that lists a run it does not own copies them onto the listed run, so an unsaved child still nests under its parent. Records claimed before this field existed fall back to the same values in `snapshot` |
 | `error` | The run's error, if any |
 | `interrupted` | `1` once an orphan sweep took the run over (see below) |
 | `interrupted_by` | Replica id that took it over |
@@ -278,7 +325,9 @@ turn.
   registry. It does not save its partial turn to chat history: the
   conversation may have a newer turn saved since the takeover, and a save
   replaces the stored message set. Its finished tool calls stay in the
-  execution projection.
+  execution projection. The same holds when no replica took the run over and
+  it was fenced only because the lease lapsed during a Redis outage: the owner
+  cannot tell the two apart, so the turn is not saved either.
 - Live session snapshots (`session:<id>`) are not fenced.
 
 A graceful shutdown stops its live runs and then releases their claims
@@ -309,25 +358,95 @@ an owner consumes a single stream). The envelope, JSON in field `c`:
 
 Details, reply codes and guarantees: [run control](run-control.md).
 
-## Still open in #1128
+## Child run frames and tool identity
+
+A tool that launches a run (`atlas_launch_subagent`, `atlas_follow_up_subagent`)
+hands its update callback to the child, so the child's frames travel through
+the parent's tool-call wrappers. Rule: a frame whose `run_id` differs from the
+wrapper's own run belongs to a descendant. `observe_tool_callback` and
+`stamp_callback_identity` forward it unchanged: no parent `tool_name`,
+`tool_call_id`, `step` or `invocation_id`, and no execution-projection write.
+`_ChildConnection` likewise calls `note_event` only for frames with no run id
+or its own run id, so a grandchild's approval request does not mark the
+middle child as waiting for input.
+
+## Beyond #1128: what stays replica-local
 
 Nothing in `test/multireplica/test_run_coordination_gaps.py` is still a gap:
 admission, inspection from a non-owner, owner loss, fencing a paused owner and
-routing stop/steer/approval to the owner are all covered.
+routing stop/steer/approval to the owner are all covered. That file covers the
+browser run path. These pieces are still replica-local and are not gaps in
+that file:
+
+- The `atlas_follow_up_subagent` tool reads the replica's own run registry.
+  The Agent Runs API follow-up and list endpoints are not replica-local:
+  with Redis they use the retained API run records and the per-conversation
+  continuation pointer (see the CLAIM notes above). Status by run id
+  (`get_api_run_anywhere`), cancel and the idempotency keys are cluster-wide,
+  and so are the launch result and the listing of
+  sub-conversations (`atlas_get_subagent_result` and
+  `atlas_get_subagent_runs`, see
+  [reading sub-conversations from any replica](#reading-sub-conversations-from-any-replica)).
+- Opening a conversation whose run has not saved its first turn
+  (`in_flight.py`) resolves the run through the local registry, so only the
+  owning replica can show its transcript so far.
+- MCP elicitation requests and their responses (`elicitation_manager`) live in
+  the process that issued them.
 
 ## Tests
 
 - `atlas/tests/test_redis_run_coordinator.py`: the Lua scripts under
   fakeredis (`fakeredis[lua]`), including races between coordinators with
   different replica ids.
+- `atlas/tests/test_idempotency_store.py`: both idempotency stores (atomic reserve under concurrency, different body, release, pending TTL expiry, Redis down fails closed).
 - `atlas/tests/test_run_admission.py`: `admit_run`, including cleanup after
   every kind of failed admission.
 - `atlas/tests/test_run_leases.py`: the lease guard on the same scripts with
   two replicas: mirror, sweep, takeover generation, stale-owner refusal,
   frozen owner, Redis outage after the lease lapsed, projection and tool
   guards, non-owner reads.
-- `test/multireplica/test_cluster_admission.py`, `test_run_leases.py` and
+- `test/multireplica/test_idempotency_across_replicas.py`, `test_cluster_admission.py`, `test_run_leases.py` and
   `test_run_coordination_gaps.py`: two real replicas with shared Redis and
   PostgreSQL (`bash test/multireplica_tests.sh`), including SIGKILL and
   SIGSTOP of the owner with the side-effect counter proving nothing was
   replayed.
+
+## Reading sub-conversations from any replica
+
+Issue #1222. `atlas_get_subagent_runs` and `atlas_get_subagent_result` look in
+the local run registry first, then in shared state
+(`atlas/application/chat/runs/shared_children.py`), so a parent turn that lands
+on a replica other than the launching one, or after the local retention window
+or a restart, still finds its children:
+
+1. **Live children, any replica.** The user's live runs (`<p>:run-user:<user>`)
+   whose `parent_conversation_id` is the caller's conversation. Status, waiting
+   state and error come from the run record and its mirrored `snapshot`.
+2. **Finished children, within retention.** The run record is read by run id;
+   a completed run's reply is the `result` in its snapshot.
+3. **Finished children, after retention.** The stored child conversations: the
+   metadata the server writes on the child's first save holds
+   `parent_conversation_id` and `launch_run_id` (the run id the launch
+   returned). `ConversationRepository.list_child_conversations` finds them by
+   parent and user, and the reply is the conversation's last assistant message.
+   The launch path records how the launching run ended (`launch_status`,
+   `launch_depth`) and how the newest run ended (`latest_status`) on the child's
+   conversation, before the run's status is published. A lookup by the launch
+   run id reports `launch_status`; a lookup by conversation id reports
+   `latest_status`, so a failed follow-up is not shown as the launch's
+   success. A child with no recorded outcome (stored before this, or its
+   replica died first) is reported `failed` with an error saying so, never
+   assumed successful; its last saved reply is still returned. A child stored
+   before `launch_run_id` existed is addressed by its conversation id. The
+   stored children are read in full (up to 5000 per parent conversation), not
+   just the first page. When shared state cannot be read, the listing returns
+   the children this replica holds flagged `partial` (or is refused when it
+   holds none).
+
+Authorization is the registry path's: a caller sees only children of its own
+conversation that its own user owns, and an unknown run, another user's run and
+a run of another conversation all get the same "not a sub-conversation" answer.
+An unreadable store is reported as unavailable, never as "not a sub-conversation".
+
+`atlas_follow_up_subagent` is unchanged and still needs the launching replica's
+registry: continuing a child runs on the owning replica.

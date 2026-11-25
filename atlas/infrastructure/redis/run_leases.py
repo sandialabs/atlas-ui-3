@@ -29,7 +29,17 @@ from atlas.infrastructure.redis.run_coordinator import _NOW, _SUBTREE, RunCoordi
 # ARGV: run_id, error, interrupted_by, retention_ms, retry_ms, lease_ms, key_prefix
 INTERRUPT_SCRIPT = _NOW + _SUBTREE + """
 local status = redis.call('HGET', KEYS[1], 'status')
-if (not status) or status == 'completed' or status == 'failed' or status == 'cancelled' then
+local provisional = redis.call('HGET', KEYS[1], 'api_admission_unconfirmed')
+    or redis.call('HGET', KEYS[1], 'api_pending_spec')
+if provisional then
+  if tonumber(redis.call('HGET', KEYS[1], 'lease_expires_at') or '0') > now then
+    return 0
+  end
+  rollback_api_publication(ARGV[7], KEYS[1], ARGV[1])
+  -- Retain the orphan-close obligation, but no longer expose this refused
+  -- admission as an API run. Forget removes the tombstone after projection close.
+  redis.call('HSET', KEYS[1], 'api_admission_discarded', '1', 'source', '')
+elseif (not status) or status == 'completed' or status == 'failed' or status == 'cancelled' then
   -- Taken over earlier and still in runs-live, so its projection is not
   -- closed yet: the caller closes it (idempotent) and then forgets the run.
   -- Once forgotten, a late takeover attempt (the resumed old owner's) is 0.
@@ -39,7 +49,7 @@ if (not status) or status == 'completed' or status == 'failed' or status == 'can
     -- keeps failing cannot starve them) and keeps the record, so the
     -- obligation to close cannot expire before the close is confirmed.
     redis.call('ZADD', KEYS[5], now + tonumber(ARGV[5]), ARGV[1])
-    redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
+    expire_both(ARGV[7], ARGV[1], tonumber(ARGV[4]))
     return -1
   end
   redis.call('ZREM', KEYS[5], ARGV[1])
@@ -112,6 +122,13 @@ class RedisRunLeases:
         client = self._redis.client
         self._interrupt = client.register_script(INTERRUPT_SCRIPT)
         self._mirror = client.register_script(MIRROR_SCRIPT)
+        self._forget = client.register_script("""
+redis.call('ZREM', KEYS[1], ARGV[1])
+if redis.call('HGET', KEYS[2], 'api_admission_discarded') == '1' then
+  redis.call('DEL', KEYS[2])
+end
+return 1
+""")
 
     async def interrupt(
         self, run_id: str, conversation_id: str, user_email: str, error: str
@@ -144,8 +161,8 @@ class RedisRunLeases:
         return bool(int(written))
 
     async def forget(self, run_id: str) -> None:
-        """Drop an interrupted run from ``runs-live`` once its projection is closed."""
-        await self._redis.client.zrem(self.keys.live(), run_id)
+        """Drop an interrupted run from the live index once its projection is closed."""
+        await self._forget(keys=[self.keys.live(), self.keys.run(run_id)], args=[run_id])
 
     async def lapsed_candidates(self, limit: int = 200) -> List[str]:
         """Run ids whose lease deadline in ``runs-live`` has passed.

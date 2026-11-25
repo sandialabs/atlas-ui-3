@@ -270,6 +270,16 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	// Adopt a conversation id the server announced (`run_started`, or
+	// `conversation_saved`) so the routing sees it at once. The ref above only
+	// catches up when React next renders, and the run's first tagged frames can
+	// arrive before that: they would not match the still-empty id, be filed as
+	// background activity, and leave a new chat's answer out of the transcript
+	// (issue #1216).
+	const adoptConversationId = useCallback((id) => {
+		activeConversationIdRef.current = id
+		setActiveConversationId(id)
+	}, [])
 	// Canvas documents this tab has shown for the open conversation. A
 	// reconnect or joined poll compares the stored artifact with this, not
 	// with the panel text, which a file view clears (issue #1157).
@@ -313,7 +323,7 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [mapMessages])
 
-		const { sendMessage, addMessageHandler, isConnected } = useWS()
+		const { sendMessage, addMessageHandler, isConnected, navigationState } = useWS()
 	const toast = useToast()
 	const { currentModel } = config
 
@@ -659,7 +669,7 @@ export const ChatProvider = ({ children }) => {
 			addAttachment,
 			resolvePendingFileEvent,
 			setPendingElicitation,
-			setActiveConversationId,
+			setActiveConversationId: adoptConversationId,
 			streamToken,
 			streamEnd,
 			getVisibleConversationId: () => activeConversationIdRef.current,
@@ -717,6 +727,25 @@ export const ChatProvider = ({ children }) => {
 						}
 					}
 				}
+				if (
+					data?.type === 'run_status' &&
+					data.run &&
+					!isRunActive(data.run) &&
+					data.run.conversation_id &&
+					data.run.conversation_id === activeConversationIdRef.current
+				) {
+					// A run that ends on screen must not leave the turn looking busy:
+					// one that fails before any token (a start-up failure) sends no
+					// other frame to clear it. Skipped when the tracker holds a
+					// different run for this conversation -- a newer turn is live and
+					// the terminal frame belongs to the older one.
+					const tracked = runs.getRun(data.run.conversation_id)
+					if (!tracked || !tracked.run_id || tracked.run_id === data.run.run_id) {
+						setIsThinking(false)
+						setIsAgentRunning(false)
+						setIsSynthesizing(false)
+					}
+				}
 				runs.handleRunFrame(data)
 			},
 			// The joined conversation's turn is on disk: reload now rather than
@@ -728,7 +757,7 @@ export const ChatProvider = ({ children }) => {
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, runs.handleRunFrame])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, adoptConversationId, streamToken, streamEnd, runs.handleRunFrame])
 
 	// Refs so the message handler above (rebuilt only when its deps change)
 	// sees the current settings and socket without re-subscribing per change.
@@ -740,8 +769,8 @@ export const ChatProvider = ({ children }) => {
 	// The UI already shows the new value; dropping the frame would leave a
 	// run on this replica approving tools the user just turned off. The
 	// pending ref does not survive a reload, so a fresh connection also
-	// sends the value saved in settings. That update reaches only the runs
-	// this connection's server process owns.
+	// sends the value saved in settings. The server applies it to the user's
+	// runs on its own replica and routes it to the runs other replicas own.
 	const pendingAutoApproveRef = useRef(null)
 	const readLatestSettingsRef = useRef(readLatestSettings)
 	readLatestSettingsRef.current = readLatestSettings
@@ -1215,7 +1244,14 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// check above and the send, bail out without mutating the UI so we don't
 		// hang on "Thinking...".
 		if (!sent) {
-			toast.error('Not connected. Waiting to reconnect before sending.')
+			const navState = typeof navigationState === 'function' ? navigationState() : null
+			if (navState === 'pending') {
+				toast.error('Waiting for the server to confirm the conversation switch. Send your message again in a moment.')
+			} else if (navState === 'failed') {
+				toast.error('The server did not confirm the conversation switch, so this message was not sent. Start a new chat or reopen the conversation.')
+			} else {
+				toast.error('Not connected. Waiting to reconnect before sending.')
+			}
 			return false
 		}
 		rememberSteerFrame(steerRetryRef.current, requestId, chatFrame)
@@ -1287,7 +1323,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, navigationState, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -1413,7 +1449,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
-		setActiveConversationId(null)
+		// Through the adopt helper so frames from the abandoned conversation
+		// that land before the next render are not routed to the fresh chat.
+		adoptConversationId(null)
 		setFollowUpSuggestions([])
 		// A deferred workspace restore queued by a previous load must not
 		// fire into the fresh chat once the workspace list finishes loading.
@@ -1458,7 +1496,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			undoOfferRef.current = { token, toastId }
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {
@@ -2145,42 +2183,60 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// the terminal agent_completion event will also clear this. A question
 			// the stopped run asked goes with it, or the waiting row and Stop
 			// would stay up with nothing left to answer.
+			if (sendMessage) {
+				const run = runs.getRun(activeConversationId)
+				const sent = sendMessage({
+					type: 'agent_control',
+					action: 'stop',
+					conversation_id: activeConversationId || undefined,
+					run_id: run?.run_id || undefined,
+				})
+				// A dropped Stop leaves the run going on the server (issue #1223):
+				// keep the Stop control up so it can be pressed again.
+				if (sent !== true) {
+					toast.error('Stop was not sent: not connected. Press Stop again once the connection is back.')
+					return
+				}
+			}
 			setIsAgentRunning(false)
 			clearAgentQuestion(null)
-			if (!sendMessage) return
-			const run = runs.getRun(activeConversationId)
-			sendMessage({
-				type: 'agent_control',
-				action: 'stop',
-				conversation_id: activeConversationId || undefined,
-				run_id: run?.run_id || undefined,
-			})
-		}, [sendMessage, runs, activeConversationId, clearAgentQuestion])
+		}, [sendMessage, runs, activeConversationId, clearAgentQuestion, toast])
 
 		// Stop non-agent streaming
 		const stopStreaming = useCallback(() => {
+			if (sendMessage) {
+				const run = runs.getRun(activeConversationId)
+				const sent = sendMessage({
+					type: 'stop_streaming',
+					conversation_id: activeConversationId || undefined,
+					run_id: run?.run_id || undefined,
+				})
+				if (sent !== true) {
+					toast.error('Stop was not sent: not connected. Press Stop again once the connection is back.')
+					return
+				}
+			}
 			cleanupStreamState()
 			streamEnd()
 			setIsThinking(false)
 			clearPendingCompaction()
-			if (!sendMessage) return
-			const run = runs.getRun(activeConversationId)
-			sendMessage({
-				type: 'stop_streaming',
-				conversation_id: activeConversationId || undefined,
-				run_id: run?.run_id || undefined,
-			})
-		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction])
+		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction, toast])
 
 			const answerAgentQuestion = useCallback((content) => {
-			if (!content || !content.trim()) return
+			if (!content || !content.trim()) return false
 				// Show immediately in UI. _agentInput marks this as an agent-loop
 				// answer: the backend consumes it inside the transient agent loop and
 				// never appends it to ConversationHistory, so it must NOT count toward
 				// the rewind ordinal (see utils/userMessageOrdinal). #142
+				// Send first: an answer that never reached the server must not
+				// look delivered, and the question stays open for a retry.
+				if (!sendMessage || sendMessage({ type: 'agent_user_input', content }) !== true) {
+					toast.error('Your answer was not sent: not connected. Try again once the connection is back.')
+					return false
+				}
 				addMessage({ role: 'user', content, timestamp: new Date().toISOString(), _agentInput: true })
-				if (sendMessage) sendMessage({ type: 'agent_user_input', content })
-			}, [sendMessage, addMessage])
+				return true
+			}, [sendMessage, addMessage, toast])
 
 	const deleteFile = useCallback((filename) => {
 		if (!confirm(`Delete ${filename}?`)) return

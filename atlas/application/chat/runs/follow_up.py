@@ -327,8 +327,8 @@ async def execute_follow_up_tool(
         f"it is answering as run {handle['run_id']}. This call did not wait "
         "for the reply -- read it with atlas_get_subagent_result using that run_id.\n"
         + (
-            "It will pause for approval on these tools until the user opens "
-            f"that conversation: {', '.join(handle['tools_needing_approval'])}.\n"
+            "Only these tools will pause for approval until the user opens "
+            f"that conversation (its other tools run without asking): {', '.join(handle['tools_needing_approval'])}.\n"
             if handle["tools_needing_approval"]
             else ""
         )

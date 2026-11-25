@@ -16,6 +16,7 @@ const ElicitationDialog = ({ elicitation }) => {
   const { sendMessage, setPendingElicitation } = useChat()
   const [formData, setFormData] = useState({})
   const [isValid, setIsValid] = useState(false)
+  const [sendFailed, setSendFailed] = useState(false)
   const dialogRef = useRef(null)
   // The prompt claims to be modal (aria-modal), so it must own focus: it
   // pulls focus in on mount, traps Tab while up, and stands down as the
@@ -48,6 +49,7 @@ const ElicitationDialog = ({ elicitation }) => {
       }
     })
     setFormData(initialData)
+    setSendFailed(false)
   }, [elicitation_id])
 
   // Validate form data
@@ -70,6 +72,25 @@ const ElicitationDialog = ({ elicitation }) => {
     }))
   }
 
+  // Close the dialog only when the answer reached the server. A dropped
+  // answer would leave the tool waiting out its timeout while the prompt is
+  // gone, so on failure the prompt stays up and says so. Cancel is the way out
+  // of a long outage: it always dismisses, and the tool times out on its own.
+  const respond = (action, data, { dismissAnyway = false } = {}) => {
+    const sent = sendMessage({
+      type: 'elicitation_response',
+      elicitation_id,
+      action,
+      data
+    })
+    if (sent !== true && !dismissAnyway) {
+      setSendFailed(true)
+      return
+    }
+    setSendFailed(false)
+    setPendingElicitation(null)
+  }
+
   const handleAccept = () => {
     // Prepare response data based on schema type
     let responseData
@@ -84,39 +105,15 @@ const ElicitationDialog = ({ elicitation }) => {
       responseData = { ...formData }
     }
 
-    sendMessage({
-      type: 'elicitation_response',
-      elicitation_id,
-      action: 'accept',
-      data: responseData
-    })
-
-    // Close the dialog
-    setPendingElicitation(null)
+    respond('accept', responseData)
   }
 
   const handleDecline = () => {
-    sendMessage({
-      type: 'elicitation_response',
-      elicitation_id,
-      action: 'decline',
-      data: null
-    })
-
-    // Close the dialog
-    setPendingElicitation(null)
+    respond('decline', null)
   }
 
   const handleCancel = () => {
-    sendMessage({
-      type: 'elicitation_response',
-      elicitation_id,
-      action: 'cancel',
-      data: null
-    })
-
-    // Close the dialog
-    setPendingElicitation(null)
+    respond('cancel', null, { dismissAnyway: true })
   }
 
   return (
@@ -163,6 +160,12 @@ const ElicitationDialog = ({ elicitation }) => {
             ))
           )}
         </div>
+
+        {sendFailed && (
+          <p role="alert" className="px-6 pb-4 text-sm text-red-400">
+            Your answer was not sent because the connection is down. Try again once it is back.
+          </p>
+        )}
 
         {/* Actions */}
         <div className="flex flex-row-reverse items-center justify-start gap-3 p-6 border-t border-gray-700 bg-gray-750">

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-24
+
+### Features
+- **#1229:** `llmconfig.yml` can now list LiteLLM gateways above static models in the model picker (`model_picker_order: gateways_first`) and set a starting model: a top-level `default_model`, or a gateway's `default_team` and `default_model`. A new session starts on the gateway default only when the user is in that team and the team offers the model; otherwise it falls back to the next default.
+
+### Fixes
+- **#1216:** On a server with the Redis session store, the first answer of a new agent-mode chat now appears right away instead of only after a page reload.
+- **#1227:** `atlas_discover_subagent_options` (and `GET /api/agent-runs/options`) now lists the Enterprise LiteLLM gateway team models the user can chat with, so subagents can be launched on them; with compliance levels enabled, discovery lists only models approved for the conversation's current level.
+- **#1230:** Reasoning models that require their reasoning to be sent back (for example some OpenRouter-served models) no longer fail with a 400 on the LLM call after a tool runs: the model's reasoning now round-trips on the assistant tool-call message within the turn, in agent mode and tools mode, streaming or not. The reasoning is never saved to history, shown in the UI, or logged.
+
 ## [0.13.0] - 2026-11-16
 
 ### Features

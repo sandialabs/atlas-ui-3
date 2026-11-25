@@ -77,7 +77,11 @@ from atlas.application.chat.runs.eligibility import (
     turn_is_eligible_for_background_run,
     turn_is_off_record,
 )
-from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
+from atlas.application.chat.runs.registry import (
+    STEER_QUEUE_FULL,
+    STEER_QUEUED,
+    busy_message_for,
+)
 from atlas.application.chat.runs.remote_run_frames import steer_finished_frame
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
@@ -950,12 +954,71 @@ async def _persist_session(chat_service, session) -> None:
         await persist(session)
 
 
+def _usable_request_id(data):
+    """The client's navigation ``request_id`` when it is a short string, else None."""
+    request_id = data.get("request_id") if isinstance(data, dict) else None
+    if isinstance(request_id, str) and 0 < len(request_id) <= 64:
+        return request_id
+    return None
+
+
+def _echo_request_id(data, response) -> None:
+    """Copy the client's ``request_id`` onto the reply to a navigation frame.
+
+    ``reset_session`` and ``restore_conversation`` are answered with
+    ``session_reset`` / ``conversation_restored``, or an ``error`` that names
+    nothing. A client that holds such a frame until it is acknowledged (issue
+    #1223) sends a ``request_id`` and matches the reply by it. Absent or
+    oversized ids are not echoed, so older clients see no change.
+    """
+    request_id = _usable_request_id(data)
+    if request_id is not None and isinstance(response, dict):
+        response["request_id"] = request_id
+
+
 # Marks a tracked run's own session, which belongs to the run rather than to a
 # connection and so can never be resumed by one.
 _RUN_SESSION_MARKER = "tracked_run_session"
 
 # Query parameter a reconnecting client uses to name its previous session.
 RESUME_SESSION_PARAM = "resume_session"
+
+
+# How long the resume waits for the conversation store to say whether the
+# conversation a session carries is stored. A store that does not answer counts
+# as "stored" (fail closed).
+_STORE_LOOKUP_TIMEOUT_SECONDS = 5.0
+
+
+async def _conversation_may_be_stored(chat_service, conversation_id) -> bool:
+    """Whether writing into ``conversation_id`` could overwrite a stored record.
+
+    Answered fail closed. False only when there is nothing to overwrite: no
+    conversation store at all, or a store that answers and has no record. A
+    record of any owner, a failing lookup and a store that cannot answer
+    ownership questions all count as "may be stored". Failing closed is cheap:
+    the only effect is that the resumed session's next chat starts in a fresh
+    conversation, while a wrong "not stored" risks saving over a real one.
+    """
+    repository = getattr(chat_service, "conversation_repository", None)
+    if repository is None or not conversation_id:
+        return False
+    lookup = getattr(repository, "get_conversation_owner", None)
+    if not callable(lookup):
+        return True
+    try:
+        # Synchronous store query: keep it off the event loop, and do not let a
+        # hung store hold the handshake (the thread itself cannot be cancelled).
+        found = await asyncio.wait_for(
+            asyncio.to_thread(lookup, str(conversation_id)), _STORE_LOOKUP_TIMEOUT_SECONDS
+        )
+        return found is not None
+    except asyncio.TimeoutError:
+        logger.warning("Checking whether a resumed conversation is stored timed out; assuming it is")
+        return True
+    except Exception:
+        logger.warning("Could not check whether a resumed conversation is stored", exc_info=True)
+        return True
 
 
 async def _resume_connection_session(chat_service, requested, user_email):
@@ -1013,6 +1076,25 @@ async def _resume_connection_session(chat_service, requested, user_email):
     session = decode_session(encode_session(session), session.store_version)
     session.active = True
     session.connection_owner = chat_service.connection_id
+    # Issue #1217: the client may have started a new chat while it was
+    # disconnected, and its reset_session frame went nowhere. The session
+    # still names the conversation the previous connection was in, so decide
+    # here, once, that the next chat is a new conversation. A client that is
+    # continuing the old one names it on its frames and is hydrated from the
+    # store as always. The decision is part of the adopted snapshot: there is
+    # no per-frame state to arm, consume or lose on a refused or failed frame.
+    carried_conversation = session.context.get("conversation_id")
+    if await _conversation_may_be_stored(chat_service, carried_conversation):
+        new_conversation = chat_service.rebind_to_new_conversation(session)
+        # A tracked run of the abandoned conversation may still be going; its
+        # artifacts must not come home to the new one (as for New Chat).
+        forget_run_conversations(session)
+        logger.info(
+            "Resumed session %s: rebound from conversation %s to new conversation %s",
+            sanitize_for_logging(str(session_id)),
+            sanitize_for_logging(str(carried_conversation)),
+            sanitize_for_logging(new_conversation),
+        )
     if not await chat_service.persist_session(session, adopt=True):
         return None
     chat_service.restore_connection_state(session)
@@ -2295,11 +2377,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # transcript.
                     await websocket.send_json({
                         "type": "error",
-                        "message": (
-                            "This conversation already has a run in progress. "
-                            "Wait for it to reach its next step, or stop it, "
-                            "before sending another message."
-                        ),
+                        "message": busy_message_for(tracked_run),
                         "error_type": "conversation_busy",
                         "steering": True,
                         "request_id": data.get("request_id"),
@@ -2836,6 +2914,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 chat_task = None
                 started = False
                 try:
+                    # Announce the run before its task can emit anything.
+                    # The task's first frames are tagged with the run's
+                    # conversation id, and a client that has not yet
+                    # adopted that id (a new chat has none) would file them
+                    # as background activity and drop them from the
+                    # transcript it is showing.
+                    # Sent before the seeding below, which awaits the session
+                    # store: the registry has already scheduled this run's
+                    # `queued` status frame, and a yield here (a Redis-backed
+                    # store always yields) would let it reach the client ahead
+                    # of `run_started` (#1216). The task still starts only
+                    # after seeding, so its first frames see the files.
+                    await websocket.send_json({
+                        "type": "run_started",
+                        "run_id": run_record.run_id,
+                        "conversation_id": run_record.conversation_id,
+                        "title": run_record.title,
+                        # Lets the client tell a model-launched child
+                        # (atlas_launch_subagent) from a run the user started --
+                        # auto-approve is scoped to the latter -- and place
+                        # it under its parent in the history tree
+                        # (issue #1081) before either conversation is saved.
+                        "parent_run_id": run_record.parent_run_id,
+                        "parent_conversation_id": run_record.parent_conversation_id,
+                        "connection_bound": run_record.connection_bound,
+                    })
                     # Files attached via `attach_file` land on the
                     # *connection* session's context, which the run's fresh
                     # session cannot see -- the tool that needs them would
@@ -2851,26 +2955,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         user_email,
                         conversation_id=run_record.conversation_id,
                     )
-                    # Announce the run before its task can emit anything.
-                    # The task's first frames are tagged with the run's
-                    # conversation id, and a client that has not yet
-                    # adopted that id (a new chat has none) would file them
-                    # as background activity and drop them from the
-                    # transcript it is showing.
-                    await websocket.send_json({
-                        "type": "run_started",
-                        "run_id": run_record.run_id,
-                        "conversation_id": run_record.conversation_id,
-                        "title": run_record.title,
-                        # Lets the client tell a model-launched child
-                        # (atlas_launch_subagent) from a run the user started --
-                        # auto-approve is scoped to the latter -- and place
-                        # it under its parent in the history tree
-                        # (issue #1081) before either conversation is saved.
-                        "parent_run_id": run_record.parent_run_id,
-                        "parent_conversation_id": run_record.parent_conversation_id,
-                        "connection_bound": run_record.connection_bound,
-                    })
                     chat_task = asyncio.create_task(handle_chat_guarded())
                     if run_record.connection_bound:
                         work.track(chat_task)
@@ -3107,6 +3191,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             else "domain"
                         ),
                     }
+                _echo_request_id(data, response)
                 await websocket.send_json(response)
 
                 # A refused restore (authorization, or the id simply not
@@ -3193,6 +3278,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # by another connection (issue #1091): tell the client
                     # rather than dropping the socket.
                     response = {"type": "error", "message": e.message, "error_type": "domain"}
+                _echo_request_id(data, response)
                 await websocket.send_json(response)
 
             elif message_type == "attach_file":

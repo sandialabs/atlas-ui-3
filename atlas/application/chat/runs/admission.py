@@ -36,6 +36,7 @@ from atlas.application.chat.runs.coordination import (
     release_claim_soon,
 )
 from atlas.application.chat.runs.registry import RunRecord, RunStatus, get_run_registry
+from atlas.domain.conversation_origin import origin_for_run_source
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ async def admit_run(
     precheck: Optional[Callable[[], None]] = None,
     source: str = "",
     follow_up_of: Optional[str] = None,
+    api_continuation: Optional[dict] = None,
     **start_kwargs: Any,
 ) -> RunRecord:
     """Admit one run cluster-wide and register it locally, or raise.
@@ -98,6 +100,8 @@ async def admit_run(
     ``source`` (the launch source) and ``follow_up_of`` (the run an API
     follow-up continues) go to the shared run record with the claim, beside
     ``parent_run_id``, so any replica can route by them from the first moment.
+    The lineage (parent conversation, title, launch origin, depth) goes with
+    them, so a replica that lists the run keeps its place in the tree.
     """
     registry = get_run_registry()
     if _admission_closed:
@@ -122,6 +126,13 @@ async def admit_run(
         source=source,
         parent_run_id=start_kwargs.get("parent_run_id"),
         follow_up_of=follow_up_of,
+        **({"api_continuation": api_continuation} if api_continuation is not None else {}),
+        parent_conversation_id=start_kwargs.get("parent_conversation_id"),
+        # An off-record run has no title: it is the prompt, and an incognito
+        # turn shares nothing but its claim.
+        title=None if start_kwargs.get("off_record") else start_kwargs.get("title"),
+        launch_origin=origin_for_run_source(source),
+        depth=start_kwargs.get("depth") or 0,
     )
     try:
         # Synchronous from here: the precheck and the insert cannot be
@@ -139,9 +150,23 @@ async def admit_run(
         if claim is not None:
             release_claim_soon(claim, "failed")
         raise
+    # Attach before publication can suspend so shutdown and terminal
+    # transitions can release the claim, and the heartbeat can renew it.
     record.claim = claim
     if claim is not None:
         ensure_lease_heartbeat()
+    if claim is not None and api_continuation is not None:
+        record.api_admission_pending = True
+        try:
+            await coordinator.publish_api_admission(claim)
+            if record.is_terminal or record.claim is not claim or _admission_closed:
+                raise RunCoordinationUnavailableError("API admission interrupted")
+            record.api_admission_pending = False
+        except BaseException:
+            record.claim = None
+            registry.remove(record.run_id)
+            release_claim_soon(claim, "admission_refused")
+            raise
     return record
 
 
@@ -310,7 +335,7 @@ async def shut_down_live_runs(timeout: float = 10.0) -> int:
             continue
         if not record.is_terminal:
             registry.set_status(record.run_id, RunStatus.FAILED, error="The server shut down")
-        release_claim_soon(claim, record.status.value)
+        release_claim_soon(claim, "admission_refused" if record.api_admission_pending else record.status.value)
         released += 1
     return released
 

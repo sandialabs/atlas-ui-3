@@ -68,6 +68,9 @@ class CoordinationEvent(str, Enum):
     RUN_STATE_CHANGED = "run_state_changed"
     RUN_FINISHED = "run_finished"
     RUN_INTERRUPTED = "run_interrupted"
+    # An Agent Runs API request lost its idempotency reservation mid-admission
+    # and was aborted (#1220).
+    IDEMPOTENCY_RESERVATION_LOST = "idempotency_reservation_lost"
     REPLICA_STARTED = "replica_started"
     REPLICA_SHUTDOWN = "replica_shutdown"
     DEPENDENCY_DOWN = "dependency_down"

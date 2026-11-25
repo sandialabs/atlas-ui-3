@@ -10,11 +10,15 @@ run semantics see [Parallel Conversation Runs](parallel-conversation-runs.md).
 
 ## What is per replica
 
-A run executes on the replica that admitted it (its **owner**). The run
-registry is process-local today; cross-replica run discovery, routing and
-lease-based failover are #1128. Everything below therefore describes **the
-replica that answers**: behind a load balancer, query each pod directly, and
-let your metrics backend sum or compare the pods.
+A run executes on the replica that admitted it (its **owner**). With the
+shared store (`SESSION_REPOSITORY_TYPE=redis`), run status, admission and the
+per-user run cap, run leases with failover, and stop, steer, approval and
+auto-approve routing are shared through Redis (issue #1128). The live
+transcript of a run that has not yet been saved, the Agent Runs API follow-up
+and list endpoints, the subagent result tools and MCP elicitation stay on the
+owner. The registry, counts and metrics below describe **the replica that
+answers**: behind a load balancer, query each pod directly, and let your
+metrics backend sum or compare the pods.
 
 Each replica names itself with the first of `ATLAS_REPLICA_ID`, `POD_NAME`,
 `HOSTNAME` (the pod name on Kubernetes/OpenShift), or the host name, plus a
@@ -22,7 +26,7 @@ random `instance_id` that changes on every process start. The `replica` metric
 label and the `replica=` log field are therefore **the pod (or host)**: one
 value per pod, low cardinality.
 
-#1128 run coordination identifies a run's owner per **process**, as
+Run coordination identifies a run's owner per **process**, as
 `<hostname>-<pid>-<random>`. On Kubernetes the hostname is the pod name, so an
 owner id starts with the pod's `replica` value (unless `ATLAS_REPLICA_ID`
 overrides it). Once that coordination is installed, `atlas_replica_info` and
@@ -129,7 +133,7 @@ The same numbers in Prometheus text format, every series labelled
 | `atlas_projection_failures_total` | counter | `op` |
 | `atlas_conversation_persist_failures_total` | counter | `error` |
 | `atlas_coordination_events_total` | counter | `event` |
-| `atlas_replica_info` | gauge | `instance_id`, `version`, `owner_id` once #1128 coordination is present (`instance` is left to Prometheus's own target label) |
+| `atlas_replica_info` | gauge | `instance_id`, `version`, `owner_id` when run coordination is active (`instance` is left to Prometheus's own target label) |
 | `atlas_replica_start_time_seconds` | gauge | |
 | `atlas_dependency_command_errors_total` | counter | `dependency`, `op`, `error` (`PoolExhausted` = this replica's Redis pool ran out) |
 
@@ -157,6 +161,7 @@ statuses, counts and exception class names, never user identity or content.
 | `run_rejected` | WARNING | Admission refused (`reason`) |
 | `run_finished` | INFO / WARNING if failed | Terminal (`status`, `outcome`, `reason`, `duration_s`, `detached`) |
 | `run_interrupted` | WARNING | Terminal because the replica went away (`reason=replica_shutdown`) |
+| `idempotency_reservation_lost` | ERROR | An Agent Runs API request lost its idempotency reservation while admitting and was aborted, nothing launched (`reason`: `taken` or `expired`) |
 | `replica_shutdown` | INFO / WARNING if runs were interrupted | Shutdown began (`interrupted_runs`) |
 | `dependency_down` | ERROR | First failure of an outage (`dependency`, `op`, `error`) |
 | `dependency_still_down` | ERROR | At most every 30 s while it stays down (`failures`, `down_for_s`) |
@@ -167,7 +172,7 @@ The console handler shows WARNING and above, so `kubectl logs` carries
 interruptions, failures and dependency transitions; INFO events are in
 `APP_LOG_DIR/app.jsonl`.
 
-Reserved for #1128 so coordination PRs log with stable names: `lease_acquired`,
+These event names are reserved for coordination logging and are not emitted today (the lease and control code logs through the ordinary logger, for example `Run ... lost its owner`): `lease_acquired`,
 `lease_renewed`, `lease_lost`, `orphan_detected`, `run_fenced`,
 `command_routed`, `command_delivered`, `command_timed_out`. Emit them with
 `coordination_metrics().record_event(CoordinationEvent.LEASE_LOST, run_id=..., ...)`
@@ -178,7 +183,7 @@ from `atlas/core/coordination_metrics.py`.
 | Failure | What each replica reports | What users see |
 |---------|---------------------------|----------------|
 | **Graceful pod stop** (delete, rollout, scale-in: SIGTERM) | The stopping pod logs `run_interrupted reason=replica_shutdown` per live run, then `replica_shutdown interrupted_runs=N`. It waits up to 5 s for the runs to unwind and for their terminal state to reach Redis. | The run is reported `failed` with `end_reason=replica_shutdown` on the run APIs and the shared projection; completed steps are kept and nothing is re-run. A browser reconnects to another replica. The UI does not yet render a specific "interrupted" notice. |
-| **Crash** (SIGKILL, OOM, node loss) | Nothing from the dead pod. Its runs are **not** reported interrupted by anyone yet: that is #1128 (leases / orphan detection). | The conversation keeps what was saved; its live projection can keep saying `running` until it expires or the next run on that conversation replaces it. |
+| **Crash** (SIGKILL, OOM, node loss) | Nothing from the dead pod. Once its run leases lapse (`RUN_LEASE_SECONDS`, default 30 s), the orphan sweep on any surviving replica (it runs every half lease) takes each run over: the replica logs `Run ... lost its owner ...; marked interrupted`. This needs the shared Redis. | The run is reported `failed` with `interrupted: true` on the run APIs, and in the shared projection as `status: failed` with `end_reason=owner_lost` (its open tool rows become `interrupted`), about one to one and a half leases after the crash. Completed tool rows are kept, open ones become interrupted, and nothing is retried. The conversation keeps what was saved; the unsaved turn is lost. |
 | **Redis outage** | `/api/health` `degraded`, `session_store.status=unavailable`; `dependency_down dependency=redis` once, `dependency_still_down` every 30 s, `dependency_recovered` after. `atlas_dependency_up{dependency="redis"} 0`. | Requests needing the shared session fail with `SESSION_STORE_UNAVAILABLE`; there is no silent per-replica fallback. Projection writes that fail are counted (`atlas_projection_failures_total`), not raised. |
 | **PostgreSQL outage** | `checks.chat_history_db=unavailable`, `degraded`; `dependency_down dependency=postgres`; failed saves counted in `atlas_conversation_persist_failures_total`. | Conversation history cannot load or save until it returns. Saves attempted during the outage fail and are counted; check affected conversations after recovery. |
 | **Controlled rollout** | Each old pod: `replica_shutdown` (+ `run_interrupted` per live run); each new pod: `replica_started`. | As graceful stop, for runs still live on a replaced pod. Size `maxUnavailable`/`maxSurge` and keep `terminationGracePeriodSeconds` >= 15. |

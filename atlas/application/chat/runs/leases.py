@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from atlas.application.chat.runs.registry import RunRecord, RunRegistry
+from atlas.application.chat.runs.run_directory import lineage_from_record
 from atlas.core.coordination_metrics import EndReason
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,13 @@ INTERRUPTED_ERROR = (
 # The API returns at most 20,000 characters (``launcher.MAX_RESULT_CHARS``).
 # One more is kept so a reader can still tell the reply was truncated.
 MAX_SNAPSHOT_RESULT_CHARS = 20_001
+# What this replica knows when it fences a run, worded as observations only.
+# Whether another replica held the run is not knowable here: Redis refuses a
+# renewal both when the lease merely lapsed and when another holder took over.
+FENCE_REASON_RENEWAL_REFUSED = "lease renewal refused: the lease lapsed or another replica holds the run"
+FENCE_REASON_WRITE_REFUSED = "snapshot write refused: the lease lapsed or another replica holds the run"
+FENCE_REASON_NO_PROOF = "lease lapsed without proof of ownership (Redis unreachable or silent)"
+FENCE_REASON_TAKEN_OVER = "marked interrupted by an orphan sweep after its lease lapsed"
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -132,6 +140,11 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     # Known from admission, so present before the owner's first snapshot.
     view["parent_run_id"] = view.get("parent_run_id") or raw.get("parent_run_id") or None
     view["previous_run_id"] = view.get("previous_run_id") or raw.get("follow_up_of") or None
+    # Also from admission: what a replica needs to list a run it does not own.
+    snapshot_fields = {k: v for k, v in view.items() if k in ("parent_conversation_id", "title", "launch_origin", "depth")}
+    for key, value in lineage_from_record(raw, snapshot_fields).items():
+        if key != "parent_run_id":
+            view[key] = value
     view.update({
         "run_id": raw.get("run_id"),
         "conversation_id": raw.get("conversation_id"),
@@ -146,9 +159,26 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     if raw.get("error"):
         view["error"] = raw["error"]
     if raw.get("interrupted") == "1":
+        view["end_reason"] = EndReason.OWNER_LOST.value
         view["ended_at"] = int(raw.get("updated_at") or 0) / 1000.0
         view["updated_at"] = view["ended_at"]
     return view
+
+
+def _is_redis_unreachable(exc: BaseException) -> bool:
+    from atlas.infrastructure.redis.client import is_redis_connectivity_error
+
+    return is_redis_connectivity_error(exc)
+
+
+def _note_redis_unreachable(exc: BaseException, op: str) -> None:
+    """Record the failure with the dependency state (``[COORD] event=dependency_down``)."""
+    try:
+        from atlas.core.coordination_metrics import coordination_metrics
+
+        coordination_metrics().dependency_failed("redis", exc, op=op)
+    except Exception:  # pragma: no cover - bookkeeping must not replace the caller's handling
+        logger.debug("recording a Redis error failed", exc_info=True)
 
 
 @dataclass
@@ -160,6 +190,9 @@ class _Lease:
     # answer fences.
     verified_at: float = float("-inf")
     fenced: bool = False
+    # Why this replica fenced the run (local knowledge only; see
+    # ``current_run_fence_reason``).
+    fence_reason: str = ""
     done: bool = False
     dirty: bool = True
     syncing: bool = False
@@ -238,8 +271,15 @@ class RunLeaseGuard:
                 await self.sweep_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.warning("run orphan sweep failed", exc_info=True)
+            except Exception as exc:
+                if _is_redis_unreachable(exc):
+                    # An outage is one condition, not one traceback per sweep:
+                    # the first failure logs ``dependency_down`` and later
+                    # ones are summarized by the coordination metrics.
+                    _note_redis_unreachable(exc, "orphan_sweep")
+                    logger.warning("run orphan sweep skipped: Redis unreachable (%s)", type(exc).__name__)
+                else:
+                    logger.warning("run orphan sweep failed", exc_info=True)
 
     # -- claim bookkeeping ---------------------------------------------------------
 
@@ -286,7 +326,7 @@ class RunLeaseGuard:
             lease = self._track(record, claim)
         if lease is None or lease.fenced:
             return
-        self._fence_local(lease, record.run_id, "lease renewal refused")
+        self._fence_local(lease, record.run_id, FENCE_REASON_RENEWAL_REFUSED)
         await self._take_over(record.run_id)
 
     # -- snapshot mirror ---------------------------------------------------------
@@ -321,7 +361,7 @@ class RunLeaseGuard:
                 terminal = record.is_terminal
                 written = await self._write_snapshot(lease, record)
                 if not written:
-                    self._fence_local(lease, run_id, "snapshot write refused")
+                    self._fence_local(lease, run_id, FENCE_REASON_WRITE_REFUSED)
                 elif terminal:
                     lease.done = True
                     await self._release_held(run_id, lease)
@@ -380,7 +420,7 @@ class RunLeaseGuard:
             record.status.value,
             json.dumps(run_snapshot(record), default=str),
             record.error or "",
-            (record.launch_spec or {}).get("source") or "",
+            (record.launch_spec or {}).get("source") or record.source or "",
         )
 
     async def publish_now(self, run_id: str) -> None:
@@ -405,6 +445,7 @@ class RunLeaseGuard:
         if lease.fenced:
             return
         lease.fenced = True
+        lease.fence_reason = why
         logger.warning("Run %s lost its claim (%s); stopping it on this replica", run_id, why)
         self._registry.mark_interrupted(run_id, INTERRUPTED_ERROR)
 
@@ -449,7 +490,7 @@ class RunLeaseGuard:
         if answer is False:
             # Refused: another owner or generation holds the run, or its lease
             # passed; another replica may already have taken it over.
-            self._fence_local(lease, run_id, "lease renewal refused")
+            self._fence_local(lease, run_id, FENCE_REASON_RENEWAL_REFUSED)
             with contextlib.suppress(Exception):
                 await self._take_over(run_id)
             return False
@@ -472,7 +513,7 @@ class RunLeaseGuard:
         if self._clock() - lease.verified_at < self.lease_seconds:
             logger.warning("lease check for %s got no answer; still inside the lease", run_id)
             return True
-        self._fence_local(lease, run_id, "lease lapsed without proof")
+        self._fence_local(lease, run_id, FENCE_REASON_NO_PROOF)
         return False
 
     async def ensure_may_act(self, run_id: Optional[str]) -> None:
@@ -486,9 +527,18 @@ class RunLeaseGuard:
         lease = self._leases.get(run_id)
         return bool(lease and lease.fenced)
 
+    def fence_reason(self, run_id: str) -> str:
+        lease = self._leases.get(run_id)
+        return lease.fence_reason if lease else ""
+
     # -- orphan sweep (any replica) -------------------------------------------------
 
     async def sweep_once(self) -> List[str]:
+        # Retry refused API publications outside the lease-renewal heartbeat:
+        # a slow cleanup must not delay renewal of unrelated live runs.
+        retry_refusals = getattr(self._coordinator, "retry_api_refusals", None)
+        if retry_refusals is not None:
+            await retry_refusals()
         for run_id, lease in list(self._leases.items()):
             if self._registry.get(run_id) is None:
                 self._leases.pop(run_id, None)  # reaped here: nothing left to track
@@ -521,8 +571,12 @@ class RunLeaseGuard:
                 run_id, raw.get("owner") or "?", generation,
             )
             lease = self._leases.get(run_id)
-            if lease is not None:
-                self._fence_local(lease, run_id, "interrupted by orphan sweep")
+            if lease is not None and lease.fenced:
+                # Already fenced here for a weaker reason (a lapse without
+                # proof): the takeover now observed is the better account.
+                lease.fence_reason = FENCE_REASON_TAKEN_OVER
+            elif lease is not None:
+                self._fence_local(lease, run_id, FENCE_REASON_TAKEN_OVER)
         # The run stays in ``runs-live`` until its projection is closed, so a
         # failed close is retried by the next sweep on any replica.
         if await _close_projection(run_id, raw):
@@ -554,8 +608,12 @@ async def _close_projection(run_id: str, raw: Dict[str, str]) -> bool:
         # Confirmed only by reading it back: ``apply_event`` also returns
         # nothing when it gave up after its revision retries.
         doc = await store.get(conversation_id, user_email) if conversation_id and user_email else None
-    except Exception:
-        logger.warning("could not close the projection of an interrupted run", exc_info=True)
+    except Exception as exc:
+        if _is_redis_unreachable(exc):
+            _note_redis_unreachable(exc, "projection_close")
+            logger.warning("could not close the projection of an interrupted run: Redis unreachable (%s)", type(exc).__name__)
+        else:
+            logger.warning("could not close the projection of an interrupted run", exc_info=True)
         return False
     if doc is None or doc.get("run_id") != run_id:
         return True  # nothing of this run left open (expired, or a newer run's)
@@ -619,6 +677,20 @@ def current_run_is_fenced() -> bool:
         return False
     record = get_run_registry().get(run.run_id)
     return bool(record is not None and record.fenced)
+
+
+def current_run_fence_reason() -> str:
+    """Why this replica fenced the current run, as far as it knows locally.
+
+    Only "interrupted by orphan sweep" means a takeover was observed here; a
+    refused renewal or a lapse without proof says the claim was lost, not
+    that anyone took the run over.
+    """
+    from atlas.application.chat.runs.context import get_current_run
+
+    run = get_current_run()
+    guard = _guard
+    return guard.fence_reason(run.run_id) if run is not None and guard is not None else ""
 
 
 async def may_publish_for_run(run_id: Optional[str]) -> bool:

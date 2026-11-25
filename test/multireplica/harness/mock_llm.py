@@ -13,6 +13,12 @@ Directives in the last user message (whitespace separated, key=value):
   stream_ms=M  delay per streamed token in ms (default 60)
   words=W      number of words in the final answer (default 30)
   fail=429     after the tool steps, answer HTTP 429 (a provider rate limit)
+  subagent=1   the PARENT calls atlas_discover_subagent_options, then
+               atlas_launch_subagent with the first workspace and model it was
+               offered, then answers. child=a=1,b=2 is the child's prompt
+               (commas stand for spaces, since a directive value has none).
+  observe=1    calls atlas_get_subagent_runs, then atlas_get_subagent_result
+               for rid=<run id>, then answers (issue #1222).
 Without any directive the mock answers immediately with "ECHO: <content>".
 """
 import json
@@ -57,6 +63,65 @@ def tool_calls_since_last_user(messages):
             n += 1
     return n
 
+def _tool_named(tool_names, suffix):
+    return next((n for n in sorted(tool_names) if n and n.endswith(suffix)), None)
+
+
+def scripted_call(d, tool_names, messages, done_calls):
+    """The next call of a ``subagent=1`` or ``observe=1`` script, or None when it is done."""
+    if d.get("subagent"):
+        disc = _tool_named(tool_names, "atlas_discover_subagent_options")
+        launch = _tool_named(tool_names, "atlas_launch_subagent")
+        if not (disc and launch) or done_calls >= 2:
+            return None
+        if done_calls == 0:
+            return disc, {}
+        options = {}
+        for m in reversed(messages):
+            if m.get("role") == "tool":
+                try:
+                    options = json.loads(m.get("content") or "{}")
+                except ValueError:
+                    options = {}
+                break
+        workspace = (options.get("workspaces") or [{}])[0].get("name", "")
+        model = (options.get("models") or [{}])[0].get("name", "")
+        prompt = d.get("child", "label=CHILD").replace(",", " ")
+        return launch, {"workspace": workspace, "model": model, "prompt": prompt}
+    if d.get("observe"):
+        runs = _tool_named(tool_names, "atlas_get_subagent_runs")
+        result = _tool_named(tool_names, "atlas_get_subagent_result")
+        if not (runs and result) or done_calls >= 2:
+            return None
+        if done_calls == 0:
+            return runs, {}
+        return result, {"run_id": d.get("rid", "")}
+    return None
+
+
+def scripted_done(d, done_calls):
+    return bool((d.get("subagent") or d.get("observe")) and done_calls >= 2)
+
+
+def tool_call_reply(call, stream, cid, model):
+    name = call["function"]["name"]
+    if stream:
+        def gen():
+            yield sse({"id": cid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
+                       "choices": [{"index": 0, "delta": {"role": "assistant", "content": None,
+                                    "tool_calls": [{"index": 0, "id": call["id"], "type": "function",
+                                                    "function": {"name": name, "arguments": ""}}]}, "finish_reason": None}]})
+            yield sse({"id": cid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
+                       "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": call["function"]["arguments"]}}]}, "finish_reason": None}]})
+            yield sse({"id": cid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
+                       "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(gen(), media_type="text/event-stream")
+    return JSONResponse({"id": cid, "object": "chat.completion", "created": int(time.time()), "model": model,
+                         "choices": [{"index": 0, "message": {"role": "assistant", "content": None, "tool_calls": [call]}, "finish_reason": "tool_calls"}],
+                         "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}})
+
+
 def sse(obj):
     return f"data: {json.dumps(obj)}\n\n"
 
@@ -95,6 +160,15 @@ async def chat(request: Request):
     stream_ms = int(d.get("stream_ms", 60))
     words = int(d.get("words", 30))
     label = d.get("label", "none")
+
+    scripted = scripted_call(d, tool_names, messages, done_calls)
+    if scripted is not None:
+        name, arguments = scripted
+        call = {"id": "call_" + uuid.uuid4().hex[:8], "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)}}
+        return tool_call_reply(call, stream, cid, model)
+    if scripted_done(d, done_calls):
+        steps = 0  # the scripted calls were this turn's tool steps
 
     if has_directive and chosen_tool and done_calls < steps:
         seconds = float(d.get("sleep", 4))
