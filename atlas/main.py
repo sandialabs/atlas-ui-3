@@ -77,7 +77,11 @@ from atlas.application.chat.runs.eligibility import (
     turn_is_eligible_for_background_run,
     turn_is_off_record,
 )
-from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
+from atlas.application.chat.runs.registry import (
+    STEER_QUEUE_FULL,
+    STEER_QUEUED,
+    busy_message_for,
+)
 from atlas.application.chat.runs.remote_run_frames import steer_finished_frame
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
@@ -2351,11 +2355,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # transcript.
                     await websocket.send_json({
                         "type": "error",
-                        "message": (
-                            "This conversation already has a run in progress. "
-                            "Wait for it to reach its next step, or stop it, "
-                            "before sending another message."
-                        ),
+                        "message": busy_message_for(tracked_run),
                         "error_type": "conversation_busy",
                         "steering": True,
                         "request_id": data.get("request_id"),
