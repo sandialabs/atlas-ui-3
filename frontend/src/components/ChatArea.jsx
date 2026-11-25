@@ -1573,8 +1573,13 @@ const ChatArea = () => {
                   <Square className="w-5 h-5" />
                 </button>
               )}
+              {/* Keyed on navigation: New Chat or opening another conversation
+                  remounts the button, which cancels a recording or a pending
+                  transcription and releases the microphone. Speech meant for
+                  one conversation must not land in the next one's draft. */}
               {audioControls.stt.visible && (
                 <DictationButton
+                  key={conversationNavigationVersion}
                   onTranscript={insertDictation}
                   maxDurationSeconds={audioControls.stt.max_duration_seconds}
                   maxAudioBytes={audioControls.stt.max_audio_bytes}

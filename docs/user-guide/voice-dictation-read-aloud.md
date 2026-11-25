@@ -19,7 +19,10 @@ or neither.
 
 Click **cancel** instead of stop to throw the recording away: nothing is
 transcribed or inserted. Recording stops by itself at the length limit your
-administrator set and transcribes what was recorded up to then.
+administrator set and transcribes what was recorded up to then. Starting a new
+chat or opening another conversation while you are recording, or while a
+recording is being transcribed, cancels it, so what you said is not put into a
+different conversation's message box.
 
 If the microphone button says access is blocked, allow the microphone for
 the site in your browser's site settings (usually the icon at the left of

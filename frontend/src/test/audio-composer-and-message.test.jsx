@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ChatArea from '../components/ChatArea'
 import Message from '../components/Message'
@@ -125,6 +125,73 @@ describe('microphone in the composer', () => {
     // Still an ordinary draft: the user can keep editing it.
     fireEvent.change(textarea, { target: { value: 'Typed first dictated words, edited' } })
     expect(textarea.value).toBe('Typed first dictated words, edited')
+  })
+})
+
+describe('dictation and conversation navigation', () => {
+  it('abandons a pending dictation when the user moves to another conversation', async () => {
+    const track = { stop: vi.fn() }
+    class Recorder {
+      static isTypeSupported = () => true
+      constructor(stream, options) { this.mimeType = options.mimeType; this.state = 'inactive' }
+      start() { this.state = 'recording' }
+      stop() {
+        this.state = 'inactive'
+        this.ondataavailable({ data: new Blob(['x'], { type: this.mimeType }) })
+        this.onstop()
+      }
+    }
+    window.MediaRecorder = Recorder
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }) },
+    })
+    let respond
+    // Other parts of the composer fetch too; only the transcription matters.
+    const fetchMock = vi.fn((url) => (url === '/api/audio/transcriptions'
+      ? new Promise((resolve) => { respond = resolve })
+      : Promise.resolve({ ok: false, status: 404, json: async () => ({}) })))
+    vi.stubGlobal('fetch', fetchMock)
+    const uploads = () => fetchMock.mock.calls.filter(([url]) => url === '/api/audio/transcriptions')
+    useWS.mockReturnValue({ isConnected: true, connectionStatus: 'Connected', sendMessage: vi.fn() })
+
+    const context = {
+      messages: [], isWelcomeVisible: false, isSynthesizing: false, isStreaming: false,
+      sendChatMessage: vi.fn(), stopStreaming: vi.fn(), stopAgent: vi.fn(), currentModel: 'gpt-4',
+      tools: [], prompts: [], selectedTools: new Set(), selectedPrompts: new Set(),
+      toggleTool: vi.fn(), togglePrompt: vi.fn(),
+      sessionFiles: { files: [], total_files: 0, categories: {} },
+      agentModeAvailable: true, agentPendingQuestion: null, setAgentPendingQuestion: vi.fn(),
+      answerAgentQuestion: vi.fn(), followUpSuggestions: [], setFollowUpSuggestions: vi.fn(),
+      settings: {}, audio: audio(), conversationNavigationVersion: 0,
+    }
+    useChat.mockReturnValue(context)
+    const { rerender } = render(<BrowserRouter><ChatArea /></BrowserRouter>)
+    const textarea = screen.getByPlaceholderText(/Type a message/i)
+
+    // Recorded and sent for transcription in the first conversation...
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    fireEvent.click(await screen.findByTestId('dictation-stop'))
+    await waitFor(() => expect(uploads()).toHaveLength(1))
+
+    // ...then New Chat (or another conversation) before the text comes back.
+    useChat.mockReturnValue({ ...context, conversationNavigationVersion: 1 })
+    rerender(<BrowserRouter><ChatArea /></BrowserRouter>)
+    expect(uploads()[0][1].signal.aborted).toBe(true)
+    expect(screen.getByTestId('dictation-start')).toBeInTheDocument()
+
+    await act(async () => { respond({ ok: true, status: 200, json: async () => ({ text: 'for the old conversation' }) }) })
+    expect(textarea.value).toBe('')
+
+    // The same holds while still recording: the microphone is released.
+    track.stop.mockClear()
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    await screen.findByTestId('dictation-stop')
+    useChat.mockReturnValue({ ...context, conversationNavigationVersion: 2 })
+    rerender(<BrowserRouter><ChatArea /></BrowserRouter>)
+    expect(track.stop).toHaveBeenCalled()
+    expect(uploads()).toHaveLength(1)
+    expect(textarea.value).toBe('')
   })
 })
 
