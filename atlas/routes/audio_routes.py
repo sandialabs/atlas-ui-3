@@ -65,7 +65,13 @@ audio_router = APIRouter(prefix="/api/audio", tags=["audio"])
 
 # Room for the multipart boundaries and the small text fields around the clip.
 _MULTIPART_OVERHEAD_BYTES = 64 * 1024
-# Room for the JSON envelope around the text; 4 bytes covers any UTF-8 character.
+# The most bytes one character of text can take in a JSON body: a character
+# outside the Basic Multilingual Plane written as an escaped surrogate pair
+# ("\\ud83d\\ude80", which is what Python's json.dumps emits by default). Raw
+# UTF-8 needs at most 4, but the transport cap must not refuse text that is
+# within the character limit just because the client escaped it.
+_JSON_MAX_BYTES_PER_CHAR = 12
+# Room for the JSON envelope around the text.
 _JSON_OVERHEAD_BYTES = 4 * 1024
 _LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")
 _MAX_LEVEL_NAME_CHARS = 200
@@ -283,7 +289,7 @@ async def synthesize_speech(request: Request, current_user: str = Depends(get_cu
     if not request.headers.get("content-type", "").lower().startswith("application/json"):
         raise HTTPException(status_code=415, detail="Send the text as application/json.")
     too_long = f"The text is longer than the {config.max_input_chars} character limit for read-aloud."
-    body_limit = config.max_input_chars * 4 + _JSON_OVERHEAD_BYTES
+    body_limit = config.max_input_chars * _JSON_MAX_BYTES_PER_CHAR + _JSON_OVERHEAD_BYTES
     _reject_declared_oversize(request, body_limit, too_long)
     async with _relay_slot(settings):
         return await _synthesize_text(request, settings, config, current_user, body_limit, too_long)

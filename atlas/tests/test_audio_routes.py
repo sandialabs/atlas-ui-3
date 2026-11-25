@@ -471,6 +471,35 @@ def test_speech_enforces_text_limits(client, test_user_headers, upstream, audio_
     assert upstream.requests == []
 
 
+@pytest.mark.parametrize("character", ["a", "\u4e2d", "\U0001f680"], ids=["ascii", "cjk", "astral"])
+@pytest.mark.parametrize("ensure_ascii", [True, False], ids=["escaped", "raw-utf8"])
+def test_speech_accepts_text_at_the_limit_however_it_is_encoded(
+    client, test_user_headers, upstream, audio_on, monkeypatch, character, ensure_ascii
+):
+    """The byte cap on the body must not be tighter than the character limit.
+
+    A client may send non-ASCII text raw or as ``\\uXXXX`` escapes (the default
+    of Python's ``json.dumps``), which take up to 12 bytes for one character.
+    """
+    # Large enough that the allowance for the JSON envelope cannot hide a cap
+    # that is too tight per character.
+    limit = 4096
+    monkeypatch.setattr(audio_on, "audio_tts_max_input_chars", limit)
+    upstream.handler = lambda request: httpx.Response(200, content=MP3, headers={"content-type": "audio/mpeg"})
+
+    def post(text):
+        body = json.dumps({"input": text, "compliance_level": None}, ensure_ascii=ensure_ascii).encode()
+        return client.post(
+            "/api/audio/speech", headers={**test_user_headers, "content-type": "application/json"}, content=body
+        )
+
+    assert post(character * limit).status_code == 200
+    assert json.loads(upstream.bodies[-1])["input"] == character * limit
+    # One character over is still refused, by the count of decoded characters.
+    assert post(character * (limit + 1)).status_code == 413
+    assert len(upstream.requests) == 1
+
+
 def test_speech_labels_generic_replies_and_refuses_non_audio(client, test_user_headers, upstream, audio_on):
     upstream.handler = lambda request: httpx.Response(200, content=MP3, headers={"content-type": "application/octet-stream"})
     response = post_speech(client, test_user_headers)
