@@ -137,6 +137,33 @@ replica, resumes the session when:
 The new connection works on a detached copy of the session, so a turn of the
 old connection that is still finishing cannot reach it.
 
+A resumed session still names the conversation its previous connection was in,
+but the client may have started a new chat while it was disconnected, so that
+its `reset_session` frame never arrived. To keep the next message out of the
+old conversation, the resume decides once, before the session is adopted: if
+the conversation store may hold the carried conversation, the session is
+rebound to a fresh conversation id with an empty history (its restore marker,
+lineage, classification binding and save floor go with it).
+
+The wire contract for `chat` frames after a resume follows from that:
+
+- A frame that names no `conversation_id` runs in the fresh conversation, so
+  it can never run in, or be saved over, the old one.
+- A frame that names the old conversation continues it, hydrated from the
+  store as before. A client that continues a saved conversation after a
+  reconnect must therefore send its `conversation_id` on every chat frame.
+- "May hold" fails closed: a record of any owner, a store that cannot be
+  reached, and a store that cannot answer ownership questions all count as
+  stored. Only "no conversation store" or "the store has no such record" (a New
+  Chat that was never saved, with files already attached) leaves the session as
+  it was.
+- An off-record (incognito) session is guarded the same way. The shared store
+  never holds its messages, so it resumes with an empty history already.
+- The decision is part of the adopted snapshot. There is no per-frame state, so
+  a frame refused for any reason (run limit, upload size, store outage) leaves
+  the session bound to the fresh conversation; a connection that is not a
+  resume never consults the conversation store.
+
 Resuming stamps the new connection as the session's owner and writes it, so
 the old connection's late teardown leaves it alone, and its stale copy can no
 longer overwrite it.

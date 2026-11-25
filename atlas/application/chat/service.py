@@ -1236,6 +1236,33 @@ class ChatService:
             if floor.get("locked") is True:
                 self._save_floor_locked.add(session.id)
 
+    def rebind_to_new_conversation(self, session: Session) -> str:
+        """Point ``session`` at a brand-new conversation and return its id.
+
+        Used when a session resumed after a reconnect may still name a
+        conversation the user has already left (issue #1217): the next chat
+        must not run in, or be saved over, that conversation. Everything the
+        old conversation owned goes with it: its messages (the stored record is
+        the source for anyone naming it), restore marker, lineage, launch
+        origin, classification binding, workspace binding and incognito state
+        and save floor. Each turn states its own incognito mode, so a new chat
+        starts from neither the old conversation's flag nor its workspace.
+
+        An off-record session needs no special case: the shared store never
+        holds its messages (see ``encode_session``), so a resumed one arrives
+        with an empty history already.
+        """
+        new_id = str(uuid4())
+        session.context["conversation_id"] = new_id
+        for key in ("_restored", "parent_conversation_id", ORIGIN_METADATA_KEY,
+                    SAVE_FLOOR_CONTEXT_KEY, conv_class.SESSION_BINDING_KEY,
+                    "workspace_id", "incognito"):
+            session.context.pop(key, None)
+        self._incognito_save_floor.pop(session.id, None)
+        self._save_floor_locked.discard(session.id)
+        session.history.messages.clear()
+        return new_id
+
     def validate_conversation_id_owner(
         self,
         conversation_id: str,
