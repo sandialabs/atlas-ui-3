@@ -509,6 +509,14 @@ These are known and deliberate, not oversights:
   `memory` session store), all run state is per process: use a single
   replica and worker. While Redis is configured but down, new runs are refused
   rather than admitted locally.
+- **Sub-conversation results work from any replica.** When a parent's next
+  turn runs on another replica, `atlas_get_subagent_runs` and
+  `atlas_get_subagent_result` find the children through the shared run
+  records, and after the 30-minute retention window (or a restart) through the
+  stored child conversations. A run listed by a replica that does not own it
+  keeps its parent, title and launch origin, so the sidebar nests it under its
+  parent. `atlas_follow_up_subagent` still has to run on the replica that
+  launched the child.
 
 ## Troubleshooting
 

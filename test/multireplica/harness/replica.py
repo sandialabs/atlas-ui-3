@@ -302,6 +302,8 @@ def replica_env(
         "FEATURE_WORKSPACES_ENABLED": "true",
         "FEATURE_RAG_ENABLED": "false",
         "FEATURE_AGENT_RUNS_API_ENABLED": "true",
+        # The sub-conversation tools (atlas_launch_subagent and its readers).
+        "FEATURE_ATLAS_LAUNCH_ENABLED": "true",
         "REQUIRE_TOOL_APPROVAL_BY_DEFAULT": "false",
         "FORCE_TOOL_APPROVAL_GLOBALLY": "false",
         # The registry's built-in default. Until the cap is applied at startup
