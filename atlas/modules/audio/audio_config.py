@@ -43,10 +43,21 @@ def _split_csv(raw: Any) -> Tuple[str, ...]:
 def _base_url_problem(base_url: str) -> Optional[str]:
     if not base_url:
         return "no base URL is set"
-    parsed = urlparse(base_url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    if any(ord(char) <= 0x20 or ord(char) == 0x7F for char in base_url):
+        return "the base URL contains whitespace or a control character"
+    # urlparse raises ValueError for some malformed URLs (an unclosed IPv6
+    # bracket) and so does reading ``.port`` (a port that is not a number).
+    # A typo in an audio setting must switch that capability off, not take
+    # down the config endpoints that report it.
+    try:
+        parsed = urlparse(base_url)
+        hostname, _port = parsed.hostname, parsed.port
+        has_credentials = bool(parsed.username or parsed.password)
+    except ValueError:
+        return "the base URL could not be parsed"
+    if parsed.scheme not in ("http", "https") or not hostname:
         return "the base URL is not an http(s) URL"
-    if parsed.username or parsed.password:
+    if has_credentials:
         return "the base URL must not carry credentials; use the API key setting"
     return None
 

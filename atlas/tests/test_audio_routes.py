@@ -144,24 +144,41 @@ def test_capabilities_are_independent(client, test_user_headers, upstream, audio
         ("audio_stt_base_url", ""),
         ("audio_stt_base_url", "ftp://stt.test/v1"),
         ("audio_stt_base_url", "http://user:pw@stt.test/v1"),
+        # These make urlparse (or reading the port) raise rather than return.
+        ("audio_stt_base_url", "http://[::1:8000/v1"),
+        ("audio_stt_base_url", "http://stt.test:port/v1"),
+        ("audio_stt_base_url", "http://:8000/v1"),
+        ("audio_stt_base_url", "http://stt.test:8000/v 1"),
+        ("audio_stt_base_url", "http://stt.test:8000/v1\x7f"),
         ("audio_stt_model", ""),
     ],
 )
 def test_incomplete_stt_configuration_is_treated_as_disabled(client, test_user_headers, upstream, audio_on, monkeypatch, field, value):
     monkeypatch.setattr(audio_on, field, value)
     assert post_clip(client, test_user_headers).status_code == 404
-    config = client.get("/api/config/shell", headers=test_user_headers).json()
-    assert config["audio"]["stt"]["enabled"] is False
-    assert config["audio"]["tts"]["enabled"] is True
+    # A broken audio setting disables that capability only: both config
+    # endpoints still answer, and the other capability is unaffected.
+    for path in ("/api/config/shell", "/api/config"):
+        response = client.get(path, headers=test_user_headers)
+        assert response.status_code == 200, path
+        assert response.json()["audio"]["stt"]["enabled"] is False
+        assert response.json()["audio"]["tts"]["enabled"] is True
 
 
 @pytest.mark.parametrize(
     "field,value",
-    [("audio_tts_base_url", ""), ("audio_tts_model", ""), ("audio_tts_voice", ""), ("audio_tts_response_format", "exe")],
+    [
+        ("audio_tts_base_url", ""),
+        ("audio_tts_base_url", "http://[::1:9000/v1"),
+        ("audio_tts_model", ""),
+        ("audio_tts_voice", ""),
+        ("audio_tts_response_format", "exe"),
+    ],
 )
 def test_incomplete_tts_configuration_is_treated_as_disabled(client, test_user_headers, upstream, audio_on, monkeypatch, field, value):
     monkeypatch.setattr(audio_on, field, value)
     assert post_speech(client, test_user_headers).status_code == 404
+    assert client.get("/api/config/shell", headers=test_user_headers).json()["audio"]["tts"]["enabled"] is False
     assert upstream.requests == []
 
 
@@ -414,6 +431,15 @@ def test_transcription_timeout_is_a_504(client, test_user_headers, upstream, aud
 
     upstream.handler = slow
     assert post_clip(client, test_user_headers).status_code == 504
+
+
+def test_a_url_the_http_client_rejects_is_a_502_not_a_500(client, test_user_headers, upstream, audio_on):
+    def invalid(request):
+        raise httpx.InvalidURL("Invalid non-printable ASCII character in URL")
+
+    upstream.handler = invalid
+    assert post_clip(client, test_user_headers).status_code == 502
+    assert post_speech(client, test_user_headers).status_code == 502
 
 
 def test_transcription_connection_failure_is_a_502(client, test_user_headers, upstream, audio_on):

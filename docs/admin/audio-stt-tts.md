@@ -84,10 +84,12 @@ to the `atlas-ui` service from your shell environment or the `.env` file next
 to it, with the defaults above, so they are set the same way there.
 
 A capability that is switched on but incompletely configured (no base URL,
-a base URL that is not `http(s)`, no model, no voice for text-to-speech, or
+a base URL that is not a well-formed `http(s)` URL, no model, no voice for text-to-speech, or
 an unknown response format) stays **off**: its button is hidden and its
 endpoint answers 404. The reason is written to the application log once, as
-`FEATURE_AUDIO_STT_ENABLED is true but the capability stays off: ...`.
+`FEATURE_AUDIO_STT_ENABLED is true but the capability stays off: ...`. A
+mistake in one capability's settings never affects the other capability or
+the rest of Atlas.
 
 The model, the voice and the endpoint are chosen by the administrator only.
 A request from the browser cannot name a different one.

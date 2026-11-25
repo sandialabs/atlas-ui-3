@@ -113,7 +113,10 @@ async def _post(config: AudioCapabilityConfig, path: str, response_limit: int, *
         return await asyncio.wait_for(run(), timeout=config.timeout_seconds)
     except (asyncio.TimeoutError, httpx.TimeoutException):
         raise AudioUpstreamError(504, "The speech service did not answer in time.", "timeout") from None
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        # InvalidURL is not an HTTPError: a base URL that passed the settings
+        # check but that httpx still will not request. Only the exception
+        # type is logged; its message can contain the URL.
         logger.warning("Audio %s request failed: %s", config.name, type(exc).__name__)
         raise AudioUpstreamError(502, "The speech service could not be reached.", "unreachable") from None
 
