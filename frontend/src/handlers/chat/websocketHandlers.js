@@ -1014,6 +1014,21 @@ export function createWebSocketHandler(deps) {
         case 'warning':
           addMessage({ role: 'system', content: `Warning: ${data.message}`, type: 'warning', timestamp: new Date().toISOString() })
           break
+        // Acknowledgements of reset_session / restore_conversation. WSContext
+        // matches them to the held frame; nothing else needs to react.
+        case 'session_reset':
+        case 'conversation_restored':
+          break
+        // Raised by WSContext when a New Chat or a conversation switch could not
+        // be confirmed by the server (timeout, or held too long while offline).
+        case 'navigation_failed':
+          addMessage({
+            role: 'system',
+            content: `${data.message || 'The server did not confirm the change.'} The chat on screen may not match the server session; reload the page if replies look wrong.`,
+            type: 'warning',
+            timestamp: new Date().toISOString(),
+          })
+          break
         case 'error':
           // The reply to a malformed background `list_runs` poll is not about
           // anything the user did: it must neither land in the transcript nor

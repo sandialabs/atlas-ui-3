@@ -42,7 +42,7 @@ AGENT_RUNS_API_KEY=...
 
 ## Endpoints
 
-A terminal run also carries `end_reason`: `completed`, `user_cancelled`, `error`, `wall_clock_limit`, or `replica_shutdown` when the replica running it shut down (status `failed`; see [Multi-Replica Observability](multi-replica-observability.md)).
+A terminal run also carries `end_reason`: `completed`, `user_cancelled`, `error`, `wall_clock_limit`, `replica_shutdown` when the replica running it shut down, `owner_lost` when the owning replica lost its lease, or `fenced` when execution was interrupted by fencing (see [Multi-Replica Observability](multi-replica-observability.md)).
 
 All requests carry `Authorization: Bearer <AGENT_RUNS_API_KEY>`. The full schema is in the
 server's OpenAPI document (`/openapi.json`, browsable at `/docs`) under the `agent-runs` tag.
@@ -222,7 +222,7 @@ Redis stayed unreachable for the 2 minute pending window), that request is abort
 `503 unavailable` with nothing left running (a run admitted a moment before the loss is
 cancelled); the loss is counted as an `idempotency_reservation_lost` coordination event. A retry of a follow-up replays on
 any replica, naming either the run it addressed or any other run of that conversation (the
-conversation is read from the run's shared record, kept 5 minutes after the run ends; after that,
+conversation is read from the run's shared record, normally kept 30 minutes after the run ends; after that,
 only the originally addressed run id replays; if that record cannot be read the retry is refused
 with `503 unavailable` rather than `404`). The shared keys have no entry cap: each is one
 small hash, kept at most 24 hours, and only the one trusted service holding the master key can
@@ -235,20 +235,36 @@ memory of the replica that accepted them and are lost on restart.
   other. With Redis the cap counts the user's runs on every replica, browser runs included; the `atlas_launch_subagent` depth and fan-out caps do not apply to the API run itself (it is a
   root, depth 0) but do apply to anything it launches. The global HTTP rate limiter applies to
   these endpoints. Messages are limited to 20,000 characters.
-- **Run state is per replica, status is shared.** Follow-up and listing
-  are served by the replica that accepted the launch, and only while the registry retains the run
-  (30 minutes after it ends). **Cancel** is the exception: with `SESSION_REPOSITORY_TYPE=redis`
-  any replica accepts it and stops the run on the replica executing it (see
-  [cross-replica run control](../developer/run-control.md)); a `504 command_timeout` means that
-  replica did not confirm in time, and repeating the cancel is safe. A cancel naming a run that finished in the last 5 minutes still reaches the replica that ran it, so its sub-conversations and the conversation's in-progress follow-up are stopped from any replica. A `503 owner_unavailable` means the shared run directory could not be read; nothing was stopped, and the cancel can be repeated. With `SESSION_REPOSITORY_TYPE=redis`, `GET /api/agent-runs/{run_id}`
-  answers on every replica from the run's shared record, kept 5 minutes after the run ends
-  ([run coordination](../developer/run-coordination.md));
-  otherwise a status request that reaches another replica gets `404 run_not_found`. Behind
-  several replicas, route the other endpoints to one replica or use sticky routing. When the
-  replica running a run is lost, the others report the run `failed` with `interrupted: true`
-  within about `RUN_LEASE_SECONDS` (default 30) to one and a half times that; nothing is
-  retried. Saved transcripts are unaffected -- every completed turn is in the user's
-  conversation history, where the user can read and continue it.
+- **Redis-backed replicas share retained API run state.** With
+  `SESSION_REPOSITORY_TYPE=redis`, status, follow-up, listing and cancel can
+  be requested on any replica. The retained run records normally expire 30
+  minutes after completion; they are not durable history. A follow-up checks
+  the latest API admission for the conversation and starts a new run on the
+  receiving replica, including after the previous replica has restarted.
+  The new admission checks the predecessor atomically with the conversation
+  claim, so a concurrent turn cannot restore older tool permissions. Missing
+  continuation metadata or unavailable Redis produces `503 unavailable`,
+  rather than falling back to local admission. A stale predecessor produces
+  `409 conversation_busy`; retry the request to resolve the latest state.
+  Cancellation still routes to the executing replica (see
+  [cross-replica run control](../developer/run-control.md)); a
+  `504 command_timeout` means it did not confirm in time. Without Redis,
+  status, follow-up and listing remain local and are lost on restart.
+  A lost owner is reported as `failed` with `interrupted: true` and
+  `end_reason: owner_lost` once the shared orphan record is closed, including
+  when the former owner serves the detail request. Before that shared terminal
+  record exists, the former owner's local status may report `fenced`.
+  Tools are never automatically replayed. PostgreSQL conversation history is
+  unaffected. Retained listings skip individually unreadable records and log
+  the failures; if every member read fails (or the index cannot be read), the
+  listing returns `503 unavailable`.
+- **Upgrade note:** do not mix replicas running the old local-only API
+  continuation path with replicas using shared admission. Quiesce API
+  launches and follow-ups, drain active runs, and upgrade all replicas before
+  re-enabling these endpoints. Retained runs admitted before the upgrade
+  have no continuation record or retained API index entry; use their
+  conversation history rather than reconstructing a continuation from
+  potentially stale local settings.
 - The API can see and act only on runs it started. A run the user started in the browser, or one
   started by `atlas_launch_subagent`, answers `404 run_not_found` here even by its correct id.
 

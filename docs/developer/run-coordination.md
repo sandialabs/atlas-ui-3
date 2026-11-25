@@ -65,7 +65,29 @@ rather than a turn that bypasses the cap.
 
 If the claim's reply is lost (a timeout after Redis applied it), the
 coordinator releases whatever this replica holds under that run id before
-reporting the failure.
+reporting the failure. For API turns, CLAIM exposes the routing source but stages
+the continuation spec without updating the latest pointer or retained indexes.
+The local record holds the claim before publication can suspend. Publication
+checks that the original claim is still held. A refused publication removes
+the local record and attempts to undo the shared claim. Its original publication
+identity permits metadata cleanup after lease expiry or orphan takeover, without
+releasing a different run's lock or overwriting a newer continuation pointer.
+Publication also records a provisional marker in the shared run hash. The
+marker is cleared by an explicit successful activation renewal at the API task
+execution gate, or a normal terminal release after acknowledged admission.
+Routine heartbeat renewals never activate a provisional run. The gate retries
+unknown renewal replies twice, but never starts work without confirmed ownership. Before that point, the prior continuation is retained for at least
+the provisional pointer's lifetime. A shutdown or cancel during publication
+releases the admission as refused, not as an accepted terminal turn.
+
+The owner's orphan sweep retries known refusals promptly. If the owner
+disappears before cleanup succeeds, any replica's existing orphan sweep rolls
+back the expired provisional publication atomically, restores a still-retained
+predecessor, and removes the refused run from the retained indexes. A tombstone
+keeps the projection-close obligation until that close is confirmed. Runs that
+reached the execution boundary instead retain the normal owner-lost outcome.
+The marker tracks shared admission/activation, not receipt of the HTTP response
+by the client; it cannot provide exactly-once HTTP delivery.
 
 If Redis cannot be reached, admission **fails closed** with
 `RunCoordinationUnavailableError` (REST 503 `unavailable`, WebSocket
@@ -125,6 +147,9 @@ rather than formatting keys by hand.
 | `<p>:run-conv:<conversation_id>` | string | `run_id` of the run holding the conversation, for every user (conversation ids are global in storage) | `PX` = lease, renewed |
 | `<p>:run-user:<user>` | sorted set | The user's claimed `run_id`s, scored by lease expiry (epoch ms) | 2 x lease, renewed |
 | `<p>:run-fence` | string | Fencing counter, only ever `INCR`ed (by claims and by takeovers), floored at Redis time (microseconds) | Persistent |
+| `<p>:run-api-latest:<conversation_id>` | string | Latest accepted API admission; compare predecessor inside CLAIM, publish after the local insert | Until the last retained API run in the conversation expires |
+| `<p>:run-api-latest:<conversation_id>:retained` | sorted set | Conversation API run IDs scored by expiry; determines the latest pointer and spec lifetime | Expires with its last member |
+| `<p>:runs-api`, `<p>:runs-api-user:<user>` | sorted set | Global and per-user retained API run IDs, scored by record expiry | Prune expired scores on writes and listing; expire the index with its last member |
 | `<p>:runs-live` | sorted set | Every claimed, unreleased `run_id`, scored by lease expiry (epoch ms); read by the orphan sweep | Removed on release; after a takeover, once the run's projection is closed |
 | `<p>:ctl:<replica_id>` | stream | Run-control inbox of one replica: envelopes for stop, steer, approval ([run control](run-control.md)) | Entries deleted on read; trimmed to ~1000; inbox TTL, refreshed per send |
 | `<p>:ctl-reply:<scope>` | stream | Replies to one request (`scope` hashes actor and request id) | reply TTL |
@@ -428,10 +453,12 @@ routing stop/steer/approval to the owner are all covered. That file covers the
 browser run path. These pieces are still replica-local and are not gaps in
 that file:
 
-- The Agent Runs API follow-up and list endpoints, and the
-  `atlas_follow_up_subagent` tool, read the replica's own run registry.
-  Status by run id (`get_api_run_anywhere`), cancel and the idempotency keys
-  are cluster-wide, and so are the launch result and the listing of
+- The `atlas_follow_up_subagent` tool reads the replica's own run registry.
+  The Agent Runs API follow-up and list endpoints are not replica-local:
+  with Redis they use the retained API run records and the per-conversation
+  continuation pointer (see the CLAIM notes above). Status by run id
+  (`get_api_run_anywhere`), cancel and the idempotency keys are cluster-wide,
+  and so are the launch result and the listing of
   sub-conversations (`atlas_get_subagent_result` and
   `atlas_get_subagent_runs`, see
   [reading sub-conversations from any replica](#reading-sub-conversations-from-any-replica)).

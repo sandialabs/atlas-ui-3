@@ -159,6 +159,7 @@ def shared_view(raw: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     if raw.get("error"):
         view["error"] = raw["error"]
     if raw.get("interrupted") == "1":
+        view["end_reason"] = EndReason.OWNER_LOST.value
         view["ended_at"] = int(raw.get("updated_at") or 0) / 1000.0
         view["updated_at"] = view["ended_at"]
     return view
@@ -419,7 +420,7 @@ class RunLeaseGuard:
             record.status.value,
             json.dumps(run_snapshot(record), default=str),
             record.error or "",
-            (record.launch_spec or {}).get("source") or "",
+            (record.launch_spec or {}).get("source") or record.source or "",
         )
 
     async def publish_now(self, run_id: str) -> None:
@@ -533,6 +534,11 @@ class RunLeaseGuard:
     # -- orphan sweep (any replica) -------------------------------------------------
 
     async def sweep_once(self) -> List[str]:
+        # Retry refused API publications outside the lease-renewal heartbeat:
+        # a slow cleanup must not delay renewal of unrelated live runs.
+        retry_refusals = getattr(self._coordinator, "retry_api_refusals", None)
+        if retry_refusals is not None:
+            await retry_refusals()
         for run_id, lease in list(self._leases.items()):
             if self._registry.get(run_id) is None:
                 self._leases.pop(run_id, None)  # reaped here: nothing left to track
