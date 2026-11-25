@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from redis.exceptions import WatchError
 
+from atlas.application.chat.runs.context import is_foreign_run_frame
 from atlas.application.chat.runs.coordination import RUN_RETENTION_SECONDS
 from atlas.core.user_identity import normalize_user_email
 
@@ -1263,7 +1264,8 @@ def stamp_callback_identity(inner, identity: dict):
         return inner
 
     async def tagged(payload):
-        payload = _with_invocation_identity(payload, identity)
+        if not is_foreign_run_frame(payload, identity.get("run_id")):
+            payload = _with_invocation_identity(payload, identity)
         if inner is not None:
             await inner(payload)
 
@@ -1280,7 +1282,7 @@ def observe_tool_callback(inner, identity: dict):
         return inner
 
     async def tagged(payload):
-        if isinstance(payload, dict):
+        if isinstance(payload, dict) and not is_foreign_run_frame(payload, identity.get("run_id")):
             merged = _with_invocation_identity(payload, identity)
             event = dict(merged)
             event["user_email"] = identity.get("user_email")

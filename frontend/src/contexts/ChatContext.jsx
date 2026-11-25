@@ -270,6 +270,16 @@ export const ChatProvider = ({ children }) => {
 	// it was built.
 	const activeConversationIdRef = useRef(null)
 	activeConversationIdRef.current = activeConversationId
+	// Adopt a conversation id the server announced (`run_started`, or
+	// `conversation_saved`) so the routing sees it at once. The ref above only
+	// catches up when React next renders, and the run's first tagged frames can
+	// arrive before that: they would not match the still-empty id, be filed as
+	// background activity, and leave a new chat's answer out of the transcript
+	// (issue #1216).
+	const adoptConversationId = useCallback((id) => {
+		activeConversationIdRef.current = id
+		setActiveConversationId(id)
+	}, [])
 	// Canvas documents this tab has shown for the open conversation. A
 	// reconnect or joined poll compares the stored artifact with this, not
 	// with the panel text, which a file view clears (issue #1157).
@@ -659,7 +669,7 @@ export const ChatProvider = ({ children }) => {
 			addAttachment,
 			resolvePendingFileEvent,
 			setPendingElicitation,
-			setActiveConversationId,
+			setActiveConversationId: adoptConversationId,
 			streamToken,
 			streamEnd,
 			getVisibleConversationId: () => activeConversationIdRef.current,
@@ -717,6 +727,25 @@ export const ChatProvider = ({ children }) => {
 						}
 					}
 				}
+				if (
+					data?.type === 'run_status' &&
+					data.run &&
+					!isRunActive(data.run) &&
+					data.run.conversation_id &&
+					data.run.conversation_id === activeConversationIdRef.current
+				) {
+					// A run that ends on screen must not leave the turn looking busy:
+					// one that fails before any token (a start-up failure) sends no
+					// other frame to clear it. Skipped when the tracker holds a
+					// different run for this conversation -- a newer turn is live and
+					// the terminal frame belongs to the older one.
+					const tracked = runs.getRun(data.run.conversation_id)
+					if (!tracked || !tracked.run_id || tracked.run_id === data.run.run_id) {
+						setIsThinking(false)
+						setIsAgentRunning(false)
+						setIsSynthesizing(false)
+					}
+				}
 				runs.handleRunFrame(data)
 			},
 			// The joined conversation's turn is on disk: reload now rather than
@@ -728,7 +757,7 @@ export const ChatProvider = ({ children }) => {
 		})
 		return addMessageHandler(handler)
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, setActiveConversationId, streamToken, streamEnd, runs.handleRunFrame])
+	}, [addMessageHandler, addMessage, mapMessages, agent.setCurrentAgentStep, files, triggerFileDownload, addAttachment, addPendingFileEvent, resolvePendingFileEvent, adoptConversationId, streamToken, streamEnd, runs.handleRunFrame])
 
 	// Refs so the message handler above (rebuilt only when its deps change)
 	// sees the current settings and socket without re-subscribing per change.
@@ -740,8 +769,8 @@ export const ChatProvider = ({ children }) => {
 	// The UI already shows the new value; dropping the frame would leave a
 	// run on this replica approving tools the user just turned off. The
 	// pending ref does not survive a reload, so a fresh connection also
-	// sends the value saved in settings. That update reaches only the runs
-	// this connection's server process owns.
+	// sends the value saved in settings. The server applies it to the user's
+	// runs on its own replica and routes it to the runs other replicas own.
 	const pendingAutoApproveRef = useRef(null)
 	const readLatestSettingsRef = useRef(readLatestSettings)
 	readLatestSettingsRef.current = readLatestSettings
@@ -1413,7 +1442,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		if (agent?.setCurrentAgentStep) agent.setCurrentAgentStep(0)
 		if (agent?.setAgentPendingQuestion) agent.setAgentPendingQuestion(null)
 		setIsWelcomeVisible(true)
-		setActiveConversationId(null)
+		// Through the adopt helper so frames from the abandoned conversation
+		// that land before the next render are not routed to the fresh chat.
+		adoptConversationId(null)
 		setFollowUpSuggestions([])
 		// A deferred workspace restore queued by a previous load must not
 		// fire into the fresh chat once the workspace list finishes loading.
@@ -1458,7 +1489,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			undoOfferRef.current = { token, toastId }
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {

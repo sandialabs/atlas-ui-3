@@ -55,6 +55,16 @@ export function useConversationRuns() {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.
 					const prior = runsRef.current[run.conversation_id]
+					// A snapshot reporting a fence for a run this tab knows completed or
+					// saved is the late fence again (issue #1218): keep what is known.
+					if (
+						run.end_reason === 'fenced'
+						&& prior?.run_id === run.run_id
+						&& (prior.status === 'completed' || prior.saved)
+					) {
+						next[run.conversation_id] = { ...prior }
+						continue
+					}
 					// Likewise how the run was launched (issue #1187): a replica that
 					// does not hold the run lists it without the origin, and that
 					// must not erase one this tab already learned for the same run.
@@ -65,6 +75,7 @@ export function useConversationRuns() {
 						...run,
 						...((!run.title && prior?.title) ? { title: prior.title } : {}),
 						launch_origin: origin,
+						...(prior?.run_id === run.run_id && prior.saved ? { saved: true } : {}),
 					}
 				}
 			}
@@ -103,6 +114,16 @@ export function useConversationRuns() {
 		if (data.type === 'run_status' && data.run) {
 			applyRuns(prev => {
 				const prior = prev[data.run.conversation_id]
+				// A run that already ended (completed, stopped, failed in the model
+				// call, shutdown) committed its turn. A fence arriving afterwards must
+				// not flag it Interrupted or say it was not saved (issue #1218).
+				if (data.run.end_reason === 'fenced' && prior) {
+					// Its own turn was committed: completed, or its save was reported.
+					if (prior.run_id === data.run.run_id && (prior.status === 'completed' || prior.saved)) return prev
+					// A late fence for an older run must not replace a newer live run.
+					// Its own record, ended or not, is the newer fact.
+					if (prior.run_id !== data.run.run_id) return prev
+				}
 				const title = data.run.title || prior?.title || null
 				const parentConversationId = data.run.parent_conversation_id
 					|| prior?.parent_conversation_id
@@ -117,13 +138,28 @@ export function useConversationRuns() {
 						...(title ? { title } : {}),
 						parent_conversation_id: parentConversationId,
 						launch_origin: launchOrigin,
+						...(prior?.run_id === data.run.run_id && prior.saved ? { saved: true } : {}),
 					},
 				}
 			})
 			return
 		}
-		if (data.type === 'background_activity' && data.frame?.type === 'conversation_saved') {
-			setBackgroundSaves(n => n + 1)
+		if (data.type === 'run_saved' || (data.type === 'background_activity' && data.frame?.type === 'conversation_saved')) {
+			// Remember that this run's turn is on disk (issue #1218): a fence that
+			// arrives later must not call it lost.
+			const savedRunId = data.type === 'run_saved' ? data.run_id : data.frame.run_id
+			const savedConversation = data.type === 'run_saved' ? data.conversation_id : data.frame.conversation_id
+			if (savedRunId) {
+				// Found by run id: a save that rebinds the thread names the new
+				// conversation, while the record is keyed by the old one.
+				applyRuns(prev => {
+					const key = prev[savedConversation]?.run_id === savedRunId
+						? savedConversation
+						: Object.keys(prev).find(k => prev[k]?.run_id === savedRunId)
+					return key ? { ...prev, [key]: { ...prev[key], saved: true } } : prev
+				})
+			}
+			if (data.type === 'background_activity') setBackgroundSaves(n => n + 1)
 			return
 		}
 		if (data.type === 'background_activity' && data.conversation_id) {

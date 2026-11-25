@@ -56,6 +56,12 @@ def test_a_save_that_moves_the_thread_to_a_new_conversation_is_not_tagged():
     """The client adopts the new id only from an event it does not file as background."""
     rebind = {"type": "conversation_saved", "conversation_id": "conv-branch"}
     assert "run_id" not in tag_run_event(rebind, "run-1", "conv-1")
+    # The run is named in fields the client's routing does not read.
+    named = tag_run_event(rebind, "run-1", "conv-1")
+    assert named["saved_run_id"] == "run-1"
+    assert named["saved_from_conversation_id"] == "conv-1"
+    assert named["conversation_id"] == "conv-branch"
+    assert "saved_run_id" not in rebind  # the caller's event is not mutated
     same = tag_run_event({"type": "conversation_saved", "conversation_id": "conv-1"}, "run-1", "conv-1")
     assert same["run_id"] == "run-1"
 

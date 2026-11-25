@@ -339,7 +339,10 @@ async def test_resume_rehydrates_from_chat_history_instead_of_the_snapshot(serve
     replica_b.conversation_repository.get_conversation_owner.return_value = USER
     resumed = await main._resume_connection_session(replica_b, str(session_id), USER)
     assert resumed.history.messages == []
-    assert resumed.context["conversation_id"] == "conv-42"
+    # The stored conversation is no longer the session's own: an id-less chat
+    # must not run in it (issue #1217). A follow-up that names it still loads
+    # it from chat history, below.
+    assert resumed.context["conversation_id"] != "conv-42"
 
     hydrate = AsyncMock(return_value=0)
     with patch.object(replica_b, "_hydrate_session_from_store", new=hydrate), \

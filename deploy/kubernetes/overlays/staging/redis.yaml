@@ -1,6 +1,9 @@
-# Staging Redis for live session state. Unreplicated and without persistence:
-# losing it costs only resumable session state (docs/admin/session-store.md),
-# and the outage drill in the runbook restarts it on purpose.
+# Staging Redis for live session state and run coordination. Unreplicated and
+# without persistence. Losing it costs resumable session state, and an outage
+# longer than the run lease (default 30 s, RUN_LEASE_SECONDS) also cancels in-flight runs and loses their
+# unsaved turn (docs/admin/session-store.md). The outage drill in the runbook
+# restarts it on purpose. maxmemory is unset, so the policy is noeviction; keep
+# it that way, since evicting a run's claim record cancels the run.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
