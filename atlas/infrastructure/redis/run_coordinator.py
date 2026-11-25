@@ -371,7 +371,7 @@ return freed
 """
 
 # KEYS: run, conv, user, live
-# ARGV: run_id, owner, generation, status, lease_ms, retention_ms, key_prefix
+# ARGV: run_id, owner, generation, status, lease_ms, retention_ms, key_prefix, activate_api
 RENEW_SCRIPT = _NOW + _SUBTREE + """
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[3] then return 0 end
 if redis.call('HGET', KEYS[1], 'owner') ~= ARGV[2] then return 0 end
@@ -390,7 +390,7 @@ redis.call('SET', KEYS[2], ARGV[1], 'PX', lease)
 redis.call('ZADD', KEYS[3], expires, ARGV[1])
 redis.call('PEXPIRE', KEYS[3], lease * 2)
 redis.call('HSET', KEYS[1], 'status', ARGV[4], 'lease_expires_at', expires, 'updated_at', now)
-if ARGV[4] ~= 'queued' then
+if ARGV[8] == '1' then
   redis.call('HDEL', KEYS[1], 'api_admission_unconfirmed')
 end
 expire_both(ARGV[7], ARGV[1], lease + tonumber(ARGV[6]))
@@ -644,7 +644,14 @@ class RedisRunCoordinator:
                 # Redis is still unavailable. Try again on the next sweep.
                 break
 
-    async def renew(self, claims: Iterable[RunClaim], statuses: Dict[str, str]) -> Dict[str, bool]:
+    async def activate_api(self, claim: RunClaim) -> Optional[bool]:
+        """Confirm the execution boundary independently of heartbeat status."""
+        held = await self.renew([claim], {claim.run_id: "running"}, activate_api=True)
+        return held.get(claim.run_id)
+
+    async def renew(
+        self, claims: Iterable[RunClaim], statuses: Dict[str, str], *, activate_api: bool = False
+    ) -> Dict[str, bool]:
         """Renew concurrently (bounded), so one beat stays well inside the lease
         even with many live runs on a slow link."""
         semaphore = asyncio.Semaphore(RENEW_CONCURRENCY)
@@ -667,6 +674,7 @@ class RedisRunCoordinator:
                             self._lease_ms,
                             self._retention_ms,
                             self._prefix,
+                            "1" if activate_api else "0",
                         ],
                     )
                 except Exception as exc:

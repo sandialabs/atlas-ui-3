@@ -485,3 +485,23 @@ async def test_api_claim_source_visible_before_publication(server):
     assert await b.read_api_continuation("api-conv") is None
     assert await b.read_api_runs() == []
     await a.release(claim, "failed")
+
+
+async def test_api_heartbeat_does_not_activate_and_unknown_activation_is_retryable(server):
+    a = _coordinator(server, "a")
+    claim = await _api_claim(a, "first")
+    held = await a.renew([claim], {"first": "running"})
+    assert held == {"first": True}
+    assert (await a.read("first"))["api_admission_unconfirmed"] == "1"
+
+    renew = a._renew
+
+    async def lose_reply(**kwargs):
+        await renew(**kwargs)
+        raise ConnectionError("activation reply lost")
+
+    a._renew = lose_reply
+    assert await a.activate_api(claim) is None
+    a._renew = renew
+    assert await a.activate_api(claim) is True
+    assert "api_admission_unconfirmed" not in await a.read("first")

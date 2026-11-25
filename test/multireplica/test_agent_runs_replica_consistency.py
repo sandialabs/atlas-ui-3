@@ -190,6 +190,10 @@ def test_refused_publication_reconciles_after_lease_expiry(shared_infra, monkeyp
             await a.publish_api_admission(next_run)
             held = await a.renew([next_run], {next_run.run_id: "running"})
             assert held == {next_run.run_id: True}
+            assert (await b.read(next_run.run_id))["api_admission_unconfirmed"] == "1"
+            activated = await a.activate_api(next_run)
+            assert activated is True
+            assert "api_admission_unconfirmed" not in await b.read(next_run.run_id)
             await a.release(refused, "admission_refused")
             assert (await b.read_api_continuation("conversation"))["run_id"] == next_run.run_id
             # A genuinely activated run must survive owner loss as interrupted,

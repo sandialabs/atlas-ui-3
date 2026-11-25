@@ -121,6 +121,9 @@ class RunCoordinator(Protocol):
     async def publish_api_admission(self, claim: RunClaim) -> None:
         """Publish API continuation metadata after local admission succeeds."""
 
+    async def activate_api(self, claim: RunClaim) -> Optional[bool]:
+        """Confirm execution activation: True held, False lost, None unknown."""
+
     async def release(self, claim: RunClaim, status: str) -> bool:
         """Free the claim, recording the run's final ``status``.
 
@@ -178,6 +181,9 @@ class InProcessRunCoordinator:
 
     async def claim(self, **_kwargs) -> Optional[RunClaim]:
         return None
+
+    async def activate_api(self, claim: RunClaim) -> Optional[bool]:
+        return True
 
     async def release(self, claim: RunClaim, status: str) -> bool:
         return False

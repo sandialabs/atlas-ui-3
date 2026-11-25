@@ -604,6 +604,22 @@ async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
     return ""
 
 
+async def _confirm_api_activation(record: Any, claim: Any) -> None:
+    """Retry unknown replies, never start work without confirmed ownership."""
+    coordinator = get_run_coordinator()
+    for attempt in range(3):
+        if record.is_terminal or record.claim is not claim or record.lost_claim is not None:
+            break
+        held = await coordinator.activate_api(claim)
+        if held is True and not record.is_terminal and record.claim is claim and record.lost_claim is None:
+            return
+        if held is not None:
+            break
+        if attempt < 2:
+            await asyncio.sleep(0.1)
+    raise RunCoordinationUnavailableError("API execution admission unavailable")
+
+
 async def _run_child(
     *,
     chat_service: Any,
@@ -629,9 +645,7 @@ async def _run_child(
             if record.is_terminal or record.lost_claim is not None:
                 raise RunCoordinationUnavailableError("API execution admission unavailable")
             if claim is not None:
-                held = await get_run_coordinator().renew([claim], {record.run_id: RunStatus.RUNNING.value})
-                if held.get(record.run_id) is not True or record.is_terminal or record.claim is not claim:
-                    raise RunCoordinationUnavailableError("API execution admission unavailable")
+                await _confirm_api_activation(record, claim)
         response = await chat_service.handle_chat_message(
             session_id=record.session_id,
             content=prompt,

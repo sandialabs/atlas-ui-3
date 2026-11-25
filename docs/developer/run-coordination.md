@@ -73,9 +73,10 @@ the local record and attempts to undo the shared claim. Its original publication
 identity permits metadata cleanup after lease expiry or orphan takeover, without
 releasing a different run's lock or overwriting a newer continuation pointer.
 Publication also records a provisional marker in the shared run hash. The
-marker is cleared by a successful running-state lease renewal (required before
-the API task begins work), or a normal terminal release after acknowledged
-admission. Before that point, the prior continuation is retained for at least
+marker is cleared by an explicit successful activation renewal at the API task
+execution gate, or a normal terminal release after acknowledged admission.
+Routine heartbeat renewals never activate a provisional run. The gate retries
+unknown renewal replies twice, but never starts work without confirmed ownership. Before that point, the prior continuation is retained for at least
 the provisional pointer's lifetime. A shutdown or cancel during publication
 releases the admission as refused, not as an accepted terminal turn.
 
