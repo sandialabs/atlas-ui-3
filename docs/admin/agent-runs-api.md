@@ -250,9 +250,14 @@ memory of the replica that accepted them and are lost on restart.
   [cross-replica run control](../developer/run-control.md)); a
   `504 command_timeout` means it did not confirm in time. Without Redis,
   status, follow-up and listing remain local and are lost on restart.
-  A lost owner is reported as `failed` with `interrupted: true`; tools
-  are never automatically replayed. PostgreSQL conversation history is
-  unaffected.
+  A lost owner is reported as `failed` with `interrupted: true` and
+  `end_reason: owner_lost` once the shared orphan record is closed, including
+  when the former owner serves the detail request. Before that shared terminal
+  record exists, the former owner's local status may report `fenced`.
+  Tools are never automatically replayed. PostgreSQL conversation history is
+  unaffected. Retained listings skip individually unreadable records and log
+  the failures; if every member read fails (or the index cannot be read), the
+  listing returns `503 unavailable`.
 - **Upgrade note:** do not mix replicas running the old local-only API
   continuation path with replicas using shared admission. Quiesce API
   launches and follow-ups, drain active runs, and upgrade all replicas before

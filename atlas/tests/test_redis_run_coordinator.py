@@ -505,3 +505,37 @@ async def test_api_heartbeat_does_not_activate_and_unknown_activation_is_retryab
     a._renew = renew
     assert await a.activate_api(claim) is True
     assert "api_admission_unconfirmed" not in await a.read("first")
+
+
+async def test_api_listing_isolates_failed_member_reads(server, monkeypatch, caplog):
+    from redis.exceptions import ResponseError
+
+    a = _coordinator(server, "a")
+    first = await _api_claim(a, "first")
+    await a.release(first, "completed")
+    await _api_claim(a, "second", previous="first")
+    original = a.read
+
+    async def read(run_id):
+        if run_id == "first":
+            raise ResponseError("unreadable record")
+        return await original(run_id)
+
+    monkeypatch.setattr(a, "read", read)
+    assert [r["run_id"] for r in await a.read_api_runs(USER)] == ["second"]
+    assert "Skipping unreadable API run record" in caplog.text
+    assert a._redis.stats.command_errors == 1
+
+
+async def test_api_listing_propagates_total_member_read_failure(server, monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    a = _coordinator(server, "a")
+    await _api_claim(a, "first")
+
+    async def read(run_id):
+        raise ConnectionError("unavailable")
+
+    monkeypatch.setattr(a, "read", read)
+    with pytest.raises(ConnectionError):
+        await a.read_api_runs(USER)

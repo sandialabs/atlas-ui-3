@@ -716,9 +716,27 @@ class RedisRunCoordinator:
         ids = await client.zrange(index, 0, -1)
         # Read in bounded batches; a record can expire between index and read.
         records = []
+        first_error = None
+        successful_reads = 0
         for start in range(0, len(ids), 100):
-            batch = await asyncio.gather(*(self.read(_text(i)) for i in ids[start:start + 100]))
-            records.extend(record for record in batch if record is not None)
+            batch = await asyncio.gather(
+                *(self.read(_text(i)) for i in ids[start:start + 100]),
+                return_exceptions=True,
+            )
+            for record in batch:
+                if isinstance(record, Exception):
+                    if first_error is None:
+                        first_error = record
+                    self._redis.stats.record_error(record, op="api_run_listing_member")
+                    logger.warning("Skipping unreadable API run record: %s", type(record).__name__)
+                elif isinstance(record, BaseException):
+                    raise record  # cancellation must not become a partial listing
+                else:
+                    successful_reads += 1
+                    if record is not None:
+                        records.append(record)
+        if first_error is not None and not successful_reads:
+            raise first_error
         return records
 
     async def read(self, run_id: str) -> Optional[Dict[str, str]]:

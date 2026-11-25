@@ -820,40 +820,49 @@ def _status_from_shared(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def get_api_run_anywhere(run_id: str) -> Dict[str, Any]:
-    """:func:`get_api_run`, falling back to the shared run record.
+    """Read local status, or the shared record for remote or fenced runs.
 
-    The replica that owns a run answers from its registry. Any other
-    replica answers from the record the owner mirrors to Redis -- including
-    a run whose owner died, which the orphan sweep marked interrupted.
+    Once a local run has been fenced, its local terminal reason is no longer
+    authoritative. An orphan sweep may have closed the shared run as owner_lost.
     """
-    try:
-        return get_api_run(run_id)
-    except LaunchRefused:
-        from atlas.application.chat.runs.leases import get_lease_guard
+    from atlas.core.user_identity import normalize_user_email
 
-        guard = get_lease_guard()
-        if guard is None:
-            raise
+    local = None
+    not_found = None
+    try:
+        local = get_api_run(run_id)
+    except LaunchRefused as exc:
+        not_found = exc
+    if local is not None and not local["interrupted"]:
+        return local
+
+    guard = get_lease_guard()
+    if guard is not None:
         try:
             doc = await guard.read_record(run_id)
         except Exception as exc:
             # Not "no such run": a client that relaunches on 404 would repeat
             # a live run's side effects.
-            logger.warning("shared run record unreadable: %s", type(exc).__name__)
-            raise LaunchRefused(
-                "The run's status could not be read right now. Try again.", code="unavailable"
-            ) from exc
-        if doc is None:
-            raise
-        if doc.get("snapshot_unreadable"):
-            raise LaunchRefused(
-                "The run's status could not be read right now. Try again.", code="unavailable"
-            )
-        # The source is in the record from admission, so a run that is not an
-        # API run is known not to be one.
-        if doc.get("source") != API_SOURCE:
-            raise
-        return _status_from_shared(doc)
+            _note_shared_api_read_failure(exc, "api_run_read")
+            raise _shared_unavailable() from exc
+        if doc is not None:
+            if doc.get("snapshot_unreadable"):
+                raise _shared_unavailable()
+            # Never substitute the status of a non-API run or another user.
+            if doc.get("source") == API_SOURCE:
+                if local is None:
+                    return _status_from_shared(doc)
+                if (
+                    normalize_user_email(doc.get("user_email")) == normalize_user_email(local["user"])
+                    and doc.get("status") in ("completed", "failed", "cancelled")
+                ):
+                    return _status_from_shared(doc)
+
+    if local is not None:
+        # The shared record may have expired or not yet been closed by a sweep.
+        return local
+    assert not_found is not None
+    raise not_found
 
 
 def list_api_runs(user_email: Optional[str] = None) -> List[Dict[str, Any]]:

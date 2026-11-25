@@ -1196,3 +1196,34 @@ def test_shared_view_carries_admission_relations_before_the_first_snapshot():
     plain = shared_view({"run_id": "r3", "status": "queued", "source": "",
                          "parent_run_id": "", "follow_up_of": ""})
     assert plain["parent_run_id"] is None and plain["previous_run_id"] is None
+
+
+async def test_fenced_owner_api_status_matches_shared_listing(server, monkeypatch):
+    from atlas.application.chat.runs import external_runs
+
+    a, b = Replica(server, "A"), Replica(server, "B")
+    record, task = await a.start()
+    try:
+        await a.expire(record)
+        assert await b.guard.sweep_once() == [record.run_id]
+        a.registry.mark_interrupted(record.run_id, INTERRUPTED_ERROR)
+        assert record.end_reason == "fenced"
+        # Replica.start uses the generic admission fixture; supply the retained
+        # API index entry that a real API admission would have published.
+        seconds, micros = await a.client.time()
+        await a.client.zadd(a.keys.api_index(EMAIL), {
+            record.run_id: seconds * 1000 + micros // 1000 + 60000,
+        })
+        monkeypatch.setattr(external_runs, "get_run_registry", lambda: a.registry)
+        set_lease_guard(a.guard)
+        set_run_coordinator(a.coordinator)
+        local = await get_api_run_anywhere(record.run_id)
+        listing = await external_runs.list_api_runs_anywhere(EMAIL)
+        assert len(listing) == 1
+        assert local["end_reason"] == listing[0]["end_reason"] == "owner_lost"
+        assert record.end_reason == "fenced"  # local fencing remains intact
+        monkeypatch.setattr(external_runs, "get_run_registry", lambda: b.registry)
+        set_lease_guard(b.guard)
+        assert (await get_api_run_anywhere(record.run_id))["end_reason"] == "owner_lost"
+    finally:
+        task.cancel()
