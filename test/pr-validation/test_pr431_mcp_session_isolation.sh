@@ -74,7 +74,7 @@ cd "$ATLAS_DIR" && python -m pytest tests/test_multi_prompt.py -v --tb=short 2>&
 print_result $? "Multi-prompt application and meta forwarding"
 
 print_header "7. Adaptive task polling tests"
-cd "$ATLAS_DIR" && python -m pytest tests/test_adaptive_task_polling.py -v --tb=short 2>&1
+cd "$ATLAS_DIR" && python -m pytest tests/test_mcp_background_tasks.py -v --tb=short 2>&1
 print_result $? "Adaptive task polling and cancellation"
 
 print_header "8. Per-user HTTP client tests"

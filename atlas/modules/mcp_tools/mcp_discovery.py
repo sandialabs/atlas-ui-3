@@ -1,6 +1,6 @@
 """Tool/prompt discovery and inventory queries for MCPToolManager.
 
-Per-server discovery (with the task-support cache rebuild) plus the read-only
+Per-server discovery plus the read-only
 inventory accessors that translate discovered tools/prompts into OpenAI-style
 schemas and the lazily-built tool index. config_manager is referenced via the
 client module to preserve test patch targets.
@@ -180,24 +180,6 @@ def _log_deferred_delegated_discovery(server_name, server_config, kind, error) -
 class DiscoveryMixin:
     """Tool/prompt discovery and inventory query helpers."""
 
-    def _apply_task_support_metadata(self, server_name: str, tools) -> None:
-        """Rebuild this server's per-tool task-forbidden cache from fresh metadata.
-
-        Stale entries are dropped first so a server upgrade that flips a tool
-        from "forbidden" to "optional"/"required" takes effect on the next
-        discovery without a process restart. Per MCP SEP-1686, an absent
-        taskSupport value defaults to "forbidden"; only "optional" or
-        "required" leaves us willing to try task mode for a given tool.
-        """
-        self._tool_task_forbidden = {
-            entry for entry in self._tool_task_forbidden
-            if entry[0] != server_name
-        }
-        for tool in tools:
-            mode = self._discover_task_support_mode(tool)
-            if mode in ("forbidden", None):
-                self._tool_task_forbidden.add((server_name, tool.name))
-
     async def _discover_tools_for_server(self, server_name: str, client: Client) -> Dict[str, Any]:
         """Discover tools for a single server. Returns server tools data."""
         safe_server_name = sanitize_for_logging(server_name)
@@ -226,7 +208,6 @@ class DiscoveryMixin:
                     'tools': tools,
                     'config': self.servers_config[server_name]
                 }
-                self._apply_task_support_metadata(server_name, tools)
                 logger.debug("Stored %d tools for %s", len(tools), safe_server_name)
                 return server_data
         except Exception as e:
@@ -473,23 +454,6 @@ class DiscoveryMixin:
             prompt_names = [prompt.name for prompt in server_data.get('prompts', [])]
             logger.debug("Prompt discovery summary: %s: %d prompts %s", server_name, len(prompt_names), prompt_names)
 
-    @staticmethod
-    def _discover_task_support_mode(tool: Any) -> Optional[str]:
-        """Read the per-tool taskSupport mode from a discovered MCP Tool.
-
-        Returns "required", "optional", "forbidden", or None when the tool
-        doesn't expose execution metadata. Per MCP SEP-1686, an absent value
-        defaults to "forbidden" — callers treat None the same as "forbidden"
-        for the purpose of skipping task-mode attempts.
-        """
-        execution = getattr(tool, "execution", None)
-        if execution is None:
-            return None
-        mode = getattr(execution, "taskSupport", None)
-        if mode is None:
-            return None
-        return getattr(mode, "value", mode)
-
     def get_server_groups(self, server_name: str) -> List[str]:
         """Get required groups for a server."""
         if server_name in self.servers_config:
@@ -534,7 +498,7 @@ class DiscoveryMixin:
                         "function": {
                             "name": f"{server_name}_{tool.name}",
                             "description": tool.description or '',
-                            "parameters": tool.inputSchema or {}
+                            "parameters": tool.input_schema or {}
                         }
                     }
                     # log the server -> function name
@@ -776,7 +740,7 @@ class DiscoveryMixin:
                 "function": {
                     "name": requested,
                     "description": getattr(tool, 'description', '') or '',
-                    "parameters": getattr(tool, 'inputSchema', {}) or {}
+                    "parameters": getattr(tool, 'input_schema', {}) or {}
                 }
             })
 

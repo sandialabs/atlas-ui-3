@@ -76,7 +76,7 @@ check "Import server dependencies" \
     python -c "from fastmcp.server.dependencies import get_http_headers"
 
 check "Import ToolResult" \
-    python -c "from fastmcp.tools.tool import ToolResult"
+    python -c "from fastmcp.tools import ToolResult"
 
 check "Import StaticTokenVerifier" \
     python -c "from fastmcp.server.auth.providers.jwt import StaticTokenVerifier"

@@ -5,6 +5,7 @@ Tests the dictionary-based routing system that allows elicitation requests
 from MCP tools to reach the correct WebSocket connection across async tasks.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -361,3 +362,259 @@ class TestElicitationIntegration:
 
             assert result.action == "accept"
             assert result.content == {}
+
+
+def _session_context(protocol_version, meta=None):
+    """A stand-in for the request context FastMCP hands the handler."""
+    context = MagicMock()
+    context.session.protocol_version = protocol_version
+    context.meta = meta
+    return context
+
+
+class TestRoundTripRouting:
+    """Routing on MCP 2026-07-28 sessions, where the handler runs in the calling task."""
+
+    MODERN = "2026-07-28"
+    LEGACY = "2025-11-25"
+
+    @pytest.fixture
+    def manager(self):
+        from atlas.modules.mcp_tools.client import MCPToolManager
+        return MCPToolManager(config_path="/tmp/nonexistent_mcp_test.json")
+
+    @pytest.mark.asyncio
+    async def test_modern_session_routes_to_the_calling_tool_call(self, manager):
+        tc1 = ToolCall(id="call_1", name="tool_a", arguments={})
+        tc2 = ToolCall(id="call_2", name="tool_b", arguments={})
+
+        async with manager._use_elicitation_context("srv", tc1, AsyncMock(), "a@example.com"):
+            async with manager._use_elicitation_context("srv", tc2, AsyncMock(), "a@example.com"):
+                routing = manager._resolve_routing(
+                    manager._elicitation_routing, "srv", _session_context(self.MODERN)
+                )
+                assert routing.tool_call.id == "call_2"
+            # Leaving the inner call restores the outer one.
+            routing = manager._resolve_routing(
+                manager._elicitation_routing, "srv", _session_context(self.MODERN)
+            )
+            assert routing.tool_call.id == "call_1"
+
+    @pytest.mark.asyncio
+    async def test_modern_session_ignores_a_tool_call_id_from_the_server(self, manager):
+        """A server cannot point a prompt at another user's call through request meta."""
+        victim = ToolCall(id="call_victim", name="tool_a", arguments={})
+        caller = ToolCall(id="call_caller", name="tool_a", arguments={})
+        manager._elicitation_routing[("srv", victim.id)] = MagicMock(
+            server_name="srv", tool_call=victim, user_email="victim@example.com"
+        )
+
+        async with manager._use_elicitation_context("srv", caller, AsyncMock(), "caller@example.com"):
+            routing = manager._resolve_routing(
+                manager._elicitation_routing,
+                "srv",
+                _session_context(self.MODERN, meta={"tool_call_id": "call_victim"}),
+            )
+
+        assert routing.tool_call.id == "call_caller"
+        assert routing.user_email == "caller@example.com"
+
+    @pytest.mark.asyncio
+    async def test_modern_session_without_a_calling_entry_is_refused(self, manager):
+        """No single-match guess on a modern session: an unbound call prompts nobody."""
+        other = ToolCall(id="call_other", name="tool_a", arguments={})
+        manager._elicitation_routing[("srv", other.id)] = MagicMock(
+            server_name="srv", tool_call=other
+        )
+
+        routing = manager._resolve_routing(
+            manager._elicitation_routing, "srv", _session_context(self.MODERN)
+        )
+
+        assert routing is None
+
+    @pytest.mark.asyncio
+    async def test_modern_session_refuses_an_entry_for_another_server(self, manager):
+        tc = ToolCall(id="call_1", name="tool_a", arguments={})
+        async with manager._use_elicitation_context("srv_a", tc, AsyncMock(), "a@example.com"):
+            routing = manager._resolve_routing(
+                manager._elicitation_routing, "srv_b", _session_context(self.MODERN)
+            )
+        assert routing is None
+
+    @pytest.mark.asyncio
+    async def test_modern_session_refuses_an_entry_that_was_already_released(self, manager):
+        """A task that outlives its call (and still carries the contextvar) cannot prompt."""
+        tc = ToolCall(id="call_1", name="tool_a", arguments={})
+        resolved = []
+
+        async def late(release: asyncio.Event) -> None:
+            await release.wait()
+            resolved.append(
+                manager._resolve_routing(
+                    manager._elicitation_routing, "srv", _session_context(self.MODERN)
+                )
+            )
+
+        release = asyncio.Event()
+        async with manager._use_elicitation_context("srv", tc, AsyncMock(), "a@example.com"):
+            straggler = asyncio.create_task(late(release))
+            await asyncio.sleep(0)
+        release.set()
+        await straggler
+
+        assert resolved == [None]
+
+    @pytest.mark.asyncio
+    async def test_legacy_session_does_not_trust_the_contextvar(self, manager):
+        """Back-channel requests run on the receive loop, whose context is stale."""
+        tc1 = ToolCall(id="call_1", name="tool_a", arguments={})
+        tc2 = ToolCall(id="call_2", name="tool_a", arguments={})
+        manager._elicitation_routing[("srv", tc2.id)] = MagicMock(server_name="srv", tool_call=tc2)
+
+        async with manager._use_elicitation_context("srv", tc1, AsyncMock(), "a@example.com"):
+            ambiguous = manager._resolve_routing(
+                manager._elicitation_routing, "srv", _session_context(self.LEGACY)
+            )
+            by_meta = manager._resolve_routing(
+                manager._elicitation_routing,
+                "srv",
+                _session_context(self.LEGACY, meta={"tool_call_id": "call_2"}),
+            )
+
+        from atlas.modules.mcp_tools.mcp_routing import AMBIGUOUS_ROUTING
+
+        assert ambiguous is AMBIGUOUS_ROUTING
+        assert by_meta.tool_call.id == "call_2"
+
+
+class TestElicitationModes:
+    """Form content shaping and URL-mode requests."""
+
+    @pytest.fixture
+    def manager(self):
+        from atlas.modules.mcp_tools.client import MCPToolManager
+        return MCPToolManager(config_path="/tmp/nonexistent_mcp_test.json")
+
+    @staticmethod
+    def _answering(response):
+        elicit_mgr = Mock()
+        request = AsyncMock()
+        request.wait_for_response = AsyncMock(return_value=response)
+        elicit_mgr.create_elicitation_request = Mock(return_value=request)
+        elicit_mgr.cleanup_request = Mock()
+        return elicit_mgr
+
+    def _handler(self, manager):
+        from atlas.modules.mcp_tools.client import _ElicitationRoutingContext
+
+        tool_call = ToolCall(id="call_1", name="tool", arguments={})
+        callback = AsyncMock()
+        manager._elicitation_routing[("srv", tool_call.id)] = _ElicitationRoutingContext(
+            server_name="srv", tool_call=tool_call, update_cb=callback, user_email="a@example.com"
+        )
+        return manager._create_elicitation_handler("srv"), callback
+
+    @pytest.mark.asyncio
+    async def test_form_request_reads_the_requested_schema(self, manager):
+        from mcp_types import ElicitRequestFormParams
+
+        schema = {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]}
+        params = ElicitRequestFormParams(message="Name?", requested_schema=schema)
+        handler, callback = self._handler(manager)
+
+        with patch(
+            "atlas.application.chat.elicitation_manager.get_elicitation_manager",
+            return_value=self._answering({"action": "accept", "data": "Ada"}),
+        ):
+            result = await handler("Name?", str, params, None)
+
+        event = callback.call_args[0][0]
+        assert event["response_schema"] == schema
+        assert event["mode"] == "form"
+        assert "url" not in event
+        assert result.content == {"value": "Ada"}
+
+    @pytest.mark.asyncio
+    async def test_blank_optional_fields_are_left_out(self, manager):
+        from mcp_types import ElicitRequestFormParams
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "nickname": {"type": "string"},
+                "age": {"type": "integer"},
+                "subscribed": {"type": "boolean"},
+            },
+            "required": ["title"],
+        }
+        params = ElicitRequestFormParams(message="Details", requested_schema=schema)
+        handler, _ = self._handler(manager)
+        answer = {"title": "", "nickname": "", "age": None, "subscribed": False}
+
+        with patch(
+            "atlas.application.chat.elicitation_manager.get_elicitation_manager",
+            return_value=self._answering({"action": "accept", "data": answer}),
+        ):
+            result = await handler("Details", dict, params, None)
+
+        # A required field is sent even when blank; False is a real answer.
+        assert result.content == {"title": "", "subscribed": False}
+
+    @pytest.mark.asyncio
+    async def test_unknown_action_is_a_cancel(self, manager):
+        handler, _ = self._handler(manager)
+        with patch(
+            "atlas.application.chat.elicitation_manager.get_elicitation_manager",
+            return_value=self._answering({"action": "approve-all", "data": {"value": "x"}}),
+        ):
+            result = await handler("Name?", str, None, None)
+        assert result.action == "cancel"
+        assert result.content is None
+
+    @pytest.mark.asyncio
+    async def test_url_request_is_shown_and_accept_carries_no_data(self, manager):
+        from mcp_types import ElicitRequestURLParams
+
+        params = ElicitRequestURLParams(
+            message="Sign in to continue", url="https://auth.example.com/start?state=abc"
+        )
+        handler, callback = self._handler(manager)
+
+        with patch(
+            "atlas.application.chat.elicitation_manager.get_elicitation_manager",
+            return_value=self._answering({"action": "accept", "data": {"value": "injected"}}),
+        ):
+            result = await handler("Sign in to continue", None, params, None)
+
+        event = callback.call_args[0][0]
+        assert event["mode"] == "url"
+        assert event["url"] == "https://auth.example.com/start?state=abc"
+        assert event["response_schema"] == {}
+        assert result.action == "accept"
+        assert result.content is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "file:///etc/passwd",
+            "//evil.example.com/x",
+            "/relative/path",
+            "https://",
+            "",
+        ],
+    )
+    async def test_non_web_url_is_declined_without_prompting(self, manager, url):
+        from mcp_types import ElicitRequestURLParams
+
+        params = ElicitRequestURLParams(message="Open this", url=url)
+        handler, callback = self._handler(manager)
+
+        result = await handler("Open this", None, params, None)
+
+        assert result.action == "decline"
+        callback.assert_not_called()

@@ -14,15 +14,15 @@ vi.mock('../contexts/ChatContext')
 
 describe('ElicitationDialog - Basic Rendering', () => {
   let mockSendMessage
-  let mockSetPendingElicitation
+  let mockSettleElicitation
 
   beforeEach(() => {
     mockSendMessage = vi.fn()
-    mockSetPendingElicitation = vi.fn()
+    mockSettleElicitation = vi.fn()
 
     useChat.mockReturnValue({
       sendMessage: mockSendMessage,
-      setPendingElicitation: mockSetPendingElicitation
+      settleElicitation: mockSettleElicitation
     })
   })
 
@@ -72,15 +72,15 @@ describe('ElicitationDialog - Basic Rendering', () => {
 
 describe('ElicitationDialog - User Actions', () => {
   let mockSendMessage
-  let mockSetPendingElicitation
+  let mockSettleElicitation
 
   beforeEach(() => {
     mockSendMessage = vi.fn(() => true)
-    mockSetPendingElicitation = vi.fn()
+    mockSettleElicitation = vi.fn()
 
     useChat.mockReturnValue({
       sendMessage: mockSendMessage,
-      setPendingElicitation: mockSetPendingElicitation
+      settleElicitation: mockSettleElicitation
     })
   })
 
@@ -118,7 +118,7 @@ describe('ElicitationDialog - User Actions', () => {
     })
 
     // Verify dialog closed
-    expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
+    expect(mockSettleElicitation).toHaveBeenCalledWith('test-123')
   })
 
   it('keeps the prompt open and says so when the answer could not be sent', () => {
@@ -134,13 +134,13 @@ describe('ElicitationDialog - User Actions', () => {
     render(<ElicitationDialog elicitation={elicitation} />)
     fireEvent.click(screen.getByRole('button', { name: /decline/i }))
 
-    expect(mockSetPendingElicitation).not.toHaveBeenCalled()
+    expect(mockSettleElicitation).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent(/not sent/i)
 
     // Back online: the same click goes through and closes the prompt.
     mockSendMessage.mockReturnValue(true)
     fireEvent.click(screen.getByRole('button', { name: /decline/i }))
-    expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
+    expect(mockSettleElicitation).toHaveBeenCalledWith('test-123')
   })
 
   it('lets Cancel dismiss the prompt even while disconnected', () => {
@@ -155,7 +155,7 @@ describe('ElicitationDialog - User Actions', () => {
 
     render(<ElicitationDialog elicitation={elicitation} />)
     fireEvent.click(screen.getAllByRole('button', { name: /^cancel$/i })[0])
-    expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
+    expect(mockSettleElicitation).toHaveBeenCalledWith('test-123')
   })
 
   it('clears the not-sent notice when a new prompt replaces the failed one', () => {
@@ -203,7 +203,7 @@ describe('ElicitationDialog - User Actions', () => {
     })
 
     // Verify dialog closed
-    expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
+    expect(mockSettleElicitation).toHaveBeenCalledWith('test-123')
   })
 
   it('should send cancel response on Cancel button', () => {
@@ -236,21 +236,21 @@ describe('ElicitationDialog - User Actions', () => {
     })
 
     // Verify dialog closed
-    expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
+    expect(mockSettleElicitation).toHaveBeenCalledWith('test-123')
   })
 })
 
 describe('ElicitationDialog - Input Validation', () => {
   let mockSendMessage
-  let mockSetPendingElicitation
+  let mockSettleElicitation
 
   beforeEach(() => {
     mockSendMessage = vi.fn()
-    mockSetPendingElicitation = vi.fn()
+    mockSettleElicitation = vi.fn()
 
     useChat.mockReturnValue({
       sendMessage: mockSendMessage,
-      setPendingElicitation: mockSetPendingElicitation
+      settleElicitation: mockSettleElicitation
     })
   })
 
@@ -336,5 +336,205 @@ describe('ElicitationDialog - Input Validation', () => {
 
     await user.tab()
     expect(acceptButton).toHaveFocus()
+  })
+})
+
+describe('ElicitationDialog - Choice Fields', () => {
+  let mockSendMessage
+  let mockSettleElicitation
+
+  beforeEach(() => {
+    mockSendMessage = vi.fn(() => true)
+    mockSettleElicitation = vi.fn()
+    useChat.mockReturnValue({
+      sendMessage: mockSendMessage,
+      settleElicitation: mockSettleElicitation
+    })
+  })
+
+  it('shows titled options and answers with the option value', () => {
+    render(<ElicitationDialog elicitation={{
+      elicitation_id: 'test-123',
+      tool_name: 'choose_toppings',
+      message: 'What size pizza?',
+      response_schema: {
+        type: 'object',
+        properties: {
+          value: {
+            type: 'string',
+            title: 'Size',
+            oneOf: [{ const: 's', title: 'Small (10 inch)' }, { const: 'l', title: 'Large (14 inch)' }]
+          }
+        },
+        required: ['value']
+      }
+    }} />)
+
+    expect(screen.getByText('Size')).toBeInTheDocument()
+    const accept = screen.getByRole('button', { name: /accept/i })
+    expect(accept).toBeDisabled()
+
+    const select = screen.getByRole('combobox')
+    fireEvent.change(select, { target: { value: '1' } })
+    expect(screen.getByRole('option', { name: 'Large (14 inch)' }).selected).toBe(true)
+    fireEvent.click(accept)
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'elicitation_response',
+      elicitation_id: 'test-123',
+      action: 'accept',
+      data: 'l'
+    })
+  })
+
+  it('collects a multi-select as a list in option order', () => {
+    render(<ElicitationDialog elicitation={{
+      elicitation_id: 'test-123',
+      tool_name: 'choose_toppings',
+      message: 'Pick any toppings you like:',
+      response_schema: {
+        type: 'object',
+        properties: {
+          value: { type: 'array', items: { type: 'string', enum: ['mushrooms', 'peppers', 'olives'] } }
+        },
+        required: ['value']
+      }
+    }} />)
+
+    const accept = screen.getByRole('button', { name: /accept/i })
+    expect(accept).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'olives' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'mushrooms' }))
+    fireEvent.click(accept)
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'elicitation_response',
+      elicitation_id: 'test-123',
+      action: 'accept',
+      data: ['mushrooms', 'olives']
+    })
+  })
+
+  it('refuses a non-integer answer to an integer field', () => {
+    render(<ElicitationDialog elicitation={{
+      elicitation_id: 'test-123',
+      tool_name: 'pick_a_number',
+      message: 'Pick a number',
+      response_schema: {
+        type: 'object',
+        properties: { value: { type: 'integer', minimum: 1, maximum: 100 } },
+        required: ['value']
+      }
+    }} />)
+
+    const input = screen.getByRole('spinbutton')
+    const accept = screen.getByRole('button', { name: /accept/i })
+    fireEvent.change(input, { target: { value: '2.5' } })
+    expect(accept).toBeDisabled()
+    fireEvent.change(input, { target: { value: '500' } })
+    expect(accept).toBeDisabled()
+    fireEvent.change(input, { target: { value: '42' } })
+    expect(accept).not.toBeDisabled()
+  })
+
+  it('confirms an empty schema without sending placeholder data', () => {
+    render(<ElicitationDialog elicitation={{
+      elicitation_id: 'test-123',
+      tool_name: 'approve',
+      message: 'Proceed?',
+      response_schema: { type: 'object', properties: {} }
+    }} />)
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /accept/i }))
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'elicitation_response',
+      elicitation_id: 'test-123',
+      action: 'accept',
+      data: null
+    })
+  })
+})
+
+describe('ElicitationDialog - URL Requests', () => {
+  let mockSendMessage
+  let mockSettleElicitation
+  let openSpy
+
+  const urlRequest = (url) => ({
+    elicitation_id: 'test-123',
+    tool_name: 'connect_account',
+    message: 'Sign in to continue',
+    response_schema: {},
+    mode: 'url',
+    url
+  })
+
+  beforeEach(() => {
+    mockSendMessage = vi.fn(() => true)
+    mockSettleElicitation = vi.fn()
+    useChat.mockReturnValue({
+      sendMessage: mockSendMessage,
+      settleElicitation: mockSettleElicitation
+    })
+    openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+  })
+
+  it('shows the full address and opens it only after consent is sent', () => {
+    render(<ElicitationDialog elicitation={urlRequest('https://auth.example.com/start?state=abc')} />)
+
+    expect(screen.getByText('https://auth.example.com/start?state=abc')).toBeInTheDocument()
+    expect(openSpy).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /open link/i }))
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'elicitation_response',
+      elicitation_id: 'test-123',
+      action: 'accept',
+      data: null
+    })
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://auth.example.com/start?state=abc', '_blank', 'noopener,noreferrer'
+    )
+    expect(mockSettleElicitation).toHaveBeenCalledWith('test-123')
+  })
+
+  it('does not open the page when the consent could not be sent', () => {
+    mockSendMessage.mockReturnValue(false)
+    render(<ElicitationDialog elicitation={urlRequest('https://auth.example.com/start')} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /open link/i }))
+
+    expect(openSpy).not.toHaveBeenCalled()
+    expect(mockSettleElicitation).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+
+  it('will not offer a link that is not a web address', () => {
+    render(<ElicitationDialog elicitation={urlRequest('javascript:alert(1)')} />)
+
+    expect(screen.queryByText('javascript:alert(1)')).not.toBeInTheDocument()
+    const open = screen.getByRole('button', { name: /open link/i })
+    expect(open).toBeDisabled()
+    fireEvent.click(open)
+    expect(openSpy).not.toHaveBeenCalled()
+    expect(mockSendMessage).not.toHaveBeenCalled()
+  })
+
+  it('declines without opening anything', () => {
+    render(<ElicitationDialog elicitation={urlRequest('https://auth.example.com/start')} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /decline/i }))
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'elicitation_response',
+      elicitation_id: 'test-123',
+      action: 'decline',
+      data: null
+    })
+    expect(openSpy).not.toHaveBeenCalled()
   })
 })

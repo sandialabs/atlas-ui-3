@@ -1,7 +1,7 @@
 """Tool/prompt execution for MCPToolManager.
 
 Client selection (per-user auth vs per-conversation HTTP vs shared STDIO),
-adaptive task-mode polling, and the high-level execute_tool entry point that
+background-task announcement, and the high-level execute_tool entry point that
 wires routing/log contexts and normalizes results. config_manager is
 referenced via the client module to preserve test patch targets.
 """
@@ -52,10 +52,9 @@ from atlas.modules.mcp_tools.mcp_discovery import (
 )
 from atlas.modules.mcp_tools.mcp_errors import (
     _is_session_terminated_error,
-    _is_task_forbidden_error,
-    _is_task_forbidden_result,
     _is_unauthorized_error,
 )
+from atlas.modules.mcp_tools.mcp_task_extension import TaskCallTracker, track_task_call
 from atlas.modules.mcp_tools.sleep_tool import (
     execute_sleep_tool,
     get_max_sleep_seconds,
@@ -252,24 +251,66 @@ async def _ensure_current_run_may_act() -> None:
 
 
 class ExecutionMixin:
-    """Tool/prompt execution, task-mode polling, and result assembly."""
+    """Tool/prompt execution, background-task announcement, and result assembly."""
 
-    def _supports_tasks(self, server_name: str, client: Any) -> bool:
-        """Check if a server supports background tasks (cached)."""
-        if server_name in self._server_task_support:
-            return self._server_task_support[server_name]
+    async def _call_tool_announcing_tasks(
+        self,
+        client: Any,
+        server_name: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        call_kwargs: Dict[str, Any],
+        *,
+        call_timeout: float,
+        update_cb: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        tool_call_id: Optional[str] = None,
+    ) -> Any:
+        """Call a tool, announcing it to the UI if the server runs it as a slow task.
 
-        supports = False
+        FastMCP polls a server-side background task (SEP-2663) to completion
+        inside ``call_tool``, so the call looks the same either way. When the
+        server did task the call and it is still running after
+        ``MCP_TASK_TIMEOUT`` seconds, ``tool_task_started`` is sent, and
+        ``tool_task_completed`` when the call ends. The whole call is bounded
+        by ``call_timeout``; a call that times out or is cancelled has its
+        server-side task cancelled by ``AtlasTasksClientExtension``.
+        """
+        tracker = TaskCallTracker()
+        announced = False
+
+        async def _announce_when_slow() -> None:
+            nonlocal announced
+            await tracker.created.wait()
+            await asyncio.sleep(self._task_timeout)
+            announced = True
+            try:
+                await update_cb({
+                    "type": "tool_task_started",
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "server_name": server_name,
+                })
+            except Exception as e:
+                logger.debug("tool_task_started update callback failed: %s", e)
+
+        watcher = asyncio.create_task(_announce_when_slow()) if update_cb else None
         try:
-            init_result = getattr(client, 'initialize_result', None)
-            if init_result and hasattr(init_result, 'capabilities'):
-                caps = init_result.capabilities
-                supports = getattr(caps, 'tasks', None) is not None
-        except Exception as e:
-            logger.debug("Could not determine task support for server '%s': %s", server_name, e)
-
-        self._server_task_support[server_name] = supports
-        return supports
+            with track_task_call(tracker):
+                return await asyncio.wait_for(
+                    client.call_tool(tool_name, arguments, **call_kwargs),
+                    timeout=call_timeout,
+                )
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+            if announced and update_cb:
+                try:
+                    await update_cb({
+                        "type": "tool_task_completed",
+                        "tool_call_id": tool_call_id,
+                    })
+                except Exception as e:
+                    logger.debug("tool_task_completed update callback failed: %s", e)
 
     def _is_user_present(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
         """Return the trusted user email from execution context, if any."""
@@ -438,13 +479,14 @@ class ExecutionMixin:
         """Call a specific tool on an MCP server.
 
         When ``conversation_id`` is provided, a persistent session is used (and
-        reused across calls within that conversation).  Servers that advertise
-        task support will be called in adaptive-polling mode: wait up to
-        ``MCP_TASK_TIMEOUT`` synchronously, then switch to polling with UI
-        progress notifications via ``update_cb``.
+        reused across calls within that conversation). Without it, a
+        single-use session is opened and closed per call.
 
-        Without ``conversation_id``, a single-use session is opened and closed
-        per call (no task-mode support).
+        A server may run the call as a background task (SEP-2663, MCP
+        2026-07-28 only). FastMCP polls it to completion transparently; a
+        task still running after ``MCP_TASK_TIMEOUT`` seconds is announced to
+        the UI through ``update_cb``, and one whose call is cancelled or times
+        out is cancelled on the server.
 
         Per-user authenticated servers get one self-healing retry: when the
         provider answers 401 (the stored credential was rotated or revoked
@@ -713,129 +755,26 @@ class ExecutionMixin:
             if meta is not None:
                 kwargs["meta"] = meta
 
-            task_timeout = self._task_timeout
+            tool_call_id = meta.get("tool_call_id") if meta else None
 
             if conversation_id:
                 # Use persistent session
                 session = await self._session_manager.acquire(
                     conversation_id, server_name, client, user_email=user_email
                 )
-                active_client = session.client
+                await _ensure_current_run_may_act()  # session acquire awaited
+                result = await self._call_tool_announcing_tasks(
+                    session.client, server_name, tool_name, arguments, kwargs,
+                    call_timeout=call_timeout, update_cb=update_cb, tool_call_id=tool_call_id,
+                )
             else:
-                # Fallback: no conversation context, use per-call session
-                # Can't use task mode without a persistent session
+                # No conversation context: a single-use session for this call.
                 async with client:
                     await _ensure_current_run_may_act()  # connecting awaited
-                    result = await asyncio.wait_for(
-                        client.call_tool(tool_name, arguments, **kwargs),
-                        timeout=call_timeout,
+                    result = await self._call_tool_announcing_tasks(
+                        client, server_name, tool_name, arguments, kwargs,
+                        call_timeout=call_timeout, update_cb=update_cb, tool_call_id=tool_call_id,
                     )
-                    logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
-                    return result
-
-            # With persistent session, try adaptive task mode — unless this
-            # specific tool was already observed to refuse task mode
-            # (fastmcp tasks.mode="forbidden").
-            use_tasks = (
-                self._supports_tasks(server_name, active_client)
-                and (server_name, tool_name) not in self._tool_task_forbidden
-            )
-
-            tool_task = None
-            if use_tasks:
-                try:
-                    await _ensure_current_run_may_act()  # session acquire awaited
-                    tool_task = await active_client.call_tool(tool_name, arguments, task=True, **kwargs)
-                except Exception as task_exc:
-                    if _is_task_forbidden_error(task_exc):
-                        logger.info(
-                            "Tool %s on %s does not support task-augmented execution; "
-                            "falling back to synchronous call and caching the decision.",
-                            sanitize_for_logging(tool_name),
-                            sanitize_for_logging(server_name),
-                        )
-                        self._tool_task_forbidden.add((server_name, tool_name))
-                        use_tasks = False
-                    else:
-                        raise
-
-            if use_tasks:
-                if tool_task.returned_immediately:
-                    result = await tool_task.result()
-                    # fastmcp's graceful-degradation path does not raise when
-                    # the server refuses task mode mid-request: the McpError
-                    # is wrapped as a ToolError on the server, the low-level
-                    # handler converts it to CallToolResult(isError=True),
-                    # and _call_tool_as_task returns it as an immediate
-                    # result. Detect that here and fall back to sync.
-                    if _is_task_forbidden_result(result):
-                        logger.info(
-                            "Tool %s on %s returned task-forbidden as an "
-                            "immediate error result; falling back to "
-                            "synchronous call and caching the decision.",
-                            sanitize_for_logging(tool_name),
-                            sanitize_for_logging(server_name),
-                        )
-                        self._tool_task_forbidden.add((server_name, tool_name))
-                        use_tasks = False
-                else:
-                    try:
-                        await asyncio.wait_for(
-                            tool_task.wait(),
-                            timeout=task_timeout,
-                        )
-                        result = await tool_task.result()
-                    except asyncio.TimeoutError:
-                        # Exceeded threshold -- notify UI and keep waiting
-                        if update_cb:
-                            await update_cb({
-                                "type": "tool_task_started",
-                                "tool_call_id": meta.get("tool_call_id") if meta else None,
-                                "tool_name": tool_name,
-                                "server_name": server_name,
-                            })
-
-                        if update_cb:
-                            async def _task_progress(status):
-                                try:
-                                    await update_cb({
-                                        "type": "tool_task_progress",
-                                        "tool_call_id": meta.get("tool_call_id") if meta else None,
-                                        "status": getattr(status, 'state', 'running'),
-                                        "progress": getattr(status, 'progress', None),
-                                        "total": getattr(status, 'total', None),
-                                        "message": getattr(status, 'message', None),
-                                    })
-                                except Exception:
-                                    logger.debug("Task progress callback failed", exc_info=True)
-                            tool_task.on_status_change(_task_progress)
-
-                        try:
-                            remaining = max(call_timeout - task_timeout, 1)
-                            await tool_task.wait(timeout=remaining)
-                            result = await tool_task.result()
-                        except asyncio.CancelledError:
-                            await tool_task.cancel()
-                            raise
-                        finally:
-                            if update_cb:
-                                try:
-                                    await update_cb({
-                                        "type": "tool_task_completed",
-                                        "tool_call_id": meta.get("tool_call_id") if meta else None,
-                                    })
-                                except Exception as e:
-                                    logger.debug("tool_task_completed update callback failed: %s", e)
-                    except asyncio.CancelledError:
-                        await tool_task.cancel()
-                        raise
-
-            if not use_tasks:
-                await _ensure_current_run_may_act()
-                result = await asyncio.wait_for(
-                    active_client.call_tool(tool_name, arguments, **kwargs),
-                    timeout=call_timeout,
-                )
 
             logger.info(f"Successfully called {sanitize_for_logging(tool_name)} on {sanitize_for_logging(server_name)}")
             return result

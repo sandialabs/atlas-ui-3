@@ -46,6 +46,7 @@ class TestMCPAuthenticationIntegration:
                     auth="test-api-key-123",
                     log_handler=ANY,
                     elicitation_handler=ANY,
+                    extensions=ANY,
                 )
 
     @pytest.mark.asyncio
@@ -83,6 +84,7 @@ class TestMCPAuthenticationIntegration:
                     auth="invalid-token",
                     log_handler=ANY,
                     elicitation_handler=ANY,
+                    extensions=ANY,
                 )
 
                 # Now try to discover tools - this should fail due to auth error

@@ -873,8 +873,6 @@ async def test_lease_lapsing_during_authorization_stops_the_dispatch(server):
     manager = MCPToolManager.__new__(MCPToolManager)
     manager.servers_config = {"srv": {"enabled": True, "groups": []}}
     manager._elicitation_routing = {}
-    manager._server_task_support = {}
-    manager._tool_task_forbidden = set()
     manager._tool_index = {"srv_t": {"server": "srv", "tool": SimpleNamespace(name="t")}}
     original = manager._authorize_mcp_operation
 
@@ -1035,8 +1033,6 @@ async def test_lease_lapsing_while_the_client_connects_stops_the_request(server)
     await a.guard.ensure_may_act(record.run_id)  # proven at the dispatch boundary
 
     manager = MCPToolManager.__new__(MCPToolManager)
-    manager._server_task_support = {}
-    manager._tool_task_forbidden = set()
     manager._task_timeout = 1
     client = MagicMock()
     client.call_tool = AsyncMock()

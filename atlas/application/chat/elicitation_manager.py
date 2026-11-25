@@ -1,9 +1,15 @@
 """
 Elicitation manager for handling user input requests during tool execution.
 
-This manager coordinates between MCP servers requesting user input (via ctx.elicit())
-and the frontend UI collecting that input. It provides a synchronization mechanism
+This manager coordinates between MCP servers requesting user input and the
+frontend UI collecting that input. It provides a synchronization mechanism
 where tool execution pauses until the user responds.
+
+It is independent of how the request reached Atlas: an MCP 2026-07-28 server
+returns an ``InputRequiredResult`` from the tool call (multi round-trip
+requests), an older server sends ``elicitation/create`` over the connection.
+Both end up in the per-server handler in ``modules/mcp_tools/mcp_routing.py``,
+which registers the request here and waits on it.
 """
 
 import asyncio
@@ -58,7 +64,7 @@ class ElicitationManager:
     Manages elicitation requests and responses.
 
     Provides synchronization between:
-    - MCP servers requesting input via ctx.elicit()
+    - MCP servers requesting input (either protocol era, see module docstring)
     - Frontend UI collecting user responses
     """
 

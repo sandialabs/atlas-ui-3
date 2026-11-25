@@ -26,7 +26,7 @@ def _tool(name, description="", schema=None):
     return SimpleNamespace(
         name=name,
         description=description,
-        inputSchema=schema or {"type": "object", "properties": {}},
+        input_schema=schema or {"type": "object", "properties": {}},
         execution=None,
     )
 
@@ -197,22 +197,6 @@ class TestDiscoverToolsForUser:
 
         assert await manager.discover_tools_for_user("", SERVER) is None
         manager._get_user_client.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_task_support_metadata_is_recorded(self):
-        manager = _manager()
-        forbidden = _tool("legacy")
-        optional = _tool("modern")
-        optional.execution = SimpleNamespace(taskSupport="optional")
-        manager._get_user_client = AsyncMock(
-            return_value=_FakeClient([forbidden, optional])
-        )
-
-        await manager.discover_tools_for_user(USER, SERVER)
-
-        assert (SERVER, "legacy") in manager._tool_task_forbidden
-        assert (SERVER, "modern") not in manager._tool_task_forbidden
-
 
 class TestPromotionIntoTheSharedInventory:
     @pytest.mark.asyncio
@@ -428,22 +412,6 @@ class TestOneUsersViewIsNotAnothers:
         await manager.discover_tools_for_user_servers(USER, [SERVER])
 
         manager._get_user_client.assert_not_awaited()
-
-
-class TestTaskSupportMetadataIsNotClobbered:
-    @pytest.mark.asyncio
-    async def test_a_declined_promotion_leaves_the_sweeps_entries_alone(self):
-        """A narrower per-user view must not flip tools to task-allowed."""
-        manager = _manager(
-            available_tools={SERVER: {"tools": [_tool("public")], "config": {}}}
-        )
-        manager._tool_task_forbidden = {(SERVER, "public"), (SERVER, "other")}
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
-
-        await manager.discover_tools_for_user(USER, SERVER, force=True)
-
-        assert (SERVER, "public") in manager._tool_task_forbidden
-        assert (SERVER, "other") in manager._tool_task_forbidden
 
 
 class TestTheCallerCanBoundTheWait:
@@ -753,26 +721,6 @@ class TestAnEmptyRediscoveryUnpublishes:
         assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["public"]
 
 
-class TestTaskSupportFollowsTheRepublishedSet:
-    @pytest.mark.asyncio
-    async def test_the_heirs_tools_are_re_swept(self):
-        """_tool_task_forbidden must describe the catalogue actually published."""
-        manager = _manager()
-        other = "other@example.gov"
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
-        await manager.discover_tools_for_user(USER, SERVER, force=True)
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
-        await manager.discover_tools_for_user(other, SERVER, force=True)
-        # Stale verdict from the departing owner's sweep.
-        manager._tool_task_forbidden = {(SERVER, "theirs"), (SERVER, "mine")}
-
-        manager.clear_user_tool_cache(other, SERVER)
-
-        assert [t.name for t in manager.available_tools[SERVER]["tools"]] == ["mine"]
-        # Rebuilt from the heir's tools, so the departed owner's entry is gone.
-        assert (SERVER, "theirs") not in manager._tool_task_forbidden
-
-
 class TestTheIndexIsRebuiltOncePerBulkClear:
     @pytest.mark.asyncio
     async def test_a_full_clear_rebuilds_the_index_once(self):
@@ -945,36 +893,6 @@ class TestReadAccessExpiresWithTheEntry:
         assert manager.get_server_for_tool(f"{SERVER}_search") is None
 
 
-class TestTaskSupportCoversEveryPublishedTool:
-    @pytest.mark.asyncio
-    async def test_a_co_owners_forbidden_tool_stays_forbidden(self):
-        """The sweep purges (server, *) and rebuilds, so it must see the union."""
-        manager = _manager()
-        other = "other@example.gov"
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
-        await manager.discover_tools_for_user(USER, SERVER, force=True)
-        # The first owner's tool declares no taskSupport, so the sweep marks it.
-        manager._tool_task_forbidden.add((SERVER, "mine"))
-
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
-        await manager.discover_tools_for_user(other, SERVER, force=True)
-
-        assert (SERVER, "mine") in manager._tool_task_forbidden
-
-    @pytest.mark.asyncio
-    async def test_both_owners_tools_are_published(self):
-        manager = _manager()
-        other = "other@example.gov"
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("mine")]))
-        await manager.discover_tools_for_user(USER, SERVER, force=True)
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("theirs")]))
-        await manager.discover_tools_for_user(other, SERVER, force=True)
-
-        assert sorted(t.name for t in manager.available_tools[SERVER]["tools"]) == [
-            "mine", "theirs"
-        ]
-
-
 class TestEachOwnerGetsTheirOwnToolObject:
     @pytest.mark.asyncio
     async def test_a_same_named_tool_resolves_per_owner(self):
@@ -1101,20 +1019,6 @@ class TestExpiryIsNotDeferredByTheCoolDown:
         assert await manager.discover_tools_for_user(USER, SERVER) is None
         assert key not in manager._user_available_tools
         assert not manager.available_tools[SERVER]["tools"]
-
-
-class TestWithdrawalClearsTaskSupportMetadata:
-    @pytest.mark.asyncio
-    async def test_emptying_a_server_forgets_its_task_verdicts(self):
-        manager = _manager()
-        manager._get_user_client = AsyncMock(return_value=_FakeClient([_tool("search")]))
-        await manager.discover_tools_for_user(USER, SERVER, force=True)
-        assert (SERVER, "search") in manager._tool_task_forbidden
-
-        manager.clear_user_tool_cache(USER, SERVER)
-
-        assert not manager.available_tools[SERVER]["tools"]
-        assert (SERVER, "search") not in manager._tool_task_forbidden
 
 
 class TestTheUnscopedSentinelIsNotAString:

@@ -223,22 +223,16 @@ class MCPToolManager(
         # Dictionary-based routing for elicitation so a shared Client can still deliver
         # elicitation requests to the correct user's WebSocket.
         # Key: (server_name, tool_call_id) tuple to avoid collisions with concurrent tool calls
-        # Note: Cannot use contextvars.ContextVar because MCP receive loop runs in a different task
+        # Handshake-era servers elicit from the session's receive loop, a
+        # different task, so a contextvar alone cannot route them (see mcp_routing).
         self._elicitation_routing: Dict[tuple, _ElicitationRoutingContext] = {}
 
         # Session manager for per-conversation session persistence
         from atlas.modules.mcp_tools.session_manager import MCPSessionManager
         self._session_manager = MCPSessionManager()
 
-        # Cache of which servers support background tasks
-        self._server_task_support: Dict[str, bool] = {}
-        # Per-tool cache for tools that the server refused task-mode on (e.g.
-        # fastmcp tools declared with tasks.mode="forbidden"). A server may
-        # advertise task capability overall while individual tools opt out;
-        # we learn this on first failure and skip task mode thereafter.
-        self._tool_task_forbidden: set[tuple[str, str]] = set()
-
-        # Task timeout: seconds before switching to background task polling
+        # Seconds a server-side background task may run before the UI is told
+        # the tool call is long-running.
         app_settings = config_manager.app_settings
         self._task_timeout = app_settings.mcp_task_timeout
         self._user_client_cache_max_entries = max(

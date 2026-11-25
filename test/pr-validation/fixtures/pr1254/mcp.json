@@ -1,0 +1,8 @@
+{
+  "calculator": {"command": ["python", "mcp/calculator/main.py"], "cwd": "atlas", "groups": ["users"], "compliance_level": "Public"},
+  "elicitation_demo": {"command": ["python", "mcp/elicitation_demo/main.py"], "cwd": "atlas", "groups": ["users"], "compliance_level": "Public"},
+  "task_demo": {"command": ["python", "mcp/task_demo/main.py"], "cwd": "atlas", "groups": ["users"], "compliance_level": "Public"},
+  "image_demo": {"command": ["python", "mcp/image_demo/main.py"], "cwd": "atlas", "groups": ["users"], "compliance_level": "Public"},
+  "progress_demo": {"command": ["python", "mcp/progress_demo/main.py"], "cwd": "atlas", "groups": ["users"], "compliance_level": "Public"},
+  "prompts": {"command": ["python", "mcp/prompts/main.py"], "cwd": "atlas", "groups": ["users"], "compliance_level": "Public"}
+}

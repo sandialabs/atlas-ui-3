@@ -1,21 +1,30 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Check, Ban } from 'lucide-react'
+import { X, Check, Ban, ExternalLink } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { useFocusTrap } from '../utils/focusTrap'
+import {
+  buildResponseData,
+  fieldLabel,
+  initialFormData,
+  inputTypeForFormat,
+  isFormValid,
+  parseResponseSchema,
+  safeElicitationUrl,
+} from '../utils/elicitationSchema'
 
 /**
  * ElicitationDialog Component
- * 
- * Displays a modal dialog to collect user input when an MCP tool requests
- * elicitation via ctx.elicit(). Supports:
- * - String, number, boolean, enum fields
+ *
+ * Displays a modal dialog to collect user input when an MCP tool asks for it
+ * (an MCP elicitation request). Supports:
+ * - String, number, boolean, single-choice and multi-choice fields
  * - Structured multi-field forms
+ * - URL requests, where the server asks the user to open an external page
  * - Accept/Decline/Cancel actions
  */
 const ElicitationDialog = ({ elicitation }) => {
-  const { sendMessage, setPendingElicitation } = useChat()
+  const { sendMessage, settleElicitation } = useChat()
   const [formData, setFormData] = useState({})
-  const [isValid, setIsValid] = useState(false)
   const [sendFailed, setSendFailed] = useState(false)
   const dialogRef = useRef(null)
   // The prompt claims to be modal (aria-modal), so it must own focus: it
@@ -31,39 +40,23 @@ const ElicitationDialog = ({ elicitation }) => {
     initialFocusSelector: 'input, select, textarea, #elicitation-accept'
   })
 
-  const { elicitation_id, tool_name, message, response_schema } = elicitation
+  const { elicitation_id, tool_name, message, response_schema, mode, url } = elicitation
+  const isUrlMode = mode === 'url'
+  // The server already refuses non-web URLs; checking again here means a
+  // javascript: or data: link can never be rendered as something to click.
+  const safeUrl = isUrlMode ? safeElicitationUrl(url) : null
 
   // Parse the response schema to determine field types
-  const fields = parseResponseSchema(response_schema)
+  const fields = isUrlMode ? [] : parseResponseSchema(response_schema)
+  const inputFields = fields.filter(field => field.type !== 'none')
 
   // Initialize form data with default values
   useEffect(() => {
-    const initialData = {}
-    fields.forEach(field => {
-      if (field.default !== undefined) {
-        initialData[field.name] = field.default
-      } else if (field.type === 'boolean') {
-        initialData[field.name] = false
-      } else {
-        initialData[field.name] = ''
-      }
-    })
-    setFormData(initialData)
+    setFormData(initialFormData(fields))
     setSendFailed(false)
   }, [elicitation_id])
 
-  // Validate form data
-  useEffect(() => {
-    const requiredFields = fields.filter(f => f.required && f.type !== 'none')
-    const allRequiredFilled = requiredFields.every(field => {
-      const value = formData[field.name]
-      if (field.type === 'number') {
-        return value !== '' && value !== null && value !== undefined && !isNaN(value)
-      }
-      return value !== '' && value !== null && value !== undefined
-    })
-    setIsValid(allRequiredFilled)
-  }, [formData, fields])
+  const isValid = isUrlMode ? Boolean(safeUrl) : isFormValid(fields, formData)
 
   const handleFieldChange = (fieldName, value) => {
     setFormData(prev => ({
@@ -85,27 +78,23 @@ const ElicitationDialog = ({ elicitation }) => {
     })
     if (sent !== true && !dismissAnyway) {
       setSendFailed(true)
-      return
+      return false
     }
     setSendFailed(false)
-    setPendingElicitation(null)
+    settleElicitation(elicitation_id)
+    return true
   }
 
   const handleAccept = () => {
-    // Prepare response data based on schema type
-    let responseData
-    if (fields.length === 0) {
-      // No response expected (approval-only)
-      responseData = null
-    } else if (fields.length === 1 && fields[0].name === 'value') {
-      // Scalar type - unwrap the value field
-      responseData = formData.value
-    } else {
-      // Structured type - send all fields
-      responseData = { ...formData }
+    if (isUrlMode) {
+      // Accepting a URL request is consent to open the page; it carries no
+      // data. The page opens only once that consent has reached the server.
+      if (safeUrl && respond('accept', null)) {
+        window.open(safeUrl, '_blank', 'noopener,noreferrer')
+      }
+      return
     }
-
-    respond('accept', responseData)
+    respond('accept', buildResponseData(fields, formData))
   }
 
   const handleDecline = () => {
@@ -145,21 +134,37 @@ const ElicitationDialog = ({ elicitation }) => {
           <p className="text-gray-200 whitespace-pre-wrap">{message}</p>
         </div>
 
-        {/* Form Fields */}
-        <div className="p-6 space-y-4">
-          {fields.length === 0 ? (
-            <p className="text-sm text-gray-400 italic">No additional information required. Please confirm or decline.</p>
-          ) : (
-            fields.map(field => (
-              <FormField
-                key={field.name}
-                field={field}
-                value={formData[field.name]}
-                onChange={(value) => handleFieldChange(field.name, value)}
-              />
-            ))
-          )}
-        </div>
+        {isUrlMode ? (
+          <div className="p-6 space-y-3">
+            <p className="text-sm text-gray-300">
+              This tool is asking you to open an external page. Check the address before you continue.
+            </p>
+            {safeUrl ? (
+              <p className="font-mono text-sm text-gray-100 break-all bg-gray-900 border border-gray-700 rounded-md p-3">
+                {safeUrl}
+              </p>
+            ) : (
+              <p role="alert" className="text-sm text-red-400">
+                The link this tool sent is not a web address, so it cannot be opened.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="p-6 space-y-4">
+            {inputFields.length === 0 ? (
+              <p className="text-sm text-gray-400 italic">No additional information required. Please confirm or decline.</p>
+            ) : (
+              inputFields.map(field => (
+                <FormField
+                  key={field.name}
+                  field={field}
+                  value={formData[field.name]}
+                  onChange={(value) => handleFieldChange(field.name, value)}
+                />
+              ))
+            )}
+          </div>
+        )}
 
         {sendFailed && (
           <p role="alert" className="px-6 pb-4 text-sm text-red-400">
@@ -172,15 +177,15 @@ const ElicitationDialog = ({ elicitation }) => {
           <button
             id="elicitation-accept"
             onClick={handleAccept}
-            disabled={!isValid && fields.length > 0}
+            disabled={!isValid}
             className={`px-4 py-2 rounded-md transition-colors flex items-center gap-2 ${
-              isValid || fields.length === 0
+              isValid
                 ? 'bg-green-600 hover:bg-green-500 text-white'
                 : 'bg-gray-600 text-gray-400 cursor-not-allowed'
             }`}
           >
-            <Check size={16} />
-            Accept
+            {isUrlMode ? <ExternalLink size={16} /> : <Check size={16} />}
+            {isUrlMode ? 'Open link' : 'Accept'}
           </button>
           <button
             onClick={handleDecline}
@@ -202,43 +207,62 @@ const ElicitationDialog = ({ elicitation }) => {
   )
 }
 
+const INPUT_CLASS = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500'
+
 /**
  * FormField Component
  * Renders appropriate input based on field type
  */
 const FormField = ({ field, value, onChange }) => {
-  const { name, type, description, required, enum: enumValues } = field
+  const { name, type, description, required, options } = field
+  const label = fieldLabel(field)
 
   const renderInput = () => {
     switch (type) {
-      case 'string':
-        if (enumValues && enumValues.length > 0) {
-          // String enum - render as dropdown
-          return (
-            <select
-              value={value || ''}
-              onChange={(e) => onChange(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required={required}
-            >
-              <option value="">Select an option...</option>
-              {enumValues.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
-          )
-        }
-        // Regular string input
+      case 'enum': {
+        // Option values keep their JSON type (a choice may be a number), so
+        // the select works on indexes rather than on stringified values.
+        const selected = options.findIndex(option => option.value === value)
         return (
-          <input
-            type="text"
-            value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder={description || `Enter ${name}`}
+          <select
+            value={selected === -1 ? '' : String(selected)}
+            onChange={(e) => onChange(e.target.value === '' ? '' : options[Number(e.target.value)].value)}
+            className={INPUT_CLASS}
             required={required}
-          />
+            aria-label={label}
+          >
+            <option value="">Select an option...</option>
+            {options.map((option, index) => (
+              <option key={String(option.value)} value={String(index)}>{option.label}</option>
+            ))}
+          </select>
         )
+      }
+
+      case 'multiselect': {
+        const chosen = Array.isArray(value) ? value : []
+        const toggle = (optionValue, checked) => {
+          // Rebuilt in option order so the answer does not depend on click order.
+          onChange(options
+            .map(option => option.value)
+            .filter(v => (v === optionValue ? checked : chosen.includes(v))))
+        }
+        return (
+          <div role="group" aria-label={label} className="space-y-2">
+            {options.map(option => (
+              <label key={String(option.value)} className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(option.value)}
+                  onChange={(e) => toggle(option.value, e.target.checked)}
+                  className="w-5 h-5 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-gray-300">{option.label}</span>
+              </label>
+            ))}
+          </div>
+        )
+      }
 
       case 'number':
       case 'integer':
@@ -247,10 +271,13 @@ const FormField = ({ field, value, onChange }) => {
             type="number"
             value={value === '' ? '' : (value ?? '')}
             onChange={(e) => onChange(e.target.value === '' ? '' : parseFloat(e.target.value))}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder={description || `Enter ${name}`}
+            className={INPUT_CLASS}
+            placeholder={description || `Enter ${label}`}
             required={required}
+            min={field.minimum}
+            max={field.maximum}
             step={type === 'integer' ? '1' : 'any'}
+            aria-label={label}
           />
         )
 
@@ -264,35 +291,23 @@ const FormField = ({ field, value, onChange }) => {
               className="w-5 h-5 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-2 focus:ring-blue-500"
             />
             <span className="text-gray-300">
-              {description || `Enable ${name}`}
+              {description || field.title || `Enable ${name}`}
             </span>
           </label>
-        )
-
-      case 'enum':
-        return (
-          <select
-            value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required={required}
-          >
-            <option value="">Select an option...</option>
-            {enumValues.map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
         )
 
       default:
         return (
           <input
-            type="text"
+            type={inputTypeForFormat(field.format)}
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder={description || `Enter ${name}`}
+            className={INPUT_CLASS}
+            placeholder={description || `Enter ${label}`}
             required={required}
+            minLength={field.minLength}
+            maxLength={field.maxLength}
+            aria-label={label}
           />
         )
     }
@@ -301,7 +316,7 @@ const FormField = ({ field, value, onChange }) => {
   return (
     <div>
       <label className="block text-sm font-medium text-gray-300 mb-2">
-        {formatFieldName(name)}
+        {label}
         {required && <span className="text-red-500 ml-1">*</span>}
       </label>
       {description && type !== 'boolean' && (
@@ -310,56 +325,6 @@ const FormField = ({ field, value, onChange }) => {
       {renderInput()}
     </div>
   )
-}
-
-/**
- * Parse JSON schema to extract field information
- */
-function parseResponseSchema(schema) {
-  if (!schema || typeof schema !== 'object') {
-    return []
-  }
-
-  // Handle empty object schema (approval-only)
-  if (Object.keys(schema).length === 0 || (schema.properties && Object.keys(schema.properties).length === 0)) {
-    return [{
-      name: 'none',
-      type: 'none',
-      required: false
-    }]
-  }
-
-  const properties = schema.properties || {}
-  const required = schema.required || []
-  
-  return Object.entries(properties).map(([name, prop]) => {
-    const field = {
-      name,
-      type: prop.type || 'string',
-      description: prop.description || '',
-      required: required.includes(name),
-      default: prop.default
-    }
-
-    // Handle enum values
-    if (prop.enum && Array.isArray(prop.enum)) {
-      field.enum = prop.enum
-      field.type = 'enum'
-    }
-
-    return field
-  })
-}
-
-/**
- * Format field name for display (convert snake_case to Title Case)
- */
-function formatFieldName(name) {
-  if (name === 'value') return 'Value'
-  return name
-    .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
 }
 
 export default ElicitationDialog

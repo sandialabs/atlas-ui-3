@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Task Demo MCP Server using FastMCP 3.x
+Task Demo MCP Server using FastMCP 4.x
 
-Demonstrates the adaptive task polling feature (ToolTask API) where
-long-running tools can optionally run as background tasks with the
-client polling for completion.
+Demonstrates background tasks (the SEP-2663 tasks extension), where a
+long-running tool runs as a task on the server and the client polls for
+completion. Tasks exist only on MCP 2026-07-28 connections; an older client
+runs the optional-mode tools inline.
 
-FastMCP 3.x features demonstrated:
+FastMCP features demonstrated:
+- mcp.add_extension(TasksExtension()) — turns task support on for the server
 - @mcp.tool(task=True) — optional background task mode
 - @mcp.tool(task=TaskConfig(mode="required")) — required task mode
 - ctx.report_progress() — progress updates during task execution
@@ -21,11 +23,15 @@ import time
 from typing import Any, Dict
 
 from fastmcp import Context
-from fastmcp.server.tasks.config import TaskConfig
+from fastmcp.utilities.tasks import TaskConfig
+from fastmcp_tasks import TasksExtension
 
 from atlas.mcp_shared.server_factory import create_stdio_server
 
 mcp = create_stdio_server("Task Demo")
+# Task-enabled tools need the tasks extension; without a Redis URL it runs
+# the tasks in this process.
+mcp.add_extension(TasksExtension())
 
 
 @mcp.tool(task=True)

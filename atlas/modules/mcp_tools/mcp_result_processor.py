@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def _to_jsonable(value: Any) -> Any:
     """Coerce a structured-content value to plain JSON-serializable Python.
 
-    FastMCP 3.x validates a tool result's structuredContent against the tool's
+    FastMCP validates a tool result's structuredContent against the tool's
     auto-generated output_schema on the client side. For object schemas the
     validator builds a pydantic model / dataclass (named "Root" when the schema
     has no title), so ``CallToolResult.data`` can be a model instance rather
@@ -60,7 +60,7 @@ class ResultProcessorMixin:
         # Attempt extraction in priority order
         try:
             if hasattr(raw_result, "data") and raw_result.data:  # type: ignore[attr-defined]
-                # FastMCP 3.x validated/deserialized structured content (highest fidelity).
+                # FastMCP validated/deserialized structured content (highest fidelity).
                 # For object output schemas this is a pydantic model/dataclass instance
                 # (named "Root" when the schema has no title), so coerce it to plain
                 # JSON-able Python before the dict checks below.
@@ -223,7 +223,7 @@ class ResultProcessorMixin:
                         # Check if this is an ImageContent object
                         if hasattr(item, "type") and getattr(item, "type") == "image":
                             data = getattr(item, "data", None)
-                            mime_type = getattr(item, "mimeType", None)
+                            mime_type = getattr(item, "mime_type", None)
 
                             # Validate mime type against allowlist
                             if mime_type and mime_type not in ALLOWED_IMAGE_MIMES:

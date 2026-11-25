@@ -182,7 +182,7 @@ class ConnectionMixin:
                         url,
                         auth=token,
                         log_handler=log_handler,
-                        elicitation_handler=self._create_elicitation_handler(server_name),
+                        **self._client_input_kwargs(server_name),
                     )
                 else:
                     # Use HTTP transport (StreamableHttp)
@@ -191,7 +191,7 @@ class ConnectionMixin:
                         url,
                         auth=token,
                         log_handler=log_handler,
-                        elicitation_handler=self._create_elicitation_handler(server_name),
+                        **self._client_input_kwargs(server_name),
                     )
 
                 logger.info(f"Created {transport_type.upper()} MCP client for {server_name}")
@@ -255,7 +255,7 @@ class ConnectionMixin:
                             client = _client().Client(
                                 transport,
                                 log_handler=log_handler,
-                                elicitation_handler=self._create_elicitation_handler(server_name),
+                                **self._client_input_kwargs(server_name),
                             )
                             logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command and cwd")
                             return client
@@ -269,7 +269,7 @@ class ConnectionMixin:
                         client = _client().Client(
                             transport,
                             log_handler=log_handler,
-                            elicitation_handler=self._create_elicitation_handler(server_name),
+                            **self._client_input_kwargs(server_name),
                             )
                         logger.info(f"Successfully created STDIO MCP client for {server_name} with custom command")
                         return client
@@ -308,7 +308,7 @@ class ConnectionMixin:
                         client = _client().Client(
                             transport,
                             log_handler=log_handler,
-                            elicitation_handler=self._create_elicitation_handler(server_name),
+                            **self._client_input_kwargs(server_name),
                             )
                         logger.info(f"Created MCP client for {server_name}")
                         logger.debug(f"Successfully created client for {server_name}")

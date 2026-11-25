@@ -496,7 +496,7 @@ class AppSettings(BaseSettings):
     )
     mcp_task_timeout: float = Field(
         default=10.0,
-        description="Seconds to wait synchronously before switching to background task polling",
+        description="Seconds a server-side MCP background task may run before the UI is told the tool call is long-running",
         validation_alias="MCP_TASK_TIMEOUT"
     )
     mcp_user_client_cache_max_entries: int = Field(

@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """
-Session State Demo MCP Server using FastMCP 3.x
+Session State Demo MCP Server using FastMCP 4.x
 
-Demonstrates pluggable session state (ctx.get_state / ctx.set_state) —
-state that persists across multiple tool calls within the same MCP session.
+Demonstrates explicit session state - data that persists across multiple
+tool calls in the same conversation.
 
-This server implements a simple shopping cart where items are stored in
-session state and survive across separate tool invocations, proving that
-session persistence works end-to-end.
+This server implements a simple shopping cart where items are stored in a
+session and survive across separate tool invocations.
 
-FastMCP 3.x features demonstrated:
-- ctx.set_state(key, value) — persist data across tool calls
-- ctx.get_state(key) — retrieve persisted data
-- ctx.delete_state(key) — clear persisted data
-- Session-scoped storage (each conversation gets its own cart)
+MCP 2026-07-28 connections are stateless: every request is its own
+connection, so the connection-scoped ``ctx.get_state`` / ``ctx.set_state``
+no longer carries anything from one tool call to the next. State is kept in
+an explicit session instead:
+
+- ``SessionProvider`` adds ``create_session`` / ``end_session`` tools
+- the model calls ``create_session`` once and passes the returned
+  ``session_id`` to every cart tool
+- ``get_session(session_id)`` resolves the session; an id that was never
+  created (or belongs to another authenticated user) is rejected
+- ``session.get`` / ``session.set`` / ``session.delete`` read and write it
+
+When the server sits behind authentication, sessions are also walled off per
+authenticated user. Without authentication the session id is the only
+credential, so treat it as a secret.
 """
 
 from __future__ import annotations
@@ -21,21 +30,24 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
-from fastmcp import Context, FastMCP
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_session
+from fastmcp.server.sessions import SessionId, SessionProvider
 
 from atlas.mcp.common.state import get_state_store
 
 mcp = FastMCP("Session State Demo", session_state_store=get_state_store())
+mcp.add_provider(SessionProvider())
 
 CART_KEY = "shopping_cart"
 HISTORY_KEY = "action_history"
 
 
 @mcp.tool
-async def add_to_cart(item: str, quantity: int, price: float, ctx: Context) -> Dict[str, Any]:
+async def add_to_cart(item: str, quantity: int, price: float, session_id: SessionId) -> Dict[str, Any]:
     """Add an item to the session-persisted shopping cart.
 
-    Demonstrates ctx.set_state() — the cart persists across tool calls
+    Demonstrates session.set() - the cart persists across tool calls
     within the same conversation session.
 
     Args:
@@ -47,9 +59,10 @@ async def add_to_cart(item: str, quantity: int, price: float, ctx: Context) -> D
         Updated cart contents with total
     """
     start = time.perf_counter()
+    session = await get_session(session_id)
 
     # Retrieve existing cart from session state
-    cart = await ctx.get_state(CART_KEY) or []
+    cart = await session.get(CART_KEY) or []
 
     # Add the new item
     cart.append({
@@ -60,12 +73,12 @@ async def add_to_cart(item: str, quantity: int, price: float, ctx: Context) -> D
     })
 
     # Persist back to session state
-    await ctx.set_state(CART_KEY, cart)
+    await session.set(CART_KEY, cart)
 
     # Track action history
-    history = await ctx.get_state(HISTORY_KEY) or []
+    history = await session.get(HISTORY_KEY) or []
     history.append(f"Added {quantity}x {item} @ ${price:.2f}")
-    await ctx.set_state(HISTORY_KEY, history)
+    await session.set(HISTORY_KEY, history)
 
     total = sum(entry["subtotal"] for entry in cart)
 
@@ -87,18 +100,19 @@ async def add_to_cart(item: str, quantity: int, price: float, ctx: Context) -> D
 
 
 @mcp.tool
-async def view_cart(ctx: Context) -> Dict[str, Any]:
+async def view_cart(session_id: SessionId) -> Dict[str, Any]:
     """View the current shopping cart contents.
 
-    Demonstrates ctx.get_state() — retrieves data persisted by previous
+    Demonstrates session.get() - retrieves data persisted by previous
     tool calls in this session.
 
     Returns:
         Current cart contents, item count, and total
     """
     start = time.perf_counter()
+    session = await get_session(session_id)
 
-    cart = await ctx.get_state(CART_KEY) or []
+    cart = await session.get(CART_KEY) or []
     total = sum(entry["subtotal"] for entry in cart)
 
     return {
@@ -116,7 +130,7 @@ async def view_cart(ctx: Context) -> Dict[str, Any]:
 
 
 @mcp.tool
-async def remove_from_cart(item: str, ctx: Context) -> Dict[str, Any]:
+async def remove_from_cart(item: str, session_id: SessionId) -> Dict[str, Any]:
     """Remove an item from the cart by name.
 
     Demonstrates reading, modifying, and writing back session state.
@@ -128,8 +142,9 @@ async def remove_from_cart(item: str, ctx: Context) -> Dict[str, Any]:
         Updated cart after removal
     """
     start = time.perf_counter()
+    session = await get_session(session_id)
 
-    cart = await ctx.get_state(CART_KEY) or []
+    cart = await session.get(CART_KEY) or []
 
     # Remove first matching item
     removed = False
@@ -140,11 +155,11 @@ async def remove_from_cart(item: str, ctx: Context) -> Dict[str, Any]:
             continue
         new_cart.append(entry)
 
-    await ctx.set_state(CART_KEY, new_cart)
+    await session.set(CART_KEY, new_cart)
 
-    history = await ctx.get_state(HISTORY_KEY) or []
+    history = await session.get(HISTORY_KEY) or []
     history.append(f"Removed {item}" if removed else f"Item '{item}' not found")
-    await ctx.set_state(HISTORY_KEY, history)
+    await session.set(HISTORY_KEY, history)
 
     total = sum(entry["subtotal"] for entry in new_cart)
 
@@ -163,24 +178,25 @@ async def remove_from_cart(item: str, ctx: Context) -> Dict[str, Any]:
 
 
 @mcp.tool
-async def clear_cart(ctx: Context) -> Dict[str, Any]:
+async def clear_cart(session_id: SessionId) -> Dict[str, Any]:
     """Clear all items from the cart.
 
-    Demonstrates ctx.delete_state() — removes persisted session data.
+    Demonstrates session.delete() - removes persisted session data.
 
     Returns:
         Confirmation of cart clearing
     """
     start = time.perf_counter()
+    session = await get_session(session_id)
 
-    cart = await ctx.get_state(CART_KEY) or []
+    cart = await session.get(CART_KEY) or []
     items_cleared = len(cart)
 
-    await ctx.delete_state(CART_KEY)
+    await session.delete(CART_KEY)
 
-    history = await ctx.get_state(HISTORY_KEY) or []
+    history = await session.get(HISTORY_KEY) or []
     history.append(f"Cleared cart ({items_cleared} items)")
-    await ctx.set_state(HISTORY_KEY, history)
+    await session.set(HISTORY_KEY, history)
 
     return {
         "results": {
@@ -197,7 +213,7 @@ async def clear_cart(ctx: Context) -> Dict[str, Any]:
 
 
 @mcp.tool
-async def view_history(ctx: Context) -> Dict[str, Any]:
+async def view_history(session_id: SessionId) -> Dict[str, Any]:
     """View the action history for this session.
 
     Shows all cart actions taken during this session, demonstrating
@@ -207,8 +223,9 @@ async def view_history(ctx: Context) -> Dict[str, Any]:
         List of all actions performed in this session
     """
     start = time.perf_counter()
+    session = await get_session(session_id)
 
-    history = await ctx.get_state(HISTORY_KEY) or []
+    history = await session.get(HISTORY_KEY) or []
 
     return {
         "results": {

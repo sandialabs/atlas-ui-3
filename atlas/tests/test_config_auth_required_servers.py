@@ -33,7 +33,7 @@ def _headers():
 
 def _tool(name):
     return SimpleNamespace(
-        name=name, description=f"{name} tool", inputSchema={"type": "object"}
+        name=name, description=f"{name} tool", input_schema={"type": "object"}
     )
 
 

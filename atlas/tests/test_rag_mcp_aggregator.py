@@ -13,10 +13,10 @@ def patch_mcp(monkeypatch):
     from atlas.modules.mcp_tools.client import MCPToolManager
 
     class FakeTool:
-        def __init__(self, name, description="", inputSchema=None):
+        def __init__(self, name, description="", input_schema=None):
             self.name = name
             self.description = description
-            self.inputSchema = inputSchema or {"type": "object", "properties": {"_atlas_user": {"type": "string"}}}
+            self.input_schema = input_schema or {"type": "object", "properties": {"_atlas_user": {"type": "string"}}}
 
     class FakeClient:
         def __init__(self, server_name):

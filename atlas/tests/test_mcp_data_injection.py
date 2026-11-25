@@ -19,10 +19,10 @@ from atlas.application.chat.utilities.tool_executor import (
 class FakeTool:
     """Minimal tool object matching the MCP tool interface."""
 
-    def __init__(self, name, description="", inputSchema=None):
+    def __init__(self, name, description="", input_schema=None):
         self.name = name
         self.description = description
-        self.inputSchema = inputSchema or {"type": "object", "properties": {}}
+        self.input_schema = input_schema or {"type": "object", "properties": {}}
 
 
 def _make_tool_manager(available_tools=None, schema_override=None):
@@ -43,7 +43,7 @@ def _make_tool_manager(available_tools=None, schema_override=None):
                         "function": {
                             "name": fq_name,
                             "description": tool.description or "",
-                            "parameters": tool.inputSchema or {},
+                            "parameters": tool.input_schema or {},
                         },
                     })
         return schemas
@@ -61,7 +61,7 @@ class TestToolAcceptsMcpData:
     def test_returns_true_when_schema_has_mcp_data(self):
         tool = FakeTool(
             "planner",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string"},
@@ -75,7 +75,7 @@ class TestToolAcceptsMcpData:
     def test_returns_false_when_schema_lacks_mcp_data(self):
         tool = FakeTool(
             "search",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
             },
@@ -122,7 +122,7 @@ class TestBuildMcpData:
         tool_a = FakeTool(
             "search",
             description="Search documents",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
             },
@@ -160,7 +160,7 @@ class TestBuildMcpData:
         assert "server_b" in names
 
     def test_handles_missing_description(self):
-        tool = FakeTool("t", description=None, inputSchema=None)
+        tool = FakeTool("t", description=None, input_schema=None)
         manager = _make_tool_manager({
             "s": {"tools": [tool], "config": {}},
         })
@@ -188,7 +188,7 @@ class TestInjectMcpData:
     def test_injects_mcp_data_when_tool_accepts_it(self):
         tool = FakeTool(
             "planner",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string"},
@@ -214,7 +214,7 @@ class TestInjectMcpData:
     def test_does_not_inject_mcp_data_when_tool_lacks_param(self):
         tool = FakeTool(
             "search",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
             },
@@ -236,7 +236,7 @@ class TestInjectMcpData:
         """Simulates the re-injection path after user edits tool arguments."""
         tool = FakeTool(
             "planner",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string"},

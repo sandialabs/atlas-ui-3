@@ -14,10 +14,10 @@ from atlas.routes.config_routes import _atlas_tools_info
 
 class FakeTool:
     """Mock tool object for testing."""
-    def __init__(self, name, description="", inputSchema=None):
+    def __init__(self, name, description="", input_schema=None):
         self.name = name
         self.description = description
-        self.inputSchema = inputSchema or {"type": "object", "properties": {}}
+        self.input_schema = input_schema or {"type": "object", "properties": {}}
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def test_tools_detailed_includes_description_and_schema(mock_mcp_manager):
         tool_detail = {
             'name': tool.name,
             'description': tool.description or '',
-            'inputSchema': getattr(tool, 'inputSchema', {}) or {}
+            'inputSchema': getattr(tool, 'input_schema', {}) or {}
         }
         tools_detailed.append(tool_detail)
 
