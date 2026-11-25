@@ -86,10 +86,6 @@ Concurrent tool calls are routed via composite `(server_name, tool_call_id)` key
 2. **Fallback**: If meta unavailable, scan for single match on `server_name`
 3. **Ambiguous**: If multiple matches without meta, cancel the elicitation.
 
-MCP sampling used the same routing until it was removed on 2026-10-23: a
-server-initiated LLM call is not a capability Atlas can authorize against the
-requesting user's model access.
-
 ## Writing New MCP Servers
 
 ### Stateless (STDIO)

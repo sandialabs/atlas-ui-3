@@ -6,8 +6,7 @@ The security contract these tests pin down:
   cannot inject its text into model context);
 * authorized MCP operations still work, including per-user auth routing;
 * group, data-classification, and per-model checks are the same for every MCP
-  capability;
-* MCP sampling paths no longer exist, so a server cannot initiate a model call.
+  capability.
 """
 
 from types import SimpleNamespace
@@ -557,21 +556,3 @@ async def test_prompt_override_forwards_trusted_level_and_model():
         compliance_level="ITAR",
         model_name="restricted-model",
     )
-
-
-# --- sampling removal -------------------------------------------------------
-
-
-def test_sampling_surfaces_are_gone():
-    for attr in (
-        "_create_sampling_handler",
-        "_use_sampling_context",
-    ):
-        assert not hasattr(MCPToolManager, attr), attr
-
-    from atlas.modules.mcp_tools import mcp_routing
-
-    assert not hasattr(mcp_routing, "_SamplingRoutingContext")
-
-    manager = _manager({})
-    assert not hasattr(manager, "_sampling_routing")

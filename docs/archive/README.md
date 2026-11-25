@@ -20,4 +20,3 @@ For current reference, see the [Developer's Guide](../developer/README.md),
 - [Easy Start Entrypoint Plan](easy-start-entrypoint.md) - Implemented easy-start scripts
 - [Elicitation Dialog Not Showing — Issue Analysis](elicitation-issue-2025-01-07.md) - Resolved bug investigation
 - [File Access for Remote MCP Servers — Solution Summary](file-access-solution.md) - Shipped; see admin/troubleshooting-file-access.md
-- [Fix Plan: MCP Sampling Test Failures](fix-mcp-sampling-tests-plan-2026-01-18.md) - Completed test-restoration plan

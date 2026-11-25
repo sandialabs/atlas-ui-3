@@ -1,6 +1,6 @@
 # LLM Configuration
 
-Last updated: 2026-11-21
+Last updated: 2026-11-25
 
 The `llmconfig.yml` file is where you define all the Large Language Models that the application can use. The application uses the `LiteLLM` library, which allows it to connect to a wide variety of LLM providers.
 
@@ -347,11 +347,9 @@ name:
    and refuse key uploads for them, so a user cannot register a key against a
    model they may not use.
 
-MCP server-initiated LLM sampling is not supported: it has been removed so an
-MCP server can never choose and invoke a model outside the requesting user's
-per-model authorization. MCP prompts and resources are authorized through the
-same central policy as tools (server groups, active data classification, and the
-per-model ACL when a model is involved).
+MCP prompts and resources are authorized through the same central policy as
+tools (server groups, active data classification, and the per-model ACL when a
+model is involved).
 
 ## Configuration Fields Explained
 
