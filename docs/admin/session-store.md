@@ -183,6 +183,22 @@ session, which reloads the conversation from chat history on its next turn.
 A page reload starts a new UI and a new session; only reconnects within a
 page resume.
 
+#### Navigation frames while disconnected
+
+The browser holds one `reset_session` or `restore_conversation` frame that it
+could not send (socket closed, connecting, or open but unwritable) and sends it
+first on the next open, before any other frame. The frame carries a
+`request_id`; the server copies it onto the reply (`session_reset`,
+`conversation_restored`, or an `error` when the restore is refused), and the
+browser drops the frame only when that reply arrives. A frame that is written
+but not answered within 10 seconds, or held for more than 2 minutes (a restore
+carries the transcript), is dropped and the user is told the server session may
+not match the screen. Replies without a `request_id` (an older server) are
+matched by type and conversation id. When the login session ends (a
+`session_ended` frame, close code 4401 or 1008) the held frame is discarded, new
+navigation frames are refused until the user signs in again, and the next
+connection starts a new server session instead of resuming the old one.
+
 ### Outages
 
 | Situation | Behavior |

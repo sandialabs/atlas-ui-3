@@ -30,7 +30,7 @@ import {
 } from '../utils/fileLibraryModel'
 
 const AllFilesView = () => {
-  const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, attachments } = useChat()
+  const { token, user: userEmail, ensureSession, addSystemEvent, addPendingFileEvent, resolvePendingFileEvent, attachments } = useChat()
   const { sendMessage } = useWS()
   const [allFiles, setAllFiles] = useState([])
   const [filteredFiles, setFilteredFiles] = useState([])
@@ -443,11 +443,16 @@ const AllFilesView = () => {
 
       addPendingFileEvent(file.key, eventId)
 
-      sendMessage({
+      const sent = sendMessage({
         type: 'attach_file',
         s3_key: file.key,
         user: userEmail
       })
+      if (sent !== true) {
+        // Not connected: the server will never answer, so do not leave the
+        // "Adding..." row waiting for it.
+        resolvePendingFileEvent?.(file.key, 'file-attach-error', `Failed to add '${file.filename}' to session: not connected`)
+      }
     } catch (err) {
       console.error('Error adding file to session:', err)
       addSystemEvent('file-attach-error', `Failed to add '${file.filename}' to session: ${err.message}`)

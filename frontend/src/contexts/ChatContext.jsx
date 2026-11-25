@@ -2180,13 +2180,15 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			clearAgentQuestion(null)
 			if (!sendMessage) return
 			const run = runs.getRun(activeConversationId)
-			sendMessage({
+			const sent = sendMessage({
 				type: 'agent_control',
 				action: 'stop',
 				conversation_id: activeConversationId || undefined,
 				run_id: run?.run_id || undefined,
 			})
-		}, [sendMessage, runs, activeConversationId, clearAgentQuestion])
+			// A dropped Stop leaves the run going on the server (issue #1223).
+			if (sent !== true) toast.error('Stop was not sent: not connected. The run may still be going.')
+		}, [sendMessage, runs, activeConversationId, clearAgentQuestion, toast])
 
 		// Stop non-agent streaming
 		const stopStreaming = useCallback(() => {
@@ -2196,12 +2198,13 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			clearPendingCompaction()
 			if (!sendMessage) return
 			const run = runs.getRun(activeConversationId)
-			sendMessage({
+			const sent = sendMessage({
 				type: 'stop_streaming',
 				conversation_id: activeConversationId || undefined,
 				run_id: run?.run_id || undefined,
 			})
-		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction])
+			if (sent !== true) toast.error('Stop was not sent: not connected. The run may still be going.')
+		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction, toast])
 
 			const answerAgentQuestion = useCallback((content) => {
 			if (!content || !content.trim()) return
@@ -2209,9 +2212,14 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				// answer: the backend consumes it inside the transient agent loop and
 				// never appends it to ConversationHistory, so it must NOT count toward
 				// the rewind ordinal (see utils/userMessageOrdinal). #142
+				// Send first: an answer that never reached the server must not
+				// look delivered, and the question stays open for a retry.
+				if (!sendMessage || sendMessage({ type: 'agent_user_input', content }) !== true) {
+					toast.error('Your answer was not sent: not connected. Try again once the connection is back.')
+					return
+				}
 				addMessage({ role: 'user', content, timestamp: new Date().toISOString(), _agentInput: true })
-				if (sendMessage) sendMessage({ type: 'agent_user_input', content })
-			}, [sendMessage, addMessage])
+			}, [sendMessage, addMessage, toast])
 
 	const deleteFile = useCallback((filename) => {
 		if (!confirm(`Delete ${filename}?`)) return
