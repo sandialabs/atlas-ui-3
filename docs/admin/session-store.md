@@ -194,10 +194,19 @@ Store errors and refused writes are also logged (ERROR and WARNING).
   every in-flight run and discards its unsaved turn (see [Outages](#outages)).
   Set `maxmemory-policy noeviction`: evicting a run's claim record fences the
   run. Use `rediss://` across untrusted networks.
+- Redis must be one logical primary (optionally with replicas or Sentinel).
+  The run-coordination scripts touch several keys at once, so Redis Cluster is
+  not supported. A failover that loses the last acknowledged writes has the
+  same effect on in-flight runs as an outage (see [Outages](#outages)).
 - Set `REDIS_KEY_PREFIX` per environment if environments share a Redis.
 - Size `REDIS_MAX_CONNECTIONS` from the budget formula above.
 - Rolling deploys: a replica that is stopping closes its sockets; clients
-  reconnect to a remaining replica and resume.
+  reconnect to a remaining replica and resume. Runs are not drained: every run
+  in flight on a replaced pod is recorded as failed (`end_reason:
+  replica_shutdown`) and its unsaved turn is lost, so a rollout interrupts the
+  runs on each pod it replaces. uvicorn is started without
+  `timeout_graceful_shutdown`, so a connection that stays open can hold the
+  shutdown until the platform's grace period ends and the process is killed.
 - A complete staging overlay (three replicas, probes, migrations, validation
   of cross-replica resume) is in `deploy/kubernetes/`; see
   [Multi-Replica Staging on Kubernetes/OpenShift](kubernetes-staging.md).
@@ -206,13 +215,18 @@ Store errors and refused writes are also logged (ERROR and WARNING).
 
 The shared store moves **session state**. It does not move live work:
 
-- **Tracked agent runs** (parallel conversation runs), their pending approvals,
-  stop/steer routing and the per-user run cap are still process-local (see
-  [Parallel Conversation Runs](parallel-conversation-runs.md)). A user who
-  reconnects to another replica does not see a run that is executing on the
-  first one until it finishes and its conversation is saved. Deployments that
-  rely on tracked runs should keep sticky sessions until distributed run
-  coordination (issue #1091, later phases) lands.
+- **Tracked agent runs** (parallel conversation runs) execute on one replica,
+  but other replicas can work with them. The per-user run cap and one run per
+  conversation hold cluster-wide, every replica reads a run's status, and
+  stop, steer, tool approval and the auto-approve switch sent to any replica
+  are routed to the replica that owns the run (see
+  [Parallel Conversation Runs](parallel-conversation-runs.md) and
+  [run coordination](../developer/run-coordination.md)). No sticky sessions
+  are needed for these. What stays on the owning replica: the transcript of a
+  run that has not yet been saved (opening that conversation on another
+  replica does not show it until the turn ends and is saved), the Agent Runs
+  API follow-up and listing endpoints, the `atlas_get_subagent_result` and
+  `atlas_get_subagent_runs` tools, and MCP elicitation prompts.
 - **An in-flight plain turn** (one that runs on the connection's own session,
   not a background run) is cancelled when its socket closes, and its
   completed work committed, as before; the resumed session carries the
