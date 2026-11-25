@@ -217,7 +217,14 @@ describe('speaker on messages', () => {
     expect(speaker()).toBeInTheDocument()
   })
 
+  it('appears on a reply reloaded from a saved conversation', () => {
+    // loadSavedConversation types ordinary stored messages as 'chat'.
+    render(<Message message={{ role: 'assistant', type: 'chat', content: 'A stored reply.' }} />)
+    expect(speaker()).toBeInTheDocument()
+  })
+
   it.each([
+    ['a stored user message', { role: 'user', type: 'chat', content: 'my stored prompt' }],
     ['a user message', { role: 'user', content: 'my prompt' }],
     ['a reply still streaming', { role: 'assistant', content: 'partial', _streaming: true }],
     ['a replayed fragment', { role: 'assistant', content: 'fragment', _replayed: true }],

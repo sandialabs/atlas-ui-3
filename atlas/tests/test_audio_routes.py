@@ -368,6 +368,23 @@ def test_concurrent_relays_are_bounded(client, test_user_headers, upstream, audi
     assert audio_routes._in_flight == 0
 
 
+def test_a_body_that_trickles_in_gives_its_slot_back(client, test_user_headers, upstream, audio_on, monkeypatch):
+    """A relay slot is held while the body is read, so reading has a deadline."""
+    from atlas.routes import audio_routes
+
+    async def stalled(request, limit, detail):
+        await asyncio.sleep(5)
+        yield b""
+
+    monkeypatch.setattr(audio_routes, "_capped_stream", stalled)
+    monkeypatch.setattr(audio_on, "audio_stt_timeout_seconds", 0.05)
+    monkeypatch.setattr(audio_on, "audio_tts_timeout_seconds", 0.05)
+    assert post_clip(client, test_user_headers).status_code == 408
+    assert post_speech(client, test_user_headers).status_code == 408
+    assert audio_routes._in_flight == 0
+    assert upstream.requests == []
+
+
 @pytest.mark.parametrize(
     "upstream_status,expected",
     [(401, 502), (403, 502), (404, 502), (400, 422), (413, 413), (429, 503), (500, 502), (302, 502)],

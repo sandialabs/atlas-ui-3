@@ -26,6 +26,7 @@ file while it is parsed; that file is deleted before the request returns.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -69,6 +70,7 @@ _JSON_OVERHEAD_BYTES = 4 * 1024
 _LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")
 _MAX_LEVEL_NAME_CHARS = 200
 _DURATION_TOLERANCE_SECONDS = 5
+_SLOW_BODY_DETAIL = "The request took too long to arrive. Check your connection and try again."
 
 
 class SpeechRequest(BaseModel):
@@ -181,13 +183,20 @@ async def transcribe_audio(request: Request, current_user: str = Depends(get_cur
 
 async def _transcribe_upload(request: Request, settings, config, current_user: str, body_limit: int, too_large: str):
     try:
-        form = await MultiPartParser(
-            request.headers,
-            _capped_stream(request, body_limit, too_large),
-            max_files=1,
-            max_fields=8,
-            max_part_size=16 * 1024,
-        ).parse()
+        # A relay slot is held from here on, so a client may not take as long
+        # as it likes to send the body.
+        form = await asyncio.wait_for(
+            MultiPartParser(
+                request.headers,
+                _capped_stream(request, body_limit, too_large),
+                max_files=1,
+                max_fields=8,
+                max_part_size=16 * 1024,
+            ).parse(),
+            timeout=config.timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail=_SLOW_BODY_DETAIL) from None
     except (MultiPartException, ValueError):
         # Starlette raises MultiPartException for what it checks itself (no
         # boundary, too many parts); the underlying parser raises its own
@@ -281,7 +290,13 @@ async def synthesize_speech(request: Request, current_user: str = Depends(get_cu
 
 
 async def _synthesize_text(request: Request, settings, config, current_user: str, body_limit: int, too_long: str):
-    raw = b"".join([chunk async for chunk in _capped_stream(request, body_limit, too_long)])
+    async def read_body() -> bytes:
+        return b"".join([chunk async for chunk in _capped_stream(request, body_limit, too_long)])
+
+    try:
+        raw = await asyncio.wait_for(read_body(), timeout=config.timeout_seconds)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail=_SLOW_BODY_DETAIL) from None
     try:
         payload = SpeechRequest.model_validate_json(raw)
     except ValidationError:

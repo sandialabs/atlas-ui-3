@@ -277,7 +277,7 @@ fine; the two sets of variables do not interact.
 | Upload type | Server: the declared type must be WebM, Ogg, MP4/M4A, MP3, WAV or FLAC **and** the file must begin with that container's signature, otherwise 415 |
 | Text length (`AUDIO_TTS_MAX_INPUT_CHARS`) | Server, 413. The read-aloud button trims a longer message at a sentence boundary and tells the user it did |
 | Reply size (`AUDIO_TTS_MAX_AUDIO_BYTES`) | Server: a larger reply from the audio server is discarded and the request fails with 502 |
-| Time (`AUDIO_*_TIMEOUT_SECONDS`) | Server: a ceiling on the whole exchange with the audio server, 504 when exceeded |
+| Time (`AUDIO_*_TIMEOUT_SECONDS`) | Server: a ceiling on the whole exchange with the audio server, 504 when exceeded. The same value bounds how long the browser may take to send the request body (408), so a slow upload cannot hold a relay slot |
 | Concurrency (`AUDIO_MAX_CONCURRENT_REQUESTS`) | Server, per backend process: a request beyond the limit is refused with 503 before its body is read |
 
 **Memory.** A clip is held in memory while it is relayed, briefly twice (the
@@ -352,6 +352,7 @@ With text-to-speech off the header is unchanged.
 | ------ | ------- |
 | 404 | The capability is off, incompletely configured, or not available to this user |
 | 403 | The audio endpoint is not approved for the conversation's security level |
+| 408 | The request body took longer than `AUDIO_*_TIMEOUT_SECONDS` to arrive |
 | 413 | Recording too large or too long, or text too long |
 | 415 | The upload is not an accepted audio type, or is not what it claims to be |
 | 422 | Missing file or text, or the audio server could not process the request |
