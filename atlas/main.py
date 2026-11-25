@@ -79,11 +79,7 @@ from atlas.application.chat.runs.eligibility import (
 )
 from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
 from atlas.application.chat.runs.remote_run_frames import steer_finished_frame
-from atlas.application.chat.service import (
-    NAVIGATION_REQUEST_IDS_KEY,
-    UNSET,
-    DownloadError,
-)
+from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.auth_mode import validate_auth_modes
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
@@ -974,24 +970,6 @@ def _echo_request_id(data, response) -> None:
     request_id = _usable_request_id(data)
     if request_id is not None and isinstance(response, dict):
         response["request_id"] = request_id
-
-
-# Completed navigation request ids live on the session (see ChatService).
-
-
-async def _navigation_already_done(chat_service, session_id, data) -> bool:
-    request_id = _usable_request_id(data)
-    if request_id is None:
-        return False
-    try:
-        session = await chat_service.session_repository.get(session_id)
-    except Exception:
-        logger.debug("Could not look up completed navigation requests", exc_info=True)
-        return False
-    if session is None:
-        return False
-    done = session.context.get(NAVIGATION_REQUEST_IDS_KEY)
-    return isinstance(done, list) and request_id in done
 
 
 # Marks a tracked run's own session, which belongs to the run rather than to a
@@ -3156,16 +3134,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "restore_conversation":
-                if await _navigation_already_done(chat_service, session_id, data):
-                    # A replay of a restore that already went through.
-                    duplicate = {
-                        "type": "conversation_restored",
-                        "conversation_id": data.get("conversation_id", ""),
-                        "deduplicated": True,
-                    }
-                    _echo_request_id(data, duplicate)
-                    await websocket.send_json(duplicate)
-                    continue
                 # Release MCP sessions for the current conversation before restoring
                 session = await chat_service.session_repository.get(session_id)
                 if session:
@@ -3208,7 +3176,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         # conversation recorded under another classification
                         # is refused before it is loaded (issue #1042).
                         compliance_level=data.get("compliance_level_filter", UNSET),
-                        navigation_request_id=_usable_request_id(data),
                     )
                 except DomainError as e:
                     logger.warning(
@@ -3263,19 +3230,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json(replay_frame)
 
             elif message_type == "reset_session":
-                if await _navigation_already_done(chat_service, session_id, data):
-                    # A replay of a reset that already went through: a second one
-                    # would start another conversation and drop what was typed
-                    # in the first.
-                    duplicate = {
-                        "type": "session_reset",
-                        "session_id": str(session_id),
-                        "message": "New session created",
-                        "deduplicated": True,
-                    }
-                    _echo_request_id(data, duplicate)
-                    await websocket.send_json(duplicate)
-                    continue
                 # Issue #884: only the plain turn on this connection's session
                 # is cancelled here. Runs with their own session are not owned
                 # by the visible conversation, so "New Chat" must not stop one
@@ -3318,7 +3272,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         session_id=session_id,
                         user_email=user_email,
                         preserve_conversation_resources=preserve_resources,
-                        navigation_request_id=_usable_request_id(data),
                     )
                 except DomainError as e:
                     # Session store unavailable, or the session was resumed

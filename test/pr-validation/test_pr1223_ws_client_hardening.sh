@@ -22,7 +22,7 @@ npx vitest run src/test/ws-navigation-ack.test.jsx src/test/ws-navigation-handle
 cd "$PROJECT_ROOT/atlas" || exit 1
 PY="$PROJECT_ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY=python
-PYTHONPATH="$PROJECT_ROOT" "$PY" -m pytest tests/test_nav_request_id_echo.py tests/test_nav_replay_dedupe.py -q \
+PYTHONPATH="$PROJECT_ROOT" "$PY" -m pytest tests/test_nav_request_id_echo.py -q \
     || fail "backend request_id echo"
 
 echo "PASSED: PR 1223 websocket client hardening validation"

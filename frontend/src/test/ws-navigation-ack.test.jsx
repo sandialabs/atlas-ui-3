@@ -379,6 +379,34 @@ describe('WSContext navigation frames', () => {
       expect(sent).toBe(true)
     })
 
+    it('lifts the failed state on a late reply without a request id (older server)', () => {
+      act(() => {
+        probe.sendMessage({ type: 'restore_conversation', conversation_id: 'c1', messages: [] })
+      })
+      const first = openFirst()
+      act(() => {
+        vi.advanceTimersByTime(15000)
+      })
+      expect(probe.navigationState()).toBe('failed')
+      // Another conversation's reply does not count.
+      act(() => first.receive({ type: 'conversation_restored', conversation_id: 'other' }))
+      expect(probe.navigationState()).toBe('failed')
+      act(() => first.receive({ type: 'conversation_restored', conversation_id: 'c1' }))
+      expect(probe.navigationState()).toBe(null)
+    })
+
+    it('lifts the failed state on a late session_reset without a request id', () => {
+      act(() => {
+        probe.sendMessage({ type: 'reset_session' })
+      })
+      const first = openFirst()
+      act(() => {
+        vi.advanceTimersByTime(15000)
+      })
+      act(() => first.receive({ type: 'session_reset' }))
+      expect(probe.navigationState()).toBe(null)
+    })
+
     it('does not time out once acknowledged', () => {
       act(() => {
         probe.sendMessage({ type: 'reset_session' })

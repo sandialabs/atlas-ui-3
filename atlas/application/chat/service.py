@@ -120,23 +120,6 @@ def _has_save_floor(session: Session) -> bool:
 UpdateCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
-# Completed navigation request ids (reset_session / restore_conversation), kept
-# on the session so a frame the client replays after a reconnect is answered
-# without running twice (issue #1223). Written with the same persist that
-# applies the navigation, so the record and the state it guards cannot diverge.
-NAVIGATION_REQUEST_IDS_KEY = "navigation_request_ids"
-_NAVIGATION_REQUEST_IDS_KEEP = 8
-
-
-def note_navigation_request(session, request_id) -> None:
-    if not request_id:
-        return
-    done = session.context.get(NAVIGATION_REQUEST_IDS_KEY)
-    done = list(done) if isinstance(done, list) else []
-    done.append(request_id)
-    session.context[NAVIGATION_REQUEST_IDS_KEY] = done[-_NAVIGATION_REQUEST_IDS_KEEP:]
-
-
 class ChatService:
     """
     Core chat service that orchestrates chat operations.
@@ -1351,12 +1334,8 @@ class ChatService:
         messages: List[Dict[str, Any]],
         user_email: Optional[str] = None,
         compliance_level: Any = UNSET,
-        navigation_request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Restore a saved conversation into the current session.
-
-        ``navigation_request_id`` is recorded on the session in the same write
-        that carries the restore, so a replayed frame can be recognised (#1223).
 
         ``compliance_level`` is the client's active level. When supplied, a
         conversation recorded under another classification is refused here,
@@ -1483,8 +1462,11 @@ class ChatService:
         loaded = load_messages_into_history(
             session.history, canonical_messages, conversation_id
         )
-        note_navigation_request(session, navigation_request_id)
-        await self.persist_session(session)
+        if not await self.persist_session(session):
+            # The session store refused the write (outage or a newer copy from
+            # another connection). Say so: a success frame would let the client
+            # send chat into a session that does not hold this conversation.
+            return self._navigation_not_stored_frame()
 
         logger.info(
             "Restored conversation %s into session %s for user %s (%d messages)",
@@ -1620,12 +1602,8 @@ class ChatService:
         session_id: UUID,
         user_email: Optional[str] = None,
         preserve_conversation_resources: bool = False,
-        navigation_request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Handle session reset request from frontend.
-
-        ``navigation_request_id`` is recorded on the new session in the same
-        write that creates it, so a replayed frame can be recognised (#1223).
 
         Generates a new conversation_id so the next conversation
         does not overwrite the previous one (session_id stays the
@@ -1666,8 +1644,8 @@ class ChatService:
         session = await self.create_session(session_id, user_email)
         new_conv_id = str(uuid4())
         session.context["conversation_id"] = new_conv_id
-        note_navigation_request(session, navigation_request_id)
-        await self.persist_session(session)
+        if not await self.persist_session(session):
+            return self._navigation_not_stored_frame()
 
         logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
 
@@ -1675,6 +1653,14 @@ class ChatService:
             "type": "session_reset",
             "session_id": str(session_id),
             "message": "New session created"
+        }
+
+    @staticmethod
+    def _navigation_not_stored_frame() -> Dict[str, Any]:
+        return {
+            "type": "error",
+            "message": "The session could not be saved. Try again in a moment.",
+            "error_type": "domain",
         }
 
     async def handle_attach_file(

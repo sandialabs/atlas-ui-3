@@ -170,9 +170,16 @@ export const WSProvider = ({ children }) => {
   const settleHeldNavigation = (ws, data) => {
     if (!data) return
     const failed = lastFailedNavigationRef.current
+    // By request id, or by type (and conversation id for a restore) when an
+    // older server does not echo the id.
+    const lateReplyMatches = failed && (
+      data.request_id === failed.requestId ||
+      (data.request_id === undefined &&
+        (failed.type !== 'restore_conversation' || data.conversation_id === failed.conversationId))
+    )
     if (
-      failed && !heldNavigationRef.current &&
-      data.request_id === failed.requestId && data.type === NAVIGATION_ACKS[failed.type]
+      failed && !heldNavigationRef.current && lateReplyMatches &&
+      data.type === NAVIGATION_ACKS[failed.type]
     ) {
       // The reply came after the wait ran out: the server did apply it.
       lastFailedNavigationRef.current = null

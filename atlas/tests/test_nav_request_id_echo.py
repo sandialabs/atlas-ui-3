@@ -80,3 +80,57 @@ def test_unusable_ids_are_ignored(bad):
     reply = {"type": "session_reset"}
     _echo_request_id({"request_id": bad}, reply)
     assert "request_id" not in reply
+
+
+def _real_service():
+    from atlas.application.chat.service import ChatService
+    from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+
+    repo = InMemorySessionRepository()
+    service = ChatService(
+        llm=MagicMock(),
+        tool_manager=MagicMock(),
+        connection=MagicMock(),
+        config_manager=MagicMock(),
+        session_repository=repo,
+    )
+    return service
+
+
+@pytest.mark.asyncio
+async def test_reset_reports_a_failed_persist():
+    from uuid import uuid4
+
+    service = _real_service()
+    session_id = uuid4()
+    await service.create_session(session_id, USER)
+    service.persist_session = AsyncMock(return_value=False)
+    reply = await service.handle_reset_session(session_id=session_id, user_email=USER)
+    assert reply["type"] == "error"
+    assert reply["error_type"] == "domain"
+
+
+@pytest.mark.asyncio
+async def test_restore_reports_a_failed_persist():
+    from uuid import uuid4
+
+    service = _real_service()
+    session_id = uuid4()
+    await service.create_session(session_id, USER)
+    service.persist_session = AsyncMock(return_value=False)
+    reply = await service.handle_restore_conversation(
+        session_id=session_id, conversation_id="c1", messages=[], user_email=USER
+    )
+    assert reply["type"] == "error"
+    assert reply["error_type"] == "domain"
+
+
+@pytest.mark.asyncio
+async def test_successful_persist_still_acknowledges():
+    from uuid import uuid4
+
+    service = _real_service()
+    session_id = uuid4()
+    await service.create_session(session_id, USER)
+    reply = await service.handle_reset_session(session_id=session_id, user_email=USER)
+    assert reply["type"] == "session_reset"

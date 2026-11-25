@@ -197,7 +197,7 @@ not match the screen. The 2-minute limit restarts each time the frame is
 written to a socket, with a hard cap of 8 minutes since it was first held. A
 matching reply that arrives after the browser gave up still counts as
 confirmation. Replies without a `request_id` (an older server) are matched by
-type and conversation id.
+type and conversation id, both while waiting and after the browser gave up.
 
 While a navigation frame is unconfirmed, and after one was refused or timed
 out, expired or was discarded by a 1008 close, the browser refuses `chat`
@@ -205,12 +205,11 @@ frames and tells the user, because a message
 would run in whichever conversation the server session is still in. A new
 navigation that the server confirms lifts this.
 
-The server records the last 8 completed navigation `request_id`s on the session
-in the same write that applies the reset or restore (so the record survives a
-reconnect or a replica change and cannot diverge from the state it guards). A frame replayed
-with a remembered id is answered with the same reply plus `deduplicated: true`
-and is not run again, so a replayed reset does not start a second conversation.
-Refused frames are not remembered.
+A replayed `reset_session` or `restore_conversation` simply runs again through
+the normal handler, with all its checks. That is safe because the browser sends
+no chat frame while a navigation is unconfirmed. A reply whose session write
+the store refused (an outage, or a newer copy from another connection) is an
+`error` frame, not a success, so the browser keeps chat blocked.
 
 When the login session ends (a `session_ended` frame or close code 4401) the
 held frame is discarded, new navigation frames are refused until the user signs
