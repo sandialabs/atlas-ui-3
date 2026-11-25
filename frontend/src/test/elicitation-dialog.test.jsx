@@ -395,13 +395,14 @@ describe('ElicitationDialog - Choice Fields', () => {
       response_schema: {
         type: 'object',
         properties: {
-          value: { type: 'array', items: { type: 'string', enum: ['mushrooms', 'peppers', 'olives'] } }
+          value: { type: 'array', minItems: 1, items: { type: 'string', enum: ['mushrooms', 'peppers', 'olives'] } }
         },
         required: ['value']
       }
     }} />)
 
     const accept = screen.getByRole('button', { name: /accept/i })
+    // minItems, not `required`, is what demands a selection.
     expect(accept).toBeDisabled()
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'olives' }))

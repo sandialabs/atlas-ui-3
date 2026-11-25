@@ -79,7 +79,7 @@ describe('form validity', () => {
     name: { type: 'string', minLength: 2 },
     count: { type: 'integer', minimum: 1, maximum: 5 },
     note: { type: 'string' },
-    picks: { type: 'array', items: { type: 'string', enum: ['a', 'b', 'c'] }, maxItems: 2 },
+    picks: { type: 'array', items: { type: 'string', enum: ['a', 'b', 'c'] }, minItems: 1, maxItems: 2 },
   }, ['name', 'count', 'picks']))
   const [name, count, note, picks] = fields
 
@@ -102,6 +102,21 @@ describe('form validity', () => {
     expect(isFieldValid(picks, [])).toBe(false)
     expect(isFieldValid(picks, ['a'])).toBe(true)
     expect(isFieldValid(picks, ['a', 'b', 'c'])).toBe(false)
+  })
+
+  it('takes the minimum selection count from minItems, not from required', () => {
+    const [open, capped, optional] = parseResponseSchema(schemaOf({
+      open: { type: 'array', items: { enum: ['a', 'b'] } },
+      capped: { type: 'array', items: { enum: ['a', 'b'] }, maxItems: 0 },
+      optional: { type: 'array', items: { enum: ['a', 'b', 'c'] }, minItems: 2 },
+    }, ['open', 'capped']))
+    expect(isFieldValid(open, [])).toBe(true)
+    expect(isFieldValid(capped, [])).toBe(true)
+    expect(isFieldValid(capped, ['a'])).toBe(false)
+    // Optional: none is fine (the field is omitted), a partial answer is not.
+    expect(isFieldValid(optional, [])).toBe(true)
+    expect(isFieldValid(optional, ['a'])).toBe(false)
+    expect(isFieldValid(optional, ['a', 'b'])).toBe(true)
   })
 
   it('accepts a form only when every field is valid', () => {
@@ -132,6 +147,17 @@ describe('buildResponseData', () => {
     }, ['title']))
     const data = buildResponseData(fields, { title: 'Dr', nickname: '', age: '', subscribed: false })
     expect(data).toEqual({ title: 'Dr', subscribed: false })
+  })
+
+  it('omits an unanswered optional list the schema would reject', () => {
+    const fields = parseResponseSchema(schemaOf({
+      title: { type: 'string' },
+      extras: { type: 'array', items: { enum: ['a', 'b'] }, minItems: 1 },
+      tags: { type: 'array', items: { enum: ['a', 'b'] } },
+    }, ['title']))
+    const formData = { title: 'Dr', extras: [], tags: [] }
+    expect(isFormValid(fields, formData)).toBe(true)
+    expect(buildResponseData(fields, formData)).toEqual({ title: 'Dr', tags: [] })
   })
 
   it('sends a date-time as an instant', () => {

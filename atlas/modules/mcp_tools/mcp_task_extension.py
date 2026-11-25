@@ -124,6 +124,8 @@ class AtlasTasksClientExtension(ClientExtension):
                 try:
                     await asyncio.shield(cancel_remote_task(ctx.session, task_id))
                 except asyncio.CancelledError:
+                    # A second cancellation while the cancel request is in
+                    # flight; the original exception is re-raised below.
                     pass
                 raise
 

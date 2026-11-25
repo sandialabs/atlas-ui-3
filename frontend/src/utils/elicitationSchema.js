@@ -98,13 +98,20 @@ function isBlank(value) {
   return value === '' || value === null || value === undefined
 }
 
+// An empty optional list that the schema would reject (minItems > 0).
+function isUnansweredList(field, value) {
+  return field.type === 'multiselect' && Array.isArray(value) && value.length === 0 && field.minItems > 0
+}
+
 /** Whether one field holds an answer the server's schema will accept. */
 export function isFieldValid(field, value) {
   if (field.type === 'none' || field.type === 'boolean') return true
   if (field.type === 'multiselect') {
     const count = Array.isArray(value) ? value.length : 0
-    if (field.required && count === 0 && !(field.minItems === 0)) return false
-    if (typeof field.minItems === 'number' && count < field.minItems && (field.required || count > 0)) return false
+    // `required` only means the property is present; how many must be picked
+    // is minItems. An optional list left empty is omitted from the answer.
+    const minimum = typeof field.minItems === 'number' ? field.minItems : 0
+    if (count < minimum && (field.required || count > 0)) return false
     if (typeof field.maxItems === 'number' && count > field.maxItems) return false
     return true
   }
@@ -146,7 +153,7 @@ export function buildResponseData(fields, formData) {
   const data = {}
   inputs.forEach(field => {
     const value = formData[field.name]
-    if (!field.required && isBlank(value)) return
+    if (!field.required && (isBlank(value) || isUnansweredList(field, value))) return
     data[field.name] = wireValue(field, value)
   })
   return data

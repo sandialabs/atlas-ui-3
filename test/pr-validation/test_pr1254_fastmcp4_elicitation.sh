@@ -10,6 +10,7 @@
 # - The CLI lists the elicitation demo's tools
 # - The elicitation/task unit and real-server tests pass
 # - The backend test suite passes
+# - The multi-replica suite passes (this PR touches elicitation_manager.py)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -114,6 +115,15 @@ cd "$PROJECT_ROOT" && PYTEST_ARGS="${PYTEST_ARGS:--n 2}" ./test/run_tests.sh bac
 BACKEND_STATUS=$?
 tail -5 "$WORK_DIR/backend.log"
 print_result $BACKEND_STATUS "Backend test suite"
+
+print_header "7. Multi-replica suite (horizontal-scaling gate)"
+# Not part of the backend suite or CI. It needs podman (or
+# ATLAS_TEST_REDIS_URL + ATLAS_TEST_POSTGRES_URL) and refuses to start
+# without them, which fails this step rather than skipping it.
+cd "$PROJECT_ROOT" && bash test/multireplica_tests.sh > "$WORK_DIR/multireplica.log" 2>&1
+MULTIREPLICA_STATUS=$?
+tail -3 "$WORK_DIR/multireplica.log"
+print_result $MULTIREPLICA_STATUS "Multi-replica suite"
 
 print_header "RESULTS: $PASSED passed, $FAILED failed"
 [ "$FAILED" -eq 0 ]
