@@ -98,29 +98,36 @@ def _format_bytes(count: int) -> str:
     return f"{count} bytes"
 
 
-# Audio relays in flight in this process. Each one holds a clip (or a
-# synthesized reply) in memory, twice over while it is being forwarded, so the
-# number at once is bounded instead of left to the global request rate. This
-# is a per-process resource guard, not shared state: every replica protects
-# its own memory, and a refused request can simply be retried.
-_in_flight = 0
+class _RelaySlots:
+    """Bounds the audio relays in flight in this process.
+
+    Each relay holds a clip (or a synthesized reply) in memory, twice over
+    while it is being forwarded, so the number at once is bounded instead of
+    left to the overall request rate limit. This is a per-process resource
+    guard, not shared state: every replica protects its own memory, and a
+    refused request can simply be retried.
+    """
+
+    def __init__(self) -> None:
+        self.in_flight = 0
+
+    @asynccontextmanager
+    async def acquire(self, settings):
+        limit = int(getattr(settings, "audio_max_concurrent_requests", 8))
+        if self.in_flight >= limit:
+            raise HTTPException(
+                status_code=503,
+                detail="The speech service is busy. Try again in a moment.",
+                headers={"Retry-After": "2"},
+            )
+        self.in_flight += 1
+        try:
+            yield
+        finally:
+            self.in_flight -= 1
 
 
-@asynccontextmanager
-async def _relay_slot(settings):
-    global _in_flight
-    limit = int(getattr(settings, "audio_max_concurrent_requests", 8))
-    if _in_flight >= limit:
-        raise HTTPException(
-            status_code=503,
-            detail="The speech service is busy. Try again in a moment.",
-            headers={"Retry-After": "2"},
-        )
-    _in_flight += 1
-    try:
-        yield
-    finally:
-        _in_flight -= 1
+_relay_slots = _RelaySlots()
 
 
 async def _require_capability(config: AudioCapabilityConfig, user: str) -> None:
@@ -183,7 +190,7 @@ async def transcribe_audio(request: Request, current_user: str = Depends(get_cur
     too_large = f"The recording is larger than the {_format_bytes(config.max_audio_bytes)} limit."
     body_limit = config.max_audio_bytes + _MULTIPART_OVERHEAD_BYTES
     _reject_declared_oversize(request, body_limit, too_large)
-    async with _relay_slot(settings):
+    async with _relay_slots.acquire(settings):
         return await _transcribe_upload(request, settings, config, current_user, body_limit, too_large)
 
 
@@ -291,7 +298,7 @@ async def synthesize_speech(request: Request, current_user: str = Depends(get_cu
     too_long = f"The text is longer than the {config.max_input_chars} character limit for read-aloud."
     body_limit = config.max_input_chars * _JSON_MAX_BYTES_PER_CHAR + _JSON_OVERHEAD_BYTES
     _reject_declared_oversize(request, body_limit, too_long)
-    async with _relay_slot(settings):
+    async with _relay_slots.acquire(settings):
         return await _synthesize_text(request, settings, config, current_user, body_limit, too_long)
 
 

@@ -370,19 +370,19 @@ def test_concurrent_relays_are_bounded(client, test_user_headers, upstream, audi
     from atlas.routes import audio_routes
 
     monkeypatch.setattr(audio_on, "audio_max_concurrent_requests", 2, raising=False)
-    monkeypatch.setattr(audio_routes, "_in_flight", 2)
+    monkeypatch.setattr(audio_routes._relay_slots, "in_flight", 2)
     for response in (post_clip(client, test_user_headers), post_speech(client, test_user_headers)):
         assert response.status_code == 503
         assert response.headers["retry-after"] == "2"
     assert upstream.requests == []
 
     # A slot is given back whether the relay succeeds or fails.
-    monkeypatch.setattr(audio_routes, "_in_flight", 0)
+    monkeypatch.setattr(audio_routes._relay_slots, "in_flight", 0)
     assert post_clip(client, test_user_headers).status_code == 200
     upstream.handler = lambda request: httpx.Response(500)
     assert post_clip(client, test_user_headers).status_code == 502
     assert post_clip(client, test_user_headers, content=b"not audio").status_code == 415
-    assert audio_routes._in_flight == 0
+    assert audio_routes._relay_slots.in_flight == 0
 
 
 def test_a_body_that_trickles_in_gives_its_slot_back(client, test_user_headers, upstream, audio_on, monkeypatch):
@@ -398,7 +398,7 @@ def test_a_body_that_trickles_in_gives_its_slot_back(client, test_user_headers, 
     monkeypatch.setattr(audio_on, "audio_tts_timeout_seconds", 0.05)
     assert post_clip(client, test_user_headers).status_code == 408
     assert post_speech(client, test_user_headers).status_code == 408
-    assert audio_routes._in_flight == 0
+    assert audio_routes._relay_slots.in_flight == 0
     assert upstream.requests == []
 
 
