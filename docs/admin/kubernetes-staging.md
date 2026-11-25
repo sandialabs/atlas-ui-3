@@ -27,7 +27,7 @@ Everything lives under `deploy/kubernetes/`:
 | `podman_rehearsal.py` | Runs the rendered overlay with podman when no cluster is available |
 
 The bundled Redis, PostgreSQL and MinIO run as one unreplicated instance each,
-sized for validation. Production uses managed or replicated services (Redis with `maxmemory-policy noeviction`; see [Session Store](session-store.md#outages)). To
+sized for validation. Production uses managed or replicated services (Redis as a single logical primary, not Redis Cluster, with `maxmemory-policy noeviction`; see [Session Store](session-store.md#outages)). To
 use them, point `secrets.env` at those services and remove the bundled ones
 in an overlay of your own.
 
@@ -110,7 +110,7 @@ in an overlay of your own.
   and a PDB with `maxUnavailable: 1`. Before uvicorn gets SIGTERM, a 10s
   `preStop` sleep lets endpoint removal reach the Service and ingress. Uvicorn
   then closes WebSockets with code 1012, and browsers reconnect and resume on
-  another replica. `terminationGracePeriodSeconds` is 60.
+  another replica. `terminationGracePeriodSeconds` is 60. Runs are not drained: a run in flight on a pod being replaced is recorded as failed (`replica_shutdown`) and its unsaved turn is lost. uvicorn has no `timeout_graceful_shutdown`, so a connection that stays open can hold the pod until the grace period ends.
 - **Security.** The pods run non-root under the `RuntimeDefault` seccomp
   profile, with no privilege escalation, all capabilities dropped and no
   service-account token. The API pins no UID, so OpenShift can assign one;
@@ -295,16 +295,31 @@ connection budgets, no committed credentials, and no fixed UIDs on OpenShift.
 
 ## Not shared between replicas (yet)
 
-These are per-replica in this deployment. They are known gaps, not
+Shared through Redis, and so not listed below: the run cap, run status, and
+routing of stop, steer, approval responses and auto-approve commands to the
+replica that owns the run (see
+[Session Store](session-store.md#limits-of-the-shared-store)).
+
+The following are per-replica in this deployment. They are known gaps, not
 configuration mistakes:
 
-- **Tracked agent runs**, their approvals, stop/steer routing and the per-user
-  run cap are process-local until distributed run coordination
-  ([#1128](https://github.com/sandialabs/atlas-ui-3/issues/1128)) lands. A
-  user who reconnects to another replica sees the run as running (no
-  streamed tokens) and the page learns when it ends, within a few seconds;
-  see [run coordination](../developer/run-coordination.md). A turn that was
-  never saved when its replica was killed is not recovered.
+- **The live transcript of a tracked run** that has not yet been saved stays on
+  the replica that runs the work. Another replica shows the conversation as
+  running (no streamed text) and tells the page when the run ends; see
+  [run coordination](../developer/run-coordination.md). A turn that was never
+  saved when its replica was killed is not recovered. The Agent Runs API follow-up and listing endpoints, the
+  `atlas_get_subagent_result` and `atlas_get_subagent_runs` tools, and MCP
+  elicitation prompts stay on the replica that runs the work.
+- **MCP OAuth pending state** (the PKCE verifier of a login in progress) is
+  held in the process that handled `/oauth/start`; a callback that lands on
+  another replica fails with `invalid_state`. **OAuth client registrations**
+  (`mcp_oauth_clients.enc`) are written to the pod's own token directory.
+- **OIDC login sessions** are held in the process memory of the replica that
+  completed the login; a request on another replica starts a new identity
+  provider round trip.
+- **Admin-panel writes** (system messages and help text) are files written
+  inside one pod and are not seen by the others or kept when the pod is
+  replaced.
 - **Per-user MCP tokens** (`MCP_TOKEN_STORAGE_DIR=/data/tokens`) are stored on
   each pod's own `emptyDir`. A token entered through one replica is unknown to
   the others and lost when the pod is replaced.
@@ -319,12 +334,12 @@ configuration mistakes:
 The remaining items of #1129 still need a staging cluster and are not
 recorded yet: load tests with hundreds to thousands of connected clients and
 concurrent agent runs, observability and alerting for Redis or PostgreSQL
-outages, and cross-replica run operations after #1128. Record the observed
+outages, and cross-replica run operations. Record the observed
 capacity and limits here when they are measured.
 
 ## Related
 
 - [Session Store](session-store.md): Redis sessions, reconnect, outages
 - [Chat History](chat-history.md): PostgreSQL, pool settings, Alembic
-- [Parallel Conversation Runs](parallel-conversation-runs.md): process-local run limits
+- [Parallel Conversation Runs](parallel-conversation-runs.md): run limits, approvals and cross-replica run control
 - `test/multireplica/README.md`: the per-PR multi-process harness
