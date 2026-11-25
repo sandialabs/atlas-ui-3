@@ -950,6 +950,14 @@ async def _persist_session(chat_service, session) -> None:
         await persist(session)
 
 
+def _usable_request_id(data):
+    """The client's navigation ``request_id`` when it is a short string, else None."""
+    request_id = data.get("request_id") if isinstance(data, dict) else None
+    if isinstance(request_id, str) and 0 < len(request_id) <= 64:
+        return request_id
+    return None
+
+
 def _echo_request_id(data, response) -> None:
     """Copy the client's ``request_id`` onto the reply to a navigation frame.
 
@@ -959,9 +967,49 @@ def _echo_request_id(data, response) -> None:
     #1223) sends a ``request_id`` and matches the reply by it. Absent or
     oversized ids are not echoed, so older clients see no change.
     """
-    request_id = data.get("request_id") if isinstance(data, dict) else None
-    if isinstance(request_id, str) and 0 < len(request_id) <= 64 and isinstance(response, dict):
+    request_id = _usable_request_id(data)
+    if request_id is not None and isinstance(response, dict):
         response["request_id"] = request_id
+
+
+# Recently completed navigation request ids, kept on the session so a frame the
+# client replays after a reconnect (its acknowledgement was lost with the old
+# socket) is answered again instead of run twice -- a second reset would start
+# yet another conversation and drop the chat typed in between.
+_NAV_DONE_KEY = "navigation_request_ids"
+_NAV_DONE_KEEP = 8
+
+
+async def _navigation_already_done(chat_service, session_id, data) -> bool:
+    request_id = _usable_request_id(data)
+    if request_id is None:
+        return False
+    try:
+        session = await chat_service.session_repository.get(session_id)
+    except Exception:
+        logger.debug("Could not look up completed navigation requests", exc_info=True)
+        return False
+    if session is None:
+        return False
+    done = session.context.get(_NAV_DONE_KEY)
+    return isinstance(done, list) and request_id in done
+
+
+async def _record_navigation_done(chat_service, session_id, data) -> None:
+    request_id = _usable_request_id(data)
+    if request_id is None:
+        return
+    try:
+        session = await chat_service.session_repository.get(session_id)
+        if session is None:
+            return
+        done = session.context.get(_NAV_DONE_KEY)
+        done = list(done) if isinstance(done, list) else []
+        done.append(request_id)
+        session.context[_NAV_DONE_KEY] = done[-_NAV_DONE_KEEP:]
+        await _persist_session(chat_service, session)
+    except Exception:
+        logger.debug("Could not record a completed navigation request", exc_info=True)
 
 
 # Marks a tracked run's own session, which belongs to the run rather than to a
@@ -3126,6 +3174,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(response)
 
             elif message_type == "restore_conversation":
+                if await _navigation_already_done(chat_service, session_id, data):
+                    # A replay of a restore that already went through.
+                    duplicate = {
+                        "type": "conversation_restored",
+                        "conversation_id": data.get("conversation_id", ""),
+                        "deduplicated": True,
+                    }
+                    _echo_request_id(data, duplicate)
+                    await websocket.send_json(duplicate)
+                    continue
                 # Release MCP sessions for the current conversation before restoring
                 session = await chat_service.session_repository.get(session_id)
                 if session:
@@ -3183,6 +3241,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             else "domain"
                         ),
                     }
+                if isinstance(response, dict) and response.get("type") != "error":
+                    await _record_navigation_done(chat_service, session_id, data)
                 _echo_request_id(data, response)
                 await websocket.send_json(response)
 
@@ -3222,6 +3282,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json(replay_frame)
 
             elif message_type == "reset_session":
+                if await _navigation_already_done(chat_service, session_id, data):
+                    # A replay of a reset that already went through: a second one
+                    # would start another conversation and drop what was typed
+                    # in the first.
+                    duplicate = {
+                        "type": "session_reset",
+                        "session_id": str(session_id),
+                        "message": "New session created",
+                        "deduplicated": True,
+                    }
+                    _echo_request_id(data, duplicate)
+                    await websocket.send_json(duplicate)
+                    continue
                 # Issue #884: only the plain turn on this connection's session
                 # is cancelled here. Runs with their own session are not owned
                 # by the visible conversation, so "New Chat" must not stop one
@@ -3270,6 +3343,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     # by another connection (issue #1091): tell the client
                     # rather than dropping the socket.
                     response = {"type": "error", "message": e.message, "error_type": "domain"}
+                if isinstance(response, dict) and response.get("type") != "error":
+                    await _record_navigation_done(chat_service, session_id, data)
                 _echo_request_id(data, response)
                 await websocket.send_json(response)
 

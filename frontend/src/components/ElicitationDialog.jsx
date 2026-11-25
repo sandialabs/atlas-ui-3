@@ -49,6 +49,7 @@ const ElicitationDialog = ({ elicitation }) => {
       }
     })
     setFormData(initialData)
+    setSendFailed(false)
   }, [elicitation_id])
 
   // Validate form data
@@ -73,15 +74,16 @@ const ElicitationDialog = ({ elicitation }) => {
 
   // Close the dialog only when the answer reached the server. A dropped
   // answer would leave the tool waiting out its timeout while the prompt is
-  // gone, so on failure the prompt stays up and says so.
-  const respond = (action, data) => {
+  // gone, so on failure the prompt stays up and says so. Cancel is the way out
+  // of a long outage: it always dismisses, and the tool times out on its own.
+  const respond = (action, data, { dismissAnyway = false } = {}) => {
     const sent = sendMessage({
       type: 'elicitation_response',
       elicitation_id,
       action,
       data
     })
-    if (sent !== true) {
+    if (sent !== true && !dismissAnyway) {
       setSendFailed(true)
       return
     }
@@ -111,7 +113,7 @@ const ElicitationDialog = ({ elicitation }) => {
   }
 
   const handleCancel = () => {
-    respond('cancel', null)
+    respond('cancel', null, { dismissAnyway: true })
   }
 
   return (

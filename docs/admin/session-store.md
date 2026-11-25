@@ -194,10 +194,25 @@ browser drops the frame only when that reply arrives. A frame that is written
 but not answered within 10 seconds, or held for more than 2 minutes (a restore
 carries the transcript), is dropped and the user is told the server session may
 not match the screen. Replies without a `request_id` (an older server) are
-matched by type and conversation id. When the login session ends (a
-`session_ended` frame, close code 4401 or 1008) the held frame is discarded, new
-navigation frames are refused until the user signs in again, and the next
-connection starts a new server session instead of resuming the old one.
+matched by type and conversation id.
+
+While a navigation frame is unconfirmed, and after one was refused or timed
+out, the browser refuses `chat` frames and tells the user, because a message
+would run in whichever conversation the server session is still in. A new
+navigation that the server confirms lifts this.
+
+The server remembers the last 8 completed navigation `request_id`s on the
+session (so they survive a reconnect or a replica change). A frame replayed
+with a remembered id is answered with the same reply plus `deduplicated: true`
+and is not run again, so a replayed reset does not start a second conversation.
+Refused frames are not remembered.
+
+When the login session ends (a `session_ended` frame or close code 4401) the
+held frame is discarded, new navigation frames are refused until the user signs
+in again, and the next connection starts a new server session instead of
+resuming the old one. A 1008 close (proxy secret, origin or authentication
+problem) discards the held frame and shows the sign-in status, but does not mark
+the session ended: navigation is still accepted and the session id is kept.
 
 ### Outages
 

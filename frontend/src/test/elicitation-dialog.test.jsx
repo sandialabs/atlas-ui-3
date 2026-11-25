@@ -143,6 +143,37 @@ describe('ElicitationDialog - User Actions', () => {
     expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
   })
 
+  it('lets Cancel dismiss the prompt even while disconnected', () => {
+    mockSendMessage.mockReturnValue(false)
+    const elicitation = {
+      elicitation_id: 'test-123',
+      tool_call_id: 'call-456',
+      tool_name: 'get_user_name',
+      message: "What's your name?",
+      response_schema: { type: 'object', properties: { value: { type: 'string' } } }
+    }
+
+    render(<ElicitationDialog elicitation={elicitation} />)
+    fireEvent.click(screen.getAllByRole('button', { name: /^cancel$/i })[0])
+    expect(mockSetPendingElicitation).toHaveBeenCalledWith(null)
+  })
+
+  it('clears the not-sent notice when a new prompt replaces the failed one', () => {
+    mockSendMessage.mockReturnValue(false)
+    const make = (id) => ({
+      elicitation_id: id,
+      tool_call_id: 'call-456',
+      tool_name: 'get_user_name',
+      message: 'q',
+      response_schema: { type: 'object', properties: { value: { type: 'string' } } }
+    })
+    const { rerender } = render(<ElicitationDialog elicitation={make('a')} />)
+    fireEvent.click(screen.getByRole('button', { name: /decline/i }))
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    rerender(<ElicitationDialog elicitation={make('b')} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('should send decline response', () => {
     const elicitation = {
       elicitation_id: 'test-123',

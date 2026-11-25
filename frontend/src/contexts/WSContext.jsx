@@ -8,6 +8,9 @@ const INITIAL_HEALTH_CHECK_INTERVAL = 5000 // 5 seconds for first retry
 const MAX_HEALTH_CHECK_INTERVAL = 30000 // 30 seconds max between attempts
 const CLEAN_DROP_RECONNECT_DELAY = 500 // an established socket dropped: retry almost at once
 const CONNECT_TIMEOUT_MS = 10000 // a socket still CONNECTING after this is abandoned
+// A socket must stay open this long before it counts as a good connection. One
+// that closes sooner (a flapping upgrade) keeps growing the backoff.
+const STABLE_CONNECTION_MS = 10000
 
 // Frames that change which conversation the server session is in, mapped to the
 // frame the server answers them with. A refusal is an `error` frame.
@@ -20,6 +23,8 @@ const NAVIGATION_ACK_TIMEOUT_MS = 10000
 // How long an unsent or unconfirmed frame is kept. A restore carries the
 // transcript, so it is not held for longer than a short outage.
 const HELD_NAVIGATION_TTL_MS = 120000
+// The TTL restarts when the frame is written, but never runs past this age.
+const HELD_NAVIGATION_MAX_AGE_MS = 4 * HELD_NAVIGATION_TTL_MS
 
 // What sendMessage returns for a navigation frame that was held, not sent. It
 // is truthy but not `true`, so a caller testing `=== true` still sees "not
@@ -42,7 +47,7 @@ export const WSProvider = ({ children }) => {
   const wsRef = useRef(null)
   const messageHandlersRef = useRef([])
   // Consecutive failed connection attempts (a socket that closed before it
-  // opened, or a backend that did not answer). Reset only when a socket opens.
+  // opened, or a backend that did not answer). Reset only when a socket stays open.
   const healthCheckFailuresRef = useRef(0)
   const healthCheckTimeoutRef = useRef(null)
   const scheduleHealthCheckRef = useRef(null)
@@ -60,6 +65,10 @@ export const WSProvider = ({ children }) => {
   // earlier one. Shape: { frame, requestId, sentOn, ackTimer, expiryTimer }.
   const heldNavigationRef = useRef(null)
   const navigationCounterRef = useRef(0)
+  // Set when a navigation was refused or went unconfirmed: the server session
+  // may not be where the screen is, so chat frames are refused until the user
+  // navigates again and the server confirms it.
+  const navigationOutOfSyncRef = useRef(false)
 
   const dispatchToHandlers = (data) => {
     messageHandlersRef.current.forEach(handler => {
@@ -84,24 +93,33 @@ export const WSProvider = ({ children }) => {
   const failHeldNavigation = (held, message) => {
     if (heldNavigationRef.current !== held) return
     clearHeldNavigation()
+    navigationOutOfSyncRef.current = true
     dispatchToHandlers({ type: 'navigation_failed', frame_type: held.frame.type, message })
+  }
+
+  const armExpiry = (held) => {
+    clearTimeout(held.expiryTimer)
+    const left = Math.min(HELD_NAVIGATION_TTL_MS, held.heldAt + HELD_NAVIGATION_MAX_AGE_MS - Date.now())
+    held.expiryTimer = setTimeout(
+      () => failHeldNavigation(held, 'The change was not delivered to the server in time.'),
+      Math.max(0, left)
+    )
   }
 
   const holdNavigation = (message) => {
     clearHeldNavigation()
+    navigationOutOfSyncRef.current = false
     navigationCounterRef.current += 1
     const requestId = `nav-${Date.now().toString(36)}-${navigationCounterRef.current}`
     const held = {
       frame: { ...message, request_id: requestId },
       requestId,
+      heldAt: Date.now(),
       sentOn: null,
       ackTimer: null,
       expiryTimer: null,
     }
-    held.expiryTimer = setTimeout(
-      () => failHeldNavigation(held, 'The server was not updated before the connection came back.'),
-      HELD_NAVIGATION_TTL_MS
-    )
+    armExpiry(held)
     heldNavigationRef.current = held
     return held
   }
@@ -118,6 +136,7 @@ export const WSProvider = ({ children }) => {
       return false
     }
     held.sentOn = ws
+    armExpiry(held)
     clearTimeout(held.ackTimer)
     held.ackTimer = setTimeout(
       () => failHeldNavigation(held, 'The server did not confirm the change.'),
@@ -146,7 +165,10 @@ export const WSProvider = ({ children }) => {
     if (replyId !== undefined && replyId !== held.requestId) return
     if (data.type === 'error') {
       // Refused: the error frame still reaches the handlers, which show it.
-      if (replyId === held.requestId) clearHeldNavigation()
+      if (replyId === held.requestId) {
+        clearHeldNavigation()
+        navigationOutOfSyncRef.current = true
+      }
       return
     }
     if (data.type !== NAVIGATION_ACKS[held.frame.type]) return
@@ -158,6 +180,7 @@ export const WSProvider = ({ children }) => {
       return
     }
     clearHeldNavigation()
+    navigationOutOfSyncRef.current = false
   }
 
   // A socket that cannot be written to is not worth keeping: drop it so the
@@ -191,6 +214,7 @@ export const WSProvider = ({ children }) => {
       // after the user signs in again, and do not resume the server session of
       // the identity that left.
       clearHeldNavigation()
+      navigationOutOfSyncRef.current = false
       serverSessionIdRef.current = ''
       setSessionEnded(true)
       setConnectionStatus(`Unauthenticated: ${reason || 'Your session ended. Sign in again to continue.'}`)
@@ -203,13 +227,15 @@ export const WSProvider = ({ children }) => {
     try {
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
-      let opened = false
+      let stable = false
+      let stableTimer = null
       let closed = false
 
       const handleClose = (event) => {
         if (closed) return
         closed = true
         clearTimeout(connectTimerRef.current)
+        clearTimeout(stableTimer)
         releaseHeldNavigationFrom(ws)
         setIsConnected(false)
         // 4401 (application range) means the OIDC login behind the socket was
@@ -223,8 +249,9 @@ export const WSProvider = ({ children }) => {
           setConnectionStatus('Disconnected')
         }
         if (sessionEndedRef.current) return
-        if (!opened) {
-          // Refused or never completed: back off, whatever /api/config says.
+        if (!stable) {
+          // Refused, never completed, or dropped right after opening: back off,
+          // whatever /api/config says.
           healthCheckFailuresRef.current += 1
           scheduleHealthCheckRef.current?.(
             calculateBackoffDelay(
@@ -264,8 +291,11 @@ export const WSProvider = ({ children }) => {
           abandonSocket(ws)
           return
         }
-        opened = true
-        healthCheckFailuresRef.current = 0
+        // Only a connection that lasts clears the failure count.
+        stableTimer = setTimeout(() => {
+          stable = true
+          healthCheckFailuresRef.current = 0
+        }, STABLE_CONNECTION_MS)
         setIsConnected(true)
         setConnectionStatus('Connected')
       }
@@ -341,6 +371,14 @@ export const WSProvider = ({ children }) => {
       console.error('WebSocket is not connected, readyState:', ws?.readyState)
       return false
     }
+    // A chat turn runs in whichever conversation the server session is in, so
+    // it waits for the navigation that moves the session, and is refused when
+    // that navigation failed (the screen and the session would disagree).
+    if (message?.type === 'chat' && (heldNavigationRef.current || navigationOutOfSyncRef.current)) {
+      if (heldNavigationRef.current && !sendHeldNavigation(ws)) abandonSocket(ws)
+      console.warn('Chat frame refused: the conversation switch is not confirmed')
+      return false
+    }
     // A held navigation reaches the server ahead of any other frame, including
     // in the window where the socket reports OPEN but onopen has not run.
     if (!sendHeldNavigation(ws)) {
@@ -357,6 +395,13 @@ export const WSProvider = ({ children }) => {
       abandonSocket(ws)
       return false
     }
+  }
+
+  // 'pending' while a navigation awaits the server, 'failed' after one was
+  // refused or unconfirmed, null otherwise. Chat frames are refused in both.
+  const navigationState = () => {
+    if (heldNavigationRef.current) return 'pending'
+    return navigationOutOfSyncRef.current ? 'failed' : null
   }
 
   const addMessageHandler = (handler) => {
@@ -431,8 +476,7 @@ export const WSProvider = ({ children }) => {
         )
         scheduleHealthCheck(delay)
       } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        // WebSocket is connected, reset failures and check at normal interval
-        healthCheckFailuresRef.current = 0
+        // WebSocket is connected: check again at the normal interval
         scheduleHealthCheck(INITIAL_HEALTH_CHECK_INTERVAL)
       } else {
         // Still connecting, check again soon
@@ -488,6 +532,7 @@ export const WSProvider = ({ children }) => {
     connectionStatus,
     sessionEnded,
     sendMessage,
+    navigationState,
     addMessageHandler,
     reconnectWebSocket
   }

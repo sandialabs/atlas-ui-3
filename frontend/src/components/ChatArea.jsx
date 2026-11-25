@@ -1105,7 +1105,7 @@ const ChatArea = () => {
                   className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-200"
                 />
                 <button
-                  onClick={() => { if (agentAnswer.trim()) { answerAgentQuestion(agentAnswer.trim()); setAgentAnswer(''); setAgentPendingQuestion(null) } }}
+                  onClick={() => { if (agentAnswer.trim() && answerAgentQuestion(agentAnswer.trim()) !== false) { setAgentAnswer(''); setAgentPendingQuestion(null) } }}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
                 >
                   Send

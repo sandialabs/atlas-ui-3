@@ -118,7 +118,7 @@ describe('WSContext navigation frames', () => {
       expect(second.sent[0].request_id).toEqual(expect.any(String))
     })
 
-    it('holds a frame sent while CONNECTING and sends it before a later chat frame', () => {
+    it('holds a frame sent while CONNECTING and refuses chat until the server confirms it', () => {
       // Socket is CONNECTING: send() would throw.
       const first = last()
       let sent
@@ -128,9 +128,19 @@ describe('WSContext navigation frames', () => {
       expect(sent).toBe(SEND_QUEUED)
       expect(first.sent).toEqual([])
       act(() => first.open())
+      expect(probe.navigationState()).toBe('pending')
       act(() => {
-        probe.sendMessage({ type: 'chat', content: 'hi' })
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
       })
+      expect(sent).toBe(false)
+      expect(types(first)).toEqual(['reset_session'])
+
+      act(() => first.receive({ type: 'session_reset', request_id: first.sent[0].request_id }))
+      expect(probe.navigationState()).toBe(null)
+      act(() => {
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
+      })
+      expect(sent).toBe(true)
       expect(types(first)).toEqual(['reset_session', 'chat'])
     })
 
@@ -153,7 +163,7 @@ describe('WSContext navigation frames', () => {
       expect(types(first)).toEqual(['reset_session'])
     })
 
-    it('sends the held frame before a chat frame in the window before onopen runs', () => {
+    it('sends the held frame, not the chat, in the window before onopen runs', () => {
       const first = last()
       act(() => {
         probe.sendMessage({ type: 'reset_session' })
@@ -164,10 +174,49 @@ describe('WSContext navigation frames', () => {
       act(() => {
         sent = probe.sendMessage({ type: 'chat', content: 'hi' })
       })
-      expect(sent).toBe(true)
-      expect(types(first)).toEqual(['reset_session', 'chat'])
+      expect(sent).toBe(false)
+      expect(types(first)).toEqual(['reset_session'])
       act(() => first.onopen())
-      expect(types(first)).toEqual(['reset_session', 'chat'])
+      expect(types(first)).toEqual(['reset_session'])
+    })
+
+    it('refuses chat after a refused navigation until a new one is confirmed', () => {
+      act(() => {
+        probe.sendMessage({ type: 'restore_conversation', conversation_id: 'c1', messages: [] })
+      })
+      const first = openFirst()
+      act(() => first.receive({ type: 'error', message: 'refused', request_id: first.sent[0].request_id }))
+      expect(probe.navigationState()).toBe('failed')
+      let sent
+      act(() => {
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
+      })
+      expect(sent).toBe(false)
+
+      act(() => {
+        probe.sendMessage({ type: 'reset_session' })
+      })
+      act(() => first.receive({ type: 'session_reset', request_id: first.sent[first.sent.length - 1].request_id }))
+      act(() => {
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
+      })
+      expect(sent).toBe(true)
+    })
+
+    it('refuses chat after an unconfirmed navigation timed out', () => {
+      act(() => {
+        probe.sendMessage({ type: 'reset_session' })
+      })
+      openFirst()
+      act(() => {
+        vi.advanceTimersByTime(15000)
+      })
+      expect(probe.navigationState()).toBe('failed')
+      let sent
+      act(() => {
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
+      })
+      expect(sent).toBe(false)
     })
 
     it('refuses a chat frame while the held navigation cannot be sent', () => {
@@ -345,6 +394,39 @@ describe('WSContext navigation frames', () => {
     })
   })
 
+  describe('expiry timing', () => {
+    it('restarts the expiry when the frame is finally written', () => {
+      const first = openFirst()
+      act(() => first.finishClose(1006))
+      act(() => {
+        probe.sendMessage({ type: 'restore_conversation', conversation_id: 'c1', messages: [] })
+      })
+      act(() => {
+        vi.advanceTimersByTime(119000)
+      })
+      act(() => probe.reconnectWebSocket())
+      act(() => last().open())
+      expect(types(last())).toEqual(['restore_conversation'])
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(received.find((m) => m.type === 'navigation_failed')).toBeUndefined()
+    })
+
+    it('does not claim the connection came back when it did not', () => {
+      const first = openFirst()
+      act(() => first.finishClose(1006))
+      act(() => {
+        probe.sendMessage({ type: 'reset_session' })
+      })
+      act(() => {
+        vi.advanceTimersByTime(130000)
+      })
+      const failure = received.find((m) => m.type === 'navigation_failed')
+      expect(failure.message).not.toMatch(/came back/i)
+    })
+  })
+
   describe('session end', () => {
     it('rejects navigation after the session ended, and replays nothing after sign-in', () => {
       const first = openFirst()
@@ -442,6 +524,9 @@ describe('WSContext navigation frames', () => {
 
     it('reconnects soon after a clean drop instead of waiting for the poll', async () => {
       const first = openFirst()
+      act(() => {
+        vi.advanceTimersByTime(11000)
+      })
       const before = FakeWebSocket.instances.length
       act(() => first.finishClose(1006))
       await act(async () => {
@@ -467,7 +552,7 @@ describe('WSContext navigation frames', () => {
       expect(FakeWebSocket.instances.length).toBeLessThan(12)
     })
 
-    it('resets the backoff only once a socket actually opens', async () => {
+    it('resets the backoff once a socket has stayed open', async () => {
       const refuse = () => {
         const socket = last()
         if (socket.readyState === FakeWebSocket.CONNECTING) act(() => socket.finishClose(1006))
@@ -482,11 +567,32 @@ describe('WSContext navigation frames', () => {
       act(() => probe.reconnectWebSocket())
       const during = FakeWebSocket.instances.length
       act(() => last().open())
+      act(() => {
+        vi.advanceTimersByTime(11000)
+      })
       act(() => last().finishClose(1006))
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000)
       })
       expect(FakeWebSocket.instances.length).toBe(during + 1)
+    })
+
+    it('keeps backing off when sockets open and close at once', async () => {
+      const flap = () => {
+        const socket = last()
+        if (socket.readyState === FakeWebSocket.CONNECTING) {
+          act(() => socket.open())
+          act(() => socket.finishClose(1006))
+        }
+      }
+      flap()
+      for (let i = 0; i < 120; i += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1000)
+        })
+        flap()
+      }
+      expect(FakeWebSocket.instances.length).toBeLessThan(14)
     })
 
     it('reconnects at once when the browser comes back online', async () => {
