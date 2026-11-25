@@ -18,8 +18,10 @@ Policy applied to every request, in this order:
    servers follow, issue #1032).
 4. Limits: request size is capped while the body is read, not after.
 
-Audio and text are held in memory for one request and are not written to
-disk, cached, or logged; the metrics line records sizes and timings only.
+Audio and text live for one request: they are not cached, kept, or logged,
+and the metrics line records sizes and timings only. The one time audio
+touches disk is the web framework spooling a large upload part to a temporary
+file while it is parsed; that file is deleted before the request returns.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -65,6 +68,7 @@ _MULTIPART_OVERHEAD_BYTES = 64 * 1024
 _JSON_OVERHEAD_BYTES = 4 * 1024
 _LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$")
 _MAX_LEVEL_NAME_CHARS = 200
+_DURATION_TOLERANCE_SECONDS = 5
 
 
 class SpeechRequest(BaseModel):
@@ -76,6 +80,39 @@ class SpeechRequest(BaseModel):
 
 def _settings():
     return app_factory.get_config_manager().app_settings
+
+
+def _format_bytes(count: int) -> str:
+    if count >= 1024 * 1024:
+        return f"{count / (1024 * 1024):.4g} MB"
+    if count >= 1024:
+        return f"{count / 1024:.4g} KB"
+    return f"{count} bytes"
+
+
+# Audio relays in flight in this process. Each one holds a clip (or a
+# synthesized reply) in memory, twice over while it is being forwarded, so the
+# number at once is bounded instead of left to the global request rate. This
+# is a per-process resource guard, not shared state: every replica protects
+# its own memory, and a refused request can simply be retried.
+_in_flight = 0
+
+
+@asynccontextmanager
+async def _relay_slot(settings):
+    global _in_flight
+    limit = int(getattr(settings, "audio_max_concurrent_requests", 8))
+    if _in_flight >= limit:
+        raise HTTPException(
+            status_code=503,
+            detail="The speech service is busy. Try again in a moment.",
+            headers={"Retry-After": "2"},
+        )
+    _in_flight += 1
+    try:
+        yield
+    finally:
+        _in_flight -= 1
 
 
 async def _require_capability(config: AudioCapabilityConfig, user: str) -> None:
@@ -135,10 +172,14 @@ async def transcribe_audio(request: Request, current_user: str = Depends(get_cur
 
     if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
         raise HTTPException(status_code=415, detail="Send the recording as multipart/form-data.")
-    too_large = f"The recording is larger than the {config.max_audio_bytes // (1024 * 1024) or 1} MB limit."
+    too_large = f"The recording is larger than the {_format_bytes(config.max_audio_bytes)} limit."
     body_limit = config.max_audio_bytes + _MULTIPART_OVERHEAD_BYTES
     _reject_declared_oversize(request, body_limit, too_large)
+    async with _relay_slot(settings):
+        return await _transcribe_upload(request, settings, config, current_user, body_limit, too_large)
 
+
+async def _transcribe_upload(request: Request, settings, config, current_user: str, body_limit: int, too_large: str):
     try:
         form = await MultiPartParser(
             request.headers,
@@ -147,7 +188,10 @@ async def transcribe_audio(request: Request, current_user: str = Depends(get_cur
             max_fields=8,
             max_part_size=16 * 1024,
         ).parse()
-    except MultiPartException:
+    except (MultiPartException, ValueError):
+        # Starlette raises MultiPartException for what it checks itself (no
+        # boundary, too many parts); the underlying parser raises its own
+        # ValueError subclasses for broken framing.
         raise HTTPException(status_code=422, detail="The upload could not be read as a multipart form.") from None
 
     try:
@@ -169,8 +213,10 @@ async def transcribe_audio(request: Request, current_user: str = Depends(get_cur
                 seconds = float(declared_duration)
             except ValueError:
                 raise HTTPException(status_code=422, detail="duration_seconds must be a number.") from None
-            # A small tolerance for the recorder's own timer granularity.
-            if not seconds >= 0 or seconds > config.max_duration_seconds + 2:
+            # The recorder stops itself on a timer, and a browser delays the
+            # timers of a tab that is not in front; allow for that rather than
+            # throw away a clip the user was allowed to record.
+            if not seconds >= 0 or seconds > config.max_duration_seconds + _DURATION_TOLERANCE_SECONDS:
                 raise HTTPException(
                     status_code=413,
                     detail=f"Recordings are limited to {config.max_duration_seconds} seconds.",
@@ -230,6 +276,11 @@ async def synthesize_speech(request: Request, current_user: str = Depends(get_cu
     too_long = f"The text is longer than the {config.max_input_chars} character limit for read-aloud."
     body_limit = config.max_input_chars * 4 + _JSON_OVERHEAD_BYTES
     _reject_declared_oversize(request, body_limit, too_long)
+    async with _relay_slot(settings):
+        return await _synthesize_text(request, settings, config, current_user, body_limit, too_long)
+
+
+async def _synthesize_text(request: Request, settings, config, current_user: str, body_limit: int, too_long: str):
     raw = b"".join([chunk async for chunk in _capped_stream(request, body_limit, too_long)])
     try:
         payload = SpeechRequest.model_validate_json(raw)

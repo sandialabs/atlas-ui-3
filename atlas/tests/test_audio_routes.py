@@ -280,7 +280,8 @@ def test_transcription_rejects_oversized_audio(client, test_user_headers, upstre
 
 def test_transcription_rejects_long_declared_duration(client, test_user_headers, upstream, audio_on, monkeypatch):
     monkeypatch.setattr(audio_on, "audio_stt_max_duration_seconds", 30)
-    assert post_clip(client, test_user_headers, duration_seconds="31").status_code == 200
+    # A few seconds over is the recorder's stop timer running late, not a longer clip.
+    assert post_clip(client, test_user_headers, duration_seconds="34").status_code == 200
     assert post_clip(client, test_user_headers, duration_seconds="45").status_code == 413
     assert post_clip(client, test_user_headers, duration_seconds="nan").status_code == 413
     assert post_clip(client, test_user_headers, duration_seconds="soon").status_code == 422
@@ -312,6 +313,59 @@ def test_transcription_requires_multipart_with_a_file(client, test_user_headers,
     assert response.status_code == 422
     assert post_clip(client, test_user_headers, language="en; drop").status_code == 422
     assert upstream.requests == []
+
+
+def test_transcription_malformed_multipart_is_a_422(client, test_user_headers, upstream, audio_on):
+    """Broken framing under a valid boundary is the parser's own error type."""
+    for body in (b"garbage", b"--xyz\r\nnot-a-header\r\n\r\nbody\r\n--xyz--\r\n"):
+        response = client.post(
+            "/api/audio/transcriptions",
+            headers={**test_user_headers, "content-type": "multipart/form-data; boundary=xyz"},
+            content=body,
+        )
+        assert response.status_code == 422, response.text
+    assert upstream.requests == []
+
+
+def test_transcription_caps_a_body_sent_without_content_length(client, test_user_headers, upstream, audio_on, monkeypatch):
+    """A chunked upload declares no size, so the cap has to act on the stream."""
+    monkeypatch.setattr(audio_on, "audio_stt_max_audio_bytes", 1024)
+
+    def chunks():
+        yield b"--xyz\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.webm\"\r\n"
+        yield b"Content-Type: audio/webm\r\n\r\n" + WEBM
+        for _ in range(64):
+            yield b"\x00" * 4096
+        yield b"\r\n--xyz--\r\n"
+
+    response = client.post(
+        "/api/audio/transcriptions",
+        headers={**test_user_headers, "content-type": "multipart/form-data; boundary=xyz"},
+        content=chunks(),
+    )
+    assert "content-length" not in {k.lower() for k in response.request.headers}
+    assert response.status_code == 413
+    assert "1 KB limit" in response.json()["detail"]
+    assert upstream.requests == []
+
+
+def test_concurrent_relays_are_bounded(client, test_user_headers, upstream, audio_on, monkeypatch):
+    from atlas.routes import audio_routes
+
+    monkeypatch.setattr(audio_on, "audio_max_concurrent_requests", 2, raising=False)
+    monkeypatch.setattr(audio_routes, "_in_flight", 2)
+    for response in (post_clip(client, test_user_headers), post_speech(client, test_user_headers)):
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "2"
+    assert upstream.requests == []
+
+    # A slot is given back whether the relay succeeds or fails.
+    monkeypatch.setattr(audio_routes, "_in_flight", 0)
+    assert post_clip(client, test_user_headers).status_code == 200
+    upstream.handler = lambda request: httpx.Response(500)
+    assert post_clip(client, test_user_headers).status_code == 502
+    assert post_clip(client, test_user_headers, content=b"not audio").status_code == 415
+    assert audio_routes._in_flight == 0
 
 
 @pytest.mark.parametrize(
@@ -443,8 +497,8 @@ def test_classification_gate(client, test_user_headers, upstream, audio_on, monk
     from atlas.core.compliance import get_compliance_manager
 
     levels = get_compliance_manager().get_all_levels()
-    if len(levels) < 2:
-        pytest.skip("needs two configured compliance levels")
+    # Not a skip: without two levels this would silently stop testing the gate.
+    assert len(levels) >= 2, "the packaged compliance-levels.json defines several levels"
     approved, other = levels[0], levels[1]
     monkeypatch.setattr(audio_on, "feature_compliance_levels_enabled", True)
     monkeypatch.setattr(audio_on, "feature_compliance_level_required", False, raising=False)

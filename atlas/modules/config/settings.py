@@ -1244,6 +1244,15 @@ class AppSettings(BaseSettings):
         description="Longest recording the microphone button makes; also checked against the duration the client reports",
         validation_alias=AliasChoices("AUDIO_STT_MAX_DURATION_SECONDS"),
     )
+    audio_max_concurrent_requests: int = Field(
+        8,
+        gt=0,
+        description=(
+            "Audio requests (dictation and read-aloud together) one backend process "
+            "relays at a time; each holds a clip in memory. Further requests get 503."
+        ),
+        validation_alias=AliasChoices("AUDIO_MAX_CONCURRENT_REQUESTS"),
+    )
     feature_audio_tts_enabled: bool = Field(
         False,
         description="Enable read-aloud: synthesize speech through AUDIO_TTS_BASE_URL",

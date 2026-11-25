@@ -628,24 +628,25 @@ const ChatArea = () => {
   // is focused so it can be edited. It is never sent from here.
   const insertDictation = (text) => {
     const el = textareaRef.current
-    setInputValue(current => {
-      const start = el && typeof el.selectionStart === 'number' ? Math.min(el.selectionStart, current.length) : current.length
-      const end = el && typeof el.selectionEnd === 'number' ? Math.min(Math.max(el.selectionEnd, start), current.length) : start
-      const before = current.slice(0, start)
-      const after = current.slice(end)
-      const lead = before && !/\s$/.test(before) ? ' ' : ''
-      const trail = after && !/^\s/.test(after) ? ' ' : ''
-      const next = `${before}${lead}${text}${trail}${after}`
-      const caret = before.length + lead.length + text.length
-      requestAnimationFrame(() => {
-        if (!textareaRef.current) return
-        textareaRef.current.focus()
-        textareaRef.current.setSelectionRange(caret, caret)
-        autoResizeTextarea()
-      })
-      return next
-    })
+    // The textarea is the current draft; state may be a render behind it.
+    const current = el ? el.value : inputValue
+    const start = el && typeof el.selectionStart === 'number' ? Math.min(el.selectionStart, current.length) : current.length
+    const end = el && typeof el.selectionEnd === 'number' ? Math.min(Math.max(el.selectionEnd, start), current.length) : start
+    const before = current.slice(0, start)
+    const after = current.slice(end)
+    const lead = before && !/\s$/.test(before) ? ' ' : ''
+    const trail = after && !/^\s/.test(after) ? ' ' : ''
+    const caret = before.length + lead.length + text.length
+    setInputValue(`${before}${lead}${text}${trail}${after}`)
     if (followUpSuggestions.length > 0) setFollowUpSuggestions([])
+    // After React has written the new value: place the caret after the
+    // inserted text and size the box to fit. Not token streaming.
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(caret, caret)
+      autoResizeTextarea()
+    })
   }
 
   const handleInputChange = (e) => {

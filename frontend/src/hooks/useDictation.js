@@ -98,8 +98,9 @@ export function useDictation({ maxDurationSeconds = 300, maxAudioBytes, complian
       if (trimmed) callbacksRef.current.onTranscript?.(trimmed)
       finish(attempt, trimmed ? {} : { notice: 'No speech was detected in the recording.' })
     } catch (error) {
-      if (error?.name === 'AbortError') return
-      finish(attempt, { error: error?.message || 'Transcription failed. Try again.' })
+      // An abort is a cancel: back to idle, quietly. (After cancel() this
+      // attempt is no longer current and finish() does nothing.)
+      finish(attempt, error?.name === 'AbortError' ? {} : { error: error?.message || 'Transcription failed. Try again.' })
     }
   }, [finish])
 

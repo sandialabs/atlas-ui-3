@@ -73,6 +73,12 @@ are never sent to the browser and are masked in the admin configuration view.
 | `AUDIO_TTS_MAX_INPUT_CHARS` | `4096` | Longest text sent in one request |
 | `AUDIO_TTS_MAX_AUDIO_BYTES` | `26214400` (25 MB) | Largest audio reply relayed to the browser |
 
+### Shared
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `AUDIO_MAX_CONCURRENT_REQUESTS` | `8` | Audio requests (both kinds together) that one backend process relays at once. Further requests get 503 with `Retry-After` |
+
 A capability that is switched on but incompletely configured (no base URL,
 a base URL that is not `http(s)`, no model, no voice for text-to-speech, or
 an unknown response format) stays **off**: its button is hidden and its
@@ -249,6 +255,14 @@ fine; the two sets of variables do not interact.
   refused too. The buttons are hidden in a conversation whose level the
   endpoint is not approved for.
 
+  The level is the one the browser states for the conversation it is showing,
+  as it does for a chat turn; these endpoints receive text or audio, not a
+  conversation id, so Atlas does not look the conversation up. The gate keeps
+  the Atlas UI from sending a classified conversation's content to an
+  endpoint that is not approved for it. It does not stop a user from
+  deliberately mislabeling content they could equally type into any other
+  conversation, so approve an audio endpoint with the same care as a model.
+
   ```bash
   AUDIO_STT_ALLOWED_DATA_CLASSIFICATIONS=Public,Internal
   AUDIO_TTS_ALLOWED_DATA_CLASSIFICATIONS=Public
@@ -259,11 +273,20 @@ fine; the two sets of variables do not interact.
 | Limit | Where it is enforced |
 | ----- | -------------------- |
 | Upload size (`AUDIO_STT_MAX_AUDIO_BYTES`) | Server, while the body is read: an oversized upload is refused with 413 without being buffered. The browser also refuses to upload an over-limit recording |
-| Recording length (`AUDIO_STT_MAX_DURATION_SECONDS`) | The microphone button stops at the limit and transcribes what it has. The server also refuses a request whose reported duration is over the limit. Atlas does not decode audio, so for clients other than the Atlas UI the byte limit is the hard bound |
+| Recording length (`AUDIO_STT_MAX_DURATION_SECONDS`) | The microphone button stops at the limit and transcribes what it has. The server also refuses a request whose reported duration is more than 5 seconds over the limit (the allowance covers a stop timer the browser ran late). Atlas does not decode audio, so for clients other than the Atlas UI the byte limit is the hard bound |
 | Upload type | Server: the declared type must be WebM, Ogg, MP4/M4A, MP3, WAV or FLAC **and** the file must begin with that container's signature, otherwise 415 |
 | Text length (`AUDIO_TTS_MAX_INPUT_CHARS`) | Server, 413. The read-aloud button trims a longer message at a sentence boundary and tells the user it did |
 | Reply size (`AUDIO_TTS_MAX_AUDIO_BYTES`) | Server: a larger reply from the audio server is discarded and the request fails with 502 |
 | Time (`AUDIO_*_TIMEOUT_SECONDS`) | Server: a ceiling on the whole exchange with the audio server, 504 when exceeded |
+| Concurrency (`AUDIO_MAX_CONCURRENT_REQUESTS`) | Server, per backend process: a request beyond the limit is refused with 503 before its body is read |
+
+**Memory.** A clip is held in memory while it is relayed, briefly twice (the
+upload and the copy being sent on), and a synthesized reply once. Budget
+roughly `AUDIO_MAX_CONCURRENT_REQUESTS` x 2 x `AUDIO_STT_MAX_AUDIO_BYTES` per
+backend process in the worst case (about 400 MB with the defaults), and lower
+either setting if replicas are small. The concurrency limit is counted in
+each process separately: it protects that process's memory and is not a
+deployment-wide quota.
 
 Redirects from the audio server are not followed, so audio and credentials
 only ever go to the configured base URL.
@@ -304,6 +327,11 @@ only ever go to the configured base URL.
 - The recorder uses the first format the browser supports out of WebM/Opus,
   Ogg/Opus and MP4. A browser that supports none of them gets a message
   saying so rather than a failed upload.
+- Some browsers (notably Safari on iOS) only start sound in direct response
+  to a tap. If the wait for the audio outlives the tap, the read-aloud button
+  keeps the generated audio and shows **Play**; a second tap starts it
+  without generating it again. This path is implemented from the documented
+  browser behavior and has not been verified on an iOS device.
 - If a reverse proxy in front of Atlas sets a `Permissions-Policy` header,
   it must allow `microphone=(self)`.
 - A proxy with a request body size limit must allow uploads of
@@ -328,7 +356,7 @@ With text-to-speech off the header is unchanged.
 | 415 | The upload is not an accepted audio type, or is not what it claims to be |
 | 422 | Missing file or text, or the audio server could not process the request |
 | 502 | The audio server is unreachable, rejected the credential, does not know the model, or returned something that is not a transcript or audio |
-| 503 | The audio server is rate limiting |
+| 503 | The audio server is rate limiting, or this Atlas process is already relaying `AUDIO_MAX_CONCURRENT_REQUESTS` audio requests |
 | 504 | The audio server did not answer within the timeout |
 
 Users see a short message for each. The audio server's own error text is

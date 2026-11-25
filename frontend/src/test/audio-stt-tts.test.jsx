@@ -289,6 +289,71 @@ describe('dictation button', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('stops by itself at the duration limit and transcribes what it has', async () => {
+    installMicrophone()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { text: 'up to the limit' })))
+    const onTranscript = vi.fn()
+    render(withToast(<DictationButton onTranscript={onTranscript} maxDurationSeconds={0.05} maxAudioBytes={1000} />))
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    await waitFor(() => expect(onTranscript).toHaveBeenCalledWith('up to the limit'))
+    expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/Recording stopped at the .*limit/))
+  })
+
+  it('releases the microphone when cancelled during the permission prompt', async () => {
+    const track = { stop: vi.fn() }
+    let grant
+    installMicrophone({ getUserMedia: vi.fn(() => new Promise(resolve => { grant = resolve })) })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    renderButton()
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    expect(screen.getByTestId('dictation-status').textContent).toBe('Waiting for microphone permission')
+    fireEvent.click(screen.getByTestId('dictation-cancel'))
+    expect(screen.getByTestId('dictation-start')).toBeTruthy()
+
+    // The user answers the prompt after cancelling: the stream is closed at once.
+    await act(async () => { grant({ getTracks: () => [track] }) })
+    expect(track.stop).toHaveBeenCalled()
+    expect(FakeRecorder.instances).toHaveLength(0)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('releases the microphone and uploads nothing when unmounted mid-recording', async () => {
+    const { track } = installMicrophone()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const onTranscript = vi.fn()
+    const { unmount } = render(withToast(<DictationButton onTranscript={onTranscript} maxDurationSeconds={60} maxAudioBytes={1000} />))
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    await screen.findByTestId('dictation-stop')
+    unmount()
+    expect(track.stop).toHaveBeenCalled()
+    expect(FakeRecorder.instances[0].state).toBe('inactive')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onTranscript).not.toHaveBeenCalled()
+  })
+
+  it('cancel during transcription drops the transcript that arrives later', async () => {
+    installMicrophone()
+    let respond
+    let aborted = false
+    vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((resolve) => {
+      respond = resolve
+      init.signal.addEventListener('abort', () => { aborted = true })
+    })))
+    const onTranscript = renderButton()
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    fireEvent.click(await screen.findByTestId('dictation-stop'))
+    await waitFor(() => expect(screen.getByTestId('dictation-status').textContent).toBe('Transcribing'))
+    fireEvent.click(screen.getByTestId('dictation-cancel'))
+    expect(aborted).toBe(true)
+    expect(screen.getByTestId('dictation-start')).toBeTruthy()
+
+    await act(async () => { respond(jsonResponse(200, { text: 'too late' })) })
+    expect(onTranscript).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
   it('describes the other microphone failures', () => {
     expect(describeMicrophoneError({ name: 'NotFoundError' })).toMatch(/No microphone was found/)
     expect(describeMicrophoneError({ name: 'NotReadableError' })).toMatch(/Another application/)
@@ -416,6 +481,53 @@ describe('read-aloud button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Read message aloud' }))
     expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/no text to read aloud/))
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reads one message at a time: starting another stops the first', async () => {
+    let n = 0
+    URL.createObjectURL = vi.fn(() => `blob:atlas/${++n}`)
+    render(withToast(<><div data-testid="a"><ReadAloudButton content="First reply." /></div><div data-testid="b"><ReadAloudButton content="Second reply." /></div></>))
+    const within = id => screen.getByTestId(id)
+    fireEvent.click(within('a').querySelector('.read-aloud-button'))
+    await waitFor(() => expect(within('a').querySelector('[aria-label="Pause reading"]')).not.toBeNull())
+    const first = FakeAudio.instances[0]
+
+    fireEvent.click(within('b').querySelector('.read-aloud-button'))
+    await waitFor(() => expect(within('b').querySelector('[aria-label="Pause reading"]')).not.toBeNull())
+    expect(first.paused).toBe(true)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:atlas/1')
+    expect(within('a').querySelector('.read-aloud-button')).not.toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Pause reading' })).toHaveLength(1)
+  })
+
+  it('stops and releases the audio when the button is hidden mid-playback', async () => {
+    const { rerender } = render(withToast(<ReadAloudButton content="Hello" />))
+    fireEvent.click(screen.getByRole('button', { name: 'Read message aloud' }))
+    await screen.findByRole('button', { name: 'Pause reading' })
+    const audio = FakeAudio.instances[0]
+
+    // The user switches the button off in Settings while it is playing.
+    useChat.mockReturnValue(chatState({ settings: { showTtsButton: false } }))
+    rerender(withToast(<ReadAloudButton content="Hello" />))
+    expect(audio.paused).toBe(true)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:atlas/1')
+    expect(screen.queryByRole('button', { name: 'Pause reading' })).toBeNull()
+  })
+
+  it('keeps the generated audio when the browser wants another click to play', async () => {
+    const blocked = Object.assign(new Error('blocked'), { name: 'NotAllowedError' })
+    const play = vi.spyOn(FakeAudio.prototype, 'play').mockRejectedValueOnce(blocked)
+    render(withToast(<ReadAloudButton content="Hello" />))
+    fireEvent.click(screen.getByRole('button', { name: 'Read message aloud' }))
+    const resume = await screen.findByRole('button', { name: 'Resume reading' })
+    expect(toast.info).toHaveBeenCalledWith(expect.stringMatching(/audio is ready/i))
+    expect(toast.error).not.toHaveBeenCalled()
+
+    fireEvent.click(resume)
+    await screen.findByRole('button', { name: 'Pause reading' })
+    // Played from what was already generated: no second request.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    play.mockRestore()
   })
 
   it('sends the conversation level and trims to the server limit', async () => {

@@ -74,37 +74,48 @@ const ReadAloudButton = ({ content }) => {
       return
     }
     stopActivePlayer?.()
-    const player = { abort: new AbortController(), stop }
+    // The element is created here, inside the click, and given its source
+    // when the audio arrives: some browsers only let an element play if it
+    // was set up during a user gesture.
+    const audio = new Audio()
+    const player = { abort: new AbortController(), stop, audio }
     playerRef.current = player
     stopActivePlayer = stop
     setStatus('loading')
+    let loaded = false
     try {
       const blob = await synthesizeSpeech(speech.text, { complianceLevel, signal: player.abort.signal })
       if (playerRef.current !== player) return
       player.url = URL.createObjectURL(blob)
-      const audio = new Audio(player.url)
-      player.audio = audio
-      // Both: a browser resets playbackRate to the default when it loads.
-      audio.defaultPlaybackRate = rateRef.current
-      audio.playbackRate = rateRef.current
       audio.onended = () => { if (playerRef.current === player) stop() }
       audio.onerror = () => {
         if (playerRef.current !== player) return
         stop()
         toast.error('The browser could not play the generated audio.')
       }
-      await audio.play()
-      if (playerRef.current !== player) return
-      setStatus('playing')
+      audio.src = player.url
+      // Both: a browser resets playbackRate to the default when it loads.
+      audio.defaultPlaybackRate = rateRef.current
+      audio.playbackRate = rateRef.current
+      loaded = true
       if (speech.truncated) {
         toast.info(`This message is longer than the read-aloud limit. Reading the first ${speech.text.length.toLocaleString()} characters.`)
       }
+      await audio.play()
+      if (playerRef.current !== player) return
+      setStatus('playing')
     } catch (error) {
       if (error?.name === 'AbortError' || playerRef.current !== player) return
+      if (loaded && error?.name === 'NotAllowedError') {
+        // The browser wants a fresh click to start sound (the wait for the
+        // audio outlived the first one). Keep what was generated and offer
+        // Play, instead of failing and generating it all over again.
+        setStatus('paused')
+        toast.info('The audio is ready. Press play to start it.')
+        return
+      }
       stop()
-      toast.error(error?.name === 'NotAllowedError'
-        ? 'The browser blocked audio playback. Click the read-aloud button again to play.'
-        : (error?.message || 'Read-aloud failed. Try again.'))
+      toast.error(error?.message || 'Read-aloud failed. Try again.')
     }
   }
 
@@ -112,7 +123,9 @@ const ReadAloudButton = ({ content }) => {
     const audio = playerRef.current?.audio
     if (!audio) return
     if (audio.paused) {
-      audio.play().then(() => setStatus('playing')).catch(() => {})
+      audio.play().then(() => setStatus('playing')).catch(() => {
+        toast.error('The browser blocked audio playback for this site.')
+      })
     } else {
       audio.pause()
       setStatus('paused')
