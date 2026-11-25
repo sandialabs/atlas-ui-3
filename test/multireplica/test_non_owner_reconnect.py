@@ -116,6 +116,13 @@ def test_owner_killed_before_any_tool_is_a_failed_end(cluster):
         assert ended["status"] == "failed" and ended["run_id"] == run_id, ended
 
 
+def test_watch_end_without_a_conversation_is_refused(cluster):
+    with WsClient(cluster.b, cluster.new_user()) as tab:
+        tab.send({"type": "list_runs", "watch_end": True})
+        refused = tab.recv_until(_is("error"), 15)
+        assert refused["error_type"] == "invalid_request", refused
+
+
 def test_connection_bound_turn_is_not_shown_on_another_replica(cluster):
     user = cluster.new_user()
     with WsClient(cluster.a, user, auto_approve={"atlas_sleep"}) as owner_tab:

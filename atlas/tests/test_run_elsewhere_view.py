@@ -5,7 +5,12 @@ import pytest
 from atlas.application.chat.runs import RunRegistry, execution_state, run_control
 from atlas.application.chat.runs.control_bus import set_run_control_bus
 from atlas.application.chat.runs.execution_state import merge_run_snapshots
-from atlas.application.chat.runs.in_flight import hidden_remote_run_ids, in_flight_conversation, remote_live_runs
+from atlas.application.chat.runs.in_flight import (
+    compose_run_list,
+    in_flight_conversation,
+    remote_live_runs,
+    shareable_remote_run_ids,
+)
 from atlas.application.chat.runs.run_directory import owner_entry
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
@@ -17,12 +22,22 @@ class _Bus:
 
     def __init__(self, live=()):
         self.live = list(live)
+        self.scopes = {}
+        self.scopes_error = None
+        self.live_error = None
 
     async def runs_for_user(self, user_email):
+        if self.live_error:
+            raise self.live_error
         return self.live
 
+    async def scopes_of(self, run_ids):
+        if self.scopes_error:
+            raise self.scopes_error
+        return {r: self.scopes.get(r) for r in run_ids}
 
-def _entry(replica="replica-b", user="owner@example.com", scope=""):
+
+def _entry(replica="replica-b", user="owner@example.com", scope="shared"):
     return {
         "replica": replica,
         "run_id": "run-1",
@@ -71,7 +86,7 @@ async def test_text_only_run_needs_no_projection(shared):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scope", ["off_record", "connection_bound"])
+@pytest.mark.parametrize("scope", ["off_record", "connection_bound", "other"])
 async def test_scoped_runs_are_not_served(shared, scope):
     shared["entry"] = _entry(scope=scope)
     assert await _view() is None
@@ -106,45 +121,173 @@ async def test_remote_runs_list_skips_own_and_scoped(shared):
     assert [(r["run_id"], r["detached"]) for r in runs] == [("run-1", True)]
 
 
-@pytest.mark.asyncio
-async def test_hidden_remote_runs_are_found_by_scope(shared):
-    async def scopes_of(run_ids):
-        return {"run-1": "connection_bound", "run-2": "", "run-3": "off_record"}
-
-    shared["bus"].scopes_of = scopes_of
-    hidden = await hidden_remote_run_ids(["run-1", "run-2", "run-3"])
-    assert hidden == {"run-1", "run-3"}
-
-
-@pytest.mark.asyncio
-async def test_unreadable_scopes_hide_remote_runs(shared):
-    async def scopes_of(run_ids):
-        raise RuntimeError("redis down")
-
-    shared["bus"].scopes_of = scopes_of
-    assert await hidden_remote_run_ids(["run-1"]) == {"run-1"}
+# The rule, one test per row. A remote run is shown to another replica only
+# when its shared record was read AND says "shared"; everything else is hidden,
+# and a failed read also marks the list degraded.
+#
+#   record        scope field          read     -> shown   degraded
+#   present       shared               ok          yes     no
+#   present       off_record           ok          no      no
+#   present       connection_bound     ok          no      no
+#   present       (field missing)      ok          no      no
+#   present       unknown value        ok          no      no
+#   absent        -                    ok          no      no
+#   -             -                    fails       no      yes
+#   hidden projection beside a live claim of the conversation: the claim shows
+#   stale shared projection beside a newer live claim: the claim shows
 
 
 @pytest.mark.asyncio
-async def test_hidden_remote_run_adds_no_rows_to_a_conversation(shared):
-    async def scopes_of(run_ids):
-        return {"run-1": "connection_bound"}
+@pytest.mark.parametrize(
+    "scope, shown",
+    [("shared", True), ("off_record", False), ("connection_bound", False), (None, False), ("other", False)],
+)
+async def test_scope_rule_for_a_read_record(shared, scope, shown):
+    shared["bus"].scopes = {"run-1": scope}
+    assert (await shareable_remote_run_ids(["run-1"]) == {"run-1"}) is shown
+
+
+@pytest.mark.asyncio
+async def test_scope_rule_for_an_absent_record(shared):
+    # The bus answers with no entry for the id: the record is gone.
+    assert await shareable_remote_run_ids(["run-1"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_scope_rule_fails_closed_on_a_failed_read(shared):
+    from atlas.application.chat.runs.in_flight import ScopeLookupUnavailable
+
+    shared["bus"].scopes_error = RuntimeError("redis down")
+    with pytest.raises(ScopeLookupUnavailable):
+        await shareable_remote_run_ids(["run-1"])
+
+
+def _store(projections):
+    class _Store:
+        async def list_for_user(self, user_email):
+            return projections
+
+        async def get(self, conversation_id, user_email):
+            return None
+
+    execution_state.set_execution_store(_Store())
+
+
+def _proj(run_id="run-1", conversation_id="conv-1", status="running"):
+    return {"run_id": run_id, "conversation_id": conversation_id, "status": status, "revision": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["off_record", "connection_bound", None, "other"])
+async def test_list_hides_a_projection_without_the_shared_scope(shared, scope):
+    _store([_proj()])
+    shared["bus"].scopes = {"run-1": scope}
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert runs == [] and degraded is False
+
+
+@pytest.mark.asyncio
+async def test_list_shows_a_shared_projection(shared):
+    _store([_proj()])
+    shared["bus"].scopes = {"run-1": "shared"}
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert [r["run_id"] for r in runs] == ["run-1"] and degraded is False
+
+
+@pytest.mark.asyncio
+async def test_list_hides_a_projection_whose_record_is_gone(shared):
+    _store([_proj()])
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert runs == [] and degraded is False
+
+
+@pytest.mark.asyncio
+async def test_list_is_degraded_and_local_only_when_scopes_cannot_be_read(shared):
+    _store([_proj()])
+    shared["bus"].scopes_error = RuntimeError("redis down")
+    local = [{"run_id": "run-local", "conversation_id": "conv-9", "status": "running"}]
+    runs, degraded = await compose_run_list(OWNER, local)
+    assert runs == local and degraded is True
+
+
+@pytest.mark.asyncio
+async def test_list_is_degraded_when_the_claims_cannot_be_read(shared):
+    _store([_proj()])
+    shared["bus"].scopes = {"run-1": "shared"}
+    shared["bus"].live_error = RuntimeError("redis down")
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert runs == [] and degraded is True
+
+
+@pytest.mark.asyncio
+async def test_list_is_degraded_when_projections_cannot_be_read(shared):
+    class _Broken:
+        async def list_for_user(self, user_email):
+            raise RuntimeError("redis down")
+
+    execution_state.set_execution_store(_Broken())
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert runs == [] and degraded is True
+
+
+@pytest.mark.asyncio
+async def test_hidden_projection_does_not_suppress_a_live_claim(shared):
+    # An old scoped projection of the conversation, and a live shared claim.
+    _store([_proj(run_id="run-old")])
+    shared["bus"].scopes = {"run-old": "connection_bound"}
+    shared["bus"].live = [_entry()]
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert [r["run_id"] for r in runs] == ["run-1"] and degraded is False
+
+
+@pytest.mark.asyncio
+async def test_stale_shared_projection_yields_to_a_newer_claim(shared):
+    _store([_proj(run_id="run-old")])
+    shared["bus"].scopes = {"run-old": "shared"}
+    shared["bus"].live = [_entry()]
+    runs, degraded = await compose_run_list(OWNER, [])
+    assert [r["run_id"] for r in runs] == ["run-1"] and degraded is False
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_projection_adds_no_rows_to_a_conversation(shared):
+    shared["bus"].scopes = {"run-1": "connection_bound"}
 
     class _Store:
         async def get(self, conversation_id, user_email):
             return {"run_id": "run-1", "conversation_id": conversation_id, "status": "running",
                     "invocations": {"i": {"invocation_id": "i", "status": "calling", "tool_name": "t"}}}
 
-    shared["bus"].scopes_of = scopes_of
     execution_state.set_execution_store(_Store())
     conversation = {"id": "conv-1", "messages": []}
     assert await execution_state.attach_execution(conversation, OWNER) == conversation
 
 
+@pytest.mark.asyncio
+async def test_a_failed_scope_read_adds_no_rows_to_a_conversation(shared):
+    shared["bus"].scopes_error = RuntimeError("redis down")
+
+    class _Store:
+        async def get(self, conversation_id, user_email):
+            return {"run_id": "run-1", "conversation_id": conversation_id, "status": "running",
+                    "invocations": {"i": {"invocation_id": "i", "status": "calling", "tool_name": "t"}}}
+
+    execution_state.set_execution_store(_Store())
+    conversation = {"id": "conv-1", "messages": []}
+    assert await execution_state.attach_execution(conversation, OWNER) == conversation
+
+
+@pytest.mark.asyncio
+async def test_a_claim_without_a_scope_is_not_served(shared):
+    # A record written before the field existed.
+    shared["entry"] = _entry(scope=None)
+    assert await _view() is None
+
+
 def test_owner_entry_carries_scope():
     record = {"owner": "r", "generation": "1", "run_id": "x", "scope": "off_record", "status": "running"}
     assert owner_entry(record)["scope"] == "off_record"
-    assert owner_entry({**record, "scope": ""})["scope"] == ""
+    assert owner_entry({k: v for k, v in record.items() if k != "scope"})["scope"] is None
 
 
 def _projection(status):

@@ -63,7 +63,7 @@ async def test_claim_records_the_scope(server):
                   max_runs_per_user=5, scope="off_record")
     await _claim(a, "run-p", conversation_id="conv-p")
     assert (await a.read("run-s"))["scope"] == "off_record"
-    assert (await a.read("run-p"))["scope"] == ""
+    assert (await a.read("run-p"))["scope"] == "shared"
 
 
 async def test_busy_conversation_refused_on_another_replica(server):

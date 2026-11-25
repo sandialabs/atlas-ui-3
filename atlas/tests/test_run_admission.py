@@ -408,7 +408,7 @@ async def test_shutdown_keeps_the_claim_of_a_run_that_will_not_stop(coord):
 
 @pytest.mark.parametrize(
     "kwargs, scope",
-    [({"off_record": True}, "off_record"), ({"connection_bound": True}, "connection_bound"), ({}, "")],
+    [({"off_record": True}, "off_record"), ({"connection_bound": True}, "connection_bound"), ({}, "shared")],
 )
 async def test_admission_records_the_run_scope(kwargs, scope):
     coordinator = _coordinator(fakeredis.FakeServer())

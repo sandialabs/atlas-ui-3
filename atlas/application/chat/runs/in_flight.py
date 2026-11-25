@@ -29,10 +29,16 @@ from atlas.domain.conversation_origin import (
 
 TITLE_MAX_CHARS = 200
 
-# Runs whose claim says another replica must not serve a view of them: an
-# off-record turn shares nothing, and a connection-bound turn lives on its
-# socket's own session (the owner's own lookup refuses both).
-HIDDEN_SCOPES = frozenset({"off_record", "connection_bound"})
+# The one scope another replica may be shown. A claim says "shared" explicitly;
+# an off-record turn shares nothing and a connection-bound turn lives on its
+# socket's own session, so both stay on their owner. Anything else -- a record
+# without the field (written before it existed), an unknown value, a record
+# that cannot be read -- is hidden: "missing" is never read as "public".
+SHAREABLE_SCOPE = "shared"
+
+
+class ScopeLookupUnavailable(Exception):
+    """The shared records that say who may see a run could not be read."""
 
 
 def _iso(epoch: float) -> str:
@@ -105,7 +111,7 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
         entry is None
         or entry.get("replica") == bus.replica_id
         or entry.get("user_email") != normalize_user_email(user_email)
-        or entry.get("scope") in HIDDEN_SCOPES
+        or entry.get("scope") != SHAREABLE_SCOPE
     ):
         return None
     now = datetime.now(tz=timezone.utc).isoformat()
@@ -126,25 +132,51 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
     }
 
 
-async def hidden_remote_run_ids(run_ids) -> set:
-    """The ids among ``run_ids`` that another replica owns under a hidden scope.
+async def shareable_remote_run_ids(run_ids) -> set:
+    """The ids among ``run_ids`` that another replica may show: remote runs
+    whose shared record was read and carries the explicit ``shared`` scope.
 
-    A run this replica holds is never hidden from its owner. Unreadable shared
-    state hides every remote id: a view of a run that may be scoped is not
-    worth the risk.
+    This is the only place the rule lives. Runs this replica holds are not
+    remote and are never listed here (their owner sees them). An absent record,
+    a record without a scope, or any other scope is not in the result.
+    Raises :class:`ScopeLookupUnavailable` when the records cannot be read, so a
+    caller marks its answer degraded and shows no remote run.
     """
     from atlas.application.chat.runs import get_run_registry
     from atlas.application.chat.runs.control_bus import get_run_control_bus
 
-    bus = get_run_control_bus()
-    remote = [r for r in run_ids if r and get_run_registry().get(str(r)) is None]
-    if bus is None or not remote:
+    remote = [str(r) for r in run_ids if r and get_run_registry().get(str(r)) is None]
+    if not remote:
         return set()
+    bus = get_run_control_bus()
+    if bus is None:
+        # No shared run records: there is no other replica, so every
+        # projection here is this process's own.
+        return set(remote)
     try:
         scopes = await bus.scopes_of(remote)
-    except Exception:
-        return set(str(r) for r in remote)
-    return {run_id for run_id, scope in scopes.items() if scope in HIDDEN_SCOPES}
+    except Exception as exc:
+        raise ScopeLookupUnavailable(type(exc).__name__) from exc
+    return {run_id for run_id, scope in scopes.items() if scope == SHAREABLE_SCOPE}
+
+
+async def shareable_projections(projections) -> list:
+    """``projections`` minus the remote runs another replica may not show.
+
+    Applied before projections are merged into anything, so a hidden one can
+    neither be listed nor stand in for a live claim.
+    """
+    from atlas.application.chat.runs import get_run_registry
+
+    registry = get_run_registry()
+    remote = [p.get("run_id") for p in projections if p.get("run_id") and registry.get(str(p["run_id"])) is None]
+    shown = await shareable_remote_run_ids(remote)
+    kept = []
+    for projection in projections:
+        run_id = projection.get("run_id")
+        if run_id and (registry.get(str(run_id)) is not None or str(run_id) in shown):
+            kept.append(projection)
+    return kept
 
 
 async def remote_live_runs(user_email: str) -> list:
@@ -163,7 +195,7 @@ async def remote_live_runs(user_email: str) -> list:
     for entry in await bus.runs_for_user(user_email):
         if (
             entry.get("replica") == bus.replica_id
-            or entry.get("scope") in HIDDEN_SCOPES
+            or entry.get("scope") != SHAREABLE_SCOPE
             or not entry.get("conversation_id")
         ):
             continue
@@ -175,6 +207,50 @@ async def remote_live_runs(user_email: str) -> list:
             "detached": True,
         })
     return out
+
+
+async def compose_run_list(user_email: str, local_runs: list, ended_for=None):
+    """The ``list_runs`` answer: this replica's runs plus what other replicas
+    own that may be shown, as ``(runs, degraded)``.
+
+    The visibility rule (``shareable_remote_run_ids``) is applied to the shared
+    projections before they are merged into anything and to the live claims by
+    their own ``scope``, so a hidden run can neither be listed nor stand in for
+    a live claim. Any failure to read the shared state returns the local runs
+    only, with ``degraded`` true, so a client keeps what it tracks instead of
+    reading the absence of a remote run as its end.
+    """
+    import logging
+
+    from atlas.application.chat.runs.execution_state import (
+        TERMINAL_RUN_STATUSES,
+        list_execution_snapshots,
+        merge_run_snapshots,
+    )
+
+    try:
+        projections = await shareable_projections(await list_execution_snapshots(user_email, strict=True))
+        claims = await remote_live_runs(user_email)
+    except Exception:
+        logging.getLogger(__name__).warning("shared run state could not be read", exc_info=True)
+        return local_runs, True
+    runs = merge_run_snapshots(local_runs, projections, ended_for=ended_for)
+    live_remote = {
+        r.get("conversation_id"): r for r in runs
+        if r.get("detached") is True and r.get("status") not in TERMINAL_RUN_STATUSES
+    }
+    held = {r.get("conversation_id") for r in runs if r.get("status") not in TERMINAL_RUN_STATUSES}
+    for claim in claims:
+        conversation_id = claim["conversation_id"]
+        stale = live_remote.get(conversation_id)
+        if stale is not None and stale.get("run_id") != claim["run_id"]:
+            # An earlier run's projection that never closed yields to the live claim.
+            runs.remove(stale)
+            held.discard(conversation_id)
+        if conversation_id not in held:
+            runs.append(claim)
+            held.add(conversation_id)
+    return runs, False
 
 
 async def in_flight_conversation(

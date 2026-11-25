@@ -201,8 +201,16 @@ ATLAS_LAUNCH_MAX_CHILDREN_PER_RUN=3
   by its prompt), so an approval that does pause it has a visible place to be answered from.
   Tools an admin has pinned to mandatory approval (`FORCE_TOOL_APPROVAL_GLOBALLY` or
   per-tool config) are exempt from that approval and from the client's auto-approve: they still
-  prompt inside the sub-conversation, which pauses until the user opens it. Keep such tools out
-  of workspaces you expect to hand off.
+  prompt inside the sub-conversation, which pauses until the user opens it. Only those tools
+  prompt; the sub-conversation's other tools run without asking. Keep such tools out of
+  workspaces you expect to hand off. A running sub-conversation cannot be steered: a message sent
+  to it is refused until it finishes (stop it, or wait).
+  **Contract for admins:** one approval of the launch call authorizes every tool in the chosen
+  workspace that is not admin-gated, and the sub-conversation runs those tools unattended, on
+  arguments the model picks, with no further prompt. The launch approval prompt shows the task and
+  workspace, not a per-tool list. If a tool must never run without a person looking at each call,
+  pin it with `require_approval: true` (or set `FORCE_TOOL_APPROVAL_GLOBALLY`); if the policy cannot
+  be read, every tool is treated as pinned.
 - **Follow-ups**: the same flag also exposes `atlas_follow_up_subagent`, which sends the next message
   to a finished sub-conversation. It runs as a new turn of that sub-conversation on the model,
   tools and data sources it was launched with, re-checked against the user's access at that

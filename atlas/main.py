@@ -77,7 +77,11 @@ from atlas.application.chat.runs.eligibility import (
     turn_is_eligible_for_background_run,
     turn_is_off_record,
 )
-from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
+from atlas.application.chat.runs.registry import (
+    STEER_QUEUE_FULL,
+    STEER_QUEUED,
+    busy_message_for,
+)
 from atlas.application.chat.runs.remote_run_frames import steer_finished_frame
 from atlas.application.chat.service import UNSET, DownloadError
 from atlas.core.auth import resolve_user_from_auth_header_async
@@ -2351,11 +2355,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # transcript.
                     await websocket.send_json({
                         "type": "error",
-                        "message": (
-                            "This conversation already has a run in progress. "
-                            "Wait for it to reach its next step, or stop it, "
-                            "before sending another message."
-                        ),
+                        "message": busy_message_for(tracked_run),
                         "error_type": "conversation_busy",
                         "steering": True,
                         "request_id": data.get("request_id"),
@@ -3382,43 +3382,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the run still overlays the shared projection, so the sidebar
                 # shows the same activity.
                 runs = run_registry.snapshot_for_user(user_email)
-                degraded = False
-                try:
-                    from atlas.application.chat.runs.execution_state import (
-                        list_execution_snapshots,
-                        merge_run_snapshots,
-                    )
+                from atlas.application.chat.runs.in_flight import compose_run_list
 
-                    runs = merge_run_snapshots(
-                        runs,
-                        await list_execution_snapshots(user_email, strict=True),
-                        ended_for=(data.get("conversation_id") or None) if data.get("watch_end") is True else None,
-                    )
-                    # A run on another replica that has published no projection
-                    # yet (a text-only first turn) is still in the shared claims.
-                    from atlas.application.chat.runs.execution_state import TERMINAL_RUN_STATUSES
-                    from atlas.application.chat.runs.in_flight import hidden_remote_run_ids, remote_live_runs
-
-                    held = {
-                        r.get("conversation_id") for r in runs
-                        if r.get("status") not in TERMINAL_RUN_STATUSES
-                    }
-                    for remote in await remote_live_runs(user_email):
-                        if remote["conversation_id"] not in held:
-                            runs.append(remote)
-                            held.add(remote["conversation_id"])
-                    # A projection of a run another replica owns under an
-                    # off-record or connection-bound scope is not listed either.
-                    hidden = await hidden_remote_run_ids(
-                        [r.get("run_id") for r in runs if r.get("detached") is True]
-                    )
-                    runs = [r for r in runs if r.get("run_id") not in hidden]
-                except Exception:
-                    # Without the shared projections this list says nothing
-                    # about runs other replicas own. Say so, so a client does
-                    # not read their absence as an end (issue #1219).
-                    degraded = True
-                    logger.warning("execution snapshot merge failed", exc_info=True)
+                watch_end = data.get("watch_end") is True
+                watched_conversation = data.get("conversation_id") or None
+                if watch_end and not watched_conversation:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "watch_end needs a conversation_id",
+                        "error_type": "invalid_request",
+                    })
+                    continue
+                runs, degraded = await compose_run_list(
+                    user_email, runs, ended_for=watched_conversation if watch_end else None
+                )
                 await websocket.send_json({
                     "type": "runs_snapshot",
                     "runs": runs,

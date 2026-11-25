@@ -453,7 +453,12 @@ Background auto-approve covers runs the *user* started. A conversation the
 model launched (`atlas_launch_subagent`) runs on model-chosen arguments, so its
 approval requests are not answered off-screen; the child still appears in the
 history list -- titled by its prompt -- with its "Needs approval" marker, and
-admin-pinned tools pause it until it is opened.
+only admin-pinned tools pause it until it is opened; its other tools run without
+asking, because approving the launch call covered them.
+
+A sub-conversation is started without a steering channel. A message sent to it
+while it runs is refused with `conversation_busy` and text saying it runs on its own
+and cannot take messages until it finishes; stop it or wait.
 
 Every event a tracked run emits — tokens, agent updates, tool rows, files,
 canvas, completion, errors — carries `run_id` and `conversation_id`. Tagging
@@ -511,6 +516,14 @@ These are known and deliberate, not oversights:
   `memory` session store), all run state is per process: use a single
   replica and worker. While Redis is configured but down, new runs are refused
   rather than admitted locally.
+- **Sub-conversation results work from any replica.** When a parent's next
+  turn runs on another replica, `atlas_get_subagent_runs` and
+  `atlas_get_subagent_result` find the children through the shared run
+  records, and after the 30-minute retention window (or a restart) through the
+  stored child conversations. A run listed by a replica that does not own it
+  keeps its parent, title and launch origin, so the sidebar nests it under its
+  parent. `atlas_follow_up_subagent` still has to run on the replica that
+  launched the child.
 
 ## Troubleshooting
 

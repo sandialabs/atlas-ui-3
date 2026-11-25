@@ -1905,6 +1905,23 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	const remoteWatchRef = useRef(null)
 	const remoteBaselineRef = useRef(null)
 	const remoteBaselineLoadingRef = useRef(false)
+	// The watch's waits and retries stop with the provider: nothing it started
+	// may reload a view the user has left.
+	const unmountedRef = useRef(false)
+	const remoteTimersRef = useRef(new Set())
+	useEffect(() => {
+		const timers = remoteTimersRef.current
+		unmountedRef.current = false
+		return () => {
+			unmountedRef.current = true
+			timers.forEach(clearTimeout)
+			timers.clear()
+		}
+	}, [])
+	const waitRemote = useCallback((ms) => new Promise(resolve => {
+		const timer = setTimeout(() => { remoteTimersRef.current.delete(timer); resolve() }, ms)
+		remoteTimersRef.current.add(timer)
+	}), [])
 	useEffect(() => {
 		const id = activeConversationId
 		const run = id ? runs.runsByConversation[id] : null
@@ -1983,11 +2000,12 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// joined-run reload does.
 			// A completed run can also be reported before its save is readable
 			// on the replica that answers, so every end waits.
-			await new Promise(resolve => setTimeout(resolve, RUN_END_RELOAD_GRACE_MS))
+			await waitRemote(RUN_END_RELOAD_GRACE_MS)
 			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
+				if (unmountedRef.current) return
 				try {
 					const data = await fetchConversationRecord(id)
-					if (reconnectResyncGenerationRef.current !== generation ||
+					if (unmountedRef.current || reconnectResyncGenerationRef.current !== generation ||
 						activeConversationIdRef.current !== id || data?.id !== id || data.error) return
 					// A newer turn already holds the conversation: its own tracking
 					// takes over, and this record is not the final one.
@@ -2023,12 +2041,20 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 				} catch (error) {
 					console.error('Could not load conversation after its run ended:', error)
 				}
-				await new Promise(resolve => setTimeout(resolve, Math.min(RECORD_RETRY_BASE_MS * 2 ** attempt, RECORD_RETRY_MAX_MS)))
+				await waitRemote(Math.min(RECORD_RETRY_BASE_MS * 2 ** attempt, RECORD_RETRY_MAX_MS))
+			}
+			// Gave up without the final record. The run state was already cleared,
+			// so ask the server again: a run still live is tracked again, and one
+			// that ended is reported as ended, instead of being forgotten until a
+			// manual reload.
+			if (!unmountedRef.current && reconnectResyncGenerationRef.current === generation &&
+				activeConversationIdRef.current === id) {
+				sendMessageRef.current?.({ type: 'list_runs', conversation_id: id, watch_end: true })
 			}
 		}
 		finish()
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [runs.runsByConversation, activeConversationId])
+	}, [runs.runsByConversation, activeConversationId, waitRemote])
 
 	const refreshJoinedConversation = useCallback((conversationData, { live = false } = {}) => {
 		if (!conversationData || !conversationData.messages) return false

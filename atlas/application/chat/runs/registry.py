@@ -124,6 +124,37 @@ STEER_QUEUE_FULL = "steering_queue_full"
 STEER_RUN_FINISHED = "run_finished"
 STEER_NOT_DRAINING = "not_draining"
 
+BUSY_MESSAGE = (
+    "This conversation already has a run in progress. Wait for it to "
+    "reach its next step, or stop it, before sending another message."
+)
+NO_STEERING_BUSY_MESSAGE = (
+    "This conversation already has a run in progress. Wait for it to "
+    "finish, or stop it, before sending another message."
+)
+LAUNCHED_RUN_BUSY_MESSAGE = (
+    "This conversation is running on its own (it was launched by another "
+    "conversation or by the API); it cannot take messages while it runs. "
+    "Wait for it to finish, or stop it, then send your message."
+)
+
+
+def busy_message_for(record: Any) -> str:
+    """The refusal text for a message sent to a run that is not draining steers.
+
+    "Wait for its next step" is true only for a run whose loop holds a live
+    steering channel. A launched run is started without one, and a plain turn
+    that is not an agent loop never has one, so for those the advice could not
+    come true and the text promises no step boundary.
+    """
+    follows = getattr(record, "follows_user_auto_approve", None)
+    if callable(follows) and follows() is False:
+        return LAUNCHED_RUN_BUSY_MESSAGE
+    steering = getattr(record, "steering", None)
+    if steering is not None and getattr(steering, "active", False):
+        return BUSY_MESSAGE
+    return NO_STEERING_BUSY_MESSAGE
+
 
 @dataclass
 class RunRecord:

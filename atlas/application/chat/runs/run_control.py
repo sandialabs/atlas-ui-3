@@ -40,6 +40,7 @@ from atlas.application.chat.runs.registry import (
     STEER_QUEUE_FULL,
     STEER_QUEUED,
     STEER_RUN_FINISHED,
+    busy_message_for,
 )
 from atlas.core.user_identity import normalize_user_email
 
@@ -78,8 +79,7 @@ def _steer_reply(outcome: str, record: Any) -> Dict[str, Any]:
         return reply(
             False,
             "conversation_busy",
-            "This conversation already has a run in progress. Wait for it to "
-            "reach its next step, or stop it, before sending another message.",
+            busy_message_for(record),
         )
     return reply(False, "run_not_found", "The run has finished.")
 

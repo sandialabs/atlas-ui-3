@@ -561,6 +561,12 @@ def merge_execution_into_messages(messages: Optional[list], projection: dict) ->
     return merged
 
 
+# Run-record fields a replica copies onto a run it lists but does not own.
+_LINEAGE_FIELDS = (
+    "parent_run_id", "parent_conversation_id", "title", "launch_origin", "depth",
+)
+
+
 def merge_run_snapshots(
     local_runs: List[dict],
     shared: List[dict],
@@ -626,6 +632,10 @@ def merge_run_snapshots(
                 "activity": projection.get("activity"),
                 "execution_revision": projection.get("revision"),
                 "detached": True,
+                # Lineage from the shared run record (issue #1222), so an
+                # unsaved child another replica owns still nests under its
+                # parent instead of showing as a top-level conversation.
+                **{key: projection[key] for key in _LINEAGE_FIELDS if key in projection},
             })
             active_conversations.add(conversation_id)
             continue
@@ -1123,9 +1133,9 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
         return conversation
     if not doc:
         return conversation
-    # A run another replica owns under an off-record or connection-bound scope
-    # shares nothing with this one (issue #1219).
-    if await _is_hidden_remote(doc.get("run_id")):
+    # A run another replica owns is shown only when its record says it may be
+    # (issue #1219); any doubt hides it.
+    if not await _may_show_run(doc.get("run_id")):
         return conversation
     projection = public_projection(doc)
     merged = dict(conversation)
@@ -1136,13 +1146,19 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
     return merged
 
 
-async def _is_hidden_remote(run_id: Optional[str]) -> bool:
-    """Whether ``run_id`` is a run on another replica whose claim hides it."""
+async def _may_show_run(run_id: Optional[str]) -> bool:
+    """Whether the run's projection may be shown from this replica."""
     if not run_id:
-        return False
-    from atlas.application.chat.runs.in_flight import hidden_remote_run_ids
+        return True
+    from atlas.application.chat.runs import get_run_registry
+    from atlas.application.chat.runs.in_flight import ScopeLookupUnavailable, shareable_remote_run_ids
 
-    return str(run_id) in await hidden_remote_run_ids([str(run_id)])
+    if get_run_registry().get(str(run_id)) is not None:
+        return True
+    try:
+        return str(run_id) in await shareable_remote_run_ids([str(run_id)])
+    except ScopeLookupUnavailable:
+        return False
 
 
 async def forget_conversations(user_email: str, conversation_ids: Optional[List[str]] = None) -> None:
@@ -1166,12 +1182,50 @@ async def list_execution_snapshots(user_email: str, *, strict: bool = False) -> 
     """The user's shared projections. A store failure reads as empty unless
     ``strict``, which re-raises so a caller can tell "no runs" from "unknown"."""
     try:
-        return await get_execution_store().list_for_user(user_email)
+        projections = await get_execution_store().list_for_user(user_email)
     except Exception:
         if strict:
             raise
         logger.warning("execution projection list failed", exc_info=True)
         return []
+    return await _attach_run_lineage(projections, user_email)
+
+
+async def _attach_run_lineage(projections: List[dict], user_email: str) -> List[dict]:
+    """Add the shared run record's lineage to each open projection.
+
+    A projection says what a run is doing, not where it sits in the
+    conversation tree; the run record admission wrote does. Only open runs
+    need it (a finished one is not listed again), and a record that cannot be
+    read leaves the projection as it was.
+    """
+    from atlas.application.chat.runs.control_bus import get_run_control_bus
+    from atlas.application.chat.runs.run_directory import lineage_from_record
+
+    bus = get_run_control_bus()
+    if bus is None:
+        return projections
+    owner = normalize_user_email(user_email)
+
+    async def read(projection: dict):
+        run_id = projection.get("run_id")
+        if not run_id or projection.get("status") in _TERMINAL_RUN:
+            return None
+        try:
+            return await bus.directory.record(str(run_id))
+        except Exception as exc:
+            logger.warning("run lineage read failed", exc_info=True)
+            _record_projection_failure(exc, "lineage_read")
+            return None
+
+    records = await asyncio.gather(*(read(p) for p in projections))
+    enriched = []
+    for projection, record in zip(projections, records):
+        if not record or record.get("user_email") != owner:
+            enriched.append(projection)
+        else:
+            enriched.append({**projection, **lineage_from_record(record)})
+    return enriched
 
 
 async def wait_for_shared_approval(request, timeout: Optional[float], request_key: Optional[str]) -> dict:

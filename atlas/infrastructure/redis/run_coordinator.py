@@ -68,6 +68,9 @@ logger = logging.getLogger(__name__)
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 # Lease renewals in flight at once, per replica.
 RENEW_CONCURRENCY = 16
+# The title is the prompt that started the run; the shared record keeps a
+# short form of it, enough to label the run in a history list.
+MAX_RECORD_TITLE_CHARS = 200
 
 # Shared by the scripts: Redis server time in epoch milliseconds.
 _NOW = """
@@ -131,7 +134,8 @@ end
 
 # KEYS: conv, user, run, fence, live
 # ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms,
-#       source, parent_run_id, follow_up_of, key_prefix, scope
+#       source, parent_run_id, follow_up_of, key_prefix,
+#       parent_conversation_id, title, launch_origin, depth, scope
 CLAIM_SCRIPT = _NOW + """
 local lease = tonumber(ARGV[6])
 local holder = redis.call('GET', KEYS[1])
@@ -162,7 +166,8 @@ redis.call('HSET', KEYS[3],
   'owner', ARGV[4], 'generation', generation, 'status', 'queued',
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
   'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10],
-  'scope', ARGV[12])
+  'parent_conversation_id', ARGV[12], 'title', ARGV[13],
+  'launch_origin', ARGV[14], 'depth', ARGV[15], 'scope', ARGV[16])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
 if ARGV[9] ~= '' then
   local kids = ARGV[11] .. 'run-kids:' .. ARGV[9]
@@ -339,7 +344,11 @@ class RedisRunCoordinator:
         source: str = "",
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
-        scope: str = "",
+        parent_conversation_id: Optional[str] = None,
+        title: Optional[str] = None,
+        launch_origin: Optional[str] = None,
+        depth: int = 0,
+        scope: str = "shared",
     ) -> Optional[RunClaim]:
         owner_email = normalize_user_email(user_email)
         try:
@@ -363,7 +372,11 @@ class RedisRunCoordinator:
                     parent_run_id or "",
                     follow_up_of or "",
                     self._prefix,
-                    scope or "",
+                    parent_conversation_id or "",
+                    (title or "")[:MAX_RECORD_TITLE_CHARS],
+                    launch_origin or "",
+                    max(0, int(depth or 0)),
+                    scope or "shared",
                 ],
             )
         except Exception as exc:
@@ -466,7 +479,8 @@ class RedisRunCoordinator:
         Fields as strings, per the contract: ``run_id``, ``conversation_id``,
         ``user_email``, ``owner``, ``generation``, ``status``,
         ``lease_expires_at``, ``created_at``, ``updated_at``, ``source``,
-        ``parent_run_id``, ``follow_up_of``. Readable by any
+        ``parent_run_id``, ``follow_up_of``, ``parent_conversation_id``,
+        ``title``, ``launch_origin``, ``depth``. Readable by any
         replica (inspection, fencing checks).
         """
         raw = await self._redis.client.hgetall(self.keys.run(run_id))

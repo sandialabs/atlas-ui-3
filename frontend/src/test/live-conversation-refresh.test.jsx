@@ -1620,6 +1620,71 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     }
   })
 
+  it('asks the server again when it gives up on the final record, and tracks a run still live', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const before = [storedChat('user', 'a'), storedChat('assistant', 'b')]
+      // The record keeps saying the run is live.
+      h.fetchMock.mockImplementation(async () => ({
+        ok: true, json: async () => ({ id: 'conv-1', run_elsewhere: true, run_id: 'run-1', messages: before }),
+      }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: before })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      h.sendMessage.mockClear()
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+      expect(h.sendMessage).toHaveBeenCalledWith(
+        { type: 'list_runs', conversation_id: 'conv-1', watch_end: true },
+      )
+      // The server says the run is in fact still going: tracking resumes.
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      expect(result.current.isAgentRunning).toBe(true)
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops the end-of-run reads when the provider unmounts', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const before = [storedChat('user', 'a'), storedChat('assistant', 'b')]
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', messages: before }) }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: before })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      unmount()
+      h.fetchMock.mockClear()
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+      expect(h.fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('accepts a final record that is shorter than before (edit and resubmit)', async () => {
     vi.useFakeTimers()
     try {
