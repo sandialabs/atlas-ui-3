@@ -129,6 +129,7 @@ from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.help.help_config import report_help_config_problem, resolve_help_config
 from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_run_routes import router as agent_run_router
+from atlas.routes.audio_routes import audio_router
 
 # Import essential routes
 from atlas.routes.capture_routes import capture_router
@@ -1774,6 +1775,7 @@ app.include_router(user_prompt_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
+app.include_router(audio_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)

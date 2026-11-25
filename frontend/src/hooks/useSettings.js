@@ -6,7 +6,12 @@ const DEFAULT_SETTINGS = {
   autoApproveTools: false,  // User-level auto-approval for non-admin-required tools
   debugMode: false,  // Show raw tool call input/output in chat (#135)
   compactMessages: true,  // Compact tool/approval/system rows vs. classic avatar+header bubbles (#673)
-  reduceHelpText: false  // Hide optional onboarding copy, explanatory links, and hover hints
+  reduceHelpText: false,  // Hide optional onboarding copy, explanatory links, and hover hints
+  // Dictation and read-aloud buttons (#1251). null = no choice made, so the
+  // administrator's default visibility applies; true/false is the user's own.
+  showSttButton: null,
+  showTtsButton: null,
+  ttsPlaybackRate: 1  // Read-aloud speed, remembered between messages
 }
 
 export function useSettings() {

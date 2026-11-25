@@ -16,6 +16,10 @@ const DEFAULTS = {
   debugMode: false,
   compactMessages: true,
   reduceHelpText: false,
+  // Audio button preferences (#1251): null until the user chooses.
+  showSttButton: null,
+  showTtsButton: null,
+  ttsPlaybackRate: 1,
 }
 
 // Mock localStorage

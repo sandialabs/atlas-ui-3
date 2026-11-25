@@ -243,6 +243,7 @@ Principle: Learn an interaction once and use it everywhere.
 - `FEATURE_COMPLIANCE_LEVELS_ENABLED` - Compliance level enforcement
 - `FEATURE_COMPLIANCE_LEVEL_REQUIRED` - Require a concrete compliance level per turn (no "All Levels"); `COMPLIANCE_DEFAULT_LEVEL` picks the starting level
 - `FEATURE_AGENT_MODE_AVAILABLE` - Agent mode UI toggle
+- `FEATURE_AUDIO_STT_ENABLED` / `FEATURE_AUDIO_TTS_ENABLED` - Dictation and read-aloud over OpenAI-compatible audio endpoints (`AUDIO_STT_*` / `AUDIO_TTS_*`; independent of the chat models; see `docs/admin/audio-stt-tts.md`)
 - `VITE_FEATURE_ANIMATED_LOGO` - Animated logo (build-time Vite flag; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 - `VITE_FEATURE_RAG_CITATIONS` - Perplexity-style inline citations & collapsible Sources section for RAG responses (build-time Vite flag; defaults to `false`; must also be added to `Dockerfile` ARG and `test_docker_env_sync.py` exclusion list)
 
@@ -299,6 +300,7 @@ When enabled: `/api/config` includes model/server `compliance_level` and effecti
 - `/api/config/shell` - Lightweight config for fast startup
 - `/api/compliance-levels` - Compliance level definitions
 - `/api/feedback` - Submit (POST) and view (GET, admin) feedback
+- `/api/audio/transcriptions`, `/api/audio/speech` - Dictation (multipart audio in, text out) and read-aloud (JSON text in, audio out); 404 unless the capability is enabled
 - `/api/conversations/export` - Download all conversations as JSON
 - `/admin/*` - Configs and logs (admin group required)
 

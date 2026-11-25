@@ -122,6 +122,9 @@ services:
       # External agent-runs REST API (#1105); also set AGENT_RUNS_API_KEY to enable
       - FEATURE_AGENT_RUNS_API_ENABLED=false
       - FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED=false
+      # Dictation and read-aloud (#1251); also set AUDIO_STT_* / AUDIO_TTS_* to enable
+      - FEATURE_AUDIO_STT_ENABLED=false
+      - FEATURE_AUDIO_TTS_ENABLED=false
       - FEATURE_FINETUNE_CAPTURE_ENABLED=false
       
       # Tool approval configuration

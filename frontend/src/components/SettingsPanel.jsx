@@ -14,6 +14,7 @@ import { useFocusTrap } from '../utils/focusTrap'
 import { describeAutoApprove } from '../utils/toolApproval'
 import { FOCUS_RING } from '../utils/focusRing'
 import ToolsSettingsIcon from './ToolsSettingsIcon'
+import AudioSettingsSection from './AudioSettingsSection'
 
 // Every tab this panel can show, in display order. Which ones are actually
 // visible depends on feature flags and admin membership (see visibleTabs).
@@ -343,7 +344,9 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
     // Reset every default-backed preference, including the immediate
     // context-owned switches. updateSettings merges over the latest stored
     // snapshot, so the payload must name them explicitly.
-    updateCtxSettings({ ...defaults, autoApproveTools: false, compactMessages: true })
+    // The audio switches go back to "no choice made", so the administrator's
+    // default visibility applies again (#1251).
+    updateCtxSettings({ ...defaults, autoApproveTools: false, compactMessages: true, showSttButton: null, showTtsButton: null, ttsPlaybackRate: 1 })
     setSettings(defaults)
     setHasChanges(false)
   }
@@ -787,6 +790,10 @@ const SettingsPanel = ({ isOpen, onClose, initialTab = null, promptIntent = null
               </p>
             )}
           </div>
+
+          {/* Dictation and read-aloud buttons (#1251); renders nothing when
+              neither capability is available to this user. */}
+          <AudioSettingsSection reduceHelpText={reduceHelpText} />
 
           {/* Debug Mode Setting */}
           <div className="bg-gray-700 rounded-lg p-4">

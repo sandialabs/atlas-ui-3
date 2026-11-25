@@ -280,6 +280,16 @@ LLM_RETRY_MAX_WAIT_SECONDS=300
 - **Reverse proxies**: same consideration as `atlas_sleep` above -- a turn waiting out a backoff
   sends nothing over its WebSocket; keep proxy idle timeouts longer than the cap you configure.
 
+### Dictation and Read-Aloud
+
+Speech-to-text and text-to-speech are optional, off by default, and configured
+independently of the chat models with `FEATURE_AUDIO_STT_ENABLED` /
+`FEATURE_AUDIO_TTS_ENABLED` and the `AUDIO_STT_*` / `AUDIO_TTS_*` variables.
+See [Dictation and Read-Aloud](audio-stt-tts.md) for every setting, a Speaches
+example, gateway configuration, limits and retention. Enabling text-to-speech
+adds `media-src 'self' blob:` to the Content Security Policy when the policy
+has no `media-src` of its own.
+
 ### Welcome Screen Message
 
 The paragraph under the logo on the empty chat screen can be replaced per deployment with the `VITE_WELCOME_MESSAGE` frontend build-time variable (issue #1072):
