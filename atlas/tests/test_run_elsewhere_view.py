@@ -5,7 +5,7 @@ import pytest
 from atlas.application.chat.runs import RunRegistry, execution_state, run_control
 from atlas.application.chat.runs.control_bus import set_run_control_bus
 from atlas.application.chat.runs.execution_state import merge_run_snapshots
-from atlas.application.chat.runs.in_flight import in_flight_conversation, remote_live_runs
+from atlas.application.chat.runs.in_flight import hidden_remote_run_ids, in_flight_conversation, remote_live_runs
 from atlas.application.chat.runs.run_directory import owner_entry
 from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
 
@@ -104,6 +104,41 @@ async def test_remote_runs_list_skips_own_and_scoped(shared):
     ]
     runs = await remote_live_runs(OWNER)
     assert [(r["run_id"], r["detached"]) for r in runs] == [("run-1", True)]
+
+
+@pytest.mark.asyncio
+async def test_hidden_remote_runs_are_found_by_scope(shared):
+    async def scopes_of(run_ids):
+        return {"run-1": "connection_bound", "run-2": "", "run-3": "off_record"}
+
+    shared["bus"].scopes_of = scopes_of
+    hidden = await hidden_remote_run_ids(["run-1", "run-2", "run-3"])
+    assert hidden == {"run-1", "run-3"}
+
+
+@pytest.mark.asyncio
+async def test_unreadable_scopes_hide_remote_runs(shared):
+    async def scopes_of(run_ids):
+        raise RuntimeError("redis down")
+
+    shared["bus"].scopes_of = scopes_of
+    assert await hidden_remote_run_ids(["run-1"]) == {"run-1"}
+
+
+@pytest.mark.asyncio
+async def test_hidden_remote_run_adds_no_rows_to_a_conversation(shared):
+    async def scopes_of(run_ids):
+        return {"run-1": "connection_bound"}
+
+    class _Store:
+        async def get(self, conversation_id, user_email):
+            return {"run_id": "run-1", "conversation_id": conversation_id, "status": "running",
+                    "invocations": {"i": {"invocation_id": "i", "status": "calling", "tool_name": "t"}}}
+
+    shared["bus"].scopes_of = scopes_of
+    execution_state.set_execution_store(_Store())
+    conversation = {"id": "conv-1", "messages": []}
+    assert await execution_state.attach_execution(conversation, OWNER) == conversation
 
 
 def test_owner_entry_carries_scope():

@@ -49,6 +49,8 @@ _TERMINAL_INVOCATION = frozenset(
     {"completed", "failed", "interrupted", "expired", "rejected"}
 )
 _TERMINAL_RUN = frozenset({"completed", "failed", "cancelled"})
+# The run statuses that end a run, for callers outside this module.
+TERMINAL_RUN_STATUSES = _TERMINAL_RUN
 _SLEEP_TOOLS = frozenset({"atlas_sleep", "atlas_agent_sleep"})
 _INPUT_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
 # A different run_id may replace the document only when the event opens work.
@@ -1121,6 +1123,10 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
         return conversation
     if not doc:
         return conversation
+    # A run another replica owns under an off-record or connection-bound scope
+    # shares nothing with this one (issue #1219).
+    if await _is_hidden_remote(doc.get("run_id")):
+        return conversation
     projection = public_projection(doc)
     merged = dict(conversation)
     merged["execution"] = projection
@@ -1128,6 +1134,15 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
     merged["message_count"] = len(merged["messages"])
     merged["run_activity"] = projection.get("activity")
     return merged
+
+
+async def _is_hidden_remote(run_id: Optional[str]) -> bool:
+    """Whether ``run_id`` is a run on another replica whose claim hides it."""
+    if not run_id:
+        return False
+    from atlas.application.chat.runs.in_flight import hidden_remote_run_ids
+
+    return str(run_id) in await hidden_remote_run_ids([str(run_id)])
 
 
 async def forget_conversations(user_email: str, conversation_ids: Optional[List[str]] = None) -> None:

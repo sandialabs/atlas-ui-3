@@ -1904,21 +1904,27 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// lag the run's end on the replica that answers, so the read is retried.
 	const remoteWatchRef = useRef(null)
 	const remoteBaselineRef = useRef(null)
+	const remoteBaselineLoadingRef = useRef(false)
 	useEffect(() => {
 		const id = activeConversationId
 		const run = id ? runs.runsByConversation[id] : null
 		if (id && isRunActive(run) && run.detached === true) {
-			if (remoteWatchRef.current !== id) {
-				remoteWatchRef.current = id
-				// What the store holds while the run is live: the turns before
-				// it. The run's own save is the first record with more than this.
+			const watching = remoteWatchRef.current
+			if (!watching || watching.id !== id || watching.runId !== run.run_id) {
+				remoteWatchRef.current = { id, runId: run.run_id }
 				remoteBaselineRef.current = null
+			}
+			// What the store holds while the run is live: the turns before it. A
+			// failed or too-late read is tried again on the next run-list reply,
+			// so the guard below is not left without a baseline.
+			if (remoteBaselineRef.current == null && !remoteBaselineLoadingRef.current) {
+				remoteBaselineLoadingRef.current = true
 				fetchConversationRecord(id).then(data => {
 					// Only a response that still reports the run live predates its save.
-					if (remoteWatchRef.current === id && data?.id === id && data.run_elsewhere === true) {
+					if (remoteWatchRef.current?.id === id && data?.id === id && data.run_elsewhere === true) {
 						remoteBaselineRef.current = savedChatMark(data)
 					}
-				}).catch(() => {})
+				}).catch(() => {}).finally(() => { remoteBaselineLoadingRef.current = false })
 			}
 			return
 		}
@@ -1931,12 +1937,22 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		const watched = remoteWatchRef.current
 		if (!watched) return
 		remoteWatchRef.current = null
-		if (watched !== id) return
-		// A terminal status that arrived as this socket's own `run_status` frame
-		// is handled by the frame handlers (including the interrupted-run
-		// notice); this path is for a run only the run list reported ended.
-		if (run && run.detached !== true) return
+		if (watched.id !== id) return
+		// A terminal status for the watched run that arrived as this socket's
+		// own `run_status` frame is handled by the frame handlers (including the
+		// interrupted-run notice). Anything else in the slot -- nothing, or an
+		// older finished run this tab still holds -- means the watched run left
+		// the list, which is its end.
+		if (run && run.run_id === watched.runId && run.detached !== true) return
+		// The record of how it ended only counts when it is the watched run's.
+		const endedRun = run && run.run_id === watched.runId ? run : null
 		const baseline = remoteBaselineRef.current
+		const hasNewTurn = (record) => {
+			// No baseline (its read never answered): a record counts only when it
+			// holds a turn the screen does not already show.
+			const shown = new Set(latestMessagesRef.current.map(m => `${m.role}\u0000${m.content}`))
+			return savedChatTurns(record).some(m => !shown.has(`${m.role}\u0000${m.content}`))
+		}
 		// Sending a turn bumps this; a read that predates it must not replace
 		// the transcript the new turn is building.
 		const generation = reconnectResyncGenerationRef.current
@@ -1953,10 +1969,10 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			)))
 			// The same notice a run's own socket shows for a fenced run, else a
 			// plain one for any other failure; a stop by the user needs none.
-			if (run && run.status === 'failed') {
+			if (endedRun && endedRun.status === 'failed') {
 				addMessage({
 					role: 'system',
-					content: interruptedRunNotice(run)
+					content: interruptedRunNotice(endedRun)
 						|| 'This response was interrupted before it finished. Send your message again to retry.',
 					type: 'warning',
 					timestamp: new Date().toISOString(),
@@ -1980,7 +1996,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 						// A different run: its own tracking takes over. The same run
 						// still reported live: the shared record has not caught up with
 						// the end yet, so ask again.
-						if (!run?.run_id || data.run_id !== run.run_id) {
+						if (!watched.runId || data.run_id !== watched.runId) {
 							handleRunFrameRef.current?.({
 								type: 'run_status',
 								run: {
@@ -1996,7 +2012,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 					}
 					// The record must hold the run's own save. One that still has only
 					// the turns from before the run is the store lagging the end.
-					if (baseline != null && !savedChatChanged(data, baseline)) {
+					if (baseline != null ? !savedChatChanged(data, baseline) : !hasNewTurn(data)) {
 						throw new Error('record predates the run save')
 					}
 					// This is now the newest read: an older reconnect read still in

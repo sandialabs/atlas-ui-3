@@ -251,7 +251,8 @@ The shared store moves **session state**. It does not move live work:
   [run coordination](../developer/run-coordination.md)). No sticky sessions
   are needed for these. What stays on the owning replica: the transcript of a
   run that has not yet been saved (opening that conversation on another
-  replica does not show it until the turn ends and is saved), the Agent Runs
+  replica shows it as running, with the tool rows so far but no streamed text,
+  and loads the saved turn when the run ends), the Agent Runs
   API follow-up and listing endpoints, the `atlas_get_subagent_result` and
   `atlas_get_subagent_runs` tools, and MCP elicitation prompts.
 - **An in-flight plain turn** (one that runs on the connection's own session,

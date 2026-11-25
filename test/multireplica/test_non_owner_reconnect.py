@@ -101,3 +101,35 @@ def test_non_owner_client_learns_the_owner_died(cluster):
         ended = _wait_entry(other_tab, conversation_id, lambda e: e and e["status"] in TERMINAL, 90)
         assert ended["status"] == "failed", ended
         assert ended["run_id"] == run_id
+
+
+def test_owner_killed_before_any_tool_is_a_failed_end(cluster):
+    user = cluster.new_user()
+    with WsClient(cluster.a, user, auto_approve={"atlas_sleep"}) as owner_tab:
+        owner_tab.send(chat_frame(directive("earlykill", sleep=30), ["atlas_sleep"]))
+        started = owner_tab.recv_until(_is("run_started"), 30)
+        run_id, conversation_id = started["run_id"], started["conversation_id"]
+        # No tool_start was read: the run may not have published anything yet.
+        cluster.a.kill()
+    with WsClient(cluster.b, user) as other_tab:
+        ended = _wait_entry(other_tab, conversation_id, lambda e: e and e["status"] in TERMINAL, 90)
+        assert ended["status"] == "failed" and ended["run_id"] == run_id, ended
+
+
+def test_connection_bound_turn_is_not_shown_on_another_replica(cluster):
+    user = cluster.new_user()
+    with WsClient(cluster.a, user, auto_approve={"atlas_sleep"}) as owner_tab:
+        frame = chat_frame(directive("plain", sleep=6), ["atlas_sleep"])
+        frame["agent_mode"] = False
+        owner_tab.send(frame)
+        started = owner_tab.recv_until(_is("run_started"), 30)
+        assert started.get("connection_bound") is True, started
+        conversation_id = started["conversation_id"]
+        # The turn's tool row reaches the shared projection once it starts.
+        owner_tab.recv_until(_is("tool_start"), 30)
+        time.sleep(1.0)
+        with WsClient(cluster.b, user) as other_tab:
+            entry = _snapshot_entry(other_tab, conversation_id)
+            assert entry is None, f"a connection-bound turn was listed on another replica: {entry}"
+        status, body = cluster.call(cluster.b, "GET", f"/api/conversations/{conversation_id}", user=user)
+        assert status == 404, (status, body)

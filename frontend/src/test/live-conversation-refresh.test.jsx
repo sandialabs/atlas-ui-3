@@ -1550,6 +1550,76 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
     }
   })
 
+  it('ends the run state when the watched run vanishes behind an older finished run', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const final = [storedChat('user', 'a'), storedChat('assistant', 'b')]
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', messages: final }) }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: [storedChat('user', 'a')] })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      expect(result.current.isAgentRunning).toBe(true)
+      // A complete snapshot: the watched run is gone, an older finished one remains.
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-0', status: 'completed', created_at: 100 }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+      expect(result.current.isAgentRunning).toBe(false)
+      expect(result.current.messages.at(-1).content).toBe('b')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not load an older record when the baseline read failed', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const before = [storedChat('user', 'a'), storedChat('assistant', 'b')]
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', messages: before }) }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: before })
+      })
+      // Every baseline read fails.
+      h.fetchMock.mockImplementation(async () => ({ ok: false, status: 500, json: async () => ({}) }))
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      // The run ends while the store still holds only the earlier turns.
+      let saved = false
+      h.fetchMock.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          id: 'conv-1',
+          messages: saved ? [...before, storedChat('user', 'c'), storedChat('assistant', 'd')] : before,
+        }),
+      }))
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      // The stale record (only the earlier turns) was refused: nothing changed.
+      expect(result.current.messages.at(-1).content).toBe('b')
+      saved = true
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+      expect(result.current.messages.at(-1).content).toBe('d')
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('accepts a final record that is shorter than before (edit and resubmit)', async () => {
     vi.useFakeTimers()
     try {

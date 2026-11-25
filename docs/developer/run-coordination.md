@@ -363,7 +363,11 @@ replica answers from the shared records and does not stream tokens:
   only when run coordination is on.
 - `list_runs` merges the shared execution projections and the user's other live
   claims, so a run owned elsewhere is listed with `detached: true` even before
-  it has published a projection. If the shared projections cannot
+  it has published a projection. A run another replica owns under a hidden
+  `scope` is dropped from the list however it got there (claim or projection),
+  and its tool rows are not merged into a conversation read; the scope is looked
+  up from the run records in one pipelined read, and unreadable records hide the
+  run. If the shared projections cannot
   be read, the frame carries `degraded: true` and the client keeps its remote
   runs instead of reading their absence as an end. A finished run is dropped from the
   list, unless the frame carries `watch_end: true` and a `conversation_id`: then
@@ -410,7 +414,10 @@ that file:
   cancel and the idempotency keys are cluster-wide.
 - Opening a conversation whose run has not saved its first turn
   (`in_flight.py`) resolves the run through the local registry, so only the
-  owning replica can show its transcript so far.
+  owning replica can show its transcript so far. Another replica answers from
+  the shared claim: the conversation reads as running (`run_elsewhere`), with
+  the tool rows the owner has projected, and no streamed text (see "Clients on
+  a replica that does not own the run").
 - MCP elicitation requests and their responses (`elicitation_manager`) live in
   the process that issued them.
 

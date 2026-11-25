@@ -3396,16 +3396,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     # A run on another replica that has published no projection
                     # yet (a text-only first turn) is still in the shared claims.
-                    from atlas.application.chat.runs.in_flight import remote_live_runs
+                    from atlas.application.chat.runs.execution_state import TERMINAL_RUN_STATUSES
+                    from atlas.application.chat.runs.in_flight import hidden_remote_run_ids, remote_live_runs
 
                     held = {
                         r.get("conversation_id") for r in runs
-                        if r.get("status") not in ("completed", "failed", "cancelled")
+                        if r.get("status") not in TERMINAL_RUN_STATUSES
                     }
                     for remote in await remote_live_runs(user_email):
                         if remote["conversation_id"] not in held:
                             runs.append(remote)
                             held.add(remote["conversation_id"])
+                    # A projection of a run another replica owns under an
+                    # off-record or connection-bound scope is not listed either.
+                    hidden = await hidden_remote_run_ids(
+                        [r.get("run_id") for r in runs if r.get("detached") is True]
+                    )
+                    runs = [r for r in runs if r.get("run_id") not in hidden]
                 except Exception:
                     # Without the shared projections this list says nothing
                     # about runs other replicas own. Say so, so a client does

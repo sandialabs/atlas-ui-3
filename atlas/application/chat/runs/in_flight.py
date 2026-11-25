@@ -126,6 +126,27 @@ async def _run_elsewhere_view(conversation_id: str, user_email: str) -> Optional
     }
 
 
+async def hidden_remote_run_ids(run_ids) -> set:
+    """The ids among ``run_ids`` that another replica owns under a hidden scope.
+
+    A run this replica holds is never hidden from its owner. Unreadable shared
+    state hides every remote id: a view of a run that may be scoped is not
+    worth the risk.
+    """
+    from atlas.application.chat.runs import get_run_registry
+    from atlas.application.chat.runs.control_bus import get_run_control_bus
+
+    bus = get_run_control_bus()
+    remote = [r for r in run_ids if r and get_run_registry().get(str(r)) is None]
+    if bus is None or not remote:
+        return set()
+    try:
+        scopes = await bus.scopes_of(remote)
+    except Exception:
+        return set(str(r) for r in remote)
+    return {run_id for run_id, scope in scopes.items() if scope in HIDDEN_SCOPES}
+
+
 async def remote_live_runs(user_email: str) -> list:
     """The user's live runs that other replicas own, as ``list_runs`` entries.
 
