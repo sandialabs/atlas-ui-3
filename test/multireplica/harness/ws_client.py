@@ -37,13 +37,16 @@ class WsClient:
     """``auto_approve`` names tools this tab approves as soon as asked, the way
     the UI's auto-approve setting does (the built-in ``atlas_sleep`` asks)."""
 
-    def __init__(self, replica: Replica, user: str, timeout: float = 15.0, auto_approve=()):
+    def __init__(self, replica: Replica, user: str, timeout: float = 15.0, auto_approve=(),
+                 resume_session: Optional[str] = None):
         self.replica = replica
         self.user = user
         self.auto_approve = set(auto_approve)
         self.frames: List[Frame] = []
         self._ws = connect(
-            f"ws://127.0.0.1:{replica.port}/ws",
+            f"ws://127.0.0.1:{replica.port}/ws"
+            # The resume handshake (issue #1091): "" opts in, an id names the session.
+            + ("" if resume_session is None else f"?resume_session={resume_session}"),
             additional_headers={"X-User-Email": user},
             open_timeout=timeout,
             max_size=None,

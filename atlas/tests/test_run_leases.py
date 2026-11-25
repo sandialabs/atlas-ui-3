@@ -693,7 +693,12 @@ async def test_tool_is_not_started_when_its_start_notification_finds_the_fence(
         set_current_run(record.run_id, record.conversation_id)
         await execute_single_tool(
             tool_call, {"session_id": "s1", "user_email": EMAIL}, tool_manager,
-            update_callback=AsyncMock(), config_manager=None, skip_approval=True,
+            update_callback=AsyncMock(), skip_approval=True,
+            # A launched run keeps admin-gated tools on the gate and fails
+            # closed without a policy, so give it one that gates nothing.
+            config_manager=SimpleNamespace(
+                app_settings=None, tool_approvals_config=SimpleNamespace(tools={})
+            ),
         )
 
     (outcome,) = await asyncio.gather(

@@ -47,6 +47,8 @@ CLAIM_FIELDS = {
     "lease_expires_at", "interrupted", "snapshot", "error", "source", "created_at",
     "updated_at", "ended_at", "released_at", "replica", "claimed_at",
     "parent_run_id", "follow_up_of",
+    # Lineage fields (issue #1222); the title is never written for an off-record run.
+    "parent_conversation_id", "title", "launch_origin", "depth",
 }
 
 
