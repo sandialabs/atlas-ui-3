@@ -365,3 +365,67 @@ def test_local_websocket_refusal_for_a_child(chat_service):  # noqa: F811
     assert frame["error_type"] == "conversation_busy"
     assert frame["message"] == LAUNCHED_RUN_BUSY_MESSAGE
 
+
+
+def _real_config(force_global=False):
+    """A real ConfigManager with one per-tool rule; nothing is patched."""
+    from atlas.modules.config.config_loader import ConfigManager
+    from atlas.modules.config.models import ToolApprovalsConfig
+    from atlas.modules.config.settings import AppSettings
+
+    config = ConfigManager()
+    settings = AppSettings()
+    settings.force_tool_approval_globally = force_global
+    config._app_settings = settings
+    config._tool_approvals_config = ToolApprovalsConfig(
+        tools={GATED: {"require_approval": True}}
+    )
+    return config
+
+
+def test_real_config_gates_per_tool_and_globally():
+    from atlas.application.chat.utilities.tool_executor import is_admin_gated
+
+    config = _real_config()
+    assert is_admin_gated(GATED, config) is True
+    assert is_admin_gated(OPEN, config) is False
+
+    forced = _real_config(force_global=True)
+    assert is_admin_gated(OPEN, forced) is True
+    assert is_admin_gated(GATED, forced) is True
+
+
+@pytest.mark.asyncio
+async def test_real_config_in_a_child_run(monkeypatch):
+    """The unpatched policy: the gated tool asks, the open one runs."""
+    monkeypatch.setattr(
+        "atlas.application.chat.utilities.tool_executor.resolve_approval_timeout",
+        lambda: 0.2,
+    )
+    factory, handle = await _launch_child()
+    set_current_run(handle["run_id"], handle["conversation_id"])
+    config = _real_config()
+    seen = {}
+    try:
+        for name in (OPEN, GATED):
+            frames = []
+
+            async def update_callback(message, frames=frames):
+                frames.append(message)
+
+            result = await execute_single_tool(
+                _call(f"real-{name}", name),
+                {"user_email": USER, "session_id": "s1"},
+                _ToolManager(),
+                update_callback=update_callback,
+                config_manager=config,
+                skip_approval=True,
+            )
+            seen[name] = (
+                result.success,
+                [f for f in frames if f.get("type") == "tool_approval_request"],
+            )
+    finally:
+        factory.services[0].release.set()
+    assert seen[OPEN][0] is True and seen[OPEN][1] == []
+    assert len(seen[GATED][1]) == 1
