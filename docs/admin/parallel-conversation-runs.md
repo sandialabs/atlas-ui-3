@@ -202,7 +202,7 @@ Client to server:
 | `list_runs` | Ask for every run the user can still see. Sent on connect. |
 | `stop_streaming` / `agent_control` (`action: "stop"`) | Now accept `run_id` and/or `conversation_id`. A frame with neither stops the plain turn on the connection's own session, which is what older clients send. |
 | `tool_approval_response` / `elicitation_response` | May carry `run_id` so the right run is resumed when several are paused. |
-| `auto_approve_tools` | `{enabled: true}` or `{enabled: false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering. |
+| `auto_approve_tools` | `{enabled: true}` or `{enabled: false}`. Updates user-started runs this process owns so the next tool call follows the switch without a browser answering, and sends an `auto_approve` command to the owners of the user's other live runs on other replicas. |
 
 Server to client:
 
@@ -427,8 +427,10 @@ approval timed out.
 An approval request that arrives while the user is looking at another
 conversation is not shown as a modal there; the conversation is marked "Needs
 approval" in the history list instead. The server keeps the request frames and
-re-sends them when that conversation is opened (`restore_conversation`) or named on
-`list_runs` after a reconnect, so they can still be answered. One agent step
+re-sends them when that conversation is opened (`restore_conversation`), so
+they can still be answered. `list_runs` reports the run's status but does not
+replay them. The frames come from the run owner's local registry, so a
+reconnect that lands on another replica does not replay the request. One agent step
 may fire several approval-gated tools in parallel, so every outstanding
 request is kept and replayed individually -- not just the latest. Without the
 replay the request ids and arguments would exist nowhere the client could
@@ -498,15 +500,20 @@ These are known and deliberate, not oversights:
   from the view (rewound or edited elsewhere) falls back to a full reload
   (issue #959). Live re-attach (server-pushed frames to every connection) is
   issue #760.
-- **Multi-process deployments track runs per process.** A user whose second
-  connection lands on a different worker will not see the first worker's runs.
-  Admission is shared through Redis (the cap and conversation exclusivity
+- **The live transcript of a run stays on its owner.** A user whose second
+  connection lands on a different replica or worker cannot open the
+  transcript of a run that has not yet been saved, and the first worker's
+  runs are not in that process's registry. With Redis, admission is shared through Redis (the cap and conversation exclusivity
   hold cluster-wide), and every replica can read a run's status. A run whose
   replica is lost is reported failed (interrupted) by the others, with its
   finished tool rows kept and nothing retried (see
-  [run coordination](../developer/run-coordination.md)). Stopping and
-  steering a run still needs the replica that owns it; use a single worker,
-  or sticky sessions, until that routing lands (issue #1128).
+  [run coordination](../developer/run-coordination.md)). Stop, steer, tool
+  approval and the auto-approve switch sent to any replica are routed to the
+  replica that owns the run over the control bus, so no sticky sessions are
+  needed (see [run control](../developer/run-control.md)). Without Redis (the
+  `memory` session store), all run state is per process: use a single
+  replica and worker. While Redis is configured but down, new runs are refused
+  rather than admitted locally.
 
 ## Troubleshooting
 

@@ -769,8 +769,8 @@ export const ChatProvider = ({ children }) => {
 	// The UI already shows the new value; dropping the frame would leave a
 	// run on this replica approving tools the user just turned off. The
 	// pending ref does not survive a reload, so a fresh connection also
-	// sends the value saved in settings. That update reaches only the runs
-	// this connection's server process owns.
+	// sends the value saved in settings. The server applies it to the user's
+	// runs on its own replica and routes it to the runs other replicas own.
 	const pendingAutoApproveRef = useRef(null)
 	const readLatestSettingsRef = useRef(readLatestSettings)
 	readLatestSettingsRef.current = readLatestSettings
