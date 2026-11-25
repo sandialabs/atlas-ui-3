@@ -442,6 +442,7 @@ def public_projection(doc: dict) -> dict:
         "activity": doc.get("activity") or "executing",
         "waiting_on": doc.get("waiting_on"),
         "end_reason": doc.get("end_reason"),
+        "updated_at": doc.get("updated_at"),
         "invocations": invocations,
         "pending_requests": list(doc.get("pending_requests", {}).values()),
     }
@@ -615,6 +616,10 @@ def merge_run_snapshots(
                     "conversation_id": conversation_id,
                     "status": projection_status,
                     "end_reason": projection.get("end_reason"),
+                    # When the run ended, on the same clock as a local run's
+                    # `created_at`, so a client can tell which finished run of
+                    # the conversation is the newer one.
+                    "created_at": projection.get("updated_at"),
                     "execution_revision": projection.get("revision"),
                     "detached": True,
                 })

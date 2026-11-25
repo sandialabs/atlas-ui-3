@@ -20,6 +20,27 @@ export function isRunActive(run) {
 	return !!run && !TERMINAL_STATUSES.has(run.status)
 }
 
+/**
+ * Which of two runs of one conversation the tracker keeps (issue #1219).
+ *
+ * A conversation holds one live run at a time, so: a live run beats a finished
+ * one; between two of the same kind the newer `created_at` wins (for a finished
+ * run another replica owns, the server sends its end time there); only a true
+ * tie is broken by `detached`, in favour of the entry the server kept for the
+ * run this tab watches, and a tie that remains goes to the later entry.
+ */
+export function runOutranks(run, existing) {
+	if (!existing) return true
+	const live = isRunActive(run)
+	if (live !== isRunActive(existing)) return live
+	const age = run.created_at || 0
+	const existingAge = existing.created_at || 0
+	if (age !== existingAge) return age > existingAge
+	const detached = run.detached === true
+	if (detached !== (existing.detached === true)) return detached
+	return true
+}
+
 export function useConversationRuns() {
 	// conversation_id -> run record from the server.
 	const [runsByConversation, setRunsByConversation] = useState({})
@@ -50,20 +71,8 @@ export function useConversationRuns() {
 			const next = {}
 			for (const run of data.runs || []) {
 				const existing = next[run.conversation_id]
-				// Several runs can share a conversation over time; the newest wins.
-				// A conversation holds one live run at a time, so a live run beats
-				// a finished one whatever their timestamps: a run another replica
-				// owns carries no `created_at`, and must not lose to an earlier
-				// finished run this replica still retains (issue #1219).
-				// Between two finished runs, the one the server kept because this tab
-				// is watching for its end (`detached`) is the newer turn.
-				const outranks = !existing
-					|| (isRunActive(run) !== isRunActive(existing)
-						? isRunActive(run)
-						: (!isRunActive(run) && (run.detached === true) !== (existing.detached === true))
-							? run.detached === true
-							: (run.created_at || 0) >= (existing.created_at || 0))
-				if (outranks) {
+				// Several runs can share a conversation over time; see runOutranks.
+				if (runOutranks(run, existing)) {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.
 					const prior = runsRef.current[run.conversation_id]

@@ -49,6 +49,11 @@ const REMOTE_RUN_POLL_MS = 4000
 const RECORD_RETRY_BASE_MS = 1000
 const RECORD_RETRY_MAX_MS = 8000
 const RECORD_RETRY_ATTEMPTS = 6
+// Rounds of those reads after a run's end, each round waiting longer, so a
+// store that is down for a while is still read once it is back.
+const RECORD_RETRY_ROUNDS = 6
+const RECORD_ROUND_BASE_MS = 5000
+const RECORD_ROUND_MAX_MS = 30000
 // How many times the joined-run refresh will re-arm for a conversation whose
 // record still reports itself in flight. Bounded so an untracked run cannot
 // turn the refresh into an open-ended poll; after this the caller's full
@@ -1882,11 +1887,21 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 	// tracker; a remote run that has ended is then terminal or absent.
 	const hasRemoteRun = Object.values(runs.runsByConversation).some(r => isRunActive(r) && r.detached === true)
 	const pollRemoteRuns = useCallback(async () => {
-		const sent = sendMessageRef.current?.({
-			type: 'list_runs',
-			conversation_id: activeConversationIdRef.current || undefined,
-			watch_end: true,
-		})
+		// `watch_end` names the conversation whose ended run to keep, and the
+		// server refuses it without one. The open conversation when it holds the
+		// remote run, otherwise the conversation of a remote run this tab tracks;
+		// with none, a plain list.
+		const tracked = runsByConversationRef.current
+		const isRemote = (conversationId) => (
+			!!conversationId && isRunActive(tracked[conversationId]) && tracked[conversationId].detached === true
+		)
+		const open = activeConversationIdRef.current
+		const watched = isRemote(open) ? open : Object.keys(tracked).find(isRemote)
+		const sent = sendMessageRef.current?.(
+			watched
+				? { type: 'list_runs', conversation_id: watched, watch_end: true }
+				: { type: 'list_runs', conversation_id: open || undefined },
+		)
 		// An unsent frame is a failed attempt: the hook backs off with jitter.
 		if (!sent) throw new Error('list_runs not sent')
 	}, [])
@@ -2001,47 +2016,56 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// A completed run can also be reported before its save is readable
 			// on the replica that answers, so every end waits.
 			await waitRemote(RUN_END_RELOAD_GRACE_MS)
-			for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
-				if (unmountedRef.current) return
-				try {
-					const data = await fetchConversationRecord(id)
-					if (unmountedRef.current || reconnectResyncGenerationRef.current !== generation ||
-						activeConversationIdRef.current !== id || data?.id !== id || data.error) return
-					// A newer turn already holds the conversation: its own tracking
-					// takes over, and this record is not the final one.
-					if (data.in_flight === true) return
-					if (data.run_elsewhere === true) {
-						// A different run: its own tracking takes over. The same run
-						// still reported live: the shared record has not caught up with
-						// the end yet, so ask again.
-						if (!watched.runId || data.run_id !== watched.runId) {
-							handleRunFrameRef.current?.({
-								type: 'run_status',
-								run: {
-									run_id: data.run_id,
-									conversation_id: id,
-									status: data.run_status || 'running',
-									detached: true,
-								},
-							})
-							return
+			// The finish stays pending until the record loads: rounds of reads, each
+			// round backed off further, so a store outage that outlasts one round is
+			// still covered once the store is back (bounded, and stopped by unmount, a
+			// newer turn or leaving the conversation).
+			for (let round = 0; round < RECORD_RETRY_ROUNDS; round++) {
+				for (let attempt = 0; attempt < RECORD_RETRY_ATTEMPTS; attempt++) {
+					if (unmountedRef.current) return
+					try {
+						const data = await fetchConversationRecord(id)
+						if (unmountedRef.current || reconnectResyncGenerationRef.current !== generation ||
+							activeConversationIdRef.current !== id || data?.id !== id || data.error) return
+						// A newer turn already holds the conversation: its own tracking
+						// takes over, and this record is not the final one.
+						if (data.in_flight === true) return
+						if (data.run_elsewhere === true) {
+							// A different run: its own tracking takes over. The same run
+							// still reported live: the shared record has not caught up with
+							// the end yet, so ask again.
+							if (!watched.runId || data.run_id !== watched.runId) {
+								handleRunFrameRef.current?.({
+									type: 'run_status',
+									run: {
+										run_id: data.run_id,
+										conversation_id: id,
+										status: data.run_status || 'running',
+										detached: true,
+									},
+								})
+								return
+							}
+							throw new Error('run still reported live')
 						}
-						throw new Error('run still reported live')
+						// The record must hold the run's own save. One that still has only
+						// the turns from before the run is the store lagging the end.
+						if (baseline != null ? !savedChatChanged(data, baseline) : !hasNewTurn(data)) {
+							throw new Error('record predates the run save')
+						}
+						// This is now the newest read: an older reconnect read still in
+						// the air must not replace it with an earlier turn.
+						reconnectResyncGenerationRef.current += 1
+						await loadSavedConversationRef.current(data, { origin: 'reconnect' })
+						return
+					} catch (error) {
+						console.error('Could not load conversation after its run ended:', error)
 					}
-					// The record must hold the run's own save. One that still has only
-					// the turns from before the run is the store lagging the end.
-					if (baseline != null ? !savedChatChanged(data, baseline) : !hasNewTurn(data)) {
-						throw new Error('record predates the run save')
-					}
-					// This is now the newest read: an older reconnect read still in
-					// the air must not replace it with an earlier turn.
-					reconnectResyncGenerationRef.current += 1
-					await loadSavedConversationRef.current(data, { origin: 'reconnect' })
-					return
-				} catch (error) {
-					console.error('Could not load conversation after its run ended:', error)
+					await waitRemote(Math.min(RECORD_RETRY_BASE_MS * 2 ** attempt, RECORD_RETRY_MAX_MS))
 				}
-				await waitRemote(Math.min(RECORD_RETRY_BASE_MS * 2 ** attempt, RECORD_RETRY_MAX_MS))
+				await waitRemote(Math.min(RECORD_ROUND_BASE_MS * 2 ** round, RECORD_ROUND_MAX_MS))
+				if (unmountedRef.current || reconnectResyncGenerationRef.current !== generation ||
+					activeConversationIdRef.current !== id) return
 			}
 			// Gave up without the final record. The run state was already cleared,
 			// so ask the server again: a run still live is tracked again, and one

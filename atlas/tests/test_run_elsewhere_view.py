@@ -300,6 +300,12 @@ def test_snapshot_keeps_ended_run_when_watched():
     assert [(r["run_id"], r["status"], r["end_reason"]) for r in runs] == [("run-1", "failed", "owner_lost")]
 
 
+def test_ended_entry_carries_the_end_time_as_its_recency():
+    projection = {**_projection("failed"), "updated_at": 1700.5}
+    runs = merge_run_snapshots([], [projection], ended_for="conv-1")
+    assert runs[0]["created_at"] == 1700.5
+
+
 def test_ended_run_survives_an_older_local_run():
     older = {"run_id": "run-0", "conversation_id": "conv-1", "status": "completed", "created_at": 1}
     runs = merge_run_snapshots([older], [_projection("failed")], ended_for="conv-1")

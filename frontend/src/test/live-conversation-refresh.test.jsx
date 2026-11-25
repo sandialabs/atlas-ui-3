@@ -1642,7 +1642,7 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
         type: 'runs_snapshot',
         runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
       })
-      await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(400000) })
       expect(h.sendMessage).toHaveBeenCalledWith(
         { type: 'list_runs', conversation_id: 'conv-1', watch_end: true },
       )
@@ -1680,6 +1680,70 @@ describe('reconnect to a replica that does not own the run (issue #1219)', () =>
       h.fetchMock.mockClear()
       await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
       expect(h.fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never polls with watch_end and no conversation, and ignores a refusal of one', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      // No conversation is open, and a remote run is tracked in another one.
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-2', run_id: 'run-2', status: 'running', detached: true }],
+      })
+      h.sendMessage.mockClear()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+      const polls = h.sendMessage.mock.calls.map(c => c[0]).filter(c => c?.type === 'list_runs')
+      expect(polls.length).toBeGreaterThan(0)
+      for (const poll of polls) {
+        if (poll.watch_end) expect(poll.conversation_id).toBeTruthy()
+      }
+      // A refusal of such a poll would be noise, never a transcript line or a state change.
+      const before = result.current.messages.length
+      dispatchFrame({
+        type: 'error', error_type: 'invalid_request', message: 'watch_end needs a conversation_id',
+      })
+      expect(result.current.messages).toHaveLength(before)
+      expect(result.current.isThinking).toBe(false)
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps trying for the final record through a store outage that outlasts one round', async () => {
+    vi.useFakeTimers()
+    try {
+      const { result, unmount } = renderChat()
+      const before = [storedChat('user', 'a'), storedChat('assistant', 'b')]
+      h.fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ id: 'conv-1', messages: before }) }))
+      await act(async () => {
+        await result.current.loadSavedConversation({ id: 'conv-1', messages: before })
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'running', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      // The store is down for more reads than one round makes, then recovers.
+      let calls = 0
+      const final = [...before, storedChat('user', 'c'), storedChat('assistant', 'd')]
+      h.fetchMock.mockImplementation(async () => {
+        calls += 1
+        if (calls <= 8) return { ok: false, status: 503, json: async () => ({}) }
+        return { ok: true, json: async () => ({ id: 'conv-1', messages: final }) }
+      })
+      dispatchFrame({
+        type: 'runs_snapshot',
+        runs: [{ conversation_id: 'conv-1', run_id: 'run-1', status: 'completed', detached: true }],
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(120000) })
+      expect(calls).toBeGreaterThan(8)
+      expect(result.current.messages.at(-1).content).toBe('d')
+      unmount()
     } finally {
       vi.useRealTimers()
     }
