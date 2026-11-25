@@ -69,6 +69,9 @@ export const WSProvider = ({ children }) => {
   // may not be where the screen is, so chat frames are refused until the user
   // navigates again and the server confirms it.
   const navigationOutOfSyncRef = useRef(false)
+  // The last navigation given up on for lack of a reply. A reply that does
+  // arrive late still proves the server applied it, and lifts the block.
+  const lastFailedNavigationRef = useRef(null)
 
   const dispatchToHandlers = (data) => {
     messageHandlersRef.current.forEach(handler => {
@@ -94,6 +97,11 @@ export const WSProvider = ({ children }) => {
     if (heldNavigationRef.current !== held) return
     clearHeldNavigation()
     navigationOutOfSyncRef.current = true
+    lastFailedNavigationRef.current = {
+      requestId: held.requestId,
+      type: held.frame.type,
+      conversationId: held.frame.conversation_id,
+    }
     dispatchToHandlers({ type: 'navigation_failed', frame_type: held.frame.type, message })
   }
 
@@ -109,6 +117,7 @@ export const WSProvider = ({ children }) => {
   const holdNavigation = (message) => {
     clearHeldNavigation()
     navigationOutOfSyncRef.current = false
+    lastFailedNavigationRef.current = null
     navigationCounterRef.current += 1
     const requestId = `nav-${Date.now().toString(36)}-${navigationCounterRef.current}`
     const held = {
@@ -159,8 +168,19 @@ export const WSProvider = ({ children }) => {
   // request_id the client sent; an older server omits it, so a success frame
   // is also matched by type (and conversation id for a restore).
   const settleHeldNavigation = (ws, data) => {
+    if (!data) return
+    const failed = lastFailedNavigationRef.current
+    if (
+      failed && !heldNavigationRef.current &&
+      data.request_id === failed.requestId && data.type === NAVIGATION_ACKS[failed.type]
+    ) {
+      // The reply came after the wait ran out: the server did apply it.
+      lastFailedNavigationRef.current = null
+      navigationOutOfSyncRef.current = false
+      return
+    }
     const held = heldNavigationRef.current
-    if (!held || held.sentOn !== ws || !data) return
+    if (!held || held.sentOn !== ws) return
     const replyId = data.request_id
     if (replyId !== undefined && replyId !== held.requestId) return
     if (data.type === 'error') {
@@ -215,6 +235,7 @@ export const WSProvider = ({ children }) => {
       // the identity that left.
       clearHeldNavigation()
       navigationOutOfSyncRef.current = false
+      lastFailedNavigationRef.current = null
       serverSessionIdRef.current = ''
       setSessionEnded(true)
       setConnectionStatus(`Unauthenticated: ${reason || 'Your session ended. Sign in again to continue.'}`)
@@ -243,7 +264,10 @@ export const WSProvider = ({ children }) => {
         if (event.code === 4401) {
           markSessionEnded(event.reason)
         } else if (event.code === 1008) {
-          clearHeldNavigation()
+          // Not replayed, and not silently lost either: chat stays blocked and
+          // the user is told, until they navigate again.
+          const held = heldNavigationRef.current
+          if (held) failHeldNavigation(held, 'The change was discarded because the connection needs authentication.')
           setConnectionStatus(`Unauthenticated: ${event.reason || 'Authentication required'}`)
         } else {
           setConnectionStatus('Disconnected')
@@ -293,6 +317,7 @@ export const WSProvider = ({ children }) => {
         }
         // Only a connection that lasts clears the failure count.
         stableTimer = setTimeout(() => {
+          if (wsRef.current !== ws) return
           stable = true
           healthCheckFailuresRef.current = 0
         }, STABLE_CONNECTION_MS)

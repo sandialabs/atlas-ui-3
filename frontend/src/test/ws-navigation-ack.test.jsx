@@ -360,6 +360,25 @@ describe('WSContext navigation frames', () => {
       expect(first.sent).toHaveLength(1)
     })
 
+    it('treats a reply that arrives after the timeout as confirmation', () => {
+      act(() => {
+        probe.sendMessage({ type: 'reset_session' })
+      })
+      const first = openFirst()
+      const requestId = first.sent[0].request_id
+      act(() => {
+        vi.advanceTimersByTime(15000)
+      })
+      expect(probe.navigationState()).toBe('failed')
+      act(() => first.receive({ type: 'session_reset', request_id: requestId }))
+      expect(probe.navigationState()).toBe(null)
+      let sent
+      act(() => {
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
+      })
+      expect(sent).toBe(true)
+    })
+
     it('does not time out once acknowledged', () => {
       act(() => {
         probe.sendMessage({ type: 'reset_session' })
@@ -471,6 +490,25 @@ describe('WSContext navigation frames', () => {
       act(() => probe.reconnectWebSocket())
       act(() => last().open())
       expect(last().sent).toEqual([])
+    })
+
+    it('keeps chat blocked, with a notice, after a 1008 close discarded a held frame', () => {
+      const first = openFirst()
+      act(() => first.finishClose(1006))
+      act(() => {
+        probe.sendMessage({ type: 'restore_conversation', conversation_id: 'c1', messages: [] })
+      })
+      act(() => probe.reconnectWebSocket())
+      act(() => last().finishClose(1008, 'Authentication required'))
+      expect(received.find((m) => m.type === 'navigation_failed')).toBeTruthy()
+      expect(probe.navigationState()).toBe('failed')
+      act(() => probe.reconnectWebSocket())
+      act(() => last().open())
+      let sent
+      act(() => {
+        sent = probe.sendMessage({ type: 'chat', content: 'hi' })
+      })
+      expect(sent).toBe(false)
     })
 
     it('does not resume the server session the user left', () => {

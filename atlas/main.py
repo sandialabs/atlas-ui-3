@@ -79,7 +79,11 @@ from atlas.application.chat.runs.eligibility import (
 )
 from atlas.application.chat.runs.registry import STEER_QUEUE_FULL, STEER_QUEUED
 from atlas.application.chat.runs.remote_run_frames import steer_finished_frame
-from atlas.application.chat.service import UNSET, DownloadError
+from atlas.application.chat.service import (
+    NAVIGATION_REQUEST_IDS_KEY,
+    UNSET,
+    DownloadError,
+)
 from atlas.core.auth import resolve_user_from_auth_header_async
 from atlas.core.auth_mode import validate_auth_modes
 from atlas.core.domain_whitelist_middleware import DomainWhitelistMiddleware
@@ -972,12 +976,7 @@ def _echo_request_id(data, response) -> None:
         response["request_id"] = request_id
 
 
-# Recently completed navigation request ids, kept on the session so a frame the
-# client replays after a reconnect (its acknowledgement was lost with the old
-# socket) is answered again instead of run twice -- a second reset would start
-# yet another conversation and drop the chat typed in between.
-_NAV_DONE_KEY = "navigation_request_ids"
-_NAV_DONE_KEEP = 8
+# Completed navigation request ids live on the session (see ChatService).
 
 
 async def _navigation_already_done(chat_service, session_id, data) -> bool:
@@ -991,25 +990,8 @@ async def _navigation_already_done(chat_service, session_id, data) -> bool:
         return False
     if session is None:
         return False
-    done = session.context.get(_NAV_DONE_KEY)
+    done = session.context.get(NAVIGATION_REQUEST_IDS_KEY)
     return isinstance(done, list) and request_id in done
-
-
-async def _record_navigation_done(chat_service, session_id, data) -> None:
-    request_id = _usable_request_id(data)
-    if request_id is None:
-        return
-    try:
-        session = await chat_service.session_repository.get(session_id)
-        if session is None:
-            return
-        done = session.context.get(_NAV_DONE_KEY)
-        done = list(done) if isinstance(done, list) else []
-        done.append(request_id)
-        session.context[_NAV_DONE_KEY] = done[-_NAV_DONE_KEEP:]
-        await _persist_session(chat_service, session)
-    except Exception:
-        logger.debug("Could not record a completed navigation request", exc_info=True)
 
 
 # Marks a tracked run's own session, which belongs to the run rather than to a
@@ -3226,6 +3208,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         # conversation recorded under another classification
                         # is refused before it is loaded (issue #1042).
                         compliance_level=data.get("compliance_level_filter", UNSET),
+                        navigation_request_id=_usable_request_id(data),
                     )
                 except DomainError as e:
                     logger.warning(
@@ -3241,8 +3224,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             else "domain"
                         ),
                     }
-                if isinstance(response, dict) and response.get("type") != "error":
-                    await _record_navigation_done(chat_service, session_id, data)
                 _echo_request_id(data, response)
                 await websocket.send_json(response)
 
@@ -3337,14 +3318,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         session_id=session_id,
                         user_email=user_email,
                         preserve_conversation_resources=preserve_resources,
+                        navigation_request_id=_usable_request_id(data),
                     )
                 except DomainError as e:
                     # Session store unavailable, or the session was resumed
                     # by another connection (issue #1091): tell the client
                     # rather than dropping the socket.
                     response = {"type": "error", "message": e.message, "error_type": "domain"}
-                if isinstance(response, dict) and response.get("type") != "error":
-                    await _record_navigation_done(chat_service, session_id, data)
                 _echo_request_id(data, response)
                 await websocket.send_json(response)
 

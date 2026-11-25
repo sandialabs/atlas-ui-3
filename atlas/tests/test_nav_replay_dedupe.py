@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from main import app
 
 from atlas.application.chat.runs import reset_run_registry
+from atlas.application.chat.service import note_navigation_request
 
 USER = "owner@example.com"
 
@@ -35,13 +36,25 @@ def service():
         settings.max_concurrent_runs_per_user = 3
         factory.get_config_manager.return_value = config
         chat = MagicMock()
-        chat.handle_reset_session = AsyncMock(return_value={"type": "session_reset"})
-        chat.handle_restore_conversation = AsyncMock(
-            return_value={"type": "conversation_restored", "conversation_id": "c1"}
-        )
+        session = SimpleNamespace(context={})
+
+        # The real handlers record the id on the session they persist.
+        async def reset(**kwargs):
+            note_navigation_request(session, kwargs.get("navigation_request_id"))
+            return {"type": "session_reset"}
+
+        async def restore(**kwargs):
+            if chat.refuse_restore:
+                return {"type": "error", "message": "nope"}
+            note_navigation_request(session, kwargs.get("navigation_request_id"))
+            return {"type": "conversation_restored", "conversation_id": "c1"}
+
+        chat.refuse_restore = False
+        chat.handle_reset_session = AsyncMock(side_effect=reset)
+        chat.handle_restore_conversation = AsyncMock(side_effect=restore)
         chat.end_session = AsyncMock()
         chat.persist_session = AsyncMock()
-        chat.session_repository.get = AsyncMock(return_value=SimpleNamespace(context={}))
+        chat.session_repository.get = AsyncMock(return_value=session)
         factory.create_chat_service.return_value = chat
         yield chat
     reset_run_registry()
@@ -72,7 +85,7 @@ def test_replayed_restore_runs_once(service):
 
 
 def test_refused_restore_is_not_remembered(service):
-    service.handle_restore_conversation.return_value = {"type": "error", "message": "nope"}
+    service.refuse_restore = True
     frame = {"type": "restore_conversation", "conversation_id": "c1", "messages": [], "request_id": "nav-7"}
     first, second = _twice(frame)
     assert first["type"] == second["type"] == "error"
@@ -83,3 +96,28 @@ def test_frames_without_an_id_are_not_deduplicated(service):
     _, second = _twice({"type": "reset_session"})
     assert "deduplicated" not in second
     assert service.handle_reset_session.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reset_records_the_id_in_the_session_it_persists():
+    from uuid import uuid4
+
+    from atlas.application.chat.service import NAVIGATION_REQUEST_IDS_KEY, ChatService
+    from atlas.infrastructure.sessions.in_memory_repository import InMemorySessionRepository
+
+    repo = InMemorySessionRepository()
+    service = ChatService(
+        llm=MagicMock(),
+        tool_manager=MagicMock(),
+        connection=MagicMock(),
+        config_manager=MagicMock(),
+        session_repository=repo,
+    )
+    session_id = uuid4()
+    await service.create_session(session_id, USER)
+    reply = await service.handle_reset_session(
+        session_id=session_id, user_email=USER, navigation_request_id="nav-1"
+    )
+    assert reply["type"] == "session_reset"
+    stored = await repo.get(session_id)
+    assert stored.context[NAVIGATION_REQUEST_IDS_KEY] == ["nav-1"]
