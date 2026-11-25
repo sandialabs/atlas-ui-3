@@ -323,7 +323,7 @@ export const ChatProvider = ({ children }) => {
 		})
 	}, [mapMessages])
 
-		const { sendMessage, addMessageHandler, isConnected } = useWS()
+		const { sendMessage, addMessageHandler, isConnected, navigationState } = useWS()
 	const toast = useToast()
 	const { currentModel } = config
 
@@ -1244,7 +1244,14 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// check above and the send, bail out without mutating the UI so we don't
 		// hang on "Thinking...".
 		if (!sent) {
-			toast.error('Not connected. Waiting to reconnect before sending.')
+			const navState = typeof navigationState === 'function' ? navigationState() : null
+			if (navState === 'pending') {
+				toast.error('Waiting for the server to confirm the conversation switch. Send your message again in a moment.')
+			} else if (navState === 'failed') {
+				toast.error('The server did not confirm the conversation switch, so this message was not sent. Start a new chat or reopen the conversation.')
+			} else {
+				toast.error('Not connected. Waiting to reconnect before sending.')
+			}
 			return false
 		}
 		rememberSteerFrame(steerRetryRef.current, requestId, chatFrame)
@@ -1316,7 +1323,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, navigationState, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -2176,42 +2183,60 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			// the terminal agent_completion event will also clear this. A question
 			// the stopped run asked goes with it, or the waiting row and Stop
 			// would stay up with nothing left to answer.
+			if (sendMessage) {
+				const run = runs.getRun(activeConversationId)
+				const sent = sendMessage({
+					type: 'agent_control',
+					action: 'stop',
+					conversation_id: activeConversationId || undefined,
+					run_id: run?.run_id || undefined,
+				})
+				// A dropped Stop leaves the run going on the server (issue #1223):
+				// keep the Stop control up so it can be pressed again.
+				if (sent !== true) {
+					toast.error('Stop was not sent: not connected. Press Stop again once the connection is back.')
+					return
+				}
+			}
 			setIsAgentRunning(false)
 			clearAgentQuestion(null)
-			if (!sendMessage) return
-			const run = runs.getRun(activeConversationId)
-			sendMessage({
-				type: 'agent_control',
-				action: 'stop',
-				conversation_id: activeConversationId || undefined,
-				run_id: run?.run_id || undefined,
-			})
-		}, [sendMessage, runs, activeConversationId, clearAgentQuestion])
+		}, [sendMessage, runs, activeConversationId, clearAgentQuestion, toast])
 
 		// Stop non-agent streaming
 		const stopStreaming = useCallback(() => {
+			if (sendMessage) {
+				const run = runs.getRun(activeConversationId)
+				const sent = sendMessage({
+					type: 'stop_streaming',
+					conversation_id: activeConversationId || undefined,
+					run_id: run?.run_id || undefined,
+				})
+				if (sent !== true) {
+					toast.error('Stop was not sent: not connected. Press Stop again once the connection is back.')
+					return
+				}
+			}
 			cleanupStreamState()
 			streamEnd()
 			setIsThinking(false)
 			clearPendingCompaction()
-			if (!sendMessage) return
-			const run = runs.getRun(activeConversationId)
-			sendMessage({
-				type: 'stop_streaming',
-				conversation_id: activeConversationId || undefined,
-				run_id: run?.run_id || undefined,
-			})
-		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction])
+		}, [sendMessage, streamEnd, runs, activeConversationId, clearPendingCompaction, toast])
 
 			const answerAgentQuestion = useCallback((content) => {
-			if (!content || !content.trim()) return
+			if (!content || !content.trim()) return false
 				// Show immediately in UI. _agentInput marks this as an agent-loop
 				// answer: the backend consumes it inside the transient agent loop and
 				// never appends it to ConversationHistory, so it must NOT count toward
 				// the rewind ordinal (see utils/userMessageOrdinal). #142
+				// Send first: an answer that never reached the server must not
+				// look delivered, and the question stays open for a retry.
+				if (!sendMessage || sendMessage({ type: 'agent_user_input', content }) !== true) {
+					toast.error('Your answer was not sent: not connected. Try again once the connection is back.')
+					return false
+				}
 				addMessage({ role: 'user', content, timestamp: new Date().toISOString(), _agentInput: true })
-				if (sendMessage) sendMessage({ type: 'agent_user_input', content })
-			}, [sendMessage, addMessage])
+				return true
+			}, [sendMessage, addMessage, toast])
 
 	const deleteFile = useCallback((filename) => {
 		if (!confirm(`Delete ${filename}?`)) return

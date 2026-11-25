@@ -183,6 +183,42 @@ session, which reloads the conversation from chat history on its next turn.
 A page reload starts a new UI and a new session; only reconnects within a
 page resume.
 
+#### Navigation frames while disconnected
+
+The browser holds one `reset_session` or `restore_conversation` frame that it
+could not send (socket closed, connecting, or open but unwritable) and sends it
+first on the next open, before any other frame. The frame carries a
+`request_id`; the server copies it onto the reply (`session_reset`,
+`conversation_restored`, or an `error` when the restore is refused), and the
+browser drops the frame only when that reply arrives. A frame that is written
+but not answered within 10 seconds, or held for more than 2 minutes (a restore
+carries the transcript), is dropped and the user is told the server session may
+not match the screen. The 2-minute limit restarts each time the frame is
+written to a socket, with a hard cap of 8 minutes since it was first held. A
+matching reply that arrives after the browser gave up still counts as
+confirmation. Replies without a `request_id` (an older server) are matched by
+type and conversation id, both while waiting and after the browser gave up.
+
+While a navigation frame is unconfirmed, and after one was refused or timed
+out, expired or was discarded by a 1008 close, the browser refuses `chat`
+frames and tells the user, because a message
+would run in whichever conversation the server session is still in. A new
+navigation that the server confirms lifts this.
+
+A replayed `reset_session` or `restore_conversation` simply runs again through
+the normal handler, with all its checks. That is safe because the browser sends
+no chat frame while a navigation is unconfirmed. A reply whose session write
+the store refused (an outage, or a newer copy from another connection) is an
+`error` frame, not a success, so the browser keeps chat blocked.
+
+When the login session ends (a `session_ended` frame or close code 4401) the
+held frame is discarded, new navigation frames are refused until the user signs
+in again, and the next connection starts a new server session instead of
+resuming the old one. A 1008 close (proxy secret, origin or authentication
+problem) discards the held frame, tells the user, and keeps chat blocked until
+they navigate again, but does not mark the session ended: navigation is still
+accepted and the session id is kept.
+
 ### Outages
 
 | Situation | Behavior |
