@@ -20,6 +20,11 @@ import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
+from atlas.domain.team_prompt import (
+    is_team_prompt_message,
+    restore_team_prompt_marker,
+    strip_team_prompt_marker,
+)
 from atlas.hooks import HookBlockedError, HookEvent, get_hook_manager
 
 # Suppress Pydantic deprecation warnings from litellm's response processing.
@@ -321,10 +326,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             logger.debug("hooks: no active compliance context for PreLlmCall", exc_info=True)
         payload: Dict[str, Any] = {
             "model": model_name,
-            # Reasoning returned within a turn (#1230) is model-internal and
-            # never leaves the process: hooks may forward their envelope to an
-            # external policy service. _apply_pre_llm_modify puts it back.
-            "messages": [strip_reasoning(m) if isinstance(m, dict) else m for m in messages],
+            # Hide reasoning and internal team markers from external hooks.
+            "messages": strip_team_prompt_marker(
+                [strip_reasoning(m) if isinstance(m, dict) else m for m in messages]
+            ),
             "user_email": user_email,
         }
         if tools_schema is not None:
@@ -375,9 +380,10 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
                 )
         new_messages = mod.get("messages")
         if isinstance(new_messages, list):
-            # The hook saw the messages without reasoning (#1230); restore it
-            # so a rewrite does not bring back the provider's 400.
-            messages = reattach_reasoning(new_messages, messages)
+            # Restore internal markers and reasoning after hook modifications.
+            messages = reattach_reasoning(
+                restore_team_prompt_marker(messages, new_messages), messages
+            )
         if tools_schema is not None:
             new_tools = mod.get("tools")
             if isinstance(new_tools, list):
@@ -1394,6 +1400,23 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
             if last_role == "tool" and role not in ("tool", "assistant"):
                 result.append({"role": "assistant", "content": "(continuing)"})
                 logger.debug("strict_role_ordering: inserted bridging assistant message")
+            # A team-prompt block (issue #1169) followed by the user's turn
+            # would be two user messages in a row: fold them into one user
+            # message, team block first. Both are user-role already, so
+            # nothing changes trust.
+            if role == "user" and result and is_team_prompt_message(result[-1]):
+                team, content = result[-1], msg.get("content")
+                if isinstance(content, str):
+                    result[-1] = {**msg, "content": f"{team['content']}\n\n{content}"}
+                    last_role = role
+                    continue
+                if isinstance(content, list):
+                    # A multimodal turn (image or file blocks): the team text
+                    # becomes the first text block and every block of the
+                    # user's message follows unchanged, in order.
+                    result[-1] = {**msg, "content": [{"type": "text", "text": team["content"]}, *content]}
+                    last_role = role
+                    continue
             result.append(msg)
             last_role = role
         return result
@@ -1407,7 +1430,8 @@ class LiteLLMCaller(LiteLLMStreamingMixin):
         if model_config is not None:
             if model_config.strict_role_ordering:
                 messages = self._enforce_strict_role_ordering(messages)
-        return messages
+        # Last: the team-prompt marker is internal and never sent.
+        return strip_team_prompt_marker(messages)
 
     async def call_plain(
         self,

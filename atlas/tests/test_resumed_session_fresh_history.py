@@ -54,6 +54,21 @@ def test_rebind_drops_what_the_old_conversation_owned():
         assert key not in session.context
 
 
+def test_rebind_clears_team_prompt_pin_state():
+    from atlas.application.chat import prompt_library_turn as library_turn
+
+    service, session = _service(), _session_of_an_old_conversation()
+    for key in library_turn.PIN_STATE_CONTEXT_KEYS:
+        session.context[key] = True
+
+    service.rebind_to_new_conversation(session)
+
+    assert all(
+        key not in session.context
+        for key in library_turn.PIN_STATE_CONTEXT_KEYS
+    )
+
+
 def test_rebind_forgets_the_services_floor_state():
     service, session = _service(), _session_of_an_old_conversation()
     service._incognito_save_floor[session.id] = 3

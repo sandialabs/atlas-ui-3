@@ -57,6 +57,9 @@ class _OwnerLookupRepository:
     def get_conversation_owner(self, conversation_id):
         return self._owners.get(conversation_id)
 
+    def get_conversation(self, conversation_id, user_email):
+        return None  # owner lookup only: no stored record to hydrate
+
 
 @pytest.mark.asyncio
 async def test_first_message_defaults_conversation_id_to_session_id():

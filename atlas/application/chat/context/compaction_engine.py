@@ -24,6 +24,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from atlas.domain.team_prompt import is_team_prompt_message
 from atlas.modules.llm.reasoning_capture import reasoning_text_for_estimate
 from atlas.modules.llm.token_estimation import HEURISTIC_CHARS_PER_TOKEN, IMAGE_TOKENS
 
@@ -119,11 +120,15 @@ def approx_tokens(message: Dict[str, Any]) -> int:
 
 
 def leading_system_count(messages: Sequence[Dict[str, Any]]) -> int:
-    """How many messages at the head are system messages (canonical context)."""
+    """How many messages at the head are canonical context, never summarised:
+    the system messages, plus the team-prompt block that follows them (issue
+    #1169) -- standing instructions, not conversation."""
     count = 0
     for msg in messages:
         if msg.get("role") != "system":
             break
+        count += 1
+    if count < len(messages) and is_team_prompt_message(messages[count]):
         count += 1
     return count
 

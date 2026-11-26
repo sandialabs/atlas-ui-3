@@ -22,6 +22,7 @@ from atlas.domain.messages.models import (
     ToolResult,
 )
 from atlas.domain.sessions.models import Session
+from atlas.domain.team_prompt import is_team_prompt_message
 from atlas.interfaces.events import EventPublisher
 from atlas.interfaces.llm import LLMProtocol, LLMResponse
 from atlas.interfaces.tools import ToolManagerProtocol
@@ -581,12 +582,16 @@ class ToolsModeRunner:
         # #909) carry a list of content blocks, and the prompt provider's
         # ``user_question.strip()`` would raise on those, silently dropping
         # the configured synthesis prompt.
+        # The team-prompt block (issue #1169) is a user-role message but not
+        # the user's question: it must never be echoed into this system
+        # message.
         user_question = ""
         for m in reversed(messages):
             if (
                 m.get("role") == "user"
                 and isinstance(m.get("content"), str)
                 and m.get("content")
+                and not is_team_prompt_message(m)
             ):
                 user_question = m["content"]
                 break

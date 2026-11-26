@@ -952,6 +952,41 @@ class AppSettings(BaseSettings):
         description="Enable the per-user custom prompt library UI and API",
         validation_alias=AliasChoices("FEATURE_CUSTOM_PROMPTS_ENABLED"),
     )
+    # Team prompt library (issue #1169): shared, versioned prompts with group
+    # access control. Off by default and independent of private custom
+    # prompts, so enabling custom prompts never turns on cross-user sharing.
+    # Effective only together with custom prompts and chat history (see
+    # ``prompt_library_effective``).
+    feature_prompt_library_enabled: bool = Field(
+        False,
+        description="Enable the team-shared prompt library (requires custom prompts and chat history)",
+        validation_alias=AliasChoices("FEATURE_PROMPT_LIBRARY_ENABLED"),
+    )
+    # How long a group-membership answer may be reused by the prompt library
+    # (seconds). Bounds both the authorizer load and the revocation latency of
+    # a group change made in the authorization service: a removed member keeps
+    # group-derived *use* access for at most this long. 0 disables caching.
+    # Only definite answers are cached; failures never are.
+    prompt_library_membership_cache_seconds: int = Field(
+        30,
+        ge=0,
+        le=300,
+        description="Seconds a prompt-library group-membership answer is reused (0 disables)",
+        validation_alias=AliasChoices("PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS"),
+    )
+    # Storage bounds for the team prompt library. 0 means unlimited.
+    prompt_library_max_prompts_per_owner: int = Field(
+        1000,
+        ge=0,
+        description="Most library entries one user may own, archived included (0: unlimited)",
+        validation_alias=AliasChoices("PROMPT_LIBRARY_MAX_PROMPTS_PER_OWNER"),
+    )
+    prompt_library_max_versions_per_prompt: int = Field(
+        1000,
+        ge=0,
+        description="Most published versions one library entry may have (0: unlimited)",
+        validation_alias=AliasChoices("PROMPT_LIBRARY_MAX_VERSIONS_PER_PROMPT"),
+    )
 
     # Parallel conversation runs (issue #884). A "run" is one history-mutating
     # execution of a conversation; these caps bound how many a single user may
@@ -1046,6 +1081,17 @@ class AppSettings(BaseSettings):
         return bool(
             self.feature_custom_prompts_enabled and self.feature_chat_history_enabled
         )
+
+    @property
+    def prompt_library_effective(self) -> bool:
+        """Whether the team prompt library is usable (issue #1169).
+
+        Its own flag, on top of custom prompts and chat history: the authoritative
+        gate for the /api/prompts library routes, the config payload and library
+        references on chat turns. The owner's pin-clear route is deliberately not
+        gated on it (a pinned conversation must stay recoverable with it off).
+        """
+        return bool(self.feature_prompt_library_enabled and self.custom_prompts_effective)
 
     @property
     def compliance_level_required_effective(self) -> bool:

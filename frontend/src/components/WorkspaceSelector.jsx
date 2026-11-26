@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Layers, ChevronDown, Plus, Save, Trash2, Pencil } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
-import { isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey } from '../hooks/chat/useSelections'
+import { isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, isLibraryPromptKey } from '../hooks/chat/useSelections'
+import { libraryPromptLabel } from '../utils/libraryPromptSelection'
 import { getMcpNameFromKey } from '../utils/mcpKeys'
 import { useDialog } from './ui/toastContext'
 import { useToast } from './ui/toastContext'
@@ -32,6 +33,7 @@ const WorkspaceSelector = ({ placement = 'down', showName = true }) => {
     userPrompts = [],
     personas = [],
     prompts = [],
+    libraryPrompts = [],
   } = useChat()
 
   const [isOpen, setIsOpen] = useState(false)
@@ -66,6 +68,9 @@ const WorkspaceSelector = ({ placement = 'down', showName = true }) => {
       const match = personas.find(p => p.id === personaIdFromKey(key))
       return match ? match.name : 'persona'
     }
+    // A team-library entry the user can no longer reach is labelled as such,
+    // so switching into the workspace does not look like it brings it back.
+    if (isLibraryPromptKey(key)) return libraryPromptLabel(key, libraryPrompts)
     return getMcpNameFromKey(key, prompts) || 'custom prompt'
   }
 

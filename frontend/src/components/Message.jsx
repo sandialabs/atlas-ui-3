@@ -25,6 +25,7 @@ import ToolApprovalMessage from './ToolApprovalMessage'
 import ToolElapsedTime from './ToolElapsedTime'
 import ToolNameLabel from './ToolNameLabel'
 import ContextCheckpointRow from './ContextCheckpointRow'
+import TeamPromptRecovery from './TeamPromptRecovery'
 import ReadAloudButton from './ReadAloudButton'
 
 // Feature flag: Perplexity-style inline citations & references for RAG.
@@ -585,6 +586,21 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
     if (isUser || isSystem) {
       if (message.type === 'context_checkpoint') {
         return <ContextCheckpointRow message={message} />
+      }
+
+      // A refusal the conversation's owner can resolve by clearing its team
+      // prompt (issue #1169). Plain text, plus the action.
+      if (isSystem && message.recovery?.action === 'clear_team_prompt') {
+        return (
+          <div>
+            <div className="text-gray-200 whitespace-pre-wrap break-words">{message.content}</div>
+            <TeamPromptRecovery
+              conversationId={message.recovery.conversationId}
+              problem={message.recovery.problem}
+              revision={message.recovery.revision}
+            />
+          </div>
+        )
       }
 
       if (message.type === 'agent_status') {

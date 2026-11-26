@@ -7,7 +7,7 @@ fill the log with one traceback per orphan sweep.
 
 import asyncio
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import fakeredis
@@ -86,7 +86,7 @@ def _chat_service():
         config_manager=MagicMock(), session_repository=MagicMock(),
         conversation_repository=MagicMock(),
     )
-    chat._save_conversation = MagicMock(return_value=True)
+    chat._save_conversation = AsyncMock(return_value=True)
     session = MagicMock()
     session.history.messages = []
     session.context = {}

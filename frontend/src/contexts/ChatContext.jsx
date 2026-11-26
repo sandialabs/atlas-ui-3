@@ -3,11 +3,13 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, u
 import { useWS } from './WSContext'
 import { useToast } from '../components/ui/toastContext'
 import { useChatConfig } from '../hooks/chat/useChatConfig'
-import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter } from '../hooks/chat/useSelections'
+import { useSelections, isUserPromptKey, userPromptIdFromKey, isPersonaKey, personaIdFromKey, personaSurvivesComplianceFilter, isLibraryPromptKey, isLibraryDraftKey, libraryPromptKey } from '../hooks/chat/useSelections'
 import { useComplianceLevels } from '../hooks/chat/useComplianceLevels'
 import { isComplianceAccessible, classificationsOf, complianceLevelsReady, keysExcludedByCompliance, isModelComplianceAccessible, firstCompliantModel, COMPLIANCE_EXEMPT } from '../utils/complianceAccess'
 import { complianceDisplayName } from '../utils/complianceDisplay'
 import { useUserPrompts } from '../hooks/useUserPrompts'
+import { usePromptLibrary } from '../hooks/usePromptLibrary'
+import { resolveLibrarySelection } from '../utils/libraryPromptSelection'
 import { usePersonas } from '../hooks/usePersonas'
 import { useWorkspaces, isStaleWorkspacePointer } from '../hooks/useWorkspaces'
 import { useAgentMode } from '../hooks/chat/useAgentMode'
@@ -128,6 +130,9 @@ export const ChatProvider = ({ children }) => {
 	// State slices
 	const config = useChatConfig()
 	const selections = useSelections(config.user)
+	// Latest selections for callbacks that must stay stable (no re-creation per render).
+	const selectionsRef = useRef(selections)
+	selectionsRef.current = selections
 	const complianceEnabled = !!config.features?.compliance_levels
 	const { complianceLevels, complianceMode, defaultComplianceLevel } = useComplianceLevels(complianceEnabled)
 	// Required-level mode: there is no "All Levels" state; a session always
@@ -136,6 +141,11 @@ export const ChatProvider = ({ children }) => {
 	const customPromptsEnabled = !!config.features?.custom_prompts
 	// User-authored custom prompt library (issue #153)
 	const userPrompts = useUserPrompts(customPromptsEnabled)
+	// Team-shared prompt library (issue #1169): its own flag (features.prompt_library,
+	// off by default), on top of custom prompts. When it is off nothing is
+	// fetched and the library UI is hidden; the server refuses library references.
+	const promptLibraryEnabled = customPromptsEnabled && !!config.features?.prompt_library
+	const promptLibrary = usePromptLibrary(promptLibraryEnabled)
 	// Admin-preconfigured personas loaded from markdown files (issue #880).
 	// Always available: they need no chat history and no per-user storage.
 	const personas = usePersonas()
@@ -395,11 +405,98 @@ export const ChatProvider = ({ children }) => {
 	}, [storedComplianceFilter, complianceLevels, complianceRequired, defaultComplianceLevel, storeComplianceFilter])
 
 	useEffect(() => {
-		if (!config.configReady || customPromptsEnabled) return
-		if (isUserPromptKey(activePromptKey)) {
+		if (!config.configReady) return
+
+		const unavailableUserPrompt =
+			!customPromptsEnabled && isUserPromptKey(activePromptKey)
+		const unavailableLibraryPrompt =
+			!promptLibraryEnabled &&
+			(isLibraryPromptKey(activePromptKey) || isLibraryDraftKey(activePromptKey))
+
+		if (unavailableUserPrompt || unavailableLibraryPrompt) {
 			clearActivePrompt()
 		}
-	}, [config.configReady, customPromptsEnabled, activePromptKey, clearActivePrompt])
+	}, [config.configReady, customPromptsEnabled, promptLibraryEnabled, activePromptKey, clearActivePrompt])
+
+	// A draft under test lives in memory only; after a reload the persisted key
+	// has nothing behind it. Clearing it here is safe: the draft was never a
+	// saved selection, and the send path refuses rather than falls back.
+	// The owner's way out of a conversation whose team-prompt pin blocks it
+	// (issue #1169): the prompt is unavailable to them, or the stored pin is
+	// damaged. DELETE /api/prompts/pins/{id} -- the same route CLI users call --
+	// is deliberately not gated on the library flag. It acts on the conversation
+	// the server named, never on whatever is on screen; only when that is the
+	// conversation shown does the local selection follow the cleared pin, and
+	// the caller tells the user so.
+	// The open conversation's stored team-prompt pin, { promptId, versionId }
+	// or null (issue #1169): what its next turn runs when the picker names the
+	// same entry without a version. The version history uses it so "latest"
+	// never claims a version this conversation will not run.
+	const [conversationTeamPin, setConversationTeamPinState] = useState(null)
+	const setConversationTeamPin = useCallback(pin => {
+		setConversationTeamPinState(
+			(pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+				? { promptId: pin.prompt_id, versionId: pin.version_id }
+				: null,
+		)
+	}, [])
+	const clearConversationTeamPrompt = useCallback(async (conversationId, expectedRevision = null) => {
+		if (typeof conversationId !== 'string' || !conversationId) throw new Error('No conversation to clear.')
+		// With the revision the refusal saw, a pin changed since (another tab)
+		// is not cleared: the server answers 409 instead.
+		const query = Number.isInteger(expectedRevision) ? `?expected_revision=${expectedRevision}` : ''
+		const res = await fetch(`/api/prompts/pins/${encodeURIComponent(conversationId)}${query}`, { method: 'DELETE' })
+		let data = null
+		try { data = await res.json() } catch { data = null }
+		if (!res.ok) {
+			const message = res.status === 404
+				? "Only this conversation's owner can clear its team prompt (or the conversation no longer exists)."
+				: (data && typeof data.detail === 'string' ? data.detail : `Could not clear the team prompt (${res.status}).`)
+			const error = new Error(message)
+			error.status = res.status
+			if (
+				res.status === 409 && data && 'prompt_library' in data
+				&& Number.isInteger(data.prompt_library_pin_revision)
+				&& conversationId === activeConversationIdRef.current
+				// A newer revision already arrived (a turn's prompt_pin_state
+				// overtook this answer): the 409 is older news, adopt nothing.
+				&& !(Number.isInteger(libraryPinRevisionRef.current)
+					&& data.prompt_library_pin_revision < libraryPinRevisionRef.current)
+			) {
+				// The pin changed since the refusal (another window). As with a
+				// pin conflict on a turn, show the stored pin first and only then
+				// adopt its revision: the retry and the next message then act on
+				// the pin the user can see, never on one they did not. Only for
+				// the conversation on screen -- elsewhere nothing is shown, so the
+				// retry keeps the old revision and is refused again (safe).
+				error.currentRevision = data.prompt_library_pin_revision
+				const pin = data.prompt_library
+				const key = (pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+					? libraryPromptKey(pin.prompt_id, pin.version_id)
+					: null
+				conversationLibraryPinRef.current = key
+				setConversationTeamPin(pin)
+				if (key) selectionsRef.current?.makePromptActive?.(key)
+				else selectionsRef.current?.clearActivePrompt?.()
+				libraryPinRevisionRef.current = data.prompt_library_pin_revision
+			}
+			throw error
+		}
+		if (conversationId === activeConversationIdRef.current) {
+			conversationLibraryPinRef.current = null
+			setConversationTeamPin(null)
+			// Follow the revision the clear stored, so the next pin change is
+			// decided on it (not refused as a change made elsewhere).
+			if (Number.isInteger(data?.prompt_library_pin_revision)) libraryPinRevisionRef.current = data.prompt_library_pin_revision
+			const key = selectionsRef.current?.activePromptKey
+			if (isLibraryPromptKey(key) || isLibraryDraftKey(key)) selectionsRef.current.clearActivePrompt()
+		}
+		return { cleared: !!data?.cleared, recovered: !!data?.recovered, classificationUnknown: !!data?.classification_unknown }
+	}, [setConversationTeamPin])
+	const testDraft = promptLibrary.testDraft
+	useEffect(() => {
+		if (isLibraryDraftKey(activePromptKey) && !testDraft) clearActivePrompt()
+	}, [activePromptKey, testDraft, clearActivePrompt])
 
 	// A persisted persona key can outlive the persona itself: the admin deleted or
 	// renamed the file, or the user lost access to its group. Only clear it once a
@@ -416,7 +513,7 @@ export const ChatProvider = ({ children }) => {
 	// Which workspace the current selections came from. Persisted so a refresh
 	// keeps showing the workspace whose selections are still loaded.
 	const [activeWorkspaceId, setActiveWorkspaceId] = usePersistentState('chatui-active-workspace', null)
-	const { applyWorkspace, snapshotSelections } = selections
+	const { applyWorkspace, snapshotSelections, makePromptActive } = selections
 	const { workspaces: workspaceList, updateWorkspace: updateWorkspaceApi, deleteWorkspace: deleteWorkspaceApi } = workspaces
 
 	// Drop a stale pointer: the workspace may have been deleted in another tab,
@@ -443,6 +540,18 @@ export const ChatProvider = ({ children }) => {
 	// (switching, clearing or deleting a workspace, starting a new chat) cancels
 	// it, so a late restore can never overwrite a deliberate choice.
 	const pendingWorkspaceRestoreRef = useRef(null)
+	// The team-library prompt key pinned by the conversation being opened
+	// (issue #1169), or null. A workspace restore triggered by that load --
+	// immediate or deferred until the workspace list arrives -- re-asserts it
+	// after applying the workspace, so the workspace's saved prompt can never
+	// replace the exact version the conversation ran with. An explicit
+	// workspace switch by the user is not a restore and is not affected.
+	const conversationLibraryPinRef = useRef(null)
+	// The stored team-prompt pin revision this client last saw for the
+	// conversation on screen (issue #1169); sent with each turn so a pin
+	// change decided on an older view is refused rather than applied. Null
+	// for a chat the server has not stored yet.
+	const libraryPinRevisionRef = useRef(null)
 
 	// restoreUndoSnapshot is declared after loadSavedConversation, which it
 	// delegates to; clearChat's Undo action reaches it through this ref rather
@@ -564,9 +673,10 @@ export const ChatProvider = ({ children }) => {
 		// conversation is already bound to it, so nothing is lost by skipping.
 		if (workspaceId === activeWorkspaceId) return true
 		switchWorkspace(workspaceId)
+		if (conversationLibraryPinRef.current) makePromptActive(conversationLibraryPinRef.current)
 		toast.info(`Switched to the "${ws.name}" workspace this conversation was saved with.`)
 		return true
-	}, [activeWorkspaceId, workspaceList, switchWorkspace, toast])
+	}, [activeWorkspaceId, workspaceList, switchWorkspace, toast, makePromptActive])
 
 	const restoreWorkspace = useCallback(workspaceId => {
 		if (!workspaceId) {
@@ -752,6 +862,51 @@ export const ChatProvider = ({ children }) => {
 			// on the run's terminal status, which a stopped run reports before
 			// its interrupted turn is persisted.
 			onConversationSaved: finishJoinedRun,
+			onPromptPinState: (data) => {
+				const shown = activeConversationIdRef.current
+				const conflict = data?.error_type === 'prompt_pin_conflict'
+				if (conflict || data?.type === 'prompt_pin_state') {
+					// prompt_pin_state is only sent for a stored conversation
+					// (never a new chat's first turn), so it too must name the
+					// conversation on screen: a late frame from a conversation
+					// the user has left must not land in the new one.
+					// A conflict replaces the user's selection, so it must name
+					// the conversation on screen. One that names none, or another
+					// conversation (the user switched, or started a new chat,
+					// while the turn was in flight), belongs elsewhere: applying
+					// it here would change an unrelated conversation's prompt.
+					if (!data.conversation_id || data.conversation_id !== shown) return
+				} else if (data?.conversation_id && shown && data.conversation_id !== shown) {
+					// conversation_saved for another conversation. (A new chat's
+					// first save names the id it is about to adopt: shown is
+					// still empty then, and the revision is this chat's.)
+					return
+				}
+				if (!Number.isInteger(data?.prompt_library_pin_revision)) return
+				libraryPinRevisionRef.current = data.prompt_library_pin_revision
+				if ('prompt_library' in data) {
+					setConversationTeamPin(data.prompt_library)
+					// Keep the saved-pin reference synchronized with server
+					// updates, not only with conversation loads and conflicts.
+					// A feature-flag change must not silently unpin a prompt
+					// established during this session.
+					const pin = data.prompt_library
+					conversationLibraryPinRef.current =
+						(pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+							? libraryPromptKey(pin.prompt_id, pin.version_id)
+							: null
+				}
+				if (!conflict) return
+				// Another window changed this conversation's team prompt: show
+				// the stored selection so the next send is an informed one.
+				const pin = data.prompt_library
+				const key = (pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+					? libraryPromptKey(pin.prompt_id, pin.version_id)
+					: null
+				conversationLibraryPinRef.current = key
+				if (key) selections.makePromptActive(key)
+				else selections.clearActivePrompt()
+			},
 			onContextUsage: contextCompaction.handleUsage,
 			onContextCompaction: contextCompaction.handleCompaction,
 		})
@@ -962,6 +1117,8 @@ export const ChatProvider = ({ children }) => {
 			selections.activePromptKey &&
 			!isUserPromptKey(selections.activePromptKey) &&
 			!isPersonaKey(selections.activePromptKey) &&
+			!isLibraryPromptKey(selections.activePromptKey) &&
+			!isLibraryDraftKey(selections.activePromptKey) &&
 			!validPromptKeys.has(selections.activePromptKey)
 		) {
 			// Clear stale active prompt that no longer exists in config
@@ -1119,6 +1276,31 @@ export const ChatProvider = ({ children }) => {
 			toast.error(`${currentModel} is outside the ${complianceDisplayName(complianceLevels, activeComplianceFilter) || activeComplianceFilter} security level. Choose an allowed model or change the security level.`)
 			return false
 		}
+		// Team prompt library (issue #1169): only a reference goes out, and a
+		// selection that is no longer available is refused here rather than
+		// silently replaced by the default prompt.
+		// Omitting library_prompt preserves the server's stored pin. Unlike
+		// explicit null, omission allows the server to return a recoverable
+		// refusal and display the clear-team-prompt action in chat.
+		const disabledPinnedConversation =
+			!promptLibraryEnabled && !!conversationLibraryPinRef.current
+		const staleDisabledLibrarySelection = !promptLibraryEnabled &&
+			(isLibraryPromptKey(selections.activePromptKey) ||
+			 isLibraryDraftKey(selections.activePromptKey))
+		if (staleDisabledLibrarySelection) {
+			clearActivePrompt()
+			if (!disabledPinnedConversation) {
+				toast.error('The team prompt library is disabled. Choose another prompt before sending.')
+				return false
+			}
+		}
+		const librarySelection = disabledPinnedConversation
+			? { kind: 'none' }
+			: resolveLibrarySelection(selections.activePromptKey, promptLibrary, conversationLibraryPinRef.current)
+		if (librarySelection.kind === 'blocked') {
+			toast.error(librarySelection.message)
+			return false
+		}
 		const toolsToSend = dropExcluded(
 			selectedToolsOverride != null ? selectedToolsOverride : [...selectedTools],
 			mcpKeyLevel(config.tools)
@@ -1185,8 +1367,19 @@ export const ChatProvider = ({ children }) => {
 			content,
 			model: currentModel,
 			selected_tools: toolsToSend,
-			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona) ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
-			custom_system_prompt: activeUserPrompt ? activeUserPrompt.content : undefined,
+			selected_prompts: (activeKeyIsUserPrompt || activeKeyIsPersona || staleDisabledLibrarySelection || librarySelection.kind !== 'none') ? [] : dropExcluded(activePrompts, mcpKeyLevel(config.prompts)),
+			custom_system_prompt: librarySelection.kind === 'draft'
+				? librarySelection.content
+				: (activeUserPrompt ? activeUserPrompt.content : undefined),
+			// A library draft under test is team text: the server runs it below
+			// the platform system prompt, as the published version will run.
+			custom_system_prompt_source: librarySelection.kind === 'draft' ? 'library_draft' : undefined,
+			library_draft_title: librarySelection.kind === 'draft' ? (librarySelection.title || undefined) : undefined,
+			// Explicit null (not omitted) when no library prompt is selected:
+			// the server keeps a conversation's pinned version only while the
+			// client keeps naming it, so choosing another prompt unpins.
+			...(disabledPinnedConversation ? {} : { library_prompt: librarySelection.kind === 'library' ? librarySelection.ref : null }),
+			library_prompt_revision: typeof libraryPinRevisionRef.current === 'number' ? libraryPinRevisionRef.current : undefined,
 			persona_id: activeKeyIsPersona ? personaIdFromKey(activeKey) : undefined,
 			selected_data_sources: dataSourcesToSend,
 			data_sources_auto: dataSourcesAuto,
@@ -1323,7 +1516,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// without another `agent_start`, so clearing the flag would drop the
 		// agent Stop button and block further steering mid-run (#849 review).
 		return true
-	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, navigationState, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting])
+	}, [addMessage, mapMessages, currentModel, selectedTools, activePrompts, selectedDataSources, ragEnabled, config, selections, agent, files, isWelcomeVisible, isConnected, toast, sendMessage, settings, getAllRagSourceIds, saveMode, activeConversationId, customPromptsEnabled, userPrompts.prompts, activeWorkspaceId, cancelPendingWorkspaceRestore, invalidateUndoOffer, discardReplayPlaceholders, complianceLevels, complianceRequired, activeComplianceFilter, complianceEnabled, mcpKeyLevel, ragKeyLevel, dropExcluded, navigationState, contextCompaction.enabled, contextCompaction.autoCompact, contextCompaction.isManualCompacting, promptLibrary, promptLibraryEnabled, clearActivePrompt])
 
 	// Rewind to a previous user prompt and resubmit it (optionally edited).
 	// Overwrite-in-place: the targeted prompt and everything after it are dropped
@@ -1456,6 +1649,9 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// A deferred workspace restore queued by a previous load must not
 		// fire into the fresh chat once the workspace list finishes loading.
 		pendingWorkspaceRestoreRef.current = null
+		conversationLibraryPinRef.current = null
+		libraryPinRevisionRef.current = null
+		setConversationTeamPin(null)
 		conversationWorkspaceIdRef.current = null
 		conversationClassificationRef.current = null
 		setActiveConversationClassification(null)
@@ -1496,7 +1692,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			undoOfferRef.current = { token, toastId }
 		}
 		return true
-	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId])
+	}, [resetMessages, files, sendMessage, isThinking, isSynthesizing, isStreaming, messages.length, agent, streamEnd, runs, activeConversationId, toast, invalidateUndoOffer, adoptConversationId, setConversationTeamPin])
 
 	// Load a saved conversation from history into the chat view
 	const loadSavedConversation = useCallback(async (conversationData, { origin = 'open' } = {}) => {
@@ -1732,7 +1928,23 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 			if (complianceEnabled && recordedBound) {
 				selections.setComplianceLevelFilter(recorded.level)
 			}
+			// The exact team-library version this conversation ran with (issue
+			// #1169) becomes the active prompt, so continuing it keeps that
+			// version rather than whatever the picker last held. Recorded before
+			// the workspace restore so that restore (now or deferred) keeps it.
+			const pin = meta.prompt_library
+			setConversationTeamPin(pin)
+			libraryPinRevisionRef.current = Number.isInteger(meta.prompt_library_pin_revision)
+				? meta.prompt_library_pin_revision
+				: 0
+			conversationLibraryPinRef.current =
+				(pin && typeof pin.prompt_id === 'string' && typeof pin.version_id === 'string')
+					? libraryPromptKey(pin.prompt_id, pin.version_id)
+					: null
 			restoreWorkspace(meta.workspace_id)
+			if (conversationLibraryPinRef.current) {
+				selections.makePromptActive(conversationLibraryPinRef.current)
+			}
 		}
 		if (!reconnecting && !refreshFallback) setConversationNavigationVersion(n => n + 1)
 		// Stable members only: `runs` and `agent` are unmemoised objects that a
@@ -2337,7 +2549,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// The active prompt: an MCP prompt the level hides, or a persona it
 		// hides (the server refuses to resolve one, so keeping it selected
 		// would silently run the default prompt).
-		if (activePromptKey && !isUserPromptKey(activePromptKey)) {
+		if (activePromptKey && !isUserPromptKey(activePromptKey) && !isLibraryPromptKey(activePromptKey) && !isLibraryDraftKey(activePromptKey)) {
 			if (isPersonaKey(activePromptKey)) {
 				const persona = personas.personas.find(p => p.id === personaIdFromKey(activePromptKey))
 				const allowed = level => isComplianceAccessible(complianceLevels, activeComplianceFilter, level)
@@ -2627,6 +2839,11 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		personasError: personas.error,
 		fetchPersonas: personas.fetchPersonas,
 		// User-authored custom prompt library (issue #153)
+		// Team-shared prompt library (issue #1169)
+		promptLibrary: promptLibraryEnabled ? promptLibrary : null,
+		clearConversationTeamPrompt,
+		conversationTeamPin,
+		libraryPrompts: promptLibraryEnabled ? promptLibrary.entries : [],
 		userPrompts: userPrompts.prompts,
 		userPromptsLoading: userPrompts.loading,
 		userPromptsError: userPrompts.error,

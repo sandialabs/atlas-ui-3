@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, desc
+from sqlalchemy import delete, desc, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from atlas.core.log_sanitizer import sanitize_for_logging
@@ -35,8 +35,21 @@ from atlas.domain.conversation_lineage import (
     parent_conversation_id_from_metadata,
 )
 from atlas.domain.conversation_origin import carry_recorded_origin, origin_fields
+from atlas.domain.conversation_prompt_pin import (
+    carry_stored_pin,
+    new_record_pin,
+    pin_fields_readable,
+    pin_state,
+)
 
-from .models import ConversationRecord, ConversationTagLink, MessageRecord, TagRecord
+from .conversation_pin_store import ConversationPinStore
+from .models import (
+    ConversationPromptPinMarker,
+    ConversationRecord,
+    ConversationTagLink,
+    MessageRecord,
+    TagRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +60,7 @@ LAUNCH_RECORD_KEYS = ("launch_run_id", "launch_status", "launch_depth", "latest_
 _CHILD_SCAN_PAGE = 200
 
 
-class ConversationRepository:
+class ConversationRepository(ConversationPinStore):
     """Handles all conversation CRUD, search, and tag operations."""
 
     def __init__(self, session_factory: sessionmaker):
@@ -55,6 +68,24 @@ class ConversationRepository:
 
     def _get_session(self) -> Session:
         return self._session_factory()
+
+    @staticmethod
+    def _owned_conversation(session: Session, conversation_id: str, user_email: str):
+        """The user's conversation row, locked for update on PostgreSQL.
+
+        Saves and pin clears read-modify-write the metadata blob; the row
+        lock serializes them so neither can overwrite the other's change
+        (issue #1169). DuckDB has no row locks; there a concurrent writer
+        fails the commit instead of interleaving.
+        """
+        query = session.query(ConversationRecord).filter(
+            ConversationRecord.id == conversation_id,
+            ConversationRecord.user_email == user_email,
+        )
+        bind = session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.first()
 
     def _visible_parent_ids(
         self,
@@ -160,10 +191,11 @@ class ConversationRepository:
         """
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
-            existing = session.query(ConversationRecord).filter(
-                ConversationRecord.id == conversation_id,
-                ConversationRecord.user_email == user_email,
-            ).first()
+            bind = session.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                # Bound lock waits on the synchronous chat save path.
+                session.execute(text("SET LOCAL lock_timeout = '2s'"))
+            existing = self._owned_conversation(session, conversation_id, user_email)
 
             if existing:
                 # Count the rows rather than trusting ``message_count``: the
@@ -200,15 +232,33 @@ class ConversationRepository:
                     )
                     return None
 
+                # A stored pin or pin revision that is malformed is unreadable
+                # (issue #1169): carrying it through would read it as "no pin"
+                # and silently write an unpinned record over it.
+                stored_for_pin = _load_metadata(existing.metadata_json)
+                if isinstance(stored_for_pin, dict) and not pin_fields_readable(stored_for_pin):
+                    # No client-supplied value in the message (the id came
+                    # from the frame).
+                    logger.error(
+                        "Refusing to save a conversation: its stored team-prompt "
+                        "pin is malformed. This turn was not persisted."
+                    )
+                    return None
+
                 existing.title = title or existing.title
                 existing.model = model or existing.model
                 existing.updated_at = datetime.now(timezone.utc)
                 existing.message_count = len(messages)
                 if metadata:
+                    stored_metadata = _load_metadata(existing.metadata_json)
                     # The launch origin (issue #1187) is fixed at creation:
                     # the stored record decides it for every later save.
-                    stored_metadata = _load_metadata(existing.metadata_json)
                     metadata = carry_recorded_origin(stored_metadata, metadata)
+                    # The pin is never written by a save (issue #1169): it is
+                    # changed only by change_prompt_pin / clear_prompt_pin,
+                    # so a session holding an older pin cannot restore,
+                    # replace or drop the stored one.
+                    metadata = carry_stored_pin(stored_metadata, metadata)
                     # The launching run id (issue #1222) is fixed at creation
                     # too: a save from a session that never loaded it (an
                     # explicit restore) must not erase it.
@@ -252,6 +302,9 @@ class ConversationRepository:
                     )
                     return None
 
+                if metadata:
+                    # A new record takes the creating session's pin.
+                    metadata = new_record_pin(metadata)
                 conv = ConversationRecord(
                     id=conversation_id,
                     user_email=user_email,
@@ -261,6 +314,8 @@ class ConversationRepository:
                     metadata_json=json.dumps(metadata) if metadata else None,
                 )
                 session.add(conv)
+                if metadata and pin_state(metadata)["pin"]:
+                    self._mark_pinned(session, conversation_id, user_email)
 
                 for i, msg in enumerate(messages):
                     record = MessageRecord(
@@ -531,11 +586,24 @@ class ConversationRepository:
                 messages.append(msg_data)
 
             conv_metadata = {}
+            metadata_unreadable = False
             if conv.metadata_json:
                 try:
                     conv_metadata = json.loads(conv.metadata_json)
                 except json.JSONDecodeError:
                     logger.warning("Corrupt metadata_json for conversation %s", conv.id)
+                    metadata_unreadable = True
+                if conv_metadata is None:
+                    conv_metadata = {}  # a stored JSON null is empty metadata
+                if not isinstance(conv_metadata, dict):
+                    # Valid JSON of the wrong shape is no more readable.
+                    conv_metadata = {}
+                    metadata_unreadable = True
+                elif not pin_fields_readable(conv_metadata):
+                    # A malformed pin is not "no pin" (issue #1169). The rest
+                    # of the record stays readable; the pin state is unknown.
+                    logger.warning("Malformed team-prompt pin in conversation %s", conv.id)
+                    metadata_unreadable = True
 
             lineage = self._lineage_fields_by_id(
                 session, user_email, {conv.id: conv_metadata}
@@ -557,6 +625,10 @@ class ConversationRepository:
                 "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
                 "message_count": conv.message_count,
                 "metadata": conv_metadata,
+                # The stored metadata could not be decoded, so ``metadata`` is
+                # a placeholder: callers must not read "no pin" (or any other
+                # absent record) from it (issue #1169).
+                **({"metadata_unreadable": True} if metadata_unreadable else {}),
                 "messages": messages,
                 "tags": self._get_tag_names(session, conv.id),
                 # Classification reads the *raw* blob so an unreadable one
@@ -931,6 +1003,12 @@ class ConversationRepository:
         session.execute(
             delete(MessageRecord).where(
                 MessageRecord.conversation_id == conversation_id
+            )
+        )
+        # Delete its team-prompt pin marker (issue #1169)
+        session.execute(
+            delete(ConversationPromptPinMarker).where(
+                ConversationPromptPinMarker.conversation_id == conversation_id
             )
         )
         # Delete conversation

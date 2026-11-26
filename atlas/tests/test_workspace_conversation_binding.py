@@ -21,6 +21,7 @@ from uuid import uuid4
 import pytest
 
 from atlas.application.chat.service import ChatService
+from atlas.domain.errors import AuthorizationError
 from atlas.domain.messages.models import Message, MessageRole
 from atlas.modules.chat_history import (
     ConversationRepository,
@@ -624,15 +625,19 @@ async def test_store_read_failure_preserves_the_stored_binding(repo):
             raise RuntimeError("transient store failure")
         return real_get(conversation_id, user_email)
 
+    # The failed load leaves the team-prompt pin unknown, and the store cannot
+    # confirm the conversation is new, so the turn is refused (issue #1169)
+    # rather than run on the default prompt. The binding rules are unchanged.
     with patch.object(repo, "get_conversation", side_effect=_boom):
         with _stub_orchestrator(service, sessions, session_id):
-            await service.handle_chat_message(
-                session_id=session_id,
-                content="after the blip",
-                model="test-model",
-                user_email=TEST_USER,
-                conversation_id=other_id,
-            )
+            with pytest.raises(AuthorizationError):
+                await service.handle_chat_message(
+                    session_id=session_id,
+                    content="after the blip",
+                    model="test-model",
+                    user_email=TEST_USER,
+                    conversation_id=other_id,
+                )
 
     # The binding the session was carrying survives the failed read.
     assert session.context.get("workspace_id") == "ws-work"

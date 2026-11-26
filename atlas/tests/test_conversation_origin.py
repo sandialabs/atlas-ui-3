@@ -304,7 +304,7 @@ async def test_an_incognito_interlude_does_not_tag_the_users_new_conversation(ch
     session.history.add_message(Message(role=MessageRole.USER, content="saved again"))
     session.history.add_message(Message(role=MessageRole.ASSISTANT, content="ok"))
 
-    assert chat_service._save_conversation(session, USER, "gpt-4", start_index=floor)
+    assert await chat_service._save_conversation(session, USER, "gpt-4", start_index=floor)
 
     new_id = session.context["conversation_id"]
     assert new_id != "api-conv"

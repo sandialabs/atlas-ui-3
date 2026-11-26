@@ -11,6 +11,7 @@ const DEFAULT_FEATURES = {
   files_panel: false,
   chat_history: false,
   custom_prompts: false,
+  prompt_library: false,
   compliance_levels: false,
   file_content_extraction: false,
   finetune_capture: false

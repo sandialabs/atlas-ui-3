@@ -101,6 +101,7 @@ from atlas.core.websocket_origin import origin_is_allowed, parse_allowed_hosts
 
 # Import domain errors
 from atlas.domain.conversation_classification import ERROR_CODE as CONVERSATION_CLASSIFICATION_ERROR
+from atlas.domain.conversation_prompt_pin import PromptPinConflictError, public_pin_fields
 from atlas.domain.errors import (
     AuthorizationError,
     ContextWindowExceededError,
@@ -156,6 +157,7 @@ from atlas.routes.mcp_auth_routes import router as mcp_auth_router
 from atlas.routes.oidc_auth_routes import api_router as oidc_api_router
 from atlas.routes.oidc_auth_routes import browser_router as oidc_browser_router
 from atlas.routes.persona_routes import router as persona_router
+from atlas.routes.prompt_library_routes import router as prompt_library_router
 from atlas.routes.suggestion_routes import suggestion_router
 from atlas.routes.telemetry_routes import telemetry_router
 from atlas.routes.user_prompt_routes import router as user_prompt_router
@@ -1794,6 +1796,7 @@ app.include_router(mcp_auth_router)
 app.include_router(conversation_router)
 app.include_router(agent_run_router)
 app.include_router(user_prompt_router)
+app.include_router(prompt_library_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
@@ -2416,9 +2419,33 @@ async def websocket_endpoint(websocket: WebSocket):
                 # persona's access group for this user and the turn's compliance
                 # filter, which also means a hand-crafted client cannot use
                 # persona_id to smuggle in a prompt of its own.
+                from atlas.application.chat.prompt_library_turn import (
+                    CONFLICTING_PROMPTS_MESSAGE,
+                    frame_has_conflicting_prompts,
+                )
                 from atlas.modules.prompts.persona_library import (
                     resolve_chat_system_prompt,
                 )
+
+                # A team library prompt (issue #1169) is never combined with
+                # an inline prompt or persona. Rejected on the raw frame,
+                # before either side is resolved, so nothing is looked up or
+                # audited for a turn that never runs.
+                if frame_has_conflicting_prompts(
+                    data.get("library_prompt", UNSET),
+                    data.get("custom_system_prompt"),
+                    data.get("persona_id"),
+                    UNSET,
+                ):
+                    logger.warning(
+                        "Rejected a chat frame naming both a team prompt and another prompt"
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": CONFLICTING_PROMPTS_MESSAGE,
+                        "error_type": "validation",
+                    })
+                    continue
 
                 custom_system_prompt = await resolve_chat_system_prompt(
                     data.get("custom_system_prompt"),
@@ -2427,6 +2454,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     config_manager.app_settings.custom_prompts_effective,
                     compliance_level_filter=data.get("compliance_level_filter"),
                 )
+                # "Test in chat" of an unpublished team-library draft (issue
+                # #1169) runs the way the published version will: below the
+                # platform system prompt, not in its place. The marker can only
+                # lower the text's trust, so a client cannot gain anything by it.
+                if (
+                    data.get("custom_system_prompt_source") == "library_draft"
+                    and isinstance(custom_system_prompt, str)
+                    and custom_system_prompt.strip()
+                    and not data.get("persona_id")
+                ):
+                    from atlas.domain.team_prompt import TeamPrompt
+
+                    draft_title = data.get("library_draft_title")
+                    custom_system_prompt = TeamPrompt(
+                        text=custom_system_prompt,
+                        title=draft_title[:200] if isinstance(draft_title, str) else None,
+                        draft=True,
+                    )
 
                 try:
                     oversized_file = find_oversized_inline_file(data.get("files"))
@@ -2679,6 +2724,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             # conversation's workspace binding for any client
                             # that does not send it.
                             workspace_id=data.get("workspace_id", UNSET),
+                            # Team prompt library reference (issue #1169):
+                            # resolved and authorized server-side; omitted
+                            # keeps a pinned conversation's version.
+                            library_prompt=data.get("library_prompt", UNSET),
+                            # The pin revision the client last saw; a pin
+                            # change decided on an older one is refused.
+                            library_prompt_revision=data.get("library_prompt_revision"),
                             steering=steering_channel,
                             # Per-conversation automatic compaction toggle
                             # (issue #877); a non-bool means the default.
@@ -2757,7 +2809,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     except ValidationError as e:
                         logger.warning(f"Validation error in chat handler: {e}")
                         turn_failure.append("validation")
-                        log_metric("error", user_email, error_type="validation")
+                        log_metric(
+                            "error", user_email,
+                            error_type=(
+                                "prompt_pin_conflict"
+                                if isinstance(e, PromptPinConflictError)
+                                else "validation"
+                            ),
+                        )
                         # A conversation-classification refusal (issue #1042)
                         # keeps its own type so the client can say why.
                         error_type = (
@@ -2765,19 +2824,57 @@ async def websocket_endpoint(websocket: WebSocket):
                             if getattr(e, "code", None) == CONVERSATION_CLASSIFICATION_ERROR
                             else "validation"
                         )
+                        extra = {}
+                        if isinstance(e, PromptPinConflictError):
+                            # Issue #1169: the stored pin moved since the client
+                            # saw it. Send the current one so it can catch up.
+                            error_type = e.code
+                            extra = public_pin_fields(e.pin_state)
+                            # The conversation the conflict is about. The run
+                            # envelope (turn_update_callback) adds run_id and
+                            # never overwrites this, so a client that switched
+                            # conversations meanwhile cannot apply another
+                            # conversation's selection to the one it shows.
+                            if e.conversation_id:
+                                extra["conversation_id"] = e.conversation_id
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
                             "error_type": error_type,
+                            **extra,
                         })
                     except AuthorizationError as e:
                         logger.warning(f"Authorization error in chat handler: {e}")
                         turn_failure.append("authorization")
-                        log_metric("error", user_email, error_type="authorization")
+                        from atlas.domain.conversation_prompt_pin import PromptPinBlockedError
+
+                        if isinstance(e, PromptPinBlockedError):
+                            log_metric(
+                                "error", user_email,
+                                error_type="prompt_pin_blocked",
+                                pin_problem=e.reason,
+                            )
+                        else:
+                            log_metric("error", user_email, error_type="authorization")
+                        recovery = {}
+
+                        if isinstance(e, PromptPinBlockedError):
+                            # Issue #1169: a stored pin blocks this conversation.
+                            # The browser offers the owner's clear on the
+                            # conversation named here (the envelope adds run_id
+                            # and never overwrites it); the text still names the
+                            # API route for clients without that action.
+                            recovery = {
+                                "recovery": PromptPinBlockedError.RECOVERY,
+                                "pin_problem": e.reason,
+                                "conversation_id": e.conversation_id,
+                                **({"prompt_library_pin_revision": e.revision} if e.revision is not None else {}),
+                            }
                         await turn_update_callback({
                             "type": "error",
                             "message": str(e.message if hasattr(e, 'message') else e),
-                            "error_type": "authorization"
+                            "error_type": "authorization",
+                            **recovery,
                         })
                     except asyncio.CancelledError:
                         logger.info("Chat task cancelled by user (stop_streaming)")

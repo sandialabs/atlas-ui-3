@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from copy import deepcopy
 from enum import Enum
 from typing import (
     Any,
@@ -13,6 +14,7 @@ from typing import (
 )
 from uuid import UUID, uuid4
 
+from atlas.application.chat import prompt_library_turn as library_turn
 from atlas.core.log_sanitizer import sanitize_for_logging
 from atlas.core.telemetry import hash_short, start_span
 from atlas.core.user_identity import normalize_user_email
@@ -29,6 +31,7 @@ from atlas.domain.conversation_origin import (
 )
 from atlas.domain.errors import (
     AuthorizationError,
+    ConversationMetadataUnreadableError,
     DomainError,
     SessionConflictError,
     SessionNotFoundError,
@@ -141,6 +144,7 @@ class ChatService:
         event_publisher: Optional[EventPublisher] = None,
         session_repository: Optional[SessionRepository] = None,
         conversation_repository: Optional[Any] = None,
+        prompt_library_service: Optional[Any] = None,
     ):
         """
         Initialize chat service with dependencies.
@@ -187,6 +191,9 @@ class ChatService:
 
         # Chat history persistence (None when feature disabled)
         self.conversation_repository = conversation_repository
+        # Team prompt library (issue #1169); None when the feature is off,
+        # which makes any library reference on a turn fail closed.
+        self.prompt_library_service = prompt_library_service
         if self.conversation_repository is not None and not callable(
             getattr(self.conversation_repository, "get_conversation_owner", None)
         ):
@@ -698,6 +705,9 @@ class ChatService:
                 previous_conversation_id != conversation_id
                 or not session.history.messages
                 or (kwargs.get("compact_only") and not _has_save_floor(session))
+                # An earlier load failed and left the team-prompt pin unknown
+                # (issue #1169): retry until the store settles it.
+                or session.context.get(library_turn.PIN_UNKNOWN_CONTEXT_KEY)
             ):
                 # This session is not already carrying the conversation the turn
                 # names. Load it from the store before running the turn.
@@ -797,6 +807,44 @@ class ChatService:
         self._enforce_conversation_classification(
             session, active_classification, user_email
         )
+
+        # Team prompt library (issue #1169): a shared entry is resolved here,
+        # server-side, from a reference -- never from client text -- after a
+        # fresh authorization check, and the exact version is pinned to the
+        # conversation. A refusal raises before the turn runs or is saved.
+        try:
+            library_text = await library_turn.resolve_library_prompt_for_turn(
+                context=session.context,
+                user_email=user_email,
+                request=kwargs.pop("library_prompt", UNSET),
+                # A persona counts as another prompt for direct callers too (the
+                # WebSocket also rejects the combination on the raw frame).
+                other_prompt_selected=(
+                    isinstance(kwargs.get("custom_system_prompt"), str)
+                    and bool(kwargs["custom_system_prompt"].strip())
+                ) or kwargs.get("persona_id") not in (None, ""),
+                library=getattr(self, "prompt_library_service", None),
+                message_index=len(session.history.messages),
+                omitted=UNSET,
+                load_metadata=self._conversation_metadata_loader(session, user_email),
+                store_pin=self._conversation_pin_writer(session, user_email, turn_is_incognito),
+                # The pin revision the client last saw (optional): a pin change
+                # decided on an older one is refused, not applied blindly.
+                observed_revision=kwargs.pop("library_prompt_revision", None),
+            )
+        finally:
+            # A pin change this turn committed is reported now, before the
+            # model runs: the end-of-turn save is minutes away for an agent
+            # run and never comes for a turn that fails, and until the client
+            # hears the new revision its next change would look stale.
+            pin_frame = library_turn.pin_state_frame(session.context)
+        if pin_frame is not None and update_callback:
+            try:
+                await update_callback(pin_frame)
+            except Exception:  # pragma: no cover - a closed socket must not fail the turn
+                logger.debug("Could not send the prompt pin state frame", exc_info=True)
+        if library_text is not None:
+            kwargs["custom_system_prompt"] = library_text
 
         # Compliance for this turn. The active conversation classification --
         # the client-selected level, validated against the definitions -- is
@@ -1108,7 +1156,7 @@ class ChatService:
             and user_email
         ):
             try:
-                saved = self._save_conversation(
+                saved = await self._save_conversation(
                     session,
                     user_email,
                     model,
@@ -1125,6 +1173,11 @@ class ChatService:
                         await update_callback({
                             "type": "conversation_saved",
                             "conversation_id": conv_id,
+                            # The pin and revision the save committed (issue
+                            # #1169), read back from the saved record -- never
+                            # this session's view, which a concurrent change
+                            # can have made stale.
+                            **library_turn.persisted_pin_fields(session.context),
                         })
                     else:
                         await update_callback({
@@ -1271,6 +1324,8 @@ class ChatService:
                     SAVE_FLOOR_CONTEXT_KEY, conv_class.SESSION_BINDING_KEY,
                     "workspace_id", "incognito"):
             session.context.pop(key, None)
+        # A new conversation must never inherit the previous prompt pin.
+        library_turn.clear_pin(session.context)
         self._incognito_save_floor.pop(session.id, None)
         self._save_floor_locked.discard(session.id)
         session.history.messages.clear()
@@ -1394,6 +1449,8 @@ class ChatService:
         # display-only fallback and is NOT persisted back.
         canonical_messages = messages
         stored_workspace_id = None
+        stored_metadata = None
+        metadata_unreadable = False
         binding = None
         if getattr(self, "conversation_repository", None) is not None:
             # A conversation with a run in flight is ahead of its stored
@@ -1423,6 +1480,8 @@ class ChatService:
             conv_metadata = conv.get("metadata")
             if isinstance(conv_metadata, dict):
                 stored_workspace_id = conv_metadata.get("workspace_id")
+                stored_metadata = conv_metadata
+            metadata_unreadable = bool(conv.get("metadata_unreadable"))
             binding = conv_class.binding_from_record(conv)
 
         if compliance_level is not UNSET:
@@ -1468,6 +1527,12 @@ class ChatService:
         # inherit whatever the session was carrying.
         session.context["workspace_id"] = stored_workspace_id
         session.context[conv_class.SESSION_BINDING_KEY] = binding
+        # The exact library version the conversation ran with (issue #1169).
+        # Unreadable stored metadata leaves it unknown -- never "no pin".
+        if metadata_unreadable:
+            library_turn.mark_pin_unknown(session.context)
+        else:
+            library_turn.load_pin_from_metadata(session.context, stored_metadata)
 
         # Load previous messages into session history for LLM context. Shared
         # with the rehydrate-on-reconnect path so both produce identical
@@ -1913,6 +1978,93 @@ class ChatService:
             return False
         return bool(session.context.get("rewind_removed"))
 
+    def _conversation_metadata_loader(self, session: Session, user_email: Optional[str]):
+        """Reads the bound conversation's stored metadata, or None without a store.
+
+        Lets a turn see a pin cleared elsewhere (issue #1169). The read is
+        owner-filtered and skips the messages.
+        """
+        repository = self.conversation_repository
+        conversation_id = session.context.get("conversation_id")
+        if repository is None or not user_email or not isinstance(conversation_id, str):
+            return None
+
+        read_metadata = getattr(repository, "get_conversation_metadata", None)
+        if not callable(read_metadata) and not callable(getattr(repository, "get_conversation", None)):
+            # A store that only saves (no reads) has no stored pin to follow.
+            return None
+
+        def read_via_record():
+            # Repositories without the light read: take it from the record.
+            record = repository.get_conversation(conversation_id, user_email)
+            if record is None:
+                return None
+            if record.get("metadata_unreadable"):
+                raise ConversationMetadataUnreadableError()
+            metadata = record.get("metadata")
+            return metadata if isinstance(metadata, dict) else {}
+
+        def read():
+            try:
+                if callable(read_metadata):
+                    return read_metadata(conversation_id, user_email)
+                return read_via_record()
+            except ConversationMetadataUnreadableError:
+                # Legacy compatibility (issue #1169): unreadable metadata says
+                # nothing about a pin, but the pin marker does. A conversation
+                # that was never pinned has no pin to lose, so the pin layer
+                # stands aside and the turn proceeds exactly as it did before
+                # the library existed (the other gates -- data classification,
+                # saves -- still read the damaged record as they always have).
+                # A conversation that has or had a pin stays fail closed.
+                was_pinned = getattr(repository, "conversation_was_pinned", None)
+                if callable(was_pinned) and was_pinned(conversation_id, user_email) is False:
+                    return {}
+                raise
+            except Exception:
+                # The read itself failed (a transient storage error). Before
+                # the library a turn never read this, so refusing would break
+                # conversations that have nothing to do with it. The marker
+                # (a separate, small read) still says whether a pin can exist:
+                # never pinned -> nothing to lose, the turn runs as before;
+                # pinned, or the marker cannot be read either -> fail closed.
+                was_pinned = getattr(repository, "conversation_was_pinned", None)
+                if callable(was_pinned):
+                    try:
+                        never_pinned = was_pinned(conversation_id, user_email) is False
+                    except Exception:
+                        never_pinned = False
+                    if never_pinned:
+                        logger.warning(
+                            "Conversation metadata read failed; its pin marker shows no pin, so the turn proceeds"
+                        )
+                        return {}
+                raise
+
+        async def load():
+            return await asyncio.to_thread(read)
+
+        return load
+
+    def _conversation_pin_writer(self, session: Session, user_email: Optional[str], is_incognito: bool):
+        """Compare-and-sets the bound conversation's stored pin (issue #1169).
+
+        None when the turn is not persisted (no store, incognito) or the
+        repository has no pin writes: the change then lives in the session.
+        """
+        repository = self.conversation_repository
+        conversation_id = session.context.get("conversation_id")
+        change = getattr(repository, "change_prompt_pin", None)
+        if is_incognito or not callable(change) or not user_email or not isinstance(conversation_id, str):
+            return None
+
+        async def store(expected_revision, pin, history_entry):
+            return await asyncio.to_thread(
+                change, conversation_id, user_email, expected_revision, pin, history_entry
+            )
+
+        return store
+
     async def _hydrate_session_from_store(
         self,
         session: Session,
@@ -1946,6 +2098,9 @@ class ChatService:
             # in place, a later saving turn would create a new conversation
             # marked as launched by the API.
             session.context.pop(ORIGIN_METADATA_KEY, None)
+            # Nor does the previous conversation's team-prompt pin travel.
+            if previous_conversation_id != conversation_id:
+                library_turn.clear_pin(session.context)
             session.context.pop(LAUNCH_RUN_METADATA_KEY, None)
             return 0
 
@@ -1966,6 +2121,9 @@ class ChatService:
         # And for how the conversation was launched (issue #1187).
         previous_origin = session.context.get(ORIGIN_METADATA_KEY, UNSET)
         session.context[ORIGIN_METADATA_KEY] = None
+        # And for the pinned team-library prompt version (issue #1169).
+        previous_pin = library_turn.save_pin_state(session.context)
+        library_turn.clear_pin(session.context)
         previous_launch_run = session.context.get(LAUNCH_RUN_METADATA_KEY, UNSET)
         session.context[LAUNCH_RUN_METADATA_KEY] = None
 
@@ -2022,6 +2180,17 @@ class ChatService:
                 session.context[ORIGIN_METADATA_KEY] = previous_origin
             else:
                 session.context.pop(ORIGIN_METADATA_KEY, None)
+            # The pin likewise: the session's own state when it was already
+            # carrying this conversation (the turn re-reads the record before
+            # running it on a pin). For a conversation it was not carrying, the
+            # pin is *unknown* -- never "none": treating it as absent would
+            # silently run the default prompt in a pinned conversation, with or
+            # without compliance enforcement. The turn is refused until the
+            # record can be read (prompt_library_turn).
+            if previous_conversation_id == conversation_id:
+                session.context.update(previous_pin)
+            else:
+                library_turn.mark_pin_unknown(session.context)
             if (
                 previous_launch_run is not UNSET
                 and previous_conversation_id == conversation_id
@@ -2065,6 +2234,13 @@ class ChatService:
         # Likewise the recorded launch origin, so the live view of a turn on
         # an API conversation reports the same origin as its stored record.
         session.context[ORIGIN_METADATA_KEY] = origin_from_metadata(conv_metadata)
+        # The pinned library version travels with the stored record (#1169).
+        # A record whose metadata could not be decoded leaves the pin unknown:
+        # the turn re-reads it and is refused while it stays unreadable.
+        if conv.get("metadata_unreadable"):
+            library_turn.mark_pin_unknown(session.context)
+        else:
+            library_turn.load_pin_from_metadata(session.context, conv_metadata)
         session.context[LAUNCH_RUN_METADATA_KEY] = launch_run_id_from_metadata(conv_metadata)
         # The stored classification replaces whatever the session carried, and
         # binds even an empty record: it is the conversation's, not the turn's.
@@ -2113,7 +2289,7 @@ class ChatService:
             )
         return loaded
 
-    def _save_conversation(
+    async def _save_conversation(
         self,
         session: Session,
         user_email: str,
@@ -2194,6 +2370,8 @@ class ChatService:
             "agent_mode": bool(session.context.get("agent_mode")),
             "workspace_id": session.context.get("workspace_id"),
         }
+        # Server-managed pin of the team-library version in use (issue #1169).
+        metadata.update(library_turn.pin_metadata(session.context))
         # A launched sub-conversation's durable parent link (issue #1081).
         # Only the launch path sets this context key; a normal conversation has
         # none, and an unrelated conversation rehydrated into this session
@@ -2219,15 +2397,40 @@ class ChatService:
         if classification is not ...:
             metadata[conv_class.CLASSIFICATION_METADATA_KEY] = classification
 
-        record = self.conversation_repository.save_conversation(
+        # Snapshot the write arguments on the event loop. The worker
+        # owns only the database operation, not the live session.
+        save_task = asyncio.create_task(asyncio.to_thread(
+            self.conversation_repository.save_conversation,
             conversation_id=conv_id,
             user_email=normalize_user_email(user_email),
             title=title,
             model=model,
-            messages=messages,
-            metadata=metadata,
+            messages=deepcopy(messages),
+            metadata=deepcopy(metadata),
             allow_shrink=allow_shrink,
-        )
+        ))
+        cancelled = False
+        while True:
+            try:
+                record = await asyncio.shield(save_task)
+                break
+            except asyncio.CancelledError:
+                if save_task.cancelled():
+                    raise
+                # A worker cannot be interrupted by cancelling its waiter.
+                # Drain it before cancelled-turn cleanup can retry the save.
+                cancelled = True
+            except Exception as exc:
+                if cancelled:
+                    _record_persist_failure(exc)
+                    raise asyncio.CancelledError from exc
+                raise
+        if record is not None:
+            # The committed pin state (issue #1169): the save carried the
+            # stored pin through, which may differ from this session's view.
+            library_turn.adopt_persisted_pin(session.context, getattr(record, "metadata_json", None))
+        if cancelled:
+            raise asyncio.CancelledError
         if record is None:
             logger.warning(
                 "Conversation %s save rejected by repository (owned by another "

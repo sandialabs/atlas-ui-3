@@ -253,6 +253,7 @@ export function cleanupStreamState() {
  * @param {Function} [deps.getVisibleConversationId] - Returns the conversation currently on screen, used to route background run events (issue #884).
  * @param {Function} [deps.onRunStatus] - Receives run lifecycle frames (run_started / run_status / runs_snapshot).
  * @param {Function} [deps.onConversationSaved] - Called with the id when the conversation on screen is persisted.
+ * @param {Function} [deps.onPromptPinState] - Called with a frame carrying the stored team-prompt pin and its revision (issue #1169).
  * @param {Function} [deps.onContextUsage] - Receives `context_usage` estimates (issue #877).
  * @param {Function} [deps.onContextCompaction] - Receives `context_compaction` progress frames (issue #877).
  * @returns {Function} A handler function that processes incoming WebSocket messages.
@@ -318,6 +319,7 @@ export function createWebSocketHandler(deps) {
     retrySteer,
     onRunStatus,
     onConversationSaved,
+    onPromptPinState,
     onContextUsage,
     onContextCompaction,
   } = deps
@@ -948,15 +950,38 @@ export function createWebSocketHandler(deps) {
           }
           break
         }
+        case 'prompt_pin_state': {
+          // Issue #1169: this turn committed a team-prompt pin change. The new
+          // revision arrives now, not with the end-of-turn save, so the next
+          // change is decided on it.
+          if (typeof onPromptPinState === 'function' && 'prompt_library_pin_revision' in data) {
+            onPromptPinState(data)
+          }
+          break
+        }
         case 'conversation_saved': {
+          // Preserve Sandia's run-persistence notification.
           if (data.run_id && typeof onRunStatus === 'function') {
             onRunStatus({ type: 'run_saved', run_id: data.run_id, conversation_id: data.conversation_id })
           }
-          if (data.conversation_id && typeof setActiveConversationId === 'function') {
+
+          // Background saves must not replace the visible conversation.
+          const visibleId = typeof getVisibleConversationId === 'function'
+            ? getVisibleConversationId()
+            : null
+          if (
+            data.conversation_id &&
+            (!visibleId || data.conversation_id === visibleId) &&
+            typeof setActiveConversationId === 'function'
+          ) {
             setActiveConversationId(data.conversation_id)
           }
+
           if (data.conversation_id && typeof onConversationSaved === 'function') {
             onConversationSaved(data.conversation_id)
+          }
+          if (typeof onPromptPinState === 'function' && 'prompt_library_pin_revision' in data) {
+            onPromptPinState(data)
           }
           break
         }
@@ -1068,6 +1093,11 @@ export function createWebSocketHandler(deps) {
             })
             break
           }
+          // The conversation's team prompt changed elsewhere (issue #1169):
+          // adopt the stored selection, then report the refusal as usual.
+          if (data.error_type === 'prompt_pin_conflict' && typeof onPromptPinState === 'function') {
+            onPromptPinState(data)
+          }
           setIsThinking(false)
           clearAgentRunning()
           if (typeof setIsSynthesizing === 'function') setIsSynthesizing(false)
@@ -1080,7 +1110,24 @@ export function createWebSocketHandler(deps) {
           if (typeof onContextCompaction === 'function' && data.error_type !== 'compaction_in_progress') {
             onContextCompaction({ status: 'failed', silent: true })
           }
-          addMessage({ role: 'system', content: `Error: ${data.message}`, timestamp: new Date().toISOString() })
+          addMessage({
+            role: 'system',
+            content: `Error: ${data.message}`,
+            timestamp: new Date().toISOString(),
+            // A stored team-prompt pin blocks the conversation (issue #1169):
+            // offer its owner the clear, for the conversation the server named.
+            ...(data.recovery === 'clear_team_prompt' && typeof data.conversation_id === 'string' && data.conversation_id
+              ? {
+                  recovery: {
+                    action: 'clear_team_prompt',
+                    conversationId: data.conversation_id,
+                    problem: data.pin_problem || null,
+                    // The pin revision the refusal saw: the clear is refused if it moved since.
+                    revision: Number.isInteger(data.prompt_library_pin_revision) ? data.prompt_library_pin_revision : null,
+                  },
+                }
+              : {}),
+          })
           break
         case 'agent_step_update':
           setCurrentAgentStep(data.current_step)
