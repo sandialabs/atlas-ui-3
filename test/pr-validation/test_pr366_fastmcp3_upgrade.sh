@@ -45,11 +45,11 @@ else
     ((FAIL++))
 fi
 
-# 2. Verify pyproject.toml requires >=3.0.0
+# 2. Verify pyproject.toml constraint (raised to FastMCP 4 by PR #1254)
 echo ""
 echo "-- Checking pyproject.toml constraint --"
-check "pyproject.toml requires fastmcp>=3.0.0" \
-    grep -q 'fastmcp>=3.0.0' "$PROJECT_ROOT/pyproject.toml"
+check "pyproject.toml requires fastmcp[tasks]>=4.2.6,<5.0.0" \
+    grep -qF '"fastmcp[tasks]>=4.2.6,<5.0.0"' "$PROJECT_ROOT/pyproject.toml"
 
 # 3. Verify core imports work
 echo ""

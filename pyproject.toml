@@ -33,9 +33,16 @@ dependencies = [
     # Floor is the first 4.x line Atlas's task and elicitation paths were
     # validated against (issue #905).
     "fastmcp[tasks]>=4.2.6,<5.0.0",
+    # Imported directly (tasks client extension, task models), not only
+    # through fastmcp. Released in lockstep with fastmcp.
+    "fastmcp-tasks>=4.2.6,<5.0.0",
     "httpx>=0.28.1,<1.0.0",
     "itsdangerous>=2.0.0,<3.0.0",
     "litellm>=1.90.0,<2.0.0",
+    # MCP SDK 2.x: imported directly for protocol models and the client
+    # extension interface. 2.3.0 is the version validated with fastmcp 4.2.6.
+    "mcp>=2.3.0,<3.0.0",
+    "mcp-types>=2.3.0,<3.0.0",
     "opentelemetry-api>=1.0.0,<2.0.0",
     "opentelemetry-exporter-otlp>=1.0.0,<2.0.0",
     "opentelemetry-instrumentation-fastapi>=0.48b0,<1.0.0",

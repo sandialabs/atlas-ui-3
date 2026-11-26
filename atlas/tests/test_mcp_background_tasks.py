@@ -154,6 +154,28 @@ class TestSlowTaskAnnouncement:
             await manager.call_tool("srv", "tool", {}, conversation_id="conv-1", update_cb=update_cb)
 
     @pytest.mark.asyncio
+    async def test_announcement_fires_before_a_shorter_call_timeout(self, manager, monkeypatch):
+        """MCP_CALL_TIMEOUT <= MCP_TASK_TIMEOUT must not silence the announcement."""
+        from atlas.modules.mcp_tools import client as client_module
+
+        monkeypatch.setattr(
+            client_module.config_manager.app_settings, "mcp_call_timeout", 0.4
+        )
+        manager._task_timeout = 10  # longer than the whole call is allowed to take
+        client = _client(tasked=True, duration=5)
+        _use(manager, client)
+        update_cb = AsyncMock()
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            await manager.call_tool(
+                "srv", "tool", {}, conversation_id="conv-1",
+                meta={"tool_call_id": "call_1"}, update_cb=update_cb,
+            )
+
+        types = [c.args[0]["type"] for c in update_cb.call_args_list]
+        assert types == ["tool_task_started", "tool_task_completed"]
+
+    @pytest.mark.asyncio
     async def test_cancellation_propagates_and_closes_the_announcement(self, manager):
         client = _client(tasked=True, duration=5)
         _use(manager, client)

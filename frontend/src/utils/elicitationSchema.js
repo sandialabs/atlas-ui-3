@@ -103,6 +103,11 @@ function isUnansweredList(field, value) {
   return field.type === 'multiselect' && Array.isArray(value) && value.length === 0 && field.minItems > 0
 }
 
+// An optional field the user left alone, which is omitted from the answer.
+function isUnanswered(field, value) {
+  return !field.required && (isBlank(value) || isUnansweredList(field, value))
+}
+
 /** Whether one field holds an answer the server's schema will accept. */
 export function isFieldValid(field, value) {
   if (field.type === 'none' || field.type === 'boolean') return true
@@ -148,12 +153,16 @@ export function buildResponseData(fields, formData) {
   const inputs = fields.filter(field => field.type !== 'none')
   if (inputs.length === 0) return null
   if (inputs.length === 1 && inputs[0].name === 'value') {
+    // An optional value left blank answers with an empty object, not `""`:
+    // the backend wraps a bare value as {value: ...}, and a blank number or
+    // choice there fails the schema and with it the whole tool call.
+    if (isUnanswered(inputs[0], formData.value)) return {}
     return wireValue(inputs[0], formData.value)
   }
   const data = {}
   inputs.forEach(field => {
     const value = formData[field.name]
-    if (!field.required && (isBlank(value) || isUnansweredList(field, value))) return
+    if (isUnanswered(field, value)) return
     data[field.name] = wireValue(field, value)
   })
   return data

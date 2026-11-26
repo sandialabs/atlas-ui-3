@@ -149,6 +149,20 @@ describe('buildResponseData', () => {
     expect(data).toEqual({ title: 'Dr', subscribed: false })
   })
 
+  it('answers an empty object for an optional single value left blank', () => {
+    const number = parseResponseSchema(schemaOf({ value: { type: 'number' } }))
+    expect(isFormValid(number, initialFormData(number))).toBe(true)
+    expect(buildResponseData(number, initialFormData(number))).toEqual({})
+
+    const choice = parseResponseSchema(schemaOf({ value: { type: 'string', enum: ['a', 'b'] } }))
+    expect(buildResponseData(choice, initialFormData(choice))).toEqual({})
+
+    // Answered, or required, still sends the bare value.
+    expect(buildResponseData(number, { value: 4 })).toBe(4)
+    const required = parseResponseSchema(schemaOf({ value: { type: 'string' } }, ['value']))
+    expect(buildResponseData(required, { value: 'x' })).toBe('x')
+  })
+
   it('omits an unanswered optional list the schema would reject', () => {
     const fields = parseResponseSchema(schemaOf({
       title: { type: 'string' },

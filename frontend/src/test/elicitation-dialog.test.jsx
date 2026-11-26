@@ -3,7 +3,7 @@
  * Tests user input collection for MCP tool elicitation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ElicitationDialog from '../components/ElicitationDialog'
@@ -537,5 +537,56 @@ describe('ElicitationDialog - URL Requests', () => {
       data: null
     })
     expect(openSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('ElicitationDialog - Queued Questions', () => {
+  let rectsSpy
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useChat.mockReturnValue({ sendMessage: vi.fn(() => true), settleElicitation: vi.fn() })
+    // jsdom has no layout; the focus trap only targets elements that render.
+    rectsSpy = vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}])
+  })
+
+  afterEach(() => {
+    rectsSpy.mockRestore()
+  })
+
+  const question = (id, message, properties, required = []) => ({
+    elicitation_id: id,
+    tool_name: 'survey',
+    message,
+    response_schema: { type: 'object', properties, required }
+  })
+
+  it('moves focus into the next question when it replaces the answered one', () => {
+    const first = question('q-1', 'Confirm the order?', {})
+    const second = question('q-2', 'What is your name?', { value: { type: 'string' } }, ['value'])
+
+    const { rerender } = render(<ElicitationDialog elicitation={first} />)
+    const firstAccept = screen.getByRole('button', { name: /accept/i })
+    expect(firstAccept).toHaveFocus()
+
+    rerender(<ElicitationDialog elicitation={second} />)
+
+    // The old Accept button is gone, and focus sits in the new question's
+    // field, so a stray Enter cannot accept a question the user has not read.
+    expect(firstAccept).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveFocus()
+    expect(screen.getByRole('button', { name: /accept/i })).not.toHaveFocus()
+  })
+
+  it('starts the next question with empty fields', async () => {
+    const first = question('q-1', 'First name?', { value: { type: 'string' } }, ['value'])
+    const second = question('q-2', 'Last name?', { value: { type: 'string' } }, ['value'])
+
+    const { rerender } = render(<ElicitationDialog elicitation={first} />)
+    await userEvent.type(screen.getByRole('textbox'), 'Ada')
+    rerender(<ElicitationDialog elicitation={second} />)
+
+    expect(screen.getByRole('textbox')).toHaveValue('')
+    expect(screen.getByRole('button', { name: /accept/i })).toBeDisabled()
   })
 })

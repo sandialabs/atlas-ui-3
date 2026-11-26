@@ -270,18 +270,26 @@ class ExecutionMixin:
         FastMCP polls a server-side background task (SEP-2663) to completion
         inside ``call_tool``, so the call looks the same either way. When the
         server did task the call and it is still running after
-        ``MCP_TASK_TIMEOUT`` seconds, ``tool_task_started`` is sent, and
+        ``MCP_TASK_TIMEOUT`` seconds (at most half the call timeout),
+        ``tool_task_started`` is sent, and
         ``tool_task_completed`` when the call ends. The whole call is bounded
         by ``call_timeout``; a call that times out or is cancelled has its
         server-side task cancelled by ``AtlasTasksClientExtension``.
         """
         tracker = TaskCallTracker()
         announced = False
+        # Kept below the call timeout, or a deployment with
+        # MCP_CALL_TIMEOUT <= MCP_TASK_TIMEOUT would cancel every slow task
+        # before it could be announced.
+        try:
+            announce_after = max(0.0, min(float(self._task_timeout), float(call_timeout) / 2))
+        except (TypeError, ValueError):
+            announce_after = self._task_timeout
 
         async def _announce_when_slow() -> None:
             nonlocal announced
             await tracker.created.wait()
-            await asyncio.sleep(self._task_timeout)
+            await asyncio.sleep(announce_after)
             announced = True
             try:
                 await update_cb({

@@ -803,6 +803,17 @@ export function createWebSocketHandler(deps) {
           }))
           break
         }
+        case 'tool_task_started': {
+          // The MCP server is running this call as a background task and it
+          // has been going for a while. The row stays open; it only says so.
+          mapMessages(prev => mapToolRows(prev, data, { backgroundTask: true }))
+          break
+        }
+        case 'tool_task_completed': {
+          // The task ended. The outcome arrives as tool_complete or tool_error.
+          mapMessages(prev => mapToolRows(prev, data, { backgroundTask: false }))
+          break
+        }
         case 'tool_complete': {
           if (isCanvasTool(data.tool_name)) {
             noteCanvasArtifact(mapMessages, data, '', data.success ? 'completed' : 'failed')

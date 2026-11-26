@@ -22,7 +22,7 @@ import {
  * - URL requests, where the server asks the user to open an external page
  * - Accept/Decline/Cancel actions
  */
-const ElicitationDialog = ({ elicitation }) => {
+const ElicitationForm = ({ elicitation }) => {
   const { sendMessage, settleElicitation } = useChat()
   const [formData, setFormData] = useState({})
   const [sendFailed, setSendFailed] = useState(false)
@@ -326,5 +326,15 @@ const FormField = ({ field, value, onChange }) => {
     </div>
   )
 }
+
+/**
+ * One dialog per question. Keyed on the request id so that when a queued
+ * question takes the place of the one just answered it mounts fresh: its
+ * fields start empty and focus moves into it, instead of staying on the
+ * previous question's button where the next Enter would answer this one unseen.
+ */
+const ElicitationDialog = ({ elicitation }) => (
+  <ElicitationForm key={elicitation.elicitation_id} elicitation={elicitation} />
+)
 
 export default ElicitationDialog

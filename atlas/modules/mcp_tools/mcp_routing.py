@@ -98,11 +98,13 @@ def _form_content(data: Any, response_schema: Any) -> Dict[str, Any]:
     content against the requested schema, so a blank optional enum or number
     would otherwise fail the whole tool call.
     """
-    if not isinstance(data, dict):
-        return {"value": data}
     required: set = set()
     if isinstance(response_schema, dict):
         required = set(response_schema.get("required") or [])
+    if not isinstance(data, dict):
+        if data == "" and "value" not in required:
+            return {}
+        return {"value": data}
     return {
         key: value
         for key, value in data.items()
@@ -238,13 +240,30 @@ class RoutingMixin:
         """
         routing = _ElicitationRoutingContext(server_name, tool_call, update_cb, user_email)
         routing_key = (server_name, tool_call.id)
-        self._elicitation_routing[routing_key] = routing
+        # Tool call ids come from the model provider and are not guaranteed
+        # unique across users. Two live calls sharing a key cannot be told
+        # apart, so the key is poisoned until every holder has left and
+        # neither call can be prompted through it.
+        holders = self.__dict__.setdefault("_elicitation_routing_holders", {})
+        holders[routing_key] = holders.get(routing_key, 0) + 1
+        if holders[routing_key] == 1:
+            self._elicitation_routing[routing_key] = routing
+        else:
+            logger.warning(
+                "Two live tool calls share id '%s' on server '%s'; elicitation is disabled for both",
+                sanitize_for_logging(tool_call.id),
+                sanitize_for_logging(server_name),
+            )
+            self._elicitation_routing[routing_key] = AMBIGUOUS_ROUTING
         token = _ACTIVE_ELICITATION_ROUTING.set(routing)
         try:
             yield
         finally:
             _ACTIVE_ELICITATION_ROUTING.reset(token)
-            self._elicitation_routing.pop(routing_key, None)
+            holders[routing_key] -= 1
+            if holders[routing_key] <= 0:
+                holders.pop(routing_key, None)
+                self._elicitation_routing.pop(routing_key, None)
 
     def _client_input_kwargs(self, server_name: str) -> Dict[str, Any]:
         """Client() arguments that let a server ask the user for input.
@@ -414,9 +433,19 @@ class RoutingMixin:
 
         On a handshake-era session the request arrives over the back-channel,
         in the receive loop's task, where the contextvar says nothing about
-        which call asked. There the composite (server_name, tool_call_id) key
-        from the request meta is tried first, then a single-match scan.
-        Returns None if unresolvable.
+        which call asked and the protocol carries no reference to the
+        originating ``tools/call``. Routing is therefore only attempted when
+        the answer is unambiguous:
+
+        - exactly one call is live on this server: that call raised it;
+        - several are live and the request meta names one of them by
+          ``tool_call_id``: that one (the id is the one Atlas sent with the
+          call, echoed back by the server).
+
+        Everything else is refused: a meta id that matches no live call is
+        never redirected to whichever call happens to be alone, several live
+        calls with no usable id are ambiguous, and so is any key two live
+        calls share. Returns None or AMBIGUOUS_ROUTING when refused.
         """
         if _is_modern_session(context):
             active = _ACTIVE_ELICITATION_ROUTING.get()
@@ -435,17 +464,29 @@ class RoutingMixin:
         elif meta is not None:
             tcid = (getattr(meta, "model_extra", None) or {}).get("tool_call_id")
 
-        routing = routing_dict.get((server_name, tcid))
+        matches = [v for (srv, _), v in routing_dict.items() if srv == server_name]
+        if any(v is AMBIGUOUS_ROUTING for v in matches):
+            logger.warning(
+                "Elicitation for server '%s' refused: live tool calls share an id",
+                sanitize_for_logging(server_name),
+            )
+            return AMBIGUOUS_ROUTING
 
-        if routing is None:
-            matches = [v for (srv, _), v in routing_dict.items() if srv == server_name]
-            if len(matches) == 1:
-                routing = matches[0]
-            elif len(matches) > 1:
+        if tcid is not None:
+            routing = routing_dict.get((server_name, tcid))
+            if routing is None:
                 logger.warning(
-                    "Ambiguous routing for server '%s' with %d entries",
-                    server_name, len(matches),
+                    "Elicitation for server '%s' names a tool call that is not live; refused",
+                    sanitize_for_logging(server_name),
                 )
-                return AMBIGUOUS_ROUTING
+            return routing
 
-        return routing
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            logger.warning(
+                "Ambiguous routing for server '%s' with %d entries",
+                sanitize_for_logging(server_name), len(matches),
+            )
+            return AMBIGUOUS_ROUTING
+        return None

@@ -138,7 +138,8 @@ Other good practice:
 - Tools receive `accept`, `decline` or `cancel`, plus the data on accept.
 - The FastMCP client checks an accepted answer against the schema the tool asked for; an answer that does not fit fails the tool call. The dialog enforces required fields, integer values and ranges before it lets you accept. Optional fields left blank are omitted from the answer.
 - A request is bound to the user whose tool call raised it. A response from anyone else is rejected (`ElicitationRequest.user_email`).
-- On a 2026-07-28 connection a prompt is always delivered to the tool call that asked, because Atlas answers from inside that call. On an older connection the request arrives separately; if more than one call to the same server is in flight and the request does not say which one it belongs to, Atlas cancels it rather than guess.
+- On a 2026-07-28 connection a prompt is always delivered to the tool call that asked, because Atlas answers from inside that call. On an older connection the request arrives separately; if more than one call to the same server is in flight and the request does not say which one it belongs to, or it names a call that is not in flight, Atlas cancels it rather than guess. Two calls in flight with the same tool call id are never prompted.
+- A long-running call that the server runs as a background task is marked "running in the background" on its tool row after `MCP_TASK_TIMEOUT` seconds.
 - An empty schema (confirmation only) is still supported for servers that send one.
 
 ## Troubleshooting

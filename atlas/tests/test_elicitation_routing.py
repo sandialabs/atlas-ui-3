@@ -487,6 +487,84 @@ class TestRoundTripRouting:
         assert ambiguous is AMBIGUOUS_ROUTING
         assert by_meta.tool_call.id == "call_2"
 
+    @pytest.mark.asyncio
+    async def test_legacy_meta_naming_no_live_call_is_not_redirected(self, manager):
+        """A request naming a call that is not live must not reach the one that is."""
+        bystander = ToolCall(id="call_1", name="tool_a", arguments={})
+
+        async with manager._use_elicitation_context("srv", bystander, AsyncMock(), "a@example.com"):
+            routing = manager._resolve_routing(
+                manager._elicitation_routing,
+                "srv",
+                _session_context(self.LEGACY, meta={"tool_call_id": "call_gone"}),
+            )
+
+        assert routing is None
+
+    @pytest.mark.asyncio
+    async def test_legacy_handler_cancels_a_request_for_an_unknown_call(self, manager):
+        update_cb = AsyncMock()
+        bystander = ToolCall(id="call_1", name="tool_a", arguments={})
+        handler = manager._create_elicitation_handler("srv")
+
+        async with manager._use_elicitation_context("srv", bystander, update_cb, "a@example.com"):
+            result = await handler(
+                "Password?", str, MagicMock(),
+                _session_context(self.LEGACY, meta={"tool_call_id": "call_gone"}),
+            )
+
+        assert result.action == "cancel"
+        update_cb.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("meta", [None, {"tool_call_id": "call_1"}])
+    async def test_two_live_calls_sharing_an_id_are_both_refused(self, manager, meta):
+        """Tool call ids are provider-generated; a collision must not cross users."""
+        from atlas.modules.mcp_tools.mcp_routing import AMBIGUOUS_ROUTING
+
+        alice_cb, bob_cb = AsyncMock(), AsyncMock()
+        alice = ToolCall(id="call_1", name="tool_a", arguments={})
+        bob = ToolCall(id="call_1", name="tool_a", arguments={})
+        handler = manager._create_elicitation_handler("srv")
+
+        async with manager._use_elicitation_context("srv", alice, alice_cb, "alice@example.com"):
+            async with manager._use_elicitation_context("srv", bob, bob_cb, "bob@example.com"):
+                legacy = manager._resolve_routing(
+                    manager._elicitation_routing, "srv", _session_context(self.LEGACY, meta=meta)
+                )
+                modern = manager._resolve_routing(
+                    manager._elicitation_routing, "srv", _session_context(self.MODERN)
+                )
+                result = await handler("Password?", str, MagicMock(), _session_context(self.LEGACY, meta=meta))
+            # Still poisoned while one holder remains: Alice's entry was
+            # overwritten, so it cannot be trusted again for this call.
+            after_one_left = manager._resolve_routing(
+                manager._elicitation_routing, "srv", _session_context(self.LEGACY, meta=meta)
+            )
+
+        assert legacy is AMBIGUOUS_ROUTING
+        assert modern is None
+        assert result.action == "cancel"
+        assert after_one_left is AMBIGUOUS_ROUTING
+        alice_cb.assert_not_awaited()
+        bob_cb.assert_not_awaited()
+        assert manager._elicitation_routing == {}
+
+    @pytest.mark.asyncio
+    async def test_a_collision_on_one_server_does_not_disable_another(self, manager):
+        first = ToolCall(id="call_1", name="tool_a", arguments={})
+        second = ToolCall(id="call_1", name="tool_a", arguments={})
+        other = ToolCall(id="call_1", name="tool_b", arguments={})
+
+        async with manager._use_elicitation_context("srv", first, AsyncMock(), "a@example.com"):
+            async with manager._use_elicitation_context("srv", second, AsyncMock(), "b@example.com"):
+                async with manager._use_elicitation_context("other", other, AsyncMock(), "c@example.com"):
+                    routing = manager._resolve_routing(
+                        manager._elicitation_routing, "other", _session_context(self.LEGACY)
+                    )
+
+        assert routing.tool_call is other
+
 
 class TestElicitationModes:
     """Form content shaping and URL-mode requests."""
@@ -561,6 +639,24 @@ class TestElicitationModes:
 
         # A required field is sent even when blank; False is a real answer.
         assert result.content == {"title": "", "subscribed": False}
+
+    @pytest.mark.asyncio
+    async def test_blank_optional_single_value_is_left_out(self, manager):
+        """A bare "" for an optional scalar must not be sent as {"value": ""}."""
+        from mcp_types import ElicitRequestFormParams
+
+        schema = {"type": "object", "properties": {"value": {"type": "number"}}}
+        params = ElicitRequestFormParams(message="How many?", requested_schema=schema)
+        handler, _ = self._handler(manager)
+
+        for answer in ("", {}):
+            with patch(
+                "atlas.application.chat.elicitation_manager.get_elicitation_manager",
+                return_value=self._answering({"action": "accept", "data": answer}),
+            ):
+                result = await handler("How many?", float, params, None)
+            assert result.action == "accept"
+            assert result.content == {}
 
     @pytest.mark.asyncio
     async def test_unknown_action_is_a_cancel(self, manager):
