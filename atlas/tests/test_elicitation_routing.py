@@ -13,6 +13,11 @@ import pytest
 from atlas.domain.messages.models import ToolCall
 
 
+def _types(callback):
+    """The event types an update callback received, in order."""
+    return [call.args[0]["type"] for call in callback.call_args_list]
+
+
 class TestElicitationRouting:
     """Test elicitation routing context management."""
 
@@ -216,7 +221,7 @@ class TestElicitationHandler:
                     # Handler should route to cb2, not cb1
                     _result = await handler("Pick a color", str, None, mock_context)
                     # cb2 should have been called (routed correctly), cb1 should not
-                    cb2.assert_called_once()
+                    assert _types(cb2) == ["elicitation_request", "elicitation_settled"]
                     cb1.assert_not_called()
                     assert manager._elicitation_routing[("server-x", "call_2")].update_cb is cb2
 
@@ -244,7 +249,7 @@ class TestElicitationHandler:
                 mock_get_mgr.return_value = mock_elicit_mgr
 
                 _result = await handler("Pick a color", str, None, mock_context)
-                cb.assert_called_once()
+                assert _types(cb) == ["elicitation_request", "elicitation_settled"]
                 assert manager._elicitation_routing[("server-x", "call_1")].update_cb is cb
 
     @pytest.mark.asyncio
@@ -309,8 +314,11 @@ class TestElicitationIntegration:
             result = await handler("What's your name?", str, None, None)
 
             # Verify callback was called with elicitation_request
-            mock_callback.assert_called_once()
-            call_args = mock_callback.call_args[0][0]
+            assert _types(mock_callback) == ["elicitation_request", "elicitation_settled"]
+            call_args = mock_callback.call_args_list[0][0][0]
+            settled = mock_callback.call_args_list[1][0][0]
+            assert settled["elicitation_id"] == call_args["elicitation_id"]
+            assert settled["tool_call_id"] == "call_123"
             assert call_args["type"] == "elicitation_request"
             assert call_args["message"] == "What's your name?"
             assert call_args["tool_call_id"] == "call_123"
@@ -607,7 +615,7 @@ class TestElicitationModes:
         ):
             result = await handler("Name?", str, params, None)
 
-        event = callback.call_args[0][0]
+        event = callback.call_args_list[0][0][0]
         assert event["response_schema"] == schema
         assert event["mode"] == "form"
         assert "url" not in event
@@ -684,7 +692,7 @@ class TestElicitationModes:
         ):
             result = await handler("Sign in to continue", None, params, None)
 
-        event = callback.call_args[0][0]
+        event = callback.call_args_list[0][0][0]
         assert event["mode"] == "url"
         assert event["url"] == "https://auth.example.com/start?state=abc"
         assert event["response_schema"] == {}

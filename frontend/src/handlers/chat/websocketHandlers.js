@@ -1229,6 +1229,13 @@ export function createWebSocketHandler(deps) {
             })
           }
           break
+        case 'elicitation_settled':
+          // The question was answered (here, in another tab, or by a timeout
+          // on the server). Take it out of the queue if it is still there.
+          if (typeof settleElicitation === 'function' && data.elicitation_id) {
+            settleElicitation(data.elicitation_id)
+          }
+          break
         case 'intermediate_update':
           handleIntermediateUpdate(data)
           break

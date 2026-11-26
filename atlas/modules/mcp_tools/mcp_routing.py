@@ -365,6 +365,19 @@ class RoutingMixin:
                 action = response.get("action", "cancel")
                 data = response.get("data")
 
+                # Tell the run state and every open client that this question
+                # is settled. The tool call itself is still running, and a
+                # sibling question raised in the same round may still be open.
+                try:
+                    await routing.update_cb({
+                        "type": "elicitation_settled",
+                        "elicitation_id": elicitation_id,
+                        "tool_call_id": routing.tool_call.id,
+                        "tool_name": routing.tool_call.name,
+                    })
+                except Exception:
+                    logger.debug("elicitation_settled update callback failed", exc_info=True)
+
                 if action != "accept":
                     # Anything that is not a recognised refusal is a cancel.
                     return ElicitResult(

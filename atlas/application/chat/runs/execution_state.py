@@ -210,10 +210,13 @@ def _status_for(event: dict) -> Optional[str]:
 
 
 def _request_key(event: dict) -> str:
-    if event.get("invocation_id"):
-        return str(event["invocation_id"])
+    # One tool call may have several questions outstanding at once (an MCP
+    # multi round-trip result can carry more than one), so a question is
+    # keyed by its own id, never by the invocation it shares with its siblings.
     if event.get("elicitation_id"):
         return f"elicitation:{event['elicitation_id']}"
+    if event.get("invocation_id"):
+        return str(event["invocation_id"])
     return f"tool:{event.get('tool_call_id')}"
 
 
@@ -287,6 +290,16 @@ def _drop_settled(doc: dict, event: dict) -> None:
     inv = event.get("invocation_id")
     tool_call_id = event.get("tool_call_id")
     elicitation_id = event.get("elicitation_id")
+    if elicitation_id:
+        # A frame about one question settles that question only. Its siblings
+        # on the same tool call are still waiting for their own answers.
+        drop = [
+            key for key, request in doc["pending_requests"].items()
+            if request.get("elicitation_id") == elicitation_id
+        ]
+        for key in drop:
+            del doc["pending_requests"][key]
+        return
     drop = []
     for key, request in doc["pending_requests"].items():
         if inv and (request.get("invocation_id") == inv or key == inv):
@@ -399,9 +412,9 @@ def apply_event_to_document(doc: dict, event: dict) -> bool:
         return True
     if doc.get("status") in _TERMINAL_RUN:
         return False
-    if event.get("type") == "tool_error" and event.get("elicitation_id"):
-        # An elicitation timeout settles the question, not the tool. The tool
-        # keeps running with a cancelled answer and reports its own result.
+    if event.get("elicitation_id") and event.get("type") in ("tool_error", "elicitation_settled"):
+        # An answered or timed-out elicitation settles the question, not the
+        # tool. The tool keeps running and reports its own result.
         _drop_settled(doc, event)
         doc["updated_at"] = time.time()
         _refresh_activity(doc)

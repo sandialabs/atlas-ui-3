@@ -171,6 +171,58 @@ def test_note_event_matches_elicitation_ids(registry):
     assert registry.get(run.run_id).status == RunStatus.RUNNING
 
 
+def _sibling_questions(registry):
+    run = registry.start(conversation_id="c", user_email=USER)
+    for elicitation_id in ("e1", "e2"):
+        registry.note_event(run.run_id, {
+            "type": "elicitation_request", "tool_call_id": "call_1", "elicitation_id": elicitation_id,
+        })
+    return run
+
+
+def _open_questions(registry):
+    return [r["elicitation_id"] for r in registry.pending_requests_for_conversation("c", USER)]
+
+
+def test_sibling_questions_of_one_tool_call_are_both_stored(registry):
+    _sibling_questions(registry)
+
+    assert _open_questions(registry) == ["e1", "e2"]
+
+
+@pytest.mark.parametrize("settle_type", ["elicitation_settled", "tool_error"])
+def test_a_settle_frame_for_one_question_keeps_its_sibling(registry, settle_type):
+    run = _sibling_questions(registry)
+
+    registry.note_event(run.run_id, {
+        "type": settle_type, "tool_call_id": "call_1", "elicitation_id": "e1",
+    })
+
+    assert _open_questions(registry) == ["e2"]
+    assert registry.get(run.run_id).status == RunStatus.WAITING_FOR_INPUT
+
+
+def test_answering_one_question_keeps_its_sibling(registry):
+    run = _sibling_questions(registry)
+
+    registry.answer_pending_request(run.run_id, tool_call_id="call_1", elicitation_id="e1")
+
+    assert _open_questions(registry) == ["e2"]
+    assert registry.get(run.run_id).status == RunStatus.WAITING_FOR_INPUT
+
+    registry.answer_pending_request(run.run_id, tool_call_id="call_1", elicitation_id="e2")
+    assert registry.get(run.run_id).status == RunStatus.RUNNING
+
+
+def test_a_finished_tool_clears_every_question_it_left_open(registry):
+    run = _sibling_questions(registry)
+
+    registry.note_event(run.run_id, {"type": "tool_complete", "tool_call_id": "call_1"})
+
+    assert _open_questions(registry) == []
+    assert registry.get(run.run_id).status == RunStatus.RUNNING
+
+
 def test_note_event_treats_an_unidentified_settle_as_clearing(registry):
     run = registry.start(conversation_id="c", user_email=USER)
     registry.note_event(run.run_id, {"type": "tool_approval_request", "tool_call_id": "t1"})

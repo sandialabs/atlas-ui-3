@@ -454,6 +454,29 @@ describe('Tool Approval WebSocket Tests', () => {
       expect(messages[1].invocation_id).toBe('run-2:0:call_0')
     })
 
+    it('takes an answered question out of the queue without touching the tool row', () => {
+      let messages = [
+        { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:0:call_0', status: 'in_progress' },
+      ]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      deps.settleElicitation = vi.fn()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'elicitation_settled',
+        elicitation_id: 'e1',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        tool_name: 'ask',
+      })
+      expect(messages[0].status).toBe('in_progress')
+      expect(deps.settleElicitation).toHaveBeenCalledWith('e1')
+      expect(warn).not.toHaveBeenCalled()
+      warn.mockRestore()
+    })
+
     it('settles only the dialog on an elicitation timeout, not the running tool row', () => {
       let messages = [
         { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:0:call_0', status: 'in_progress' },

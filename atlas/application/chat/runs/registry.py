@@ -893,7 +893,7 @@ class RunRegistry:
             self.set_pending_request(run_id, frame)
         elif event_type == "tool_start":
             self._drop_started_approval(run_id, frame)
-        elif event_type in TOOL_SETTLED_EVENTS:
+        elif event_type in TOOL_SETTLED_EVENTS or event_type == "elicitation_settled":
             record = self.get(run_id)
             if record is None or record.status != RunStatus.WAITING_FOR_INPUT:
                 return
@@ -903,6 +903,10 @@ class RunRegistry:
                 for key in ("tool_call_id", "elicitation_id")
                 if frame.get(key) is not None
             }
+            if "elicitation_id" in frame_ids:
+                # A frame about one question clears that question only: the
+                # same tool call may have sibling questions outstanding.
+                frame_ids = {"elicitation_id": frame_ids["elicitation_id"]}
             if frame_ids:
                 # Clear only the requests this frame actually answers; a
                 # sibling tool settling while others are still outstanding
@@ -1005,9 +1009,11 @@ class RunRegistry:
             return False
 
         def _is_answered(request: Dict[str, Any]) -> bool:
+            if elicitation_id is not None:
+                # An elicitation answer names one question. Matching its tool
+                # call as well would drop sibling questions of the same call.
+                return request.get("elicitation_id") == elicitation_id
             if tool_call_id is not None and request.get("tool_call_id") == tool_call_id:
-                return True
-            if elicitation_id is not None and request.get("elicitation_id") == elicitation_id:
                 return True
             return False
 
