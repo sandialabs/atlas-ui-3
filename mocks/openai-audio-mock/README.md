@@ -9,9 +9,10 @@ implements the two routes Atlas calls:
 | `POST /v1/audio/transcriptions` | multipart `file`, `model`, optional `language` | `{"text": "..."}` |
 | `POST /v1/audio/speech` | JSON `model`, `input`, `voice`, `response_format` | a WAV tone (`audio/wav`) |
 
-`GET /mock/requests` lists what was received (field values, sizes and the
-SHA-256 of the `Authorization` header, never the credential, the audio or the
-text), and `DELETE /mock/requests` clears the list.
+`GET /mock/requests` lists what was received (field values, sizes and, when
+`MOCK_AUDIO_KEY_LABELS` is set, the label of the credential that arrived;
+never the credential or anything derived from it, the audio or the text), and
+`DELETE /mock/requests` clears the list.
 
 ## Try it
 
@@ -43,6 +44,7 @@ stop and playback speed.
 | -------- | ------ |
 | `MOCK_AUDIO_PORT` | Port to listen on (default `8094`) |
 | `MOCK_AUDIO_API_KEY` | Require `Authorization: Bearer <key>`; pair with `AUDIO_STT_API_KEY` / `AUDIO_TTS_API_KEY` |
+| `MOCK_AUDIO_KEY_LABELS` | `name=key,name=key`: each logged request gets `credential` set to the matching name, `unrecognized`, or `null` when none was sent |
 | `MOCK_AUDIO_DELAY_SECONDS` | Delay every reply, to exercise `AUDIO_*_TIMEOUT_SECONDS` |
 | `MOCK_AUDIO_TRANSCRIPT` | The text every transcription returns |
 

@@ -7,12 +7,13 @@ they can be exercised without a speech model:
   POST /v1/audio/transcriptions   multipart upload -> {"text": "..."}
   POST /v1/audio/speech           JSON -> a short WAV tone
   GET  /health                    -> {"status": "ok"}
-  GET  /mock/requests             -> what was received (fields, sizes and a hash of the credential; no audio or text)
+  GET  /mock/requests             -> what was received (fields, sizes, which known credential; no audio or text)
   DELETE /mock/requests
 
 Environment:
   MOCK_AUDIO_PORT            port to listen on (default 8094)
   MOCK_AUDIO_API_KEY         when set, both audio routes require "Authorization: Bearer <key>"
+  MOCK_AUDIO_KEY_LABELS      "name=key,name=key": the request log names which of these arrived
   MOCK_AUDIO_DELAY_SECONDS   wait this long before answering (to exercise timeouts)
   MOCK_AUDIO_TRANSCRIPT      the text every transcription returns
 
@@ -27,7 +28,7 @@ Run:  python mocks/openai-audio-mock/main.py
 from __future__ import annotations
 
 import asyncio
-import hashlib
+import hmac
 import io
 import math
 import os
@@ -58,15 +59,22 @@ def tone_wav(seconds: float = 1.0, frequency: float = 440.0) -> bytes:
     return buffer.getvalue()
 
 
-def _fingerprint(request: Request) -> Optional[str]:
-    """SHA-256 of the Authorization header, or None when there is none.
+def _credential_label(request: Request) -> Optional[str]:
+    """Which known credential arrived: a label, "unrecognized", or None.
 
-    The request log is readable without a credential, so it records which
-    credential arrived (a test can hash the one it expects) and not the
-    credential itself.
+    The request log is readable without a credential, so it never holds the
+    credential or anything derived from it (a hash of a short key can be
+    guessed offline). A test names the keys it expects in
+    ``MOCK_AUDIO_KEY_LABELS`` ("stt=<key>,tts=<key>") and reads back the label.
     """
     header = request.headers.get("authorization")
-    return hashlib.sha256(header.encode()).hexdigest() if header else None
+    if not header:
+        return None
+    for pair in os.environ.get("MOCK_AUDIO_KEY_LABELS", "").split(","):
+        label, _, key = pair.partition("=")
+        if key and hmac.compare_digest(header, f"Bearer {key}"):
+            return label.strip()
+    return "unrecognized"
 
 
 def _authorize(request: Request) -> None:
@@ -113,7 +121,7 @@ def get_app() -> FastAPI:
                 "filename": upload.filename,
                 "content_type": upload.content_type,
                 "bytes": len(content),
-                "authorization_sha256": _fingerprint(request),
+                "credential": _credential_label(request),
             }
         )
         await _delay()
@@ -134,7 +142,7 @@ def get_app() -> FastAPI:
                 "voice": body.get("voice"),
                 "response_format": body.get("response_format"),
                 "input_chars": len(text),
-                "authorization_sha256": _fingerprint(request),
+                "credential": _credential_label(request),
             }
         )
         await _delay()

@@ -99,6 +99,7 @@ print_header "Issue #1251: mock audio servers"
 # One server stands in for both providers. It accepts either credential, so
 # the checks below can tell from its request log which one each capability sent.
 MOCK_AUDIO_PORT=$MOCK_PORT MOCK_AUDIO_TRANSCRIPT="validation transcript" \
+    MOCK_AUDIO_KEY_LABELS="stt=$STT_KEY,tts=$TTS_KEY" \
     python mocks/openai-audio-mock/main.py > "$WORK_DIR/mock.log" 2>&1 &
 MOCK_PID=$!
 MOCK_AUDIO_PORT=$SLOW_MOCK_PORT MOCK_AUDIO_DELAY_SECONDS=5 MOCK_AUDIO_API_KEY="$TTS_KEY" \
@@ -235,14 +236,13 @@ PY
 print_result $? "Text is synthesized and playable binary audio is relayed"
 
 curl -s "$MOCK_URL/mock/requests" | python3 -c "
-import sys, json, hashlib
+import sys, json
 stt, tts = json.load(sys.stdin)['requests']
 assert stt['route'] == 'transcriptions' and stt['model'] == 'validation-whisper', stt
 assert stt['language'] == 'en' and stt['filename'] == 'audio.wav' and stt['content_type'] == 'audio/wav', stt
-sha = lambda key: hashlib.sha256(('Bearer ' + key).encode()).hexdigest()
-assert stt['authorization_sha256'] == sha('$STT_KEY'), stt
+assert stt['credential'] == 'stt', stt
 assert tts['route'] == 'speech' and tts['model'] == 'validation-tts' and tts['voice'] == 'validation-voice', tts
-assert tts['response_format'] == 'wav' and tts['authorization_sha256'] == sha('$TTS_KEY'), tts
+assert tts['response_format'] == 'wav' and tts['credential'] == 'tts', tts
 print(stt); print(tts)
 "
 print_result $? "The audio server got the configured model, voice and each capability's own credential"
