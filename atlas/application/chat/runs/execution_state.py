@@ -49,6 +49,8 @@ _TERMINAL_INVOCATION = frozenset(
     {"completed", "failed", "interrupted", "expired", "rejected"}
 )
 _TERMINAL_RUN = frozenset({"completed", "failed", "cancelled"})
+# The run statuses that end a run, for callers outside this module.
+TERMINAL_RUN_STATUSES = _TERMINAL_RUN
 _SLEEP_TOOLS = frozenset({"atlas_sleep", "atlas_agent_sleep"})
 _INPUT_EVENTS = frozenset({"tool_approval_request", "elicitation_request"})
 # A different run_id may replace the document only when the event opens work.
@@ -440,6 +442,7 @@ def public_projection(doc: dict) -> dict:
         "activity": doc.get("activity") or "executing",
         "waiting_on": doc.get("waiting_on"),
         "end_reason": doc.get("end_reason"),
+        "updated_at": doc.get("updated_at"),
         "invocations": invocations,
         "pending_requests": list(doc.get("pending_requests", {}).values()),
     }
@@ -565,7 +568,11 @@ _LINEAGE_FIELDS = (
 )
 
 
-def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict]:
+def merge_run_snapshots(
+    local_runs: List[dict],
+    shared: List[dict],
+    ended_for: Optional[str] = None,
+) -> List[dict]:
     """Overlay shared projections onto the process-local run list.
 
     A replica that did not start the run still has the projection, so the
@@ -574,6 +581,12 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
     Every local run is kept. A conversation can hold a finished turn and a
     running one at once (both retained in the registry), so the projection is
     matched to the local run with its run_id, never by conversation alone.
+
+    ``ended_for`` names the conversation a client is watching for the end of a
+    run another replica owns (issue #1219). Its finished projection is kept
+    as a terminal entry, so that client learns how the run ended instead of
+    seeing it vanish; a live run this replica holds for it still wins, an
+    earlier finished one does not.
     """
     merged = [dict(run) for run in local_runs]
     by_run = {run.get("run_id"): run for run in merged if run.get("run_id")}
@@ -593,6 +606,25 @@ def merge_run_snapshots(local_runs: List[dict], shared: List[dict]) -> List[dict
             # replica holds for the conversation. A finished projection is
             # not a new active run either: keeping it for the document TTL
             # would leave "Needs approval" on a run that already ended.
+            if (
+                projection_status in _TERMINAL_RUN
+                and conversation_id == ended_for
+                and conversation_id not in active_conversations
+            ):
+                merged.append({
+                    "run_id": projection.get("run_id"),
+                    "conversation_id": conversation_id,
+                    "status": projection_status,
+                    "end_reason": projection.get("end_reason"),
+                    # When the run ended, on the same clock as a local run's
+                    # `created_at`, so a client can tell which finished run of
+                    # the conversation is the newer one.
+                    "created_at": projection.get("updated_at"),
+                    "execution_revision": projection.get("revision"),
+                    "detached": True,
+                })
+                local_conversations.add(conversation_id)
+                continue
             if projection_status in _TERMINAL_RUN or conversation_id in active_conversations:
                 continue
             if conversation_id in local_conversations and not projection.get("run_id"):
@@ -1106,6 +1138,10 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
         return conversation
     if not doc:
         return conversation
+    # A run another replica owns is shown only when its record says it may be
+    # (issue #1219); any doubt hides it.
+    if not await _may_show_run(doc.get("run_id")):
+        return conversation
     projection = public_projection(doc)
     merged = dict(conversation)
     merged["execution"] = projection
@@ -1113,6 +1149,21 @@ async def attach_execution(conversation: Optional[dict], user_email: Optional[st
     merged["message_count"] = len(merged["messages"])
     merged["run_activity"] = projection.get("activity")
     return merged
+
+
+async def _may_show_run(run_id: Optional[str]) -> bool:
+    """Whether the run's projection may be shown from this replica."""
+    if not run_id:
+        return True
+    from atlas.application.chat.runs import get_run_registry
+    from atlas.application.chat.runs.in_flight import ScopeLookupUnavailable, shareable_remote_run_ids
+
+    if get_run_registry().get(str(run_id)) is not None:
+        return True
+    try:
+        return str(run_id) in await shareable_remote_run_ids([str(run_id)])
+    except ScopeLookupUnavailable:
+        return False
 
 
 async def forget_conversations(user_email: str, conversation_ids: Optional[List[str]] = None) -> None:
@@ -1132,10 +1183,14 @@ async def forget_conversations(user_email: str, conversation_ids: Optional[List[
         logger.warning("execution projection delete failed", exc_info=True)
 
 
-async def list_execution_snapshots(user_email: str) -> List[dict]:
+async def list_execution_snapshots(user_email: str, *, strict: bool = False) -> List[dict]:
+    """The user's shared projections. A store failure reads as empty unless
+    ``strict``, which re-raises so a caller can tell "no runs" from "unknown"."""
     try:
         projections = await get_execution_store().list_for_user(user_email)
     except Exception:
+        if strict:
+            raise
         logger.warning("execution projection list failed", exc_info=True)
         return []
     return await _attach_run_lineage(projections, user_email)

@@ -215,7 +215,8 @@ end
 # KEYS: conv, user, run, fence, live, api-latest, api-index, api-user-index
 # ARGV: run_id, conversation_id, user_email, owner, limit, lease_ms, retention_ms,
 #       source, parent_run_id, follow_up_of, key_prefix,
-#       parent_conversation_id, title, launch_origin, depth, api_continuation_json
+#       parent_conversation_id, title, launch_origin, depth, api_continuation_json,
+#       scope
 CLAIM_SCRIPT = _NOW + _API_INDEX + """
 local lease = tonumber(ARGV[6])
 local holder = redis.call('GET', KEYS[1])
@@ -276,7 +277,7 @@ redis.call('HSET', KEYS[3],
   'lease_expires_at', expires, 'created_at', now, 'updated_at', now,
   'source', ARGV[8], 'parent_run_id', ARGV[9], 'follow_up_of', ARGV[10],
   'parent_conversation_id', ARGV[12], 'title', ARGV[13],
-  'launch_origin', ARGV[14], 'depth', ARGV[15])
+  'launch_origin', ARGV[14], 'depth', ARGV[15], 'scope', ARGV[17])
 redis.call('PEXPIRE', KEYS[3], lease + tonumber(ARGV[7]))
 if ARGV[16] ~= '' then
   redis.call('HSET', KEYS[3], 'api_pending_spec', ARGV[16],
@@ -528,6 +529,7 @@ class RedisRunCoordinator:
         title: Optional[str] = None,
         launch_origin: Optional[str] = None,
         depth: int = 0,
+        scope: str = "shared",
     ) -> Optional[RunClaim]:
         owner_email = normalize_user_email(user_email)
         try:
@@ -559,6 +561,7 @@ class RedisRunCoordinator:
                     launch_origin or "",
                     max(0, int(depth or 0)),
                     json.dumps(api_continuation) if api_continuation is not None else "",
+                    scope or "shared",
                 ],
             )
         except Exception as exc:

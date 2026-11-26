@@ -248,7 +248,9 @@ Two things close that gap:
   prompt that started the run, truncated to 200 characters -- so every tab can
   list the conversation while it runs.
 - `GET /api/conversations/{id}` and `restore_conversation` answer from the
-  run's live session when the conversation has a run in flight for the
+  run's live session (on the replica that owns the run; another replica
+  answers `GET` with `run_elsewhere`, see
+  [run coordination](../developer/run-coordination.md)) when the conversation has a run in flight for the
   requesting user: the prompt that started the turn, the tool rows so far and
   any earlier saved turns. The stored record is used once the run ends. The
   live view carries `in_flight: true` and the `run_id`.

@@ -105,6 +105,7 @@ class RunCoordinator(Protocol):
         parent_run_id: Optional[str] = None,
         follow_up_of: Optional[str] = None,
         api_continuation: Optional[dict] = None,
+        scope: str = "shared",
         parent_conversation_id: Optional[str] = None,
         title: Optional[str] = None,
         launch_origin: Optional[str] = None,
@@ -117,7 +118,9 @@ class RunCoordinator(Protocol):
         replica can route by them from the first moment. So are the lineage
         fields (``parent_conversation_id``, ``title``, ``launch_origin``,
         ``depth``): a replica that lists a run it does not own keeps its place
-        in the conversation tree.
+        in the conversation tree. ``scope`` says who may be shown the run:
+        ``shared`` (any replica), or ``off_record`` / ``connection_bound`` (no
+        other replica).
 
         Returns the claim, or ``None`` when this coordinator does not track
         claims (the in-process default). Raises ``ConversationBusyError``,

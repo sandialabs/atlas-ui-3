@@ -303,8 +303,11 @@ replica that owns the run (see
 The following are per-replica in this deployment. They are known gaps, not
 configuration mistakes:
 
-- **The live transcript of a tracked run** that has not yet been saved, the
-  Agent Runs API follow-up and listing endpoints, the
+- **The live transcript of a tracked run** that has not yet been saved stays on
+  the replica that runs the work. Another replica shows the conversation as
+  running (no streamed text) and tells the page when the run ends; see
+  [run coordination](../developer/run-coordination.md). A turn that was never
+  saved when its replica was killed is not recovered. The Agent Runs API follow-up and listing endpoints, the
   `atlas_get_subagent_result` and `atlas_get_subagent_runs` tools, and MCP
   elicitation prompts stay on the replica that runs the work.
 - **MCP OAuth pending state** (the PKCE verifier of a login in progress) is

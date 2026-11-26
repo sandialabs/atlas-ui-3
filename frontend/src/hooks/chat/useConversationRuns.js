@@ -20,6 +20,27 @@ export function isRunActive(run) {
 	return !!run && !TERMINAL_STATUSES.has(run.status)
 }
 
+/**
+ * Which of two runs of one conversation the tracker keeps (issue #1219).
+ *
+ * A conversation holds one live run at a time, so: a live run beats a finished
+ * one; between two of the same kind the newer `created_at` wins (for a finished
+ * run another replica owns, the server sends its end time there); only a true
+ * tie is broken by `detached`, in favour of the entry the server kept for the
+ * run this tab watches, and a tie that remains goes to the later entry.
+ */
+export function runOutranks(run, existing) {
+	if (!existing) return true
+	const live = isRunActive(run)
+	if (live !== isRunActive(existing)) return live
+	const age = run.created_at || 0
+	const existingAge = existing.created_at || 0
+	if (age !== existingAge) return age > existingAge
+	const detached = run.detached === true
+	if (detached !== (existing.detached === true)) return detached
+	return true
+}
+
 export function useConversationRuns() {
 	// conversation_id -> run record from the server.
 	const [runsByConversation, setRunsByConversation] = useState({})
@@ -50,8 +71,8 @@ export function useConversationRuns() {
 			const next = {}
 			for (const run of data.runs || []) {
 				const existing = next[run.conversation_id]
-				// Several runs can share a conversation over time; the newest wins.
-				if (!existing || (run.created_at || 0) >= (existing.created_at || 0)) {
+				// Several runs can share a conversation over time; see runOutranks.
+				if (runOutranks(run, existing)) {
 					// Keep the title this tab learned when it started the run: the
 					// server does not know one until the conversation is saved.
 					const prior = runsRef.current[run.conversation_id]
@@ -76,6 +97,21 @@ export function useConversationRuns() {
 						...((!run.title && prior?.title) ? { title: prior.title } : {}),
 						launch_origin: origin,
 						...(prior?.run_id === run.run_id && prior.saved ? { saved: true } : {}),
+					}
+				}
+			}
+			if (data.degraded === true) {
+				// The server could not read the shared run projections, so this
+				// list says nothing about runs another replica owns. Keep those
+				// until a complete snapshot confirms how they ended (issue #1219).
+				for (const [conversationId, prior] of Object.entries(runsRef.current)) {
+					if (prior?.detached !== true || !isRunActive(prior)) continue
+					// A different, finished run this replica still retains for the
+					// conversation is an earlier turn: it does not end the remote
+					// one. The same run reported finished does.
+					const current = next[conversationId]
+					if (!current || (!isRunActive(current) && current.run_id !== prior.run_id)) {
+						next[conversationId] = prior
 					}
 				}
 			}

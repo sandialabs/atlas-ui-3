@@ -126,6 +126,11 @@ async def admit_run(
         source=source,
         parent_run_id=start_kwargs.get("parent_run_id"),
         follow_up_of=follow_up_of,
+        scope=(
+            "off_record" if start_kwargs.get("off_record")
+            else "connection_bound" if start_kwargs.get("connection_bound")
+            else "shared"
+        ),
         **({"api_continuation": api_continuation} if api_continuation is not None else {}),
         parent_conversation_id=start_kwargs.get("parent_conversation_id"),
         # An off-record run has no title: it is the prompt, and an incognito

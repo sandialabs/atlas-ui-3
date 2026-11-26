@@ -3408,18 +3408,24 @@ async def websocket_endpoint(websocket: WebSocket):
                 # the run still overlays the shared projection, so the sidebar
                 # shows the same activity.
                 runs = run_registry.snapshot_for_user(user_email)
-                try:
-                    from atlas.application.chat.runs.execution_state import (
-                        list_execution_snapshots,
-                        merge_run_snapshots,
-                    )
+                from atlas.application.chat.runs.in_flight import compose_run_list
 
-                    runs = merge_run_snapshots(runs, await list_execution_snapshots(user_email))
-                except Exception:
-                    logger.warning("execution snapshot merge failed", exc_info=True)
+                watch_end = data.get("watch_end") is True
+                watched_conversation = data.get("conversation_id") or None
+                if watch_end and not watched_conversation:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "watch_end needs a conversation_id",
+                        "error_type": "invalid_request",
+                    })
+                    continue
+                runs, degraded = await compose_run_list(
+                    user_email, runs, ended_for=watched_conversation if watch_end else None
+                )
                 await websocket.send_json({
                     "type": "runs_snapshot",
                     "runs": runs,
+                    "degraded": degraded,
                     "max_concurrent_runs_per_user": run_registry.max_concurrent_runs_per_user,
                 })
 

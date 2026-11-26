@@ -174,6 +174,7 @@ Run record fields:
 | `source` | The run's launch source (`api` for agent-runs API runs, empty otherwise), written at claim. The snapshot write repeats it |
 | `parent_run_id` | The run that launched this one (empty for a top-level run), written at claim; the scripts walk it to keep a finished parent readable while a descendant is live |
 | `follow_up_of` | The run an API follow-up continues (empty otherwise), written at claim |
+| `scope` | `shared`, `off_record` or `connection_bound`, written at claim. Only `shared` runs are shown to other replicas; a missing field (a record from before this field), an unreadable record or any other value is read as hidden |
 | `parent_conversation_id`, `title`, `launch_origin`, `depth` | The run's place in the conversation tree (issue #1222), written at claim: the conversation that launched it (empty for a top-level run), the prompt that started it (first 200 characters; never written for an off-record run), the published launch origin (`agent_runs_api` or empty) and its launch depth. A replica that lists a run it does not own copies them onto the listed run, so an unsaved child still nests under its parent. Records claimed before this field existed fall back to the same values in `snapshot` |
 | `error` | The run's error, if any |
 | `interrupted` | `1` once an orphan sweep took the run over (see below) |
@@ -358,6 +359,58 @@ an owner consumes a single stream). The envelope, JSON in field `c`:
 
 Details, reply codes and guarantees: [run control](run-control.md).
 
+## Clients on a replica that does not own the run
+
+A run's task, session and stream buffer exist only on its owner, and the
+owner's frames reach only the sockets connected to it. With no session
+affinity a browser can reconnect to any other replica (issue #1219), so that
+replica answers from the shared records and does not stream tokens:
+
+- `GET /api/conversations/<id>` (and the stored-record lookup that `restore_conversation` shares): when this replica
+  has no local run for the conversation, `in_flight_conversation` reads the
+  `<p>:run-conv:<id>` key and the run record it names
+  (`run_control.conversation_entry`). If another replica holds a live run of
+  the same user, the view is `{"run_elsewhere": true, "run_id", "run_status",
+  "messages": []}`. For a conversation with saved turns the route returns the
+  stored record with those three fields added; for an unsaved first turn it is
+  the empty view above, with the tool rows the owner has projected so far
+  merged in by `attach_execution`. Liveness comes from the shared claim, which
+  exists from admission, so a text-only first turn (no projection yet) is
+  covered. Only a claim whose `scope` is `shared` is served (see "Which runs
+  another replica may show"). It is never a 404 while the run is live.
+  `in_flight` stays unset, because the replay and live-poll paths that read it
+  need the owner's transcript. Another user's conversation id reads as missing.
+  `restore_conversation` replies with its usual `conversation_restored` frame
+  and does not carry these fields; the client learns a run is elsewhere from
+  the GET and the run list. A non-owner GET names no classification, so under
+  enforced compliance levels a request that supplies a level is refused with
+  409 until the run ends. The lookup is one Redis read on a registry miss, and
+  only when run coordination is on.
+- `list_runs` merges the shared execution projections and the user's other live
+  claims (`compose_run_list`), so a run owned elsewhere is listed with
+  `detached: true` even before it has published a projection. If any shared
+  state it needs cannot be read, the frame carries `degraded: true` and only this
+  replica's own runs, and the client keeps the remote runs it tracks instead of
+  reading their absence as an end. A finished run is dropped from the list,
+  unless the frame carries `watch_end: true` and a `conversation_id` (a
+  `watch_end` without one is refused with an `invalid_request` error): then that
+  conversation's finished projection is kept as a terminal entry (status and
+  `end_reason`) unless this replica holds a live run for it. The orphan sweep
+  closes the projection of a run whose owner died, even one that had published
+  nothing yet, so the same entry reports `failed` about one lease after a SIGKILL.
+- The client re-sends `list_runs` (with `watch_end`) every 4 s while its
+  tracker holds a `detached` active run. When the run turns terminal or leaves
+  the list, it clears the thinking and Stop state, closes tool rows that never
+  reported, and reads the stored conversation, retrying with backoff. The
+  reconnect resync retries the same way and, when the read says
+  `run_elsewhere`, keeps the transcript on screen instead of replacing it with
+  the last saved turn.
+
+Not covered: a turn that has not saved when its owner is killed stays unsaved
+(a tracked run persists only at turn end). The user gets an interrupted notice
+and resends.
+
+
 ## Child run frames and tool identity
 
 A tool that launches a run (`atlas_launch_subagent`, `atlas_follow_up_subagent`)
@@ -369,6 +422,28 @@ wrapper's own run belongs to a descendant. `observe_tool_callback` and
 `_ChildConnection` likewise calls `note_event` only for frames with no run id
 or its own run id, so a grandchild's approval request does not mark the
 middle child as waiting for input.
+
+## Which runs another replica may show
+
+One rule, in `in_flight.shareable_remote_run_ids`, used by the conversation
+read, the run list and the tool rows merged into a conversation:
+
+| Shared record | `scope` field | Read | Shown | List `degraded` |
+|---|---|---|---|---|
+| present | `shared` | ok | yes | no |
+| present | `off_record` | ok | no | no |
+| present | `connection_bound` | ok | no | no |
+| present | missing (written before the field) | ok | no | no |
+| present | any other value | ok | no | no |
+| absent | - | ok | no | no |
+| unreadable | - | fails | no, and no remote run at all | yes |
+
+Public runs carry the explicit `shared` scope, so a missing field is never read
+as public. Projections are filtered before they are merged into the list, so a
+hidden projection can neither appear nor stand in for a live claim, and a stale
+shared projection yields to a newer live claim for the same conversation.
+Off-record turns publish no projection; a connection-bound turn does (its owner
+uses it), so it is filtered rather than withheld.
 
 ## Beyond #1128: what stays replica-local
 
@@ -389,7 +464,10 @@ that file:
   [reading sub-conversations from any replica](#reading-sub-conversations-from-any-replica)).
 - Opening a conversation whose run has not saved its first turn
   (`in_flight.py`) resolves the run through the local registry, so only the
-  owning replica can show its transcript so far.
+  owning replica can show its transcript so far. Another replica answers from
+  the shared claim: the conversation reads as running (`run_elsewhere`), with
+  the tool rows the owner has projected, and no streamed text (see "Clients on
+  a replica that does not own the run").
 - MCP elicitation requests and their responses (`elicitation_manager`) live in
   the process that issued them.
 
@@ -405,6 +483,9 @@ that file:
   two replicas: mirror, sweep, takeover generation, stale-owner refusal,
   frozen owner, Redis outage after the lease lapsed, projection and tool
   guards, non-owner reads.
+- `atlas/tests/test_run_elsewhere_view.py` and
+  `test/multireplica/test_non_owner_reconnect.py`: the non-owner view and the
+  `watch_end` list, including a killed owner.
 - `test/multireplica/test_idempotency_across_replicas.py`, `test_cluster_admission.py`, `test_run_leases.py` and
   `test_run_coordination_gaps.py`: two real replicas with shared Redis and
   PostgreSQL (`bash test/multireplica_tests.sh`), including SIGKILL and

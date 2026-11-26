@@ -1030,6 +1030,13 @@ export function createWebSocketHandler(deps) {
           })
           break
         case 'error':
+          // The reply to a malformed background `list_runs` poll is not about
+          // anything the user did: it must neither land in the transcript nor
+          // touch the running state (issue #1219).
+          if (data.error_type === 'invalid_request' && typeof data.message === 'string' && data.message.startsWith('watch_end')) {
+            console.warn('list_runs poll refused:', data.message)
+            break
+          }
           // A refused steer (issue #1042) leaves the running turn running:
           // report it without tearing down the turn's indicators. So does a
           // stop or steer for a run another server executes that could not be

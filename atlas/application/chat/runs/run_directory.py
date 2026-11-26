@@ -106,6 +106,7 @@ def owner_entry(record: Optional[Dict[str, str]], *, include_terminal: bool = Fa
         "source": record.get("source") or "",
         "parent_run_id": record.get("parent_run_id") or "",
         "follow_up_of": record.get("follow_up_of") or "",
+        "scope": record.get("scope"),
         "parent_conversation_id": lineage_from_record(record)["parent_conversation_id"] or "",
         "terminal": terminal,
     }
@@ -138,13 +139,33 @@ class RunDirectory:
         client = self._redis.client
         seconds, micros = await client.time()
         now_ms = int(seconds) * 1000 + int(micros) // 1000
-        members = await client.zrangebyscore(self.keys.user(user_email), now_ms, "+inf")
+        members = [_text(m) for m in await client.zrangebyscore(self.keys.user(user_email), now_ms, "+inf")]
+        if not members:
+            return []
+        # One round trip for every record, not one per run.
+        async with client.pipeline(transaction=False) as pipe:
+            for run_id in members:
+                pipe.hgetall(self.keys.run(run_id))
+            raws = await pipe.execute()
         entries = []
-        for member in members:
-            entry = await self.owner_of(_text(member))
+        for raw in raws:
+            record = {_text(k): _text(v) for k, v in raw.items()} if raw else None
+            entry = owner_entry(record)
             if entry is not None and entry.get("user_email") == normalize_user_email(user_email):
                 entries.append(entry)
         return entries
+
+    async def scopes_of(self, run_ids: "list[str]") -> "Dict[str, Optional[str]]":
+        """``scope`` of each run's shared record; ``None`` when the record or the
+        field is absent. Raises when Redis cannot be read."""
+        ids = [r for r in run_ids if r]
+        if not ids:
+            return {}
+        async with self._redis.client.pipeline(transaction=False) as pipe:
+            for run_id in ids:
+                pipe.hget(self.keys.run(run_id), "scope")
+            values = await pipe.execute()
+        return {run_id: _text(value) for run_id, value in zip(ids, values)}
 
     async def run_for_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """The live run holding ``conversation_id``, whoever owns it."""
