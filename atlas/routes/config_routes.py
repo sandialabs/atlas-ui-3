@@ -10,6 +10,7 @@ from atlas.core.compliance import declared_classifications
 from atlas.core.log_sanitizer import get_current_user, sanitize_for_logging
 from atlas.core.model_access import is_model_allowed
 from atlas.infrastructure.app_factory import app_factory
+from atlas.modules.audio.audio_config import public_audio_config
 from atlas.modules.config.models import qualified_tool_name
 from atlas.modules.config.settings import configured_agent_max_steps, context_compaction_config
 from atlas.modules.help.help_config import resolve_help_config
@@ -255,6 +256,10 @@ async def get_config_shell(
         },
         "file_upload": get_file_upload_limit_config(),
         "file_extraction": _get_file_extraction_config(config_manager),
+        # Dictation and read-aloud (issue #1251): per-user availability, the
+        # admin's default button visibility and the limits. No endpoint
+        # address, model, voice or credential.
+        "audio": await public_audio_config(app_settings, current_user),
     }
 
 
@@ -579,7 +584,8 @@ async def get_config(
             "atlas_builtin_tools": list(ATLAS_TOOL_NAMES),
         },
         "file_upload": get_file_upload_limit_config(),
-        "file_extraction": _get_file_extraction_config(config_manager)
+        "file_extraction": _get_file_extraction_config(config_manager),
+        "audio": await public_audio_config(app_settings, current_user),
     }
 
 

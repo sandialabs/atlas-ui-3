@@ -52,6 +52,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 if port not in (80, 443):
                     ws_origins = f"ws://localhost:{port} wss://localhost:{port}"
                     csp_value = _inject_ws_origins(csp_value, ws_origins)
+                if getattr(settings, "feature_audio_tts_enabled", False):
+                    csp_value = _allow_blob_media(csp_value)
                 response.headers["Content-Security-Policy"] = csp_value
 
         return response
@@ -74,3 +76,19 @@ def _inject_ws_origins(csp: str, ws_origins: str) -> str:
     if not injected:
         updated.append(f"connect-src {ws_origins}")
     return "; ".join(updated)
+
+
+def _allow_blob_media(csp: str) -> str:
+    """Let read-aloud play the audio it fetched (issue #1251).
+
+    The player holds the synthesized audio as a ``blob:`` URL. Without a
+    ``media-src`` directive that falls back to ``default-src 'self'``, which
+    does not cover ``blob:``. The directive is added only while text-to-speech
+    is switched on and only when the policy has none of its own: an operator
+    who wrote a ``media-src`` keeps exactly what they wrote.
+    """
+    directives = [d.strip() for d in csp.split(";") if d.strip()]
+    if any(d.split()[0].lower() == "media-src" for d in directives):
+        return csp
+    directives.append("media-src 'self' blob:")
+    return "; ".join(directives)

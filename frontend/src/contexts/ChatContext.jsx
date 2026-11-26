@@ -2603,6 +2603,8 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		// How the Help page gets its content (issue #1107): the local
 		// Markdown, a remotely hosted document, or an external link.
 		help: config.help,
+		// Dictation and read-aloud availability and limits (issue #1251).
+		audio: config.audio,
 		currentModel: config.currentModel,
 		setCurrentModel: config.setCurrentModel,
 		selectedTools: selections.selectedTools,

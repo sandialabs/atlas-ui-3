@@ -11,6 +11,7 @@ first-run setup, see [getting-started/](../getting-started/README.md).
 - [Canvas Layout Controls](canvas-layout/README.md) - Expand the canvas to full width, stack it above the chat, and keep the choice per device
 - [Context Usage and Compaction](context-compaction/README.md) - See how full the model's context is, and compact long conversations manually or automatically
 - [Custom Prompt Library](custom-prompts/README.md) - Save, edit, and reuse your own prompts
+- [Dictation and Read-Aloud](voice-dictation-read-aloud.md) - Speak a prompt into the message box and have replies read to you; show or hide the buttons
 - [File Library](file-library/README.md) - Browse uploads and generated files by folder, and page through a long library
 - [Following a Response](following-responses.md) - Read earlier messages while a response is streaming
 - [Rewind / Edit a Previous Prompt](rewind-edit/README.md) - Edit one of your earlier messages and re-run from there

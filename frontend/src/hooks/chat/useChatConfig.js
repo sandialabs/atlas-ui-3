@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { parseGatewayModelKey, rememberTeamLabel, withGatewayModel } from '../../utils/gatewayModels'
 import { isKnownUser, userStorageKey } from '../../utils/userStorage'
+import { DEFAULT_AUDIO_CONFIG } from '../../utils/audioControls'
 
 const DEFAULT_FEATURES = {
   workspaces: false,
@@ -265,6 +266,10 @@ export function useChatConfig() {
       ? { ...DEFAULT_HELP, ...cached.current.help }
       : DEFAULT_HELP
   )
+  // Dictation and read-aloud availability (issue #1251). Never cached:
+  // `enabled` is per-user (it folds in the capability's groups), so a cached
+  // copy could show one user's buttons to the next person on the browser.
+  const [audio, setAudio] = useState(DEFAULT_AUDIO_CONFIG)
   const [isCanvasOpen, setIsCanvasOpen] = useState(false)
   // Empty until /api/config says who is signed in; then their saved model.
   const [currentModel, setCurrentModel] = useState('')
@@ -314,6 +319,14 @@ export function useChatConfig() {
     setFileExtraction(prev => ({ ...DEFAULT_FILE_EXTRACTION, ...(cfg.file_extraction || prev) }))
     setFileUpload(prev => ({ ...DEFAULT_FILE_UPLOAD, ...(cfg.file_upload || prev) }))
     setHelp(prev => ({ ...DEFAULT_HELP, ...(cfg.help || prev) }))
+    // A response without the field (a mixed-version pod) keeps what an
+    // earlier response established.
+    if (cfg.audio && typeof cfg.audio === 'object') {
+      setAudio({
+        stt: { ...DEFAULT_AUDIO_CONFIG.stt, ...(cfg.audio.stt || {}) },
+        tts: { ...DEFAULT_AUDIO_CONFIG.tts, ...(cfg.audio.tts || {}) },
+      })
+    }
     setAgentModeAvailable(!!cfg.agent_mode_available)
     // Only a response carrying a valid ceiling updates it: a mixed-version
     // pod that omits (or garbles) the field must not reset a confirmed
@@ -571,6 +584,7 @@ export function useChatConfig() {
     features,
     setFeatures,
     help,
+    audio,
     isCanvasOpen,
     setIsCanvasOpen,
     currentModel,
