@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Check, X, Eye, Pencil, Upload, FlaskConical } from 'lucide-react'
 
 /**
@@ -30,6 +30,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
     description: prompt?.description || '',
     content: prompt?.draft_content || '',
   })
+  const savedRef = useRef(saved)
   const [changeDescription, setChangeDescription] = useState('')
   const [preview, setPreview] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -48,7 +49,8 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
       setError(e.message)
       if (e.status === 409 && onRefresh) {
         try {
-          setConflict(await onRefresh())
+          const latest = await onRefresh()
+          setConflict({ ...latest, base: savedRef.current })
         } catch {
           setError(`${e.message} Could not refresh the draft. Try again.`)
         }
@@ -63,7 +65,16 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
     const result = await onSave({ title: title.trim(), description, content }, revision)
     if (result && typeof result.draft_revision === 'number') {
       setRevision(result.draft_revision)
-      setSaved({ title: result.title, description: result.description || '', content: result.draft_content })
+      const confirmed = {
+        title: result.title,
+        description: result.description || '',
+        content: result.draft_content,
+      }
+      savedRef.current = confirmed
+      setSaved(confirmed)
+      setTitle(confirmed.title)
+      setDescription(confirmed.description)
+      setContent(confirmed.content)
       return result.draft_revision
     }
     return revision
@@ -85,6 +96,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
           type="text"
           value={title}
           onChange={e => setTitle(e.target.value)}
+          disabled={busy || !!conflict}
           maxLength={200}
           className="w-full px-3 py-2 bg-gray-800 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -96,6 +108,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
           type="text"
           value={description}
           onChange={e => setDescription(e.target.value)}
+          disabled={busy || !!conflict}
           maxLength={1000}
           placeholder="What this prompt is for"
           className="w-full px-3 py-2 bg-gray-800 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -125,6 +138,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
             id={`${fieldId}-content`}
             value={content}
             onChange={e => setContent(e.target.value)}
+            disabled={busy || !!conflict}
             rows={8}
             placeholder="System prompt text. Replaces the default system prompt when selected."
             className="w-full px-3 py-2 bg-gray-800 text-gray-50 rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm resize-y"
@@ -163,11 +177,17 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
           </pre>
           <button type="button" onClick={() => {
             setRevision(conflict.draft_revision)
-            setSaved({
+            const latest = {
               title: conflict.title,
               description: conflict.description || '',
               content: conflict.draft_content,
-            })
+            }
+            const base = conflict.base
+            setTitle(current => current.trim() === base.title ? latest.title : current)
+            setDescription(current => current === base.description ? latest.description : current)
+            setContent(current => current === base.content ? latest.content : current)
+            savedRef.current = latest
+            setSaved(latest)
             setConflict(null)
             setError(null)
           }}>Keep my edits and use latest revision</button>

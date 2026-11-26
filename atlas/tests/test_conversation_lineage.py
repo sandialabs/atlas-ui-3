@@ -339,7 +339,7 @@ async def test_save_conversation_persists_the_parent_link(chat_service, repo):
     session.history.add_message(Message(role=MessageRole.USER, content="do work"))
     session.history.add_message(Message(role=MessageRole.ASSISTANT, content="done"))
 
-    assert chat_service._save_conversation(session, USER, "gpt-4") is True
+    assert await chat_service._save_conversation(session, USER, "gpt-4") is True
     conv_id = session.context.get("conversation_id", str(session.id))
     saved = repo.get_conversation(conv_id, USER)
     assert saved["metadata"][PARENT_CONVERSATION_METADATA_KEY] == "parent-conv"

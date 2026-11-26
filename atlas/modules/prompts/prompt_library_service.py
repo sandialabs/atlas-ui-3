@@ -21,9 +21,9 @@ one grant gives them, so losing one group never removes access that another
 group or a direct grant still provides. An entry with no published version is
 invisible to ``use``-only users (there is nothing for them to use).
 
-Membership is checked on every request -- never cached here -- so adding or
-removing someone from a group takes effect on their next request, including a
-chat turn. A group check that errors counts as "not a member" (fail closed).
+Prompt execution checks group membership directly with the authorizer,
+bypassing cached answers. Other membership checks may reuse bounded cached
+answers. An unavailable authorizer never grants access (fail closed).
 
 Callers who lack any access get the same answer as for an id that does not
 exist (``PromptNotFound``), so ids cannot be probed. ``PromptForbidden`` is
@@ -272,6 +272,10 @@ class PromptLibraryService(PromptLibraryListing, PromptLibrarySharing):
 
         async def check(group: str) -> Tuple[str, Optional[bool]]:
             async with semaphore:
+                if first_only:
+                    return group, await self._resolver.membership(
+                        user_email, group, fresh=True
+                    )
                 return group, await self._membership(user_email, group)
 
         tasks = [asyncio.ensure_future(check(g)) for g in checked]

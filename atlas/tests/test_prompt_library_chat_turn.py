@@ -1014,7 +1014,7 @@ async def test_a_session_that_never_saw_the_pin_runs_and_saves_under_it(env):
     assert meta["prompt_library"]["version_id"] == v1["id"] and meta["prompt_library_pin_revision"] == 1
     # Its save of a session that holds no pin cannot drop the stored one.
     b_sessions[b_id].context[library_turn.PIN_CONTEXT_KEY] = None
-    assert b._save_conversation(b_sessions[b_id], USER, "test-model") is True
+    assert await b._save_conversation(b_sessions[b_id], USER, "test-model") is True
     assert _stored_meta(env, conv)["prompt_library"]["version_id"] == v1["id"]
 
 

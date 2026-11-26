@@ -434,3 +434,44 @@ async def test_a_check_that_never_returns_is_bounded_and_retried(monkeypatch):
     hang.clear()
     assert await asyncio.wait_for(resolver.membership(ALICE, "eng"), 1) is True
     assert calls == ["eng", "ops", "eng"]
+
+
+@pytest.mark.asyncio
+async def test_execution_rechecks_revoked_cached_membership(app_service):
+    from atlas.modules.prompts.prompt_library_policy import (
+        PromptMembershipUnknown,
+        PromptUnavailable,
+    )
+
+    lib, authorizer = app_service
+    prompt = await _shared(lib, "Team only", ["team-00"])
+
+    page = await lib.list_prompts(ALICE, scope="team")
+    assert len(page["prompts"]) == 1
+
+    await lib.resolve_for_execution(ALICE, prompt["id"])
+
+    authorizer.members["team-00"].remove(ALICE)
+    authorizer.calls.clear()
+
+    with pytest.raises(PromptUnavailable) as exc:
+        await lib.resolve_for_execution(ALICE, prompt["id"])
+
+    assert not isinstance(exc.value, PromptMembershipUnknown)
+    assert (ALICE, "team-00") in authorizer.calls
+
+
+@pytest.mark.asyncio
+async def test_execution_fails_closed_despite_cached_membership(app_service):
+    from atlas.modules.prompts.prompt_library_policy import PromptMembershipUnknown
+
+    lib, authorizer = app_service
+    prompt = await _shared(lib, "Team only", ["team-00"])
+
+    page = await lib.list_prompts(ALICE, scope="team")
+    assert len(page["prompts"]) == 1
+
+    authorizer.down = True
+
+    with pytest.raises(PromptMembershipUnknown):
+        await lib.resolve_for_execution(ALICE, prompt["id"])

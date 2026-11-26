@@ -71,7 +71,8 @@ effect on the next request. Group membership comes from your organization's
 authorization service and Atlas reuses each answer briefly, so a change there
 (someone leaving a group) takes effect within
 `PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS` (30 seconds by default, at most 5
-minutes).
+minutes) for non-execution membership checks. Chat execution bypasses
+the membership cache and checks the authorizer again on every turn.
 
 ## Versions and chat
 

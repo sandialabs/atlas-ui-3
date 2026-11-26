@@ -923,7 +923,7 @@ class TestSessionResetConversationIsolation:
         session = await chat_service.session_repository.get(session_id)
         session.history.add_message(Message(role=MessageRole.USER, content="First question"))
         session.history.add_message(Message(role=MessageRole.ASSISTANT, content="First answer"))
-        chat_service._save_conversation(session, user, "gpt-4")
+        await chat_service._save_conversation(session, user, "gpt-4")
 
         first_conv_id = session.context.get("conversation_id", str(session_id))
         first_conv = repo.get_conversation(first_conv_id, user)
@@ -938,7 +938,7 @@ class TestSessionResetConversationIsolation:
 
         session.history.add_message(Message(role=MessageRole.USER, content="Second question"))
         session.history.add_message(Message(role=MessageRole.ASSISTANT, content="Second answer"))
-        chat_service._save_conversation(session, user, "gpt-4")
+        await chat_service._save_conversation(session, user, "gpt-4")
 
         # Verify both conversations exist independently
         first_after = repo.get_conversation(first_conv_id, user)
@@ -970,7 +970,7 @@ class TestSessionResetConversationIsolation:
 
             session = await chat_service.session_repository.get(session_id)
             session.history.add_message(Message(role=MessageRole.USER, content=f"Question {i}"))
-            chat_service._save_conversation(session, user, "gpt-4")
+            await chat_service._save_conversation(session, user, "gpt-4")
             conv_ids.append(session.context.get("conversation_id", str(session_id)))
 
         # All conversation_ids should be unique
@@ -1014,7 +1014,7 @@ class TestSessionResetConversationIsolation:
 
         # Save the new conversation
         session.history.add_message(Message(role=MessageRole.USER, content="New question"))
-        chat_service._save_conversation(session, user, "gpt-4")
+        await chat_service._save_conversation(session, user, "gpt-4")
 
         # Original should still be intact
         original = repo.get_conversation("original-conv", user)
@@ -1051,7 +1051,7 @@ class TestConversationSavedEvent:
         session.history.add_message(Message(role=MessageRole.USER, content="Hello"))
         session.history.add_message(Message(role=MessageRole.ASSISTANT, content="Hi"))
 
-        chat_service._save_conversation(session, "user@test.com", "gpt-4")
+        await chat_service._save_conversation(session, "user@test.com", "gpt-4")
 
         conv_id = session.context.get("conversation_id", str(session_id))
         saved = repo.get_conversation(conv_id, "user@test.com")
@@ -1444,3 +1444,69 @@ class TestConversationPagination:
         body = self._get(client, limit=10, offset=0)
         assert body["total"] == 2
         assert "gone-0" not in [c["id"] for c in body["conversations"]]
+
+
+@pytest.mark.parametrize("cancel_during_save", [False, True])
+@pytest.mark.asyncio
+async def test_conversation_save_is_nonblocking(
+    repo, monkeypatch, cancel_during_save
+):
+    import asyncio
+    import threading
+    from unittest.mock import MagicMock
+    from uuid import uuid4
+
+    from atlas.application.chat.service import ChatService
+    from atlas.domain.messages.models import Message, MessageRole
+
+    service = ChatService(
+        llm=MagicMock(), conversation_repository=repo
+    )
+    user = "user@test.com"
+    session = await service.create_session(uuid4(), user)
+    session.history.add_message(
+        Message(role=MessageRole.USER, content="Test save")
+    )
+
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    started = asyncio.Event()
+    release = threading.Event()
+    original_save = repo.save_conversation
+
+    def blocked_save(**kwargs):
+        loop.call_soon_threadsafe(started.set)
+        assert threading.get_ident() != loop_thread
+        assert release.wait(timeout=5)
+        return original_save(**kwargs)
+
+    monkeypatch.setattr(repo, "save_conversation", blocked_save)
+
+    task = asyncio.create_task(
+        service._save_conversation(session, user, "gpt-4")
+    )
+
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        assert not task.done()
+
+        if cancel_during_save:
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+
+        release.set()
+
+        if cancel_during_save:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            assert await task is True
+
+        conv_id = session.context.get(
+            "conversation_id", str(session.id)
+        )
+        assert repo.get_conversation(conv_id, user) is not None
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)

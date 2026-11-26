@@ -105,3 +105,157 @@ describe('Prompt library conflict recovery', () => {
     ))
   })
 })
+
+describe('Editor conflict field preservation', () => {
+  const prompt = {
+    id: 'p1',
+    title: 'Original title',
+    description: 'Original description',
+    draft_content: 'Original content',
+    draft_revision: 4,
+  }
+
+  it('adopts the latest draft after a clean publish conflict', async () => {
+    const onSave = vi.fn()
+    const onPublish = vi.fn()
+      .mockRejectedValueOnce(conflict())
+      .mockResolvedValueOnce({})
+
+    render(
+      <PromptLibraryEditor
+        prompt={prompt}
+        onSave={onSave}
+        onPublish={onPublish}
+        onRefresh={async () => ({
+          ...prompt,
+          draft_content: 'New server content',
+          draft_revision: 5,
+        })}
+        onCancel={() => {}}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', {
+      name: /Publish version/,
+    }))
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: /Keep my edits and use latest revision/,
+    }))
+
+    expect(screen.getByLabelText(/Draft system prompt/))
+      .toHaveValue('New server content')
+
+    expect(screen.getByRole('button', {
+      name: /Save draft/,
+    })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', {
+      name: /Publish version/,
+    }))
+
+    await waitFor(() =>
+      expect(onPublish).toHaveBeenLastCalledWith('', 5)
+    )
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('preserves edited fields but refreshes untouched fields', async () => {
+    const onSave = vi.fn().mockRejectedValueOnce(conflict())
+
+    render(
+      <PromptLibraryEditor
+        prompt={prompt}
+        onSave={onSave}
+        onRefresh={async () => ({
+          ...prompt,
+          title: 'New server title',
+          draft_content: 'New server content',
+          draft_revision: 5,
+        })}
+        onCancel={() => {}}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('Description'), {
+      target: { value: 'My description' },
+    })
+
+    fireEvent.click(screen.getByRole('button', {
+      name: /Save draft/,
+    }))
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: /Keep my edits and use latest revision/,
+    }))
+
+    expect(screen.getByLabelText('Title'))
+      .toHaveValue('New server title')
+
+    expect(screen.getByLabelText('Description'))
+      .toHaveValue('My description')
+
+    expect(screen.getByLabelText(/Draft system prompt/))
+      .toHaveValue('New server content')
+  })
+})
+
+it('does not restore an old draft after save succeeds but publish conflicts', async () => {
+  const prompt = {
+    id: 'p1',
+    title: 'Test prompt',
+    draft_content: 'Original',
+    draft_revision: 4,
+  }
+
+  const onSave = vi.fn().mockResolvedValue({
+    ...prompt,
+    draft_content: 'My saved edit',
+    draft_revision: 5,
+  })
+
+  const onPublish = vi.fn()
+    .mockRejectedValueOnce(conflict())
+    .mockResolvedValueOnce({})
+
+  render(
+    <PromptLibraryEditor
+      prompt={prompt}
+      onSave={onSave}
+      onPublish={onPublish}
+      onRefresh={async () => ({
+        ...prompt,
+        draft_content: 'New server draft',
+        draft_revision: 6,
+      })}
+      onCancel={() => {}}
+    />
+  )
+
+  const draft = screen.getByLabelText(/Draft system prompt/)
+
+  fireEvent.change(draft, {
+    target: { value: 'My saved edit' },
+  })
+
+  fireEvent.click(screen.getByRole('button', {
+    name: /Publish version/,
+  }))
+
+  fireEvent.click(await screen.findByRole('button', {
+    name: /Keep my edits and use latest revision/,
+  }))
+
+  expect(draft).toHaveValue('New server draft')
+
+  fireEvent.click(screen.getByRole('button', {
+    name: /Publish version/,
+  }))
+
+  await waitFor(() =>
+    expect(onPublish).toHaveBeenLastCalledWith('', 6)
+  )
+
+  expect(onSave).toHaveBeenCalledTimes(1)
+})

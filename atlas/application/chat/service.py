@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from copy import deepcopy
 from enum import Enum
 from typing import (
     Any,
@@ -1155,7 +1156,7 @@ class ChatService:
             and user_email
         ):
             try:
-                saved = self._save_conversation(
+                saved = await self._save_conversation(
                     session,
                     user_email,
                     model,
@@ -2288,7 +2289,7 @@ class ChatService:
             )
         return loaded
 
-    def _save_conversation(
+    async def _save_conversation(
         self,
         session: Session,
         user_email: str,
@@ -2396,19 +2397,40 @@ class ChatService:
         if classification is not ...:
             metadata[conv_class.CLASSIFICATION_METADATA_KEY] = classification
 
-        record = self.conversation_repository.save_conversation(
+        # Snapshot the write arguments on the event loop. The worker
+        # owns only the database operation, not the live session.
+        save_task = asyncio.create_task(asyncio.to_thread(
+            self.conversation_repository.save_conversation,
             conversation_id=conv_id,
             user_email=normalize_user_email(user_email),
             title=title,
             model=model,
-            messages=messages,
-            metadata=metadata,
+            messages=deepcopy(messages),
+            metadata=deepcopy(metadata),
             allow_shrink=allow_shrink,
-        )
+        ))
+        cancelled = False
+        while True:
+            try:
+                record = await asyncio.shield(save_task)
+                break
+            except asyncio.CancelledError:
+                if save_task.cancelled():
+                    raise
+                # A worker cannot be interrupted by cancelling its waiter.
+                # Drain it before cancelled-turn cleanup can retry the save.
+                cancelled = True
+            except Exception as exc:
+                if cancelled:
+                    _record_persist_failure(exc)
+                    raise asyncio.CancelledError from exc
+                raise
         if record is not None:
             # The committed pin state (issue #1169): the save carried the
             # stored pin through, which may differ from this session's view.
             library_turn.adopt_persisted_pin(session.context, getattr(record, "metadata_json", None))
+        if cancelled:
+            raise asyncio.CancelledError
         if record is None:
             logger.warning(
                 "Conversation %s save rejected by repository (owned by another "

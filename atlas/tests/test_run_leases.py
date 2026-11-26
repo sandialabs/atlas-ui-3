@@ -9,6 +9,7 @@ frozen owner by advancing its guard's injected clock.
 
 import asyncio
 import contextlib
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import fakeredis
@@ -826,7 +827,7 @@ async def test_fenced_run_does_not_save_its_stale_turn(server):
         config_manager=MagicMock(), session_repository=MagicMock(),
         conversation_repository=MagicMock(),
     )
-    chat._save_conversation = MagicMock(return_value=True)
+    chat._save_conversation = AsyncMock(return_value=True)
     session = MagicMock()
     session.history.messages = []
     session.context = {}

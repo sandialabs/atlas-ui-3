@@ -42,11 +42,12 @@ when the external authorizer could not answer (network error, non-2xx, no
 "member" (fail closed) and never "not a member" either: listings say
 `incomplete`, and sharing into the group answers 503.
 
-Membership answers are bounded and reused (`prompt_library_membership.py`):
+Membership answers are bounded and reused (`prompt_library_membership.py`)
+for non-execution checks. Chat execution bypasses cached and in-flight
+membership answers while retaining concurrency and timeout bounds:
 
 - A definite answer is reused for `PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS`
-  (default 30, at most 300, 0 disables). That is the revocation latency for a
-  change made in the authorization service; changes made in Atlas (unsharing,
+  (default 30, at most 300, 0 disables). That bounds revocation latency for non-execution checks; changes made in Atlas (unsharing,
   removing a grant, archiving) are read from the database on every request.
   Failures are never cached.
 - Keys are a SHA-256 of the exact identity and group, so answers are never
@@ -63,7 +64,7 @@ Membership answers are bounded and reused (`prompt_library_membership.py`):
   `edit`/`manage` exist only as direct user grants; only the owner changes
   `manage` grants.
 - Effective level is the maximum over all applicable grants (union).
-- Group membership is reused for up to `PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS`
+- Outside prompt execution, group membership is reused for up to `PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS`
   (above), so removing someone from a group in the authorization service
   takes effect within that window (default 30 s, at most 300 s), not
   immediately. Grants, unsharing and archiving are read from the database on

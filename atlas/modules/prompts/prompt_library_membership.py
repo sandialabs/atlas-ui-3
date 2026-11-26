@@ -8,9 +8,8 @@ listing, per user, per page view. ``MembershipResolver`` bounds that load:
 * **Reuse with a deadline.** A definite answer (member / not a member) is
   reused for ``ttl`` seconds (``PROMPT_LIBRARY_MEMBERSHIP_CACHE_SECONDS``,
   default 30, at most 300, 0 disables). That is also the documented
-  revocation latency for a change made *in the authorization service*: a
-  user removed from a group keeps group-derived ``use`` access for at most
-  ``ttl`` seconds. Changes made in Atlas -- unsharing, removing a grant,
+  revocation latency for a change made *in the authorization service*: non-execution access checks may reuse membership answers for at most
+  ``ttl`` seconds. Prompt execution bypasses cached and in-flight answers. Changes made in Atlas -- unsharing, removing a grant,
   archiving -- are read from the database on every request and are never
   delayed by this cache. An answer is never reused past its deadline.
 * **Failures are never cached.** An authorizer error or timeout is "unknown"
@@ -134,7 +133,13 @@ class MembershipResolver:
             self._loop_state[loop] = state
         return state
 
-    async def membership(self, user_email: str, group: str) -> Optional[bool]:
+    async def membership(
+        self, user_email: str, group: str, *, fresh: bool = False
+    ) -> Optional[bool]:
+        if fresh:
+            semaphore, _ = self._state()
+            return await self._ask(semaphore, user_email, group)
+
         key = membership_key(user_email, group)
         ttl = max(0, int(self._ttl() or 0))
         store = self._store() if ttl else None
