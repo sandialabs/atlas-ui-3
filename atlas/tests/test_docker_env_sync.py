@@ -94,6 +94,46 @@ def parse_docker_compose_env(docker_compose_path: Path) -> dict[str, str]:
     return docker_env_vars
 
 
+def _compose_default(value: str) -> str:
+    """The value Compose uses when the variable is unset: the literal itself,
+    or the default of a ``${NAME:-default}`` interpolation."""
+    match = re.match(r'^\$\{[A-Z_][A-Z0-9_]*:-(.*)\}$', value)
+    return match.group(1) if match else value
+
+
+def test_compose_default_reads_literals_and_interpolations():
+    assert _compose_default('false') == 'false'
+    assert _compose_default('${FEATURE_X:-true}') == 'true'
+    assert _compose_default('${FEATURE_X:-}') == ''
+    assert _compose_default('${FEATURE_X:?required}') == '${FEATURE_X:?required}'
+
+
+def test_audio_settings_reach_the_compose_service():
+    """The audio capabilities are configured from the deployment's environment.
+
+    Hard-coding the two flags to ``false`` here would make the documented
+    ``AUDIO_*`` settings unable to enable either one in a Compose deployment.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    compose = parse_docker_compose_env(repo_root / 'docker-compose.yml')
+    from atlas.modules.config.settings import AppSettings
+
+    audio_settings = sorted(
+        name.upper() for name in AppSettings.model_fields
+        if name.startswith('audio_') or name.startswith('feature_audio_')
+    )
+    assert len(audio_settings) >= 20
+    for name in audio_settings:
+        assert name in compose, f"{name} is not passed to the atlas-ui service"
+        assert compose[name].startswith('${' + name + ':-'), f"{name} should pass through with a default"
+        field = AppSettings.model_fields[name.lower()]
+        default = '' if field.default is None else str(field.default)
+        expected = default.lower() if isinstance(field.default, bool) else default
+        if isinstance(field.default, float) and field.default.is_integer():
+            expected = str(int(field.default))
+        assert _compose_default(compose[name]) == expected, f"{name} default differs from AppSettings"
+
+
 def test_docker_compose_has_required_env_vars():
     """Test that docker-compose.yml includes all required environment variables from .env.example.
 
@@ -167,7 +207,11 @@ def test_docker_compose_env_var_values_reasonable():
     # Check that boolean feature flags have boolean-like values
     feature_flags = [k for k in docker_compose_vars.keys() if k.startswith('FEATURE_')]
     for flag in feature_flags:
-        value = docker_compose_vars[flag].lower()
+        # A flag may be a literal or a pass-through with a default
+        # (``${FEATURE_X:-false}``), which lets a deployment switch it on from
+        # its own environment. Either way what Compose falls back to must be
+        # a boolean.
+        value = _compose_default(docker_compose_vars[flag]).lower()
         assert value in ['true', 'false'], (
             f"Feature flag '{flag}' has non-boolean value: '{docker_compose_vars[flag]}'"
         )

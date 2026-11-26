@@ -109,10 +109,6 @@ The `_` prefix on `_mcp_data` signals that this is a system-injected parameter, 
 
 The `username-override-demo` MCP server includes a `plan_with_tools` tool that demonstrates basic `_mcp_data` injection. See `atlas/mcp/username-override-demo/main.py`.
 
-The former `tool_planner` server was removed on 2026-10-23 together with MCP
-sampling: its plan generation depended on a server-initiated LLM call that ran
-without the requesting user's identity or per-model authorization.
-
 ## Related
 
 - `_atlas_user` injection: same pattern, injects authenticated user email into tools declaring an `_atlas_user` parameter

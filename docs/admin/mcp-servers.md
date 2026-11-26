@@ -1,6 +1,6 @@
 # MCP Server Configuration
 
-Last updated: 2026-10-16
+Last updated: 2026-11-25
 
 The `mcp.json` file defines the MCP (Model Context Protocol) servers that the application can connect to. These servers provide the tools and capabilities available to the LLM.
 
@@ -234,7 +234,7 @@ export MY_API_KEY="your-secret-api-key"
 
 You can restrict access to MCP servers based on user groups. This is a critical feature for controlling which users can access powerful or sensitive tools. Group checks run at both request time (when tools are listed or selected) and at the single authorization choke point inside `MCPToolManager`, keyed on the authenticated user's identity from the request context. A missing user context, a disabled server, an unreachable authorization service, or membership that does not satisfy the `groups` list will all fail closed and deny access. If a user is not in the required group, the server will be completely invisible to them in the UI, and any attempt to call its functions will be blocked.
 
-The same central policy covers **tools, prompts, and resources**. Prompt text and resource contents are injected into model context, so they are never fetched from a server the requesting user may not use. Prompt and resource operations require an authenticated identity even on a server with no `groups`; when an MCP operation selects a model, the user's per-model `groups` ACL is enforced as well. An active data classification must be declared by the server (`allowed_data_classifications`) before any of the three capabilities can run under that level. MCP sampling (server-initiated LLM calls) is not supported.
+The same central policy covers **tools, prompts, and resources**. Prompt text and resource contents are injected into model context, so they are never fetched from a server the requesting user may not use. Prompt and resource operations require an authenticated identity even on a server with no `groups`; when an MCP operation selects a model, the user's per-model `groups` ACL is enforced as well. An active data classification must be declared by the server (`allowed_data_classifications`) before any of the three capabilities can run under that level.
 
 ## A Note on the `_atlas_user` Argument
 

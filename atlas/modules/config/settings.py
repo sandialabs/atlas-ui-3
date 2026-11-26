@@ -1226,6 +1226,148 @@ class AppSettings(BaseSettings):
         validation_alias=AliasChoices("FEATURE_FOLLOWUP_SUGGESTIONS_ENABLED"),
     )
 
+    # Speech-to-text and text-to-speech (issue #1251). Each capability talks
+    # to its own OpenAI-compatible audio endpoint (``/audio/transcriptions``,
+    # ``/audio/speech``), configured independently of the chat models and of
+    # each other. Both are off by default. The resolved view, including the
+    # "enabled but incompletely configured" case, is
+    # ``atlas.modules.audio.audio_config``.
+    feature_audio_stt_enabled: bool = Field(
+        False,
+        description="Enable dictation: transcribe recorded audio through AUDIO_STT_BASE_URL",
+        validation_alias=AliasChoices("FEATURE_AUDIO_STT_ENABLED"),
+    )
+    audio_stt_show_button_by_default: bool = Field(
+        True,
+        description="Show the microphone button to users who have not chosen for themselves",
+        validation_alias=AliasChoices("AUDIO_STT_SHOW_BUTTON_BY_DEFAULT"),
+    )
+    audio_stt_base_url: str = Field(
+        "",
+        description="OpenAI-compatible base URL for transcription, e.g. http://speaches:8000/v1",
+        validation_alias=AliasChoices("AUDIO_STT_BASE_URL"),
+    )
+    audio_stt_model: str = Field(
+        "",
+        description="Transcription model identifier sent to the audio server",
+        validation_alias=AliasChoices("AUDIO_STT_MODEL"),
+    )
+    audio_stt_api_key: Optional[str] = Field(
+        default=None,
+        description="Optional bearer credential for the transcription endpoint",
+        validation_alias=AliasChoices("AUDIO_STT_API_KEY"),
+    )
+    audio_stt_groups: str = Field(
+        "",
+        description="Comma-separated groups allowed to use dictation; empty allows every user",
+        validation_alias=AliasChoices("AUDIO_STT_GROUPS"),
+    )
+    audio_stt_allowed_data_classifications: str = Field(
+        "",
+        description=(
+            "Comma-separated compliance levels the transcription endpoint is approved "
+            "for. Only read when compliance levels are enabled; empty then denies "
+            "every classified conversation."
+        ),
+        validation_alias=AliasChoices("AUDIO_STT_ALLOWED_DATA_CLASSIFICATIONS"),
+    )
+    audio_stt_timeout_seconds: float = Field(
+        60.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Overall deadline for one transcription request",
+        validation_alias=AliasChoices("AUDIO_STT_TIMEOUT_SECONDS"),
+    )
+    audio_stt_max_audio_bytes: int = Field(
+        25 * 1024 * 1024,
+        gt=0,
+        description="Largest audio upload accepted for transcription",
+        validation_alias=AliasChoices("AUDIO_STT_MAX_AUDIO_BYTES"),
+    )
+    audio_stt_max_duration_seconds: int = Field(
+        300,
+        gt=0,
+        description="Longest recording the microphone button makes; also checked against the duration the client reports",
+        validation_alias=AliasChoices("AUDIO_STT_MAX_DURATION_SECONDS"),
+    )
+    audio_max_concurrent_requests: int = Field(
+        8,
+        gt=0,
+        description=(
+            "Audio requests (dictation and read-aloud together) one backend process "
+            "relays at a time; each holds a clip in memory. Further requests get 503."
+        ),
+        validation_alias=AliasChoices("AUDIO_MAX_CONCURRENT_REQUESTS"),
+    )
+    feature_audio_tts_enabled: bool = Field(
+        False,
+        description="Enable read-aloud: synthesize speech through AUDIO_TTS_BASE_URL",
+        validation_alias=AliasChoices("FEATURE_AUDIO_TTS_ENABLED"),
+    )
+    audio_tts_show_button_by_default: bool = Field(
+        True,
+        description="Show the read-aloud button to users who have not chosen for themselves",
+        validation_alias=AliasChoices("AUDIO_TTS_SHOW_BUTTON_BY_DEFAULT"),
+    )
+    audio_tts_base_url: str = Field(
+        "",
+        description="OpenAI-compatible base URL for speech synthesis, e.g. http://speaches:8000/v1",
+        validation_alias=AliasChoices("AUDIO_TTS_BASE_URL"),
+    )
+    audio_tts_model: str = Field(
+        "",
+        description="Speech model identifier sent to the audio server",
+        validation_alias=AliasChoices("AUDIO_TTS_MODEL"),
+    )
+    audio_tts_voice: str = Field(
+        "",
+        description="Voice identifier sent to the audio server",
+        validation_alias=AliasChoices("AUDIO_TTS_VOICE"),
+    )
+    audio_tts_api_key: Optional[str] = Field(
+        default=None,
+        description="Optional bearer credential for the speech endpoint",
+        validation_alias=AliasChoices("AUDIO_TTS_API_KEY"),
+    )
+    audio_tts_groups: str = Field(
+        "",
+        description="Comma-separated groups allowed to use read-aloud; empty allows every user",
+        validation_alias=AliasChoices("AUDIO_TTS_GROUPS"),
+    )
+    audio_tts_allowed_data_classifications: str = Field(
+        "",
+        description=(
+            "Comma-separated compliance levels the speech endpoint is approved for. "
+            "Only read when compliance levels are enabled; empty then denies every "
+            "classified conversation."
+        ),
+        validation_alias=AliasChoices("AUDIO_TTS_ALLOWED_DATA_CLASSIFICATIONS"),
+    )
+    audio_tts_response_format: str = Field(
+        "mp3",
+        description="Audio format requested from the speech endpoint (mp3, wav, opus, aac or flac)",
+        validation_alias=AliasChoices("AUDIO_TTS_RESPONSE_FORMAT"),
+    )
+    audio_tts_timeout_seconds: float = Field(
+        60.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Overall deadline for one speech request",
+        validation_alias=AliasChoices("AUDIO_TTS_TIMEOUT_SECONDS"),
+    )
+    audio_tts_max_input_chars: int = Field(
+        4096,
+        gt=0,
+        description="Longest text accepted for one speech request",
+        validation_alias=AliasChoices("AUDIO_TTS_MAX_INPUT_CHARS"),
+    )
+    audio_tts_max_audio_bytes: int = Field(
+        25 * 1024 * 1024,
+        gt=0,
+        description="Largest synthesized audio response relayed to the browser",
+        validation_alias=AliasChoices("AUDIO_TTS_MAX_AUDIO_BYTES"),
+    )
+
     # Origin validation for the main chat WebSocket at /ws. A WS upgrade skips
     # the CORS preflight, so without this check any page the user visits can
     # open an authenticated socket on their behalf (cross-site WebSocket

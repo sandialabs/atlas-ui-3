@@ -48,7 +48,7 @@ from atlas.application.chat.runs.context import (
     set_current_run,
     tag_event,
 )
-from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError
+from atlas.application.chat.runs.coordination import RunCoordinationUnavailableError, get_run_coordinator
 from atlas.application.chat.runs.launch_models import list_launchable_models
 from atlas.application.chat.runs.leases import ensure_current_run_may_act
 from atlas.application.chat.runs.registry import (
@@ -61,7 +61,7 @@ from atlas.core.model_access import (
     ModelAccessDecision,
     check_model_access,
 )
-from atlas.domain.conversation_origin import origin_for_run_source
+from atlas.domain.conversation_origin import ORIGIN_AGENT_RUNS_API, origin_for_run_source
 from atlas.domain.messages.models import ToolResult
 from atlas.modules.mcp_tools.atlas_server import (
     GET_RUNS_TOOL_NAME,
@@ -596,6 +596,22 @@ async def _final_reply(chat_service: Any, session_id: Any) -> Optional[str]:
     return ""
 
 
+async def _confirm_api_activation(record: Any, claim: Any) -> None:
+    """Retry unknown replies, never start work without confirmed ownership."""
+    coordinator = get_run_coordinator()
+    for attempt in range(3):
+        if record.is_terminal or record.claim is not claim or record.lost_claim is not None:
+            break
+        held = await coordinator.activate_api(claim)
+        if held is True and not record.is_terminal and record.claim is claim and record.lost_claim is None:
+            return
+        if held is not None:
+            break
+        if attempt < 2:
+            await asyncio.sleep(0.1)
+    raise RunCoordinationUnavailableError("API execution admission unavailable")
+
+
 async def _record_outcome(chat_service: Any, record: Any, outcome: RunStatus) -> None:
     """Store how the run ended, and its depth, on the child's conversation.
 
@@ -644,6 +660,14 @@ async def _run_child(
     outcome = RunStatus.COMPLETED
     error: Optional[str] = None
     try:
+        # Do not start API work until shared coordination records that the
+        # publication was acknowledged and the local task was scheduled.
+        claim = record.claim
+        if record.source == ORIGIN_AGENT_RUNS_API:
+            if record.is_terminal or record.lost_claim is not None:
+                raise RunCoordinationUnavailableError("API execution admission unavailable")
+            if claim is not None:
+                await _confirm_api_activation(record, claim)
         response = await chat_service.handle_chat_message(
             session_id=record.session_id,
             content=prompt,
@@ -911,6 +935,23 @@ async def _start_child_run(
             chat_service, model, tools, data_sources, compliance_level, user_email
         )
 
+    spec = {
+        "model": model,
+        "tools": tools,
+        "data_sources": data_sources,
+        # Unlike tools, sources are re-authorized from the *launch-time* list
+        # on every follow-up rather than from the last narrowed one: a source
+        # is authorized again when the child queries it, so carrying the list
+        # forward widens nothing, and a RAG discovery outage during one
+        # follow-up must not strip the sources from every later turn.
+        "requested_data_sources": requested_sources,
+        "workspace_id": workspace_id,
+        "workspace_name": workspace_name,
+        "compliance_level": compliance_level,
+        "source": source,
+        "actor": actor,
+    }
+
     # Admission is check-then-insert, and it must be atomic: several
     # ``atlas_launch_subagent`` calls in one agent step run concurrently, and a check
     # separated from the insert by an await would let all of them pass a cap of
@@ -936,6 +977,7 @@ async def _start_child_run(
             title=title,
             source=source,
             follow_up_of=follow_up_of,
+            api_continuation=spec if source == ORIGIN_AGENT_RUNS_API else None,
         )
     except ConcurrencyLimitError as e:
         raise LaunchRefused(str(e), code="concurrency_limit") from e
@@ -946,22 +988,6 @@ async def _start_child_run(
     except RunRegistryError as e:  # pragma: no cover - defensive
         raise LaunchRefused(f"The sub-conversation could not be started: {e}") from e
 
-    spec = {
-        "model": model,
-        "tools": tools,
-        "data_sources": data_sources,
-        # Unlike tools, sources are re-authorized from the *launch-time* list
-        # on every follow-up rather than from the last narrowed one: a source
-        # is authorized again when the child queries it, so carrying the list
-        # forward widens nothing, and a RAG discovery outage during one
-        # follow-up must not strip the sources from every later turn.
-        "requested_data_sources": requested_sources,
-        "workspace_id": workspace_id,
-        "workspace_name": workspace_name,
-        "compliance_level": compliance_level,
-        "source": source,
-        "actor": actor,
-    }
     record.launch_spec = spec
     connection.bind_run(record.run_id)
 

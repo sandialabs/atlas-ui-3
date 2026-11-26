@@ -26,6 +26,7 @@ import ToolElapsedTime from './ToolElapsedTime'
 import ToolNameLabel from './ToolNameLabel'
 import ContextCheckpointRow from './ContextCheckpointRow'
 import TeamPromptRecovery from './TeamPromptRecovery'
+import ReadAloudButton from './ReadAloudButton'
 
 // Feature flag: Perplexity-style inline citations & references for RAG.
 // Off by default; enable at Vite build time with VITE_FEATURE_RAG_CITATIONS=true.
@@ -102,6 +103,15 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
   // assistant text messages, and only when a correction handler is wired up
   // (which the parent gates on the feature flag + the user's capture consent).
   const canCorrect = message.role === 'assistant' && !message.type && typeof onCorrect === 'function' && !message._streaming
+  // Read-aloud (issue #1251) is for finished assistant prose: not a tool or
+  // status row, and not a reply that is still streaming or a replayed
+  // fragment, which would be read as if it were the whole answer. A live
+  // reply carries no type; the same reply reloaded from history is typed
+  // 'chat'. The button decides for itself whether the capability is
+  // available and shown.
+  const isProse = !message.type || message.type === 'chat'
+  const canReadAloud = message.role === 'assistant' && isProse && !message._streaming &&
+    !message._replayed && typeof message.content === 'string' && message.content.trim().length > 0
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef(null)
@@ -856,6 +866,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
                   <RotateCcw className="w-3 h-3" />
                 </button>
               )}
+              {canReadAloud && <ReadAloudButton content={message.content} />}
               {!message._replayed && (
                 // A replayed bubble holds a mid-answer fragment (issue #957):
                 // copying it pastes the fragment as if it were the finished

@@ -4,10 +4,6 @@ Holds the per-request routing context classes and the RoutingMixin that
 creates per-server log/elicitation handlers. Routing uses dictionaries keyed
 by (server_name, tool_call_id) rather than contextvars because the MCP receive
 loop runs in a different task than the tool call.
-
-MCP sampling was removed deliberately: a server-initiated LLM call ran under
-an arbitrary configured model without the requesting user's identity or model
-ACL, which is not a boundary this application can delegate to a tool server.
 """
 import asyncio
 import contextvars

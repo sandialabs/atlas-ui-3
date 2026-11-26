@@ -1539,7 +1539,11 @@ class ChatService:
         loaded = load_messages_into_history(
             session.history, canonical_messages, conversation_id
         )
-        await self.persist_session(session)
+        if not await self.persist_session(session):
+            # The session store refused the write (outage or a newer copy from
+            # another connection). Say so: a success frame would let the client
+            # send chat into a session that does not hold this conversation.
+            return self._navigation_not_stored_frame()
 
         logger.info(
             "Restored conversation %s into session %s for user %s (%d messages)",
@@ -1717,7 +1721,8 @@ class ChatService:
         session = await self.create_session(session_id, user_email)
         new_conv_id = str(uuid4())
         session.context["conversation_id"] = new_conv_id
-        await self.persist_session(session)
+        if not await self.persist_session(session):
+            return self._navigation_not_stored_frame()
 
         logger.info(f"Reset session {sanitize_for_logging(str(session_id))} for user {sanitize_for_logging(user_email)}")
 
@@ -1725,6 +1730,14 @@ class ChatService:
             "type": "session_reset",
             "session_id": str(session_id),
             "message": "New session created"
+        }
+
+    @staticmethod
+    def _navigation_not_stored_frame() -> Dict[str, Any]:
+        return {
+            "type": "error",
+            "message": "The session could not be saved. Try again in a moment.",
+            "error_type": "domain",
         }
 
     async def handle_attach_file(

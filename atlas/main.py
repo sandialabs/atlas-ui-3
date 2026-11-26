@@ -130,6 +130,7 @@ from atlas.modules.file_storage.manager import FileManager
 from atlas.modules.help.help_config import report_help_config_problem, resolve_help_config
 from atlas.routes.admin_routes import admin_router
 from atlas.routes.agent_run_routes import router as agent_run_router
+from atlas.routes.audio_routes import audio_router
 
 # Import essential routes
 from atlas.routes.capture_routes import capture_router
@@ -956,6 +957,28 @@ async def _persist_session(chat_service, session) -> None:
         await persist(session)
 
 
+def _usable_request_id(data):
+    """The client's navigation ``request_id`` when it is a short string, else None."""
+    request_id = data.get("request_id") if isinstance(data, dict) else None
+    if isinstance(request_id, str) and 0 < len(request_id) <= 64:
+        return request_id
+    return None
+
+
+def _echo_request_id(data, response) -> None:
+    """Copy the client's ``request_id`` onto the reply to a navigation frame.
+
+    ``reset_session`` and ``restore_conversation`` are answered with
+    ``session_reset`` / ``conversation_restored``, or an ``error`` that names
+    nothing. A client that holds such a frame until it is acknowledged (issue
+    #1223) sends a ``request_id`` and matches the reply by it. Absent or
+    oversized ids are not echoed, so older clients see no change.
+    """
+    request_id = _usable_request_id(data)
+    if request_id is not None and isinstance(response, dict):
+        response["request_id"] = request_id
+
+
 # Marks a tracked run's own session, which belongs to the run rather than to a
 # connection and so can never be resumed by one.
 _RUN_SESSION_MARKER = "tracked_run_session"
@@ -1777,6 +1800,7 @@ app.include_router(prompt_library_router)
 app.include_router(persona_router)
 app.include_router(workspace_router)
 app.include_router(suggestion_router)
+app.include_router(audio_router)
 # Globus OAuth routes (browser-facing login/callback + JSON API)
 app.include_router(globus_browser_router)
 app.include_router(globus_api_router)
@@ -3266,6 +3290,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             else "domain"
                         ),
                     }
+                _echo_request_id(data, response)
                 await websocket.send_json(response)
 
                 # A refused restore (authorization, or the id simply not
@@ -3352,6 +3377,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # by another connection (issue #1091): tell the client
                     # rather than dropping the socket.
                     response = {"type": "error", "message": e.message, "error_type": "domain"}
+                _echo_request_id(data, response)
                 await websocket.send_json(response)
 
             elif message_type == "attach_file":

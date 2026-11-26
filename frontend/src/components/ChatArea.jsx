@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useChat } from '../contexts/ChatContext'
+import { useAudioControls } from '../hooks/useAudioControls'
+import DictationButton from './DictationButton'
 import { useWS } from '../contexts/WSContext'
 import { Send, Paperclip, X, Square, FileText, FileSearch, FileX, Image, Wrench, WifiOff, Sparkles } from 'lucide-react'
 import Message from './Message'
@@ -111,6 +113,7 @@ const ChatArea = () => {
     contextCompaction,
   } = useChat()
   const { isConnected, connectionStatus, sessionEnded } = useWS()
+  const audioControls = useAudioControls()
   const toast = useToast()
   // Optional onboarding copy can be switched off in Tools and Settings.
   // Warnings, state, and actions never depend on it.
@@ -620,6 +623,32 @@ const ChatArea = () => {
     }
   }
 
+  // Dictation (issue #1251): the transcript goes into the draft at the caret
+  // (replacing a selection), spaced from the text around it, and the composer
+  // is focused so it can be edited. It is never sent from here.
+  const insertDictation = (text) => {
+    const el = textareaRef.current
+    // The textarea is the current draft; state may be a render behind it.
+    const current = el ? el.value : inputValue
+    const start = el && typeof el.selectionStart === 'number' ? Math.min(el.selectionStart, current.length) : current.length
+    const end = el && typeof el.selectionEnd === 'number' ? Math.min(Math.max(el.selectionEnd, start), current.length) : start
+    const before = current.slice(0, start)
+    const after = current.slice(end)
+    const lead = before && !/\s$/.test(before) ? ' ' : ''
+    const trail = after && !/^\s/.test(after) ? ' ' : ''
+    const caret = before.length + lead.length + text.length
+    setInputValue(`${before}${lead}${text}${trail}${after}`)
+    if (followUpSuggestions.length > 0) setFollowUpSuggestions([])
+    // After React has written the new value: place the caret after the
+    // inserted text and size the box to fit. Not token streaming.
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return
+      textareaRef.current.focus()
+      textareaRef.current.setSelectionRange(caret, caret)
+      autoResizeTextarea()
+    })
+  }
+
   const handleInputChange = (e) => {
     const value = e.target.value
     setInputValue(value)
@@ -1105,7 +1134,7 @@ const ChatArea = () => {
                   className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-200"
                 />
                 <button
-                  onClick={() => { if (agentAnswer.trim()) { answerAgentQuestion(agentAnswer.trim()); setAgentAnswer(''); setAgentPendingQuestion(null) } }}
+                  onClick={() => { if (agentAnswer.trim() && answerAgentQuestion(agentAnswer.trim()) !== false) { setAgentAnswer(''); setAgentPendingQuestion(null) } }}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
                 >
                   Send
@@ -1543,6 +1572,19 @@ const ChatArea = () => {
                 >
                   <Square className="w-5 h-5" />
                 </button>
+              )}
+              {/* Keyed on navigation: New Chat or opening another conversation
+                  remounts the button, which cancels a recording or a pending
+                  transcription and releases the microphone. Speech meant for
+                  one conversation must not land in the next one's draft. */}
+              {audioControls.stt.visible && (
+                <DictationButton
+                  key={conversationNavigationVersion}
+                  onTranscript={insertDictation}
+                  maxDurationSeconds={audioControls.stt.max_duration_seconds}
+                  maxAudioBytes={audioControls.stt.max_audio_bytes}
+                  complianceLevel={audioControls.complianceLevel}
+                />
               )}
               <div className="flex-1 min-w-0 relative">
               <textarea
