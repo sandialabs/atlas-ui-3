@@ -409,7 +409,7 @@ class UserClientMixin:
                 client = _client().Client(
                     transport=transport,
                     log_handler=log_handler,
-                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    **self._client_input_kwargs(server_name),
                 )
             elif wormhole_headers:
                 # Bearer/jwt/oauth token via auth=, plus the Wormhole subtoken header.
@@ -418,7 +418,7 @@ class UserClientMixin:
                     transport=transport,
                     auth=stored_token.token_value,
                     log_handler=log_handler,
-                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    **self._client_input_kwargs(server_name),
                 )
             else:
                 # FastMCP Client accepts auth= as a string (bearer token)
@@ -426,7 +426,7 @@ class UserClientMixin:
                     url,
                     auth=stored_token.token_value,
                     log_handler=log_handler,
-                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    **self._client_input_kwargs(server_name),
                 )
 
             # Cache the client (re-check to avoid duplicate creation race)
@@ -663,14 +663,14 @@ class UserClientMixin:
                     transport=transport,
                     auth=token,
                     log_handler=log_handler,
-                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    **self._client_input_kwargs(server_name),
                 )
             else:
                 client = _client().Client(
                     url,
                     auth=token,
                     log_handler=log_handler,
-                    elicitation_handler=self._create_elicitation_handler(server_name),
+                    **self._client_input_kwargs(server_name),
                 )
 
             self._user_clients[cache_key] = client

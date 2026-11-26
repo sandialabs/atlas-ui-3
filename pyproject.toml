@@ -29,15 +29,20 @@ dependencies = [
     "cryptography>=44.0.0,<51.0.0",
     "duckdb-engine>=0.17.0,<1.0.0",
     "fastapi>=0.115.0,<1.0.0",
-    # Pinned below 4.0: FastMCP 4 implements MCP 2026-07-28, which removed
-    # server-initiated requests (SEP-2322). Atlas no longer implements MCP
-    # sampling, but the major upgrade still needs the task capability and the
-    # rest of the FastMCP client API validated against 4.x.
-    # Tracked in https://github.com/sandialabs/atlas-ui-3/issues/905
-    "fastmcp[tasks]>=3.4.3,<4.0.0",
+    # FastMCP 4 implements MCP 2026-07-28 (SEP-2322 multi round-trip requests).
+    # Floor is the first 4.x line Atlas's task and elicitation paths were
+    # validated against (issue #905).
+    "fastmcp[tasks]>=4.2.6,<5.0.0",
+    # Imported directly (tasks client extension, task models), not only
+    # through fastmcp. Released in lockstep with fastmcp.
+    "fastmcp-tasks>=4.2.6,<5.0.0",
     "httpx>=0.28.1,<1.0.0",
     "itsdangerous>=2.0.0,<3.0.0",
     "litellm>=1.90.0,<2.0.0",
+    # MCP SDK 2.x: imported directly for protocol models and the client
+    # extension interface. 2.3.0 is the version validated with fastmcp 4.2.6.
+    "mcp>=2.3.0,<3.0.0",
+    "mcp-types>=2.3.0,<3.0.0",
     "opentelemetry-api>=1.0.0,<2.0.0",
     "opentelemetry-exporter-otlp>=1.0.0,<2.0.0",
     "opentelemetry-instrumentation-fastapi>=0.48b0,<1.0.0",

@@ -34,6 +34,10 @@ import { SEARCH_TOOL, ATLAS_SERVER, migrateToolName } from '../constants/atlasTo
 import { isKnownUser } from '../utils/userStorage'
 import { normalizeSaveMode } from '../utils/saveModeConfig'
 import { clientMayAutoApprove } from '../utils/toolApproval'
+import {
+	enqueueElicitation as enqueueElicitationRequest,
+	settleElicitation as settleElicitationRequest,
+} from '../utils/elicitationQueue'
 
 // Safety timeout for stuck thinking state (no backend response)
 // How long to wait for a `conversation_saved` after a joined run ends before
@@ -274,7 +278,18 @@ export const ChatProvider = ({ children }) => {
 	const [sessionId, setSessionId] = useState(null)
 	const [attachments, setAttachments] = useState(new Set())
 	const [, setPendingFileEvents] = useState(new Map())
-	const [pendingElicitation, setPendingElicitation] = useState(null)
+	// Elicitation requests waiting for an answer, oldest first. One dialog is
+	// shown at a time (the head); see utils/elicitationQueue.js.
+	const [elicitationQueue, setElicitationQueue] = useState([])
+	const pendingElicitation = elicitationQueue[0] || null
+	const enqueueElicitation = useCallback(
+		request => setElicitationQueue(queue => enqueueElicitationRequest(queue, request)),
+		[]
+	)
+	const settleElicitation = useCallback(
+		elicitationId => setElicitationQueue(queue => settleElicitationRequest(queue, elicitationId)),
+		[]
+	)
 	const [followUpSuggestions, setFollowUpSuggestions] = useState([])
 
 	// Chat history: 3-state save mode persists across refreshes via localStorage
@@ -705,7 +720,8 @@ export const ChatProvider = ({ children }) => {
 			triggerFileDownload,
 			addAttachment,
 			resolvePendingFileEvent,
-			setPendingElicitation,
+			enqueueElicitation,
+			settleElicitation,
 			setActiveConversationId: adoptConversationId,
 			streamToken,
 			streamEnd,
@@ -2999,7 +3015,7 @@ agent_mode: agent.agentModeAvailable && agent.agentModeEnabled,
 		sendMessage,
 		sendApprovalResponse: sendMessage,
 		pendingElicitation,
-		setPendingElicitation,
+		settleElicitation,
 		refreshConfig: config.refreshConfig,
 		configReady: config.configReady,
 		saveMode,

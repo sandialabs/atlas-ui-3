@@ -61,8 +61,6 @@ def manager():
         mgr._user_clients = {}
         mgr._user_clients_lock = __import__("asyncio").Lock()
         mgr._session_manager = MCPSessionManager()
-        mgr._server_task_support = {}
-        mgr._tool_task_forbidden = set()
         mgr._task_timeout = 1
         mgr._elicitation_routing = {}
         mgr._default_log_callback = None

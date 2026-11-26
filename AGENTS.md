@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-11-13
+Last updated: 2026-11-25
 
 This project is developed for the U.S. Department of Energy (DOE). Operational security (OPSEC) requirements apply to all project artifacts -- see the Security section for details. Note: `AGENTS.md` is an industry-standard configuration format recognized by all major AI coding agents. The filename itself is not an OPSEC violation.
 
@@ -369,7 +369,7 @@ Principle: Self-contained by default; external connectivity only when it is expl
 5. **Empty `tool_calls` arrays**: OpenAI rejects empty `[]`; always call `_sanitize_messages()` before `acompletion()`
 6. **Dual file download paths**: MCP uses `/mcp/files/download/` (HMAC), browsers use `/api/files/download/` (nginx). Use `currentFile.download_url` from WebSocket events
 7. **LLM errors**: Must raise domain-specific errors (`RateLimitError`, etc.) via `_raise_llm_domain_error()`, not generic `Exception`
-8. **FastMCP 3.x**: Uses 3.x API (`list_tools()`, `list_prompts()`); don't introduce legacy `get_tools()` calls
+8. **FastMCP 4.x / MCP 2026-07-28**: MCP SDK models use snake_case fields (`tool.input_schema`, `content.mime_type`); a tool asks for user input by returning `InputRequiredResult` (see `atlas/mcp_shared/user_input.py`), not by blocking on `ctx.elicit()`; tasks are driven by the tasks extension, not `call_tool(task=True)`. Test doubles for MCP objects must use the real field names -- see `docs/developer/elicitation.md`
 
 ## PR Validation Scripts
 

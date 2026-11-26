@@ -245,7 +245,8 @@ export function cleanupStreamState() {
  * @param {Function} [deps.triggerFileDownload] - Trigger browser file download.
  * @param {Function} [deps.addAttachment] - Add a file attachment to the session.
  * @param {Function} [deps.resolvePendingFileEvent] - Resolve a pending file event.
- * @param {Function} [deps.setPendingElicitation] - Set pending elicitation request.
+ * @param {Function} [deps.enqueueElicitation] - Queue an elicitation request for the user to answer.
+ * @param {Function} [deps.settleElicitation] - Drop a queued elicitation request by id.
  * @param {Function} [deps.setIsSynthesizing] - Set the "synthesizing" indicator state.
  * @param {Function} [deps.setActiveConversationId] - Set the active conversation ID for chat history tracking.
  * @param {Function} deps.streamToken - Dispatch a STREAM_TOKEN action with a text chunk.
@@ -309,7 +310,8 @@ export function createWebSocketHandler(deps) {
     triggerFileDownload,
     addAttachment,
     resolvePendingFileEvent,
-    setPendingElicitation,
+    enqueueElicitation,
+    settleElicitation,
     setIsSynthesizing,
     setActiveConversationId,
     streamToken,
@@ -801,6 +803,17 @@ export function createWebSocketHandler(deps) {
           }))
           break
         }
+        case 'tool_task_started': {
+          // The MCP server is running this call as a background task and it
+          // has been going for a while. The row stays open; it only says so.
+          mapMessages(prev => mapToolRows(prev, data, { backgroundTask: true }))
+          break
+        }
+        case 'tool_task_completed': {
+          // The task ended. The outcome arrives as tool_complete or tool_error.
+          mapMessages(prev => mapToolRows(prev, data, { backgroundTask: false }))
+          break
+        }
         case 'tool_complete': {
           if (isCanvasTool(data.tool_name)) {
             noteCanvasArtifact(mapMessages, data, '', data.success ? 'completed' : 'failed')
@@ -829,10 +842,8 @@ export function createWebSocketHandler(deps) {
           // tool keeps running with a cancelled answer and reports its own
           // result. Close the dialog and leave the row alone.
           if (data.elicitation_id) {
-            if (typeof setPendingElicitation === 'function') {
-              setPendingElicitation(prev => (
-                prev && prev.elicitation_id === data.elicitation_id ? null : prev
-              ))
+            if (typeof settleElicitation === 'function') {
+              settleElicitation(data.elicitation_id)
             }
             break
           }
@@ -1050,6 +1061,11 @@ export function createWebSocketHandler(deps) {
           // generic error path and end the joined-view poll. Drop the card
           // and leave the run alone (issue #1122).
           if (data.error_type === 'unknown_tool_approval' || data.error_type === 'unknown_elicitation') {
+            // The server no longer has this question (answered elsewhere or
+            // expired), so a dialog still queued for it can never be answered.
+            if (data.error_type === 'unknown_elicitation' && typeof settleElicitation === 'function') {
+              settleElicitation(data.elicitation_id)
+            }
             mapMessages(prev => {
               const list = Array.isArray(prev) ? prev : []
               const target = data.error_type === 'unknown_tool_approval'
@@ -1194,21 +1210,30 @@ export function createWebSocketHandler(deps) {
           })
           break
         case 'elicitation_request':
-          // Handle elicitation request - set pending elicitation state
+          // Queue the request; the dialog shows one at a time, oldest first.
           try { setIsThinking(false) } catch { /* no-op */ }
-          if (typeof setPendingElicitation === 'function') {
-            setPendingElicitation({
+          if (typeof enqueueElicitation === 'function') {
+            enqueueElicitation({
               elicitation_id: data.elicitation_id,
               tool_call_id: data.tool_call_id,
               tool_name: data.tool_name,
               message: data.message,
-              response_schema: data.response_schema
+              response_schema: data.response_schema,
+              mode: data.mode === 'url' ? 'url' : 'form',
+              url: data.url
             })
           } else {
-            console.error('setPendingElicitation is not available', {
+            console.error('enqueueElicitation is not available', {
               toolName: data && data.tool_name,
-              setPendingElicitationType: typeof setPendingElicitation
+              enqueueElicitationType: typeof enqueueElicitation
             })
+          }
+          break
+        case 'elicitation_settled':
+          // The question was answered (here, in another tab, or by a timeout
+          // on the server). Take it out of the queue if it is still there.
+          if (typeof settleElicitation === 'function' && data.elicitation_id) {
+            settleElicitation(data.elicitation_id)
           }
           break
         case 'intermediate_update':

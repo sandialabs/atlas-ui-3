@@ -405,7 +405,7 @@ def build_mcp_data(tool_manager, user_email: Optional[str] = None) -> Dict[str, 
             tool_entry = {
                 "name": f"{server_name}_{tool.name}",
                 "description": getattr(emitted, "description", "") or "",
-                "parameters": getattr(emitted, "inputSchema", {}) or {},
+                "parameters": getattr(emitted, "input_schema", {}) or {},
             }
             tools_info.append(tool_entry)
 

@@ -17,7 +17,7 @@ class MockImageContent:
     def __init__(self, data: str, mime_type: str = "image/png"):
         self.type = "image"
         self.data = data
-        self.mimeType = mime_type
+        self.mime_type = mime_type
 
 
 class MockTextContent:
@@ -288,7 +288,7 @@ class TestImageContentHandling:
             def __init__(self):
                 self.type = "image"
                 self.data = None
-                self.mimeType = "image/png"
+                self.mime_type = "image/png"
 
         class MockResult:
             def __init__(self):
@@ -333,7 +333,7 @@ class TestImageContentHandling:
             def __init__(self):
                 self.type = "image"
                 self.data = "SGVsbG8gV29ybGQ="  # Valid base64
-                self.mimeType = None
+                self.mime_type = None
 
         class MockResult:
             def __init__(self):
@@ -378,7 +378,7 @@ class TestImageContentHandling:
             def __init__(self):
                 self.type = "image"
                 self.data = "SGVsbG8gV29ybGQ="  # Valid base64
-                self.mimeType = "application/octet-stream"
+                self.mime_type = "application/octet-stream"
 
         class MockResult:
             def __init__(self):
@@ -423,7 +423,7 @@ class TestImageContentHandling:
             def __init__(self):
                 self.type = "image"
                 self.data = "not-valid-base64!!!"
-                self.mimeType = "image/png"
+                self.mime_type = "image/png"
 
         class MockResult:
             def __init__(self):

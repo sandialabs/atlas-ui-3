@@ -55,7 +55,7 @@ async def test_tool_acl_filters_unauthorized(monkeypatch):
         def __init__(self, name):
             self.name = name
             self.description = ""
-            self.inputSchema = {"type": "object", "properties": {"_atlas_user": {"type": "string"}}}
+            self.input_schema = {"type": "object", "properties": {"_atlas_user": {"type": "string"}}}
 
     class FakeToolManager:
         def __init__(self):

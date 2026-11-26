@@ -1,9 +1,20 @@
 """Elicitation / log routing for MCPToolManager.
 
 Holds the per-request routing context classes and the RoutingMixin that
-creates per-server log/elicitation handlers. Routing uses dictionaries keyed
-by (server_name, tool_call_id) rather than contextvars because the MCP receive
-loop runs in a different task than the tool call.
+creates per-server log/elicitation handlers.
+
+Elicitation reaches the handler two ways, depending on the protocol era the
+connection negotiated:
+
+- MCP 2026-07-28 (SEP-2322 multi round-trip requests): the server answers
+  ``tools/call`` with an ``InputRequiredResult`` and the FastMCP client runs
+  the handler from inside the ``call_tool`` await, then retries the call with
+  the answers. The handler therefore runs in the calling task's context, so
+  the routing entry comes from a contextvar set by ``_use_elicitation_context``.
+- Handshake-era servers (2025-11-25 and older): the server sends an
+  ``elicitation/create`` request over the back-channel. That request is
+  served from the session's receive loop, which is a different task, so
+  routing falls back to the dictionary keyed by (server_name, tool_call_id).
 """
 import asyncio
 import contextvars
@@ -40,6 +51,66 @@ _ACTIVE_LOG_CALLBACK: contextvars.ContextVar[Optional[LogCallback]] = contextvar
     "mcp_active_log_callback",
     default=None,
 )
+
+# Routing entry of the tool call running in the current task. Authoritative on
+# modern (2026-07-28) connections only; see the module docstring.
+_ACTIVE_ELICITATION_ROUTING: contextvars.ContextVar[
+    Optional[_ElicitationRoutingContext]
+] = contextvars.ContextVar("mcp_active_elicitation_routing", default=None)
+
+# URL-mode elicitation sends the user to an external page. Only web URLs are
+# ever shown; anything else (javascript:, data:, file:, custom schemes) is
+# declined before it reaches the browser.
+_URL_ELICITATION_SCHEMES = frozenset({"http", "https"})
+
+
+def _is_modern_session(context: Any) -> bool:
+    """True when the handler was invoked on a 2026-07-28 (back-channel-free) session."""
+    from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+
+    session = getattr(context, "session", None)
+    version = getattr(session, "protocol_version", None)
+    return isinstance(version, str) and version in MODERN_PROTOCOL_VERSIONS
+
+
+def _safe_elicitation_url(url: Any) -> Optional[str]:
+    """Return ``url`` when it is an absolute http(s) URL, otherwise None."""
+    from urllib.parse import urlsplit
+
+    if not isinstance(url, str) or not url.strip():
+        return None
+    candidate = url.strip()
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in _URL_ELICITATION_SCHEMES or not parts.netloc:
+        return None
+    return candidate
+
+
+def _form_content(data: Any, response_schema: Any) -> Dict[str, Any]:
+    """Shape a form answer into the JSON object the elicitation result carries.
+
+    A bare value answers a single-field (scalar) request and is wrapped under
+    ``value``. Optional fields the user left blank are omitted: elicitation
+    schemas have no null type, and the FastMCP client validates the accepted
+    content against the requested schema, so a blank optional enum or number
+    would otherwise fail the whole tool call.
+    """
+    required: set = set()
+    if isinstance(response_schema, dict):
+        required = set(response_schema.get("required") or [])
+    if not isinstance(data, dict):
+        if data == "" and "value" not in required:
+            return {}
+        return {"value": data}
+    return {
+        key: value
+        for key, value in data.items()
+        if key in required or (value is not None and value != "")
+    }
+
 
 # Sentinel for ambiguous routing (replaces magic string)
 class _AmbiguousRouting:
@@ -161,16 +232,53 @@ class RoutingMixin:
     ) -> AsyncIterator[None]:
         """
         Set up elicitation routing for a tool call.
-        Uses dictionary-based routing (not contextvars) because MCP receive loop runs in a different task.
-        Key is (server_name, tool_call.id) to avoid collisions with concurrent tool calls.
+
+        Registers the entry twice: in the dictionary keyed by
+        (server_name, tool_call.id), which handshake-era back-channel requests
+        resolve against, and in a contextvar, which multi round-trip
+        (2026-07-28) elicitations inherit from the calling task.
         """
         routing = _ElicitationRoutingContext(server_name, tool_call, update_cb, user_email)
         routing_key = (server_name, tool_call.id)
-        self._elicitation_routing[routing_key] = routing
+        # Tool call ids come from the model provider and are not guaranteed
+        # unique across users. Two live calls sharing a key cannot be told
+        # apart, so the key is poisoned until every holder has left and
+        # neither call can be prompted through it.
+        holders = self.__dict__.setdefault("_elicitation_routing_holders", {})
+        holders[routing_key] = holders.get(routing_key, 0) + 1
+        if holders[routing_key] == 1:
+            self._elicitation_routing[routing_key] = routing
+        else:
+            logger.warning(
+                "Two live tool calls share id '%s' on server '%s'; elicitation is disabled for both",
+                sanitize_for_logging(tool_call.id),
+                sanitize_for_logging(server_name),
+            )
+            self._elicitation_routing[routing_key] = AMBIGUOUS_ROUTING
+        token = _ACTIVE_ELICITATION_ROUTING.set(routing)
         try:
             yield
         finally:
-            self._elicitation_routing.pop(routing_key, None)
+            _ACTIVE_ELICITATION_ROUTING.reset(token)
+            holders[routing_key] -= 1
+            if holders[routing_key] <= 0:
+                holders.pop(routing_key, None)
+                self._elicitation_routing.pop(routing_key, None)
+
+    def _client_input_kwargs(self, server_name: str) -> Dict[str, Any]:
+        """Client() arguments that let a server ask the user for input.
+
+        The elicitation handler answers both foreground requests and prompts
+        raised by a background task, so the tasks extension is built around
+        the same handler.
+        """
+        from atlas.modules.mcp_tools.mcp_task_extension import AtlasTasksClientExtension
+
+        handler = self._create_elicitation_handler(server_name)
+        return {
+            "elicitation_handler": handler,
+            "extensions": [AtlasTasksClientExtension(handler)],
+        }
 
     def _create_elicitation_handler(self, server_name: str):
         """
@@ -182,9 +290,8 @@ class RoutingMixin:
         async def handler(message, response_type, params, _context):
             """Per-server elicitation handler with captured server_name."""
             from fastmcp.client.elicitation import ElicitResult
-            from mcp.types import ElicitRequestFormParams
+            from mcp_types import ElicitRequestFormParams, ElicitRequestURLParams
 
-            # Find routing context for this server (keyed by (server_name, tool_call_id))
             routing = self._resolve_routing(self._elicitation_routing, server_name, _context)
 
             if routing is AMBIGUOUS_ROUTING:
@@ -204,8 +311,18 @@ class RoutingMixin:
                 return ElicitResult(action="cancel", content=None)
 
             response_schema: Dict[str, Any] = {}
-            if isinstance(params, ElicitRequestFormParams):
-                response_schema = params.requestedSchema or {}
+            request_url: Optional[str] = None
+            is_url_mode = isinstance(params, ElicitRequestURLParams)
+            if is_url_mode:
+                request_url = _safe_elicitation_url(params.url)
+                if request_url is None:
+                    logger.warning(
+                        "URL elicitation from server '%s' declined: not an absolute http(s) URL",
+                        sanitize_for_logging(server_name),
+                    )
+                    return ElicitResult(action="decline", content=None)
+            elif isinstance(params, ElicitRequestFormParams):
+                response_schema = params.requested_schema or {}
 
             elicitation_id = None
             try:
@@ -227,16 +344,18 @@ class RoutingMixin:
                 )
 
                 logger.debug(f"Sending elicitation_request to frontend for server '{server_name}'")
-                await routing.update_cb(
-                    {
-                        "type": "elicitation_request",
-                        "elicitation_id": elicitation_id,
-                        "tool_call_id": routing.tool_call.id,
-                        "tool_name": routing.tool_call.name,
-                        "message": message,
-                        "response_schema": response_schema,
-                    }
-                )
+                event: Dict[str, Any] = {
+                    "type": "elicitation_request",
+                    "elicitation_id": elicitation_id,
+                    "tool_call_id": routing.tool_call.id,
+                    "tool_name": routing.tool_call.name,
+                    "message": message,
+                    "response_schema": response_schema,
+                    "mode": "url" if is_url_mode else "form",
+                }
+                if is_url_mode:
+                    event["url"] = request_url
+                await routing.update_cb(event)
 
                 try:
                     response = await request.wait_for_response(timeout=resolve_approval_timeout())
@@ -246,28 +365,44 @@ class RoutingMixin:
                 action = response.get("action", "cancel")
                 data = response.get("data")
 
-                if action != "accept":
-                    return ElicitResult(action=action, content=None)
+                # Tell the run state and every open client that this question
+                # is settled. The tool call itself is still running, and a
+                # sibling question raised in the same round may still be open.
+                try:
+                    await routing.update_cb({
+                        "type": "elicitation_settled",
+                        "elicitation_id": elicitation_id,
+                        "tool_call_id": routing.tool_call.id,
+                        "tool_name": routing.tool_call.name,
+                    })
+                except Exception:
+                    logger.debug("elicitation_settled update callback failed", exc_info=True)
 
-                # Approval-only elicitation (response_type=None) must return an empty object.
-                # Some UIs send placeholder payloads like {'none': ''}; don't forward them.
+                if action != "accept":
+                    # Anything that is not a recognised refusal is a cancel.
+                    return ElicitResult(
+                        action="decline" if action == "decline" else "cancel",
+                        content=None,
+                    )
+
+                # URL mode carries no form data: accepting only records consent
+                # to open the page. Never forward a payload for it.
+                if is_url_mode:
+                    return ElicitResult(action="accept", content=None)
+
+                # An empty schema asks for confirmation only and must be answered
+                # with an empty object. Some UIs send placeholder payloads like
+                # {'none': ''}; don't forward them.
                 if response_type is None:
                     return ElicitResult(action="accept", content={})
 
                 if data is None:
                     return ElicitResult(action="accept", content=None)
 
-                # FastMCP requires elicitation response content to be a JSON object.
-                if not isinstance(data, dict):
-                    props: Dict[str, Any] = {}
-                    if isinstance(response_schema, dict):
-                        props = response_schema.get("properties") or {}
-                    if list(props.keys()) == ["value"]:
-                        data = {"value": data}
-                    else:
-                        data = {"value": data}
-
-                return ElicitResult(action="accept", content=data)
+                return ElicitResult(
+                    action="accept",
+                    content=_form_content(data, response_schema),
+                )
 
             except asyncio.TimeoutError:
                 logger.warning(f"Elicitation timeout for server '{server_name}'")
@@ -301,26 +436,70 @@ class RoutingMixin:
         server_name: str,
         context: Any,
     ) -> Any:
-        """Resolve routing context from a routing dict using meta-based O(1) lookup.
+        """Resolve the routing entry for an elicitation request.
 
-        Tries composite (server_name, tool_call_id) key first via context.meta,
-        then falls back to single-match scan. Returns None if unresolvable.
+        On a 2026-07-28 session the handler runs inside the tool call that
+        asked, so the entry is the one bound to the current task. It is used
+        only while it is still the registered entry for that call, and nothing
+        the server sent can redirect the prompt to another call; a request
+        that has no live entry is refused.
+
+        On a handshake-era session the request arrives over the back-channel,
+        in the receive loop's task, where the contextvar says nothing about
+        which call asked and the protocol carries no reference to the
+        originating ``tools/call``. Routing is therefore only attempted when
+        the answer is unambiguous:
+
+        - exactly one call is live on this server: that call raised it;
+        - several are live and the request meta names one of them by
+          ``tool_call_id``: that one (the id is the one Atlas sent with the
+          call, echoed back by the server).
+
+        Everything else is refused: a meta id that matches no live call is
+        never redirected to whichever call happens to be alone, several live
+        calls with no usable id are ambiguous, and so is any key two live
+        calls share. Returns None or AMBIGUOUS_ROUTING when refused.
         """
+        if _is_modern_session(context):
+            active = _ACTIVE_ELICITATION_ROUTING.get()
+            if (
+                active is not None
+                and active.server_name == server_name
+                and routing_dict.get((server_name, active.tool_call.id)) is active
+            ):
+                return active
+            return None
+
         tcid = None
-        if context and hasattr(context, 'meta') and context.meta is not None:
-            tcid = getattr(context.meta, 'model_extra', {}).get("tool_call_id")
+        meta = getattr(context, "meta", None) if context else None
+        if isinstance(meta, dict):
+            tcid = meta.get("tool_call_id")
+        elif meta is not None:
+            tcid = (getattr(meta, "model_extra", None) or {}).get("tool_call_id")
 
-        routing = routing_dict.get((server_name, tcid))
+        matches = [v for (srv, _), v in routing_dict.items() if srv == server_name]
+        if any(v is AMBIGUOUS_ROUTING for v in matches):
+            logger.warning(
+                "Elicitation for server '%s' refused: live tool calls share an id",
+                sanitize_for_logging(server_name),
+            )
+            return AMBIGUOUS_ROUTING
 
-        if routing is None:
-            matches = [v for (srv, _), v in routing_dict.items() if srv == server_name]
-            if len(matches) == 1:
-                routing = matches[0]
-            elif len(matches) > 1:
+        if tcid is not None:
+            routing = routing_dict.get((server_name, tcid))
+            if routing is None:
                 logger.warning(
-                    "Ambiguous routing for server '%s' with %d entries",
-                    server_name, len(matches),
+                    "Elicitation for server '%s' names a tool call that is not live; refused",
+                    sanitize_for_logging(server_name),
                 )
-                return AMBIGUOUS_ROUTING
+            return routing
 
-        return routing
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            logger.warning(
+                "Ambiguous routing for server '%s' with %d entries",
+                sanitize_for_logging(server_name), len(matches),
+            )
+            return AMBIGUOUS_ROUTING
+        return None

@@ -447,7 +447,7 @@ describe('RagPanel - stacked with the real ElicitationDialog', () => {
       models: [],
       currentModel: null,
       sendMessage: vi.fn(),
-      setPendingElicitation: vi.fn()
+      settleElicitation: vi.fn()
     })
     useMarketplace.mockReturnValue({
       complianceLevels: [],

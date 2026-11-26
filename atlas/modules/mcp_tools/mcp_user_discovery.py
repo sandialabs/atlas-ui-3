@@ -225,10 +225,6 @@ class UserDiscoveryMixin:
                 "tools": [],
                 "config": self.servers_config.get(server_name, {}),
             }
-            # An empty catalogue has no tools to describe, so leaving the
-            # departed owner's taskSupport verdicts behind would let them
-            # decide for whatever is discovered next.
-            self._apply_task_support_metadata(server_name, [])
             if rebuild_index:
                 self._rebuild_tool_index()
             logger.info(
@@ -242,10 +238,6 @@ class UserDiscoveryMixin:
         heir_tools = self._merged_owner_tools(
             server_name, survivors, heir, self._live_user_tools(server_name, heir)
         )
-        # The sweep entries still describe the departing owner's tool set, so a
-        # tool the heir exposes without taskSupport would otherwise inherit the
-        # other catalogue's verdict.
-        self._apply_task_support_metadata(server_name, heir_tools)
         self.available_tools[server_name] = {
             "tools": heir_tools,
             "config": self.servers_config.get(server_name, {}),
@@ -586,12 +578,6 @@ class UserDiscoveryMixin:
         have a call routed back to the owning server. A successful anonymous
         sweep always wins: it is the operator-visible catalogue, and one user's
         view must not overwrite it.
-
-        The task-support metadata is applied only once promotion is accepted.
-        Recording it unconditionally would purge the whole server's
-        ``_tool_task_forbidden`` set and rebuild it from a possibly narrower
-        per-user ``tools/list``, flipping tools the anonymous sweep had marked
-        task-forbidden to task-allowed process-wide.
         """
         if self._has_anonymous_catalogue(server_name):
             return
@@ -611,11 +597,6 @@ class UserDiscoveryMixin:
         # them. Who may *read* which tool is a separate question, answered
         # per-user against their own catalogue -- see _may_read_catalogue.
         merged = self._merged_owner_tools(server_name, owners, user_lc, tools)
-        # Swept against the merged set, not this promotion's slice: the helper
-        # purges every (server, *) entry and rebuilds, so sweeping the narrower
-        # list would drop a co-owner's task-forbidden tools and make them
-        # dispatchable process-wide.
-        self._apply_task_support_metadata(server_name, merged)
         self.available_tools[server_name] = {
             "tools": merged,
             "config": self.servers_config.get(server_name, {}),

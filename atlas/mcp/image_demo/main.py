@@ -6,7 +6,7 @@ This is a test server to validate image display functionality.
 import base64
 from io import BytesIO
 
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import ImageContent, TextContent
 
 from atlas.mcp_shared.server_factory import create_stdio_server
@@ -29,7 +29,7 @@ def generate_test_image() -> ToolResult:
         return ToolResult(
             content=[
                 TextContent(type="text", text="Success: Generated fallback image (PIL not available). Returned image_0.png"),
-                ImageContent(type="image", data=minimal_png, mimeType="image/png")
+                ImageContent(type="image", data=minimal_png, mime_type="image/png")
             ]
         )
 
@@ -60,7 +60,7 @@ def generate_test_image() -> ToolResult:
     return ToolResult(
         content=[
             TextContent(type="text", text="Success: Generated 400x300 PNG test image with gradient background. Returned image_0.png - the image should now be visible in the canvas panel."),
-            ImageContent(type="image", data=img_base64, mimeType="image/png")
+            ImageContent(type="image", data=img_base64, mime_type="image/png")
         ]
     )
 
@@ -79,8 +79,8 @@ def generate_multiple_images() -> ToolResult:
         return ToolResult(
             content=[
                 TextContent(type="text", text="Success: Generated 2 fallback images (PIL not available). Returned image_0.png, image_1.png"),
-                ImageContent(type="image", data=minimal_png, mimeType="image/png"),
-                ImageContent(type="image", data=minimal_png, mimeType="image/png")
+                ImageContent(type="image", data=minimal_png, mime_type="image/png"),
+                ImageContent(type="image", data=minimal_png, mime_type="image/png")
             ]
         )
 
@@ -104,7 +104,7 @@ def generate_multiple_images() -> ToolResult:
         content_blocks.append(ImageContent(
             type="image",
             data=img_base64,
-            mimeType="image/png"
+            mime_type="image/png"
         ))
 
     return ToolResult(content=content_blocks)

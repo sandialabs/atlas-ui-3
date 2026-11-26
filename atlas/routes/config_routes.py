@@ -404,7 +404,7 @@ async def get_config(
                         tool_detail = {
                             'name': tool.name,
                             'description': tool.description or '',
-                            'inputSchema': getattr(tool, 'inputSchema', {}) or {}
+                            'inputSchema': getattr(tool, 'input_schema', {}) or {}
                         }
                         tools_detailed.append(tool_detail)
 

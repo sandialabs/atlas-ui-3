@@ -230,9 +230,6 @@ async def main() -> None:
         config_path = str(Path(tmp) / "mcp.json")
         write_mcp_config(config_path, mcp_port)
         manager = MCPToolManager(config_path=config_path)
-        # This scenario is about auth recovery, not task-mode fallback: skip
-        # the task-augmented attempt so the bearer gate sees plain calls.
-        manager._tool_task_forbidden.add((SERVER, "echo"))
         # Mirror production wiring: the OAuth service evicts clients through
         # the app-factory singleton, so register this manager as the factory's.
         # Note: atlas/infrastructure/__init__.py re-exports the singleton

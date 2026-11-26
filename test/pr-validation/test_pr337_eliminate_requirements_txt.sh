@@ -54,10 +54,10 @@ echo "PASSED: All key dependencies present in pyproject.toml"
 echo ""
 echo "3. Verify fastmcp has version constraints"
 echo "------------------------------------------"
-if grep -q 'fastmcp\[tasks\]>=3.0.0,<4.0.0' "$PROJECT_ROOT/pyproject.toml"; then
-    echo "PASSED: fastmcp has >=3.0.0,<4.0.0 version constraint"
+if grep -q 'fastmcp\[tasks\]>=4.2.6,<5.0.0' "$PROJECT_ROOT/pyproject.toml"; then
+    echo "PASSED: fastmcp has >=4.2.6,<5.0.0 version constraint"
 else
-    echo "FAILED: fastmcp missing expected version constraint (>=3.0.0,<4.0.0)"
+    echo "FAILED: fastmcp missing expected version constraint (>=4.2.6,<5.0.0)"
     exit 1
 fi
 

@@ -10,6 +10,12 @@ Supports:
 - Enum/constrained options
 - Structured multi-field responses
 - Multi-turn elicitation
+- Several questions in one round trip
+
+Every tool gathers input through ``UserInput`` (atlas/mcp_shared/user_input.py).
+On MCP 2026-07-28 that means the multi round-trip pattern (SEP-2322): the tool
+returns an ``InputRequiredResult`` and is called again with the answers. On an
+older connection the same code falls back to ``ctx.elicit()``.
 """
 
 from dataclasses import dataclass
@@ -17,15 +23,17 @@ from enum import Enum
 from typing import Literal
 
 from fastmcp import Context
+from mcp_types import InputRequiredResult
 
 from atlas.mcp_shared.server_factory import create_stdio_server
+from atlas.mcp_shared.user_input import UserInput
 
 # Initialize the MCP server
 mcp = create_stdio_server("Elicitation Demo")
 
 
 @mcp.tool
-async def get_user_name(ctx: Context) -> str:
+async def get_user_name(ctx: Context) -> str | InputRequiredResult:
     """
     Simple elicitation example that asks for a string input.
 
@@ -35,7 +43,10 @@ async def get_user_name(ctx: Context) -> str:
     Returns:
         Greeting message with the user's name, or indication if not provided
     """
-    result = await ctx.elicit("What's your name?", response_type=str)
+    form = UserInput(ctx)
+    result = await form.ask("name", "What's your name?", str, title="Name")
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
         return f"Hello, {result.data}! Nice to meet you."
@@ -46,7 +57,7 @@ async def get_user_name(ctx: Context) -> str:
 
 
 @mcp.tool
-async def pick_a_number(ctx: Context) -> str:
+async def pick_a_number(ctx: Context) -> str | InputRequiredResult:
     """
     Elicitation example that requests an integer input.
 
@@ -56,7 +67,12 @@ async def pick_a_number(ctx: Context) -> str:
     Returns:
         Information about the picked number, or indication if not provided
     """
-    result = await ctx.elicit("Pick a number between 1 and 100!", response_type=int)
+    form = UserInput(ctx)
+    result = await form.ask(
+        "number", "Pick a number between 1 and 100!", int, title="Number"
+    )
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
         number = result.data
@@ -69,7 +85,7 @@ async def pick_a_number(ctx: Context) -> str:
 
 
 @mcp.tool
-async def confirm_action(ctx: Context) -> str:
+async def confirm_action(ctx: Context) -> str | InputRequiredResult:
     """
     Elicitation example that requests boolean confirmation.
 
@@ -79,7 +95,12 @@ async def confirm_action(ctx: Context) -> str:
     Returns:
         Result of the confirmation decision
     """
-    result = await ctx.elicit("Do you want to proceed with this action?", response_type=bool)
+    form = UserInput(ctx)
+    result = await form.ask(
+        "proceed", "Do you want to proceed with this action?", bool, title="Proceed"
+    )
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
         if result.data:
@@ -100,7 +121,7 @@ class Priority(Enum):
 
 
 @mcp.tool
-async def set_priority(ctx: Context) -> str:
+async def set_priority(ctx: Context) -> str | InputRequiredResult:
     """
     Elicitation example using enum for constrained options.
 
@@ -110,7 +131,10 @@ async def set_priority(ctx: Context) -> str:
     Returns:
         Confirmation of the selected priority level
     """
-    result = await ctx.elicit("What priority level?", response_type=Priority)
+    form = UserInput(ctx)
+    result = await form.ask("priority", "What priority level?", Priority)
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
         return f"Priority set to: {result.data.value}"
@@ -121,7 +145,7 @@ async def set_priority(ctx: Context) -> str:
 
 
 @mcp.tool
-async def choose_option(ctx: Context) -> str:
+async def choose_option(ctx: Context) -> str | InputRequiredResult:
     """
     Elicitation example using list of strings for simple options.
 
@@ -131,10 +155,15 @@ async def choose_option(ctx: Context) -> str:
     Returns:
         Confirmation of the selected option
     """
-    result = await ctx.elicit(
+    form = UserInput(ctx)
+    result = await form.ask(
+        "color",
         "Choose your favorite color:",
-        response_type=["red", "blue", "green", "yellow"]
+        ["red", "blue", "green", "yellow"],
+        title="Color",
     )
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
         return f"You chose: {result.data}"
@@ -142,6 +171,41 @@ async def choose_option(ctx: Context) -> str:
         return "No color chosen."
     else:  # cancel
         return "Operation cancelled."
+
+
+@mcp.tool
+async def choose_toppings(ctx: Context) -> str | InputRequiredResult:
+    """
+    Elicitation example with a multi-select list and titled options.
+
+    This tool demonstrates two newer schema shapes: a titled single choice
+    (each option has a value and a display title) and a multi-select list.
+    Both questions are asked in the same round trip, so the user answers
+    them one after the other without the tool running in between.
+
+    Returns:
+        Summary of the chosen size and toppings
+    """
+    form = UserInput(ctx)
+    size = await form.ask(
+        "size",
+        "What size pizza?",
+        {"s": {"title": "Small (10 inch)"}, "m": {"title": "Medium (12 inch)"}, "l": {"title": "Large (14 inch)"}},
+        title="Size",
+    )
+    toppings = await form.ask(
+        "toppings",
+        "Pick any toppings you like:",
+        [["mushrooms", "peppers", "olives", "onions"]],
+        title="Toppings",
+    )
+    if size is None or toppings is None:
+        return form.input_required()
+
+    if size.action != "accept" or toppings.action != "accept":
+        return "Order cancelled."
+    chosen = ", ".join(toppings.data) if toppings.data else "no toppings"
+    return f"Ordered a size {size.data} pizza with {chosen}."
 
 
 @dataclass
@@ -154,7 +218,7 @@ class TaskDetails:
 
 
 @mcp.tool
-async def create_task(ctx: Context) -> str:
+async def create_task(ctx: Context) -> str | InputRequiredResult:
     """
     Elicitation example with structured multi-field response.
 
@@ -164,10 +228,10 @@ async def create_task(ctx: Context) -> str:
     Returns:
         Summary of the created task with all provided details
     """
-    result = await ctx.elicit(
-        "Please provide task details",
-        response_type=TaskDetails
-    )
+    form = UserInput(ctx)
+    result = await form.ask("task", "Please provide task details", TaskDetails)
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
         task = result.data
@@ -185,42 +249,58 @@ async def create_task(ctx: Context) -> str:
 
 
 @mcp.tool
-async def multi_turn_survey(ctx: Context) -> str:
+async def multi_turn_survey(ctx: Context) -> str | InputRequiredResult:
     """
     Multi-turn elicitation example that collects information step by step.
 
     This tool demonstrates progressive elicitation - asking multiple
-    questions in sequence to gather information gradually.
+    questions in sequence to gather information gradually. Each question is
+    its own round trip: the tool is re-run with the new answer, and the
+    answers given so far come back in the request state.
 
     Returns:
         Summary of all collected survey responses
     """
+    form = UserInput(ctx)
+
     # Step 1: Get name
-    name_result = await ctx.elicit("What's your name?", response_type=str)
+    name_result = await form.ask("name", "What's your name?", str, title="Name")
+    if name_result is None:
+        return form.input_required()
     if name_result.action != "accept":
         return "Survey cancelled at name question."
     name = name_result.data
 
     # Step 2: Get age
-    age_result = await ctx.elicit("What's your age?", response_type=int)
+    age_result = await form.ask("age", "What's your age?", int, title="Age")
+    if age_result is None:
+        return form.input_required()
     if age_result.action != "accept":
         return f"Survey cancelled at age question. Thanks anyway, {name}!"
     age = age_result.data
 
     # Step 3: Get favorite food
-    food_result = await ctx.elicit(
+    food_result = await form.ask(
+        "food",
         "What's your favorite food?",
-        response_type=["pizza", "sushi", "tacos", "burgers", "other"]
+        ["pizza", "sushi", "tacos", "burgers", "other"],
+        title="Favorite food",
     )
+    if food_result is None:
+        return form.input_required()
     if food_result.action != "accept":
         return f"Survey cancelled at food question. Thanks for participating, {name}!"
     favorite_food = food_result.data
 
     # Step 4: Get satisfaction rating
-    rating_result = await ctx.elicit(
+    rating_result = await form.ask(
+        "rating",
         "How satisfied are you with this survey? (1-10)",
-        response_type=int
+        int,
+        title="Rating",
     )
+    if rating_result is None:
+        return form.input_required()
     if rating_result.action != "accept":
         return f"Survey almost complete! Thanks for your responses, {name}!"
     rating = rating_result.data
@@ -237,23 +317,32 @@ async def multi_turn_survey(ctx: Context) -> str:
 
 
 @mcp.tool
-async def approve_deletion(ctx: Context) -> str:
+async def approve_deletion(ctx: Context) -> str | InputRequiredResult:
     """
-    Elicitation example requesting approval with no data response.
+    Elicitation example requesting a yes/no approval.
 
-    This tool demonstrates approval-only elicitation - asking the user
-    to simply approve or reject without providing any additional data.
+    This tool demonstrates approval elicitation - asking the user to approve
+    or reject a destructive action. FastMCP 4 no longer sends an empty form
+    for this (clients rendered it inconsistently), so the approval is a
+    single boolean field.
 
     Returns:
         Result of the deletion approval
     """
-    result = await ctx.elicit(
+    form = UserInput(ctx)
+    result = await form.ask(
+        "approve",
         "Are you sure you want to delete this item? This action cannot be undone.",
-        response_type=None
+        bool,
+        title="Yes, delete it",
     )
+    if result is None:
+        return form.input_required()
 
     if result.action == "accept":
-        return "Item deleted successfully."
+        if result.data:
+            return "Item deleted successfully."
+        return "Deletion not approved. Item was not deleted."
     elif result.action == "decline":
         return "Deletion declined. Item was not deleted."
     else:  # cancel

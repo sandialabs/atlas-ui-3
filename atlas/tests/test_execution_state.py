@@ -461,6 +461,60 @@ def test_tool_start_keeps_an_elicitation_card():
     assert len(public_projection(doc)["pending_requests"]) == 1
 
 
+def test_sibling_questions_of_one_tool_call_are_all_kept():
+    """One MCP round trip can raise several questions for the same invocation."""
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e1"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e2"))
+
+    pending = public_projection(doc)["pending_requests"]
+    assert sorted(request["elicitation_id"] for request in pending) == ["e1", "e2"]
+
+
+@pytest.mark.parametrize("settle_type", ["elicitation_settled", "tool_error"])
+def test_settling_one_question_keeps_its_siblings(settle_type):
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e1"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e2"))
+
+    apply_event_to_document(doc, _event(0, type=settle_type, elicitation_id="e1"))
+
+    projection = public_projection(doc)
+    assert [request["elicitation_id"] for request in projection["pending_requests"]] == ["e2"]
+    assert projection["status"] == "waiting_for_input"
+
+    apply_event_to_document(doc, _event(0, type="elicitation_settled", elicitation_id="e2"))
+
+    projection = public_projection(doc)
+    assert projection["pending_requests"] == []
+    assert projection["status"] == "running"
+
+
+def test_an_answered_question_does_not_linger_behind_the_next_one():
+    """Sequential questions: the answered one is gone before the next arrives."""
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e1"))
+    apply_event_to_document(doc, _event(0, type="elicitation_settled", elicitation_id="e1"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e2"))
+
+    pending = public_projection(doc)["pending_requests"]
+    assert [request["elicitation_id"] for request in pending] == ["e2"]
+
+
+def test_a_finished_tool_drops_every_question_it_left_open():
+    doc = _blank_doc()
+    apply_event_to_document(doc, _event(0, type="tool_start"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e1"))
+    apply_event_to_document(doc, _event(0, type="elicitation_request", elicitation_id="e2"))
+
+    apply_event_to_document(doc, _event(0, type="tool_complete", success=True))
+
+    assert public_projection(doc)["pending_requests"] == []
+
+
 def test_an_earlier_runs_projection_does_not_overlay_the_current_run():
     local = [{"run_id": "run-2", "conversation_id": CONV, "status": "running", "activity": "executing"}]
     shared = [{

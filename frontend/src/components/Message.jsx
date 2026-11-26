@@ -260,7 +260,10 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
       // legacy row saved without one, or a state added later) must not claim
       // the user stopped the call, nor that it failed.
       const succeeded = message.status === 'completed'
+      // A long-running call the MCP server moved to a background task.
+      const inBackground = isToolActive && message.backgroundTask === true && message.status !== 'sleeping'
       const statusLabel =
+        inBackground ? 'BACKGROUND TASK' :
         message.status === 'calling' ? 'CALLING' :
         message.status === 'in_progress' ? 'IN PROGRESS' :
         message.status === 'sleeping' ? 'SLEEPING' :
@@ -346,6 +349,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               )}
               <ToolNameLabel toolName={message.tool_name} className="font-medium text-sm min-w-0 break-words" />
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} progressRaw={message.progressRaw} />}
+              {inBackground && <span className="text-xs text-blue-300 flex-shrink-0">running in the background</span>}
             </button>
           ) : (
             <button
@@ -379,6 +383,7 @@ const Message = ({ message, userIndex = null, onRewind = null, onCorrect = null 
               <ToolNameLabel toolName={message.tool_name} className="font-medium min-w-0 break-words" />
               <span className="text-gray-400 text-sm min-w-0 break-words">({message.server_name})</span>
               {isToolActive && <ToolElapsedTime timestamp={message.timestamp} toolName={message.tool_name} arguments={message.arguments} progressRaw={message.progressRaw} />}
+              {inBackground && <span className="text-xs text-blue-300 flex-shrink-0">running in the background</span>}
             </button>
           )}
 

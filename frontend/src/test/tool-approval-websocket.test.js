@@ -454,17 +454,37 @@ describe('Tool Approval WebSocket Tests', () => {
       expect(messages[1].invocation_id).toBe('run-2:0:call_0')
     })
 
+    it('takes an answered question out of the queue without touching the tool row', () => {
+      let messages = [
+        { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:0:call_0', status: 'in_progress' },
+      ]
+      deps.mapMessages = vi.fn(mapper => {
+        messages = mapper(messages)
+      })
+      deps.settleElicitation = vi.fn()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'elicitation_settled',
+        elicitation_id: 'e1',
+        tool_call_id: 'call_0',
+        invocation_id: 'run-1:0:call_0',
+        tool_name: 'ask',
+      })
+      expect(messages[0].status).toBe('in_progress')
+      expect(deps.settleElicitation).toHaveBeenCalledWith('e1')
+      expect(warn).not.toHaveBeenCalled()
+      warn.mockRestore()
+    })
+
     it('settles only the dialog on an elicitation timeout, not the running tool row', () => {
       let messages = [
         { type: 'tool_call', tool_call_id: 'call_0', invocation_id: 'run-1:0:call_0', status: 'in_progress' },
       ]
-      let pending = { elicitation_id: 'e1', tool_call_id: 'call_0' }
       deps.mapMessages = vi.fn(mapper => {
         messages = mapper(messages)
       })
-      deps.setPendingElicitation = vi.fn(next => {
-        pending = typeof next === 'function' ? next(pending) : next
-      })
+      deps.settleElicitation = vi.fn()
       handler = createWebSocketHandler(deps)
       handler({
         type: 'tool_error',
@@ -476,7 +496,50 @@ describe('Tool Approval WebSocket Tests', () => {
         error: 'Elicitation timed out',
       })
       expect(messages[0].status).toBe('in_progress')
-      expect(pending).toBeNull()
+      expect(deps.settleElicitation).toHaveBeenCalledWith('e1')
+    })
+
+    it('queues an elicitation request with its mode and url', () => {
+      deps.enqueueElicitation = vi.fn()
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'elicitation_request',
+        elicitation_id: 'e1',
+        tool_call_id: 'call_0',
+        tool_name: 'connect',
+        message: 'Sign in',
+        response_schema: {},
+        mode: 'url',
+        url: 'https://auth.example.com/start',
+      })
+      handler({
+        type: 'elicitation_request',
+        elicitation_id: 'e2',
+        tool_call_id: 'call_1',
+        tool_name: 'ask',
+        message: 'Name?',
+        response_schema: { type: 'object', properties: { value: { type: 'string' } } },
+      })
+      expect(deps.enqueueElicitation).toHaveBeenCalledTimes(2)
+      expect(deps.enqueueElicitation.mock.calls[0][0]).toMatchObject({
+        elicitation_id: 'e1', mode: 'url', url: 'https://auth.example.com/start',
+      })
+      // An event from a server that predates the mode field is a form.
+      expect(deps.enqueueElicitation.mock.calls[1][0]).toMatchObject({
+        elicitation_id: 'e2', mode: 'form',
+      })
+    })
+
+    it('drops a queued elicitation the server no longer knows', () => {
+      deps.settleElicitation = vi.fn()
+      handler = createWebSocketHandler(deps)
+      handler({
+        type: 'error',
+        error_type: 'unknown_elicitation',
+        elicitation_id: 'e1',
+        message: 'No matching pending elicitation',
+      })
+      expect(deps.settleElicitation).toHaveBeenCalledWith('e1')
     })
 
     it('renders a new bare call_0 approval after an earlier bare call_0 was approved', () => {
