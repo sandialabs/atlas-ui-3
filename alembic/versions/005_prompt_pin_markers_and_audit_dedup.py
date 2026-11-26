@@ -70,15 +70,8 @@ def upgrade() -> None:
 def _backfill_markers() -> None:
     conn = op.get_bind()
     now = datetime.now(timezone.utc)
-    owners = {}
-    # Any mention of the library in stored metadata, readable or not: a blob
-    # that cannot be parsed may still have held a pin, so it is marked.
-    for conversation_id, user_email in conn.execute(
-        sa.text("SELECT id, user_email FROM conversations WHERE metadata_json LIKE '%prompt_library%'")
-    ):
-        owners[conversation_id] = user_email
-    # Conversations a library "use" event names (the event outlives a pin
-    # that was later cleared, and survives metadata damage).
+
+    # Decode audit JSON in Python for portable handling of damaged JSON.
     named = set()
     for (details,) in conn.execute(
         sa.text("SELECT details_json FROM prompt_library_audit_events WHERE event_type = 'use'")
@@ -88,22 +81,40 @@ def _backfill_markers() -> None:
         except (TypeError, ValueError):
             continue
         conversation_id = value.get("conversation_id") if isinstance(value, dict) else None
-        if isinstance(conversation_id, str) and conversation_id not in owners:
+        if isinstance(conversation_id, str):
             named.add(conversation_id)
-    for conversation_id in sorted(named):
-        row = conn.execute(
-            sa.text("SELECT user_email FROM conversations WHERE id = :id"), {"id": conversation_id}
-        ).first()
-        if row is not None:
-            owners[conversation_id] = row[0]
-    for conversation_id, user_email in sorted(owners.items()):
+
+    # Stage the distinct audit references in batches instead of issuing
+    # one conversation lookup per reference.
+    staging = sa.Table(
+        "_migration_005_pin_refs",
+        sa.MetaData(),
+        sa.Column("conversation_id", sa.Text(), nullable=False),
+        prefixes=["TEMPORARY"],
+    )
+    staging.create(conn)
+
+    ids = sorted(named)
+    for offset in range(0, len(ids), 500):
         conn.execute(
-            sa.text(
-                "INSERT INTO conversation_prompt_pin_markers (conversation_id, user_email, first_pinned_at) "
-                "VALUES (:id, :user, :at)"
-            ),
-            {"id": conversation_id, "user": user_email, "at": now},
+            staging.insert(),
+            [{"conversation_id": cid} for cid in ids[offset:offset + 500]],
         )
+
+    # One set-based insert: preserve conservative metadata matching and
+    # ignore audit references to conversations that no longer exist.
+    conn.execute(
+        sa.text(
+            "INSERT INTO conversation_prompt_pin_markers "
+            "(conversation_id, user_email, first_pinned_at) "
+            "SELECT c.id, c.user_email, :at FROM conversations c "
+            "LEFT JOIN _migration_005_pin_refs r ON r.conversation_id = c.id "
+            "WHERE c.metadata_json LIKE '%prompt_library%' "
+            "OR r.conversation_id IS NOT NULL"
+        ),
+        {"at": now},
+    )
+    staging.drop(conn)
 
 
 def downgrade() -> None:

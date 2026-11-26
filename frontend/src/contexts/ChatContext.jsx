@@ -1296,7 +1296,7 @@ export const ChatProvider = ({ children }) => {
 		}
 		const librarySelection = disabledPinnedConversation
 			? { kind: 'none' }
-			: resolveLibrarySelection(selections.activePromptKey, promptLibrary)
+			: resolveLibrarySelection(selections.activePromptKey, promptLibrary, conversationLibraryPinRef.current)
 		if (librarySelection.kind === 'blocked') {
 			toast.error(librarySelection.message)
 			return false

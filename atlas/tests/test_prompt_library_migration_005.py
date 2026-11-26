@@ -123,3 +123,46 @@ def test_migration_005_postgresql(monkeypatch):
         with admin.connect() as conn:
             conn.execute(text(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
         admin.dispose()
+
+
+@pytest.mark.parametrize("count", [1205])
+def test_large_marker_backfill(tmp_path, monkeypatch, count):
+    url = f"sqlite:///{tmp_path / 'large.db'}"
+    _migrate(url, monkeypatch, command.upgrade, "004")
+    engine = create_engine(url)
+    now = datetime.now(timezone.utc)
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO conversations "
+                "(id, user_email, created_at, updated_at, message_count) "
+                "VALUES (:id, :email, :now, :now, 0)"
+            ), [
+                {"id": f"c{i}", "email": "u@example.com", "now": now}
+                for i in range(count + 1)
+            ])
+
+            conn.execute(text(
+                "INSERT INTO prompt_library_audit_events "
+                "(id, prompt_id, event_type, actor_email, details_json, created_at) "
+                "VALUES (:id, 'p', 'use', 'a@example.com', :details, :now)"
+            ), [
+                {
+                    "id": f"e{i}",
+                    "details": json.dumps({"conversation_id": f"c{i}"}),
+                    "now": now,
+                }
+                for i in range(count)
+            ])
+
+        _migrate(url, monkeypatch, command.upgrade, "head")
+
+        with engine.connect() as conn:
+            marked = set(conn.execute(text(
+                "SELECT conversation_id FROM conversation_prompt_pin_markers"
+            )).scalars())
+
+        assert marked == {f"c{i}" for i in range(count)}
+    finally:
+        engine.dispose()

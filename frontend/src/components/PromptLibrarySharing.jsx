@@ -21,6 +21,10 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
   // The sharing revision these grants were loaded at; a save names it, so a
   // change someone else made meanwhile is refused (409), never overwritten.
   const [revision, setRevision] = useState(null)
+  const [conflict, setConflict] = useState(null)
+  const [baseSharing, setBaseSharing] = useState({
+    groups: [], users: [],
+  })
   const [available, setAvailable] = useState([])
   const [newUser, setNewUser] = useState('')
   const [loading, setLoading] = useState(true)
@@ -35,12 +39,17 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setConflict(null)
     Promise.all([getSharing(prompt.id), listShareableGroups()])
       .then(([sharing, shareable]) => {
         if (cancelled) return
         setGroups(sharing.groups || [])
         setUsers(sharing.users || [])
         setRevision(sharing.revision ?? 0)
+        setBaseSharing({
+          groups: sharing.groups || [],
+          users: sharing.users || [],
+        })
         // Older servers return a bare list.
         setAvailable(Array.isArray(shareable) ? shareable : (shareable?.groups || []))
         setGroupsIncomplete(!Array.isArray(shareable) && shareable?.incomplete === true)
@@ -69,6 +78,14 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
       onClose()
     } catch (e) {
       setError(e.message)
+      if (e.status === 409) {
+        try {
+          const latest = await getSharing(prompt.id)
+          setConflict(latest)
+        } catch {
+          setError(`${e.message} Could not refresh sharing. Try again.`)
+        }
+      }
     } finally {
       setSaving(false)
     }
@@ -146,11 +163,59 @@ const PromptLibrarySharing = ({ prompt, library, onClose }) => {
 
       {error && <div role="alert" className="p-2 bg-red-900/30 border border-red-700 rounded text-red-300 text-sm">{error}</div>}
 
+      {conflict && (
+        <div className="p-3 border border-amber-500 rounded text-sm">
+          <p>Sharing changed on the server. Review the latest grants before retrying.</p>
+          <p>Current groups: {(conflict.groups || []).join(', ') || 'None'}</p>
+          <p>Current people:</p>
+          <ul>
+            {(conflict.users || []).map(u => (
+              <li key={u.email}>{u.email}: {u.permission}</li>
+            ))}
+          </ul>
+          <p>Your edits will be applied to the latest grants. Review the resulting selections before saving.</p>
+          <button type="button" onClick={() => {
+            // Apply only intentional local changes to the latest grants.
+            const mergedGroups = new Set(conflict.groups || [])
+            for (const group of baseSharing.groups) {
+              if (!groups.includes(group)) mergedGroups.delete(group)
+            }
+            for (const group of groups) {
+              if (!baseSharing.groups.includes(group)) mergedGroups.add(group)
+            }
+
+            const baseUsers = new Map(baseSharing.users.map(u => [u.email, u]))
+            const localUsers = new Map(users.map(u => [u.email, u]))
+            const mergedUsers = new Map(
+              (conflict.users || []).map(u => [u.email, u])
+            )
+            for (const email of baseUsers.keys()) {
+              if (!localUsers.has(email)) mergedUsers.delete(email)
+            }
+            for (const [email, user] of localUsers) {
+              if (baseUsers.get(email)?.permission !== user.permission) {
+                mergedUsers.set(email, user)
+              }
+            }
+
+            setGroups([...mergedGroups])
+            setUsers([...mergedUsers.values()])
+            setBaseSharing({
+              groups: conflict.groups || [],
+              users: conflict.users || [],
+            })
+            setRevision(conflict.revision)
+            setConflict(null)
+            setError(null)
+          }}>Keep my edits and use latest revision</button>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 text-sm">
           <X className="w-4 h-4" /> Cancel
         </button>
-        <button type="button" disabled={saving} onClick={save} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
+        <button type="button" disabled={saving || !!conflict} onClick={save} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
           <Check className="w-4 h-4" /> Save sharing
         </button>
       </div>

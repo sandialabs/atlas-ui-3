@@ -22,7 +22,7 @@ import {
  * (`complete` false), the reference goes out and the server -- which
  * re-checks access on every turn -- decides.
  */
-export function resolveLibrarySelection(activeKey, library) {
+export function resolveLibrarySelection(activeKey, library, storedPinKey = null) {
   if (isLibraryDraftKey(activeKey)) {
     const promptId = activeKey.slice(LIBRARY_DRAFT_PREFIX.length)
     const draft = library?.testDraft
@@ -39,7 +39,7 @@ export function resolveLibrarySelection(activeKey, library) {
   if (!parsed) {
     return { kind: 'blocked', message: 'The selected team prompt is not valid. Choose another prompt.' }
   }
-  if (library?.loaded && !library.error && library.complete !== false) {
+  if (activeKey !== storedPinKey && library?.loaded && !library.error && library.complete !== false) {
     const entry = (library.entries || []).find(e => e.id === parsed.promptId)
     if (!entry || !entry.latest_version) {
       return {

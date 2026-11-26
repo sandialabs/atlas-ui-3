@@ -52,6 +52,18 @@ describe('resolveLibrarySelection', () => {
     })
   })
 
+  it('sends a missing selection matching the stored conversation pin for server-side recovery', () => {
+    const pinned = libraryPromptKey('revoked', 'v2')
+    expect(resolveLibrarySelection(pinned, loaded(), pinned)).toEqual({
+      kind: 'library',
+      ref: { prompt_id: 'revoked', version_id: 'v2' },
+    })
+
+    // A different or unpinned selection must still be blocked.
+    expect(resolveLibrarySelection(pinned, loaded(), null).kind).toBe('blocked')
+    expect(resolveLibrarySelection(pinned, loaded(), libraryPromptKey('other', 'v1')).kind).toBe('blocked')
+  })
+
   it('blocks a selection the library no longer lists instead of falling back', () => {
     const result = resolveLibrarySelection(libraryPromptKey('gone'), loaded())
     expect(result.kind).toBe('blocked')

@@ -19,7 +19,7 @@ import { Check, X, Eye, Pencil, Upload, FlaskConical } from 'lucide-react'
  * (409) instead of overwriting someone else's save or publishing text this
  * editor never showed.
  */
-const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCancel }) => {
+const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCancel, onRefresh }) => {
   const [title, setTitle] = useState(prompt?.title || '')
   const [description, setDescription] = useState(prompt?.description || '')
   const [content, setContent] = useState(prompt?.draft_content || '')
@@ -34,6 +34,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
   const [preview, setPreview] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [conflict, setConflict] = useState(null)
 
   const dirty = !prompt || title !== saved.title || (description || '') !== saved.description ||
     content !== saved.content
@@ -45,6 +46,13 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
       await fn()
     } catch (e) {
       setError(e.message)
+      if (e.status === 409 && onRefresh) {
+        try {
+          setConflict(await onRefresh())
+        } catch {
+          setError(`${e.message} Could not refresh the draft. Try again.`)
+        }
+      }
     } finally {
       setBusy(false)
     }
@@ -145,6 +153,27 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
         <div role="alert" className="p-2 bg-red-900/30 border border-red-700 rounded text-red-300 text-sm">{error}</div>
       )}
 
+      {conflict && (
+        <div className="p-3 border border-amber-500 rounded text-sm">
+          <p>The draft changed on the server. Review the latest version before retrying.</p>
+          <p>Current title: {conflict.title}</p>
+          <p>Current description: {conflict.description}</p>
+          <pre className="whitespace-pre-wrap max-h-48 overflow-auto">
+            {conflict.draft_content}
+          </pre>
+          <button type="button" onClick={() => {
+            setRevision(conflict.draft_revision)
+            setSaved({
+              title: conflict.title,
+              description: conflict.description || '',
+              content: conflict.draft_content,
+            })
+            setConflict(null)
+            setError(null)
+          }}>Keep my edits and use latest revision</button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
@@ -156,7 +185,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
         {prompt && onTest && (
           <button
             type="button"
-            disabled={!valid || busy}
+            disabled={!valid || busy || !!conflict}
             onClick={() => onTest({ title: title.trim(), content })}
             title="Use this draft for your next messages without publishing it"
             className="flex items-center gap-1 px-3 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-gray-200 text-sm disabled:opacity-50"
@@ -166,7 +195,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
         )}
         <button
           type="button"
-          disabled={!valid || busy || !dirty}
+          disabled={!valid || busy || !dirty || !!conflict}
           onClick={save}
           className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:bg-gray-600 disabled:text-gray-400"
         >
@@ -175,7 +204,7 @@ const PromptLibraryEditor = ({ prompt = null, onSave, onPublish, onTest, onCance
         {prompt && onPublish && (
           <button
             type="button"
-            disabled={!valid || busy}
+            disabled={!valid || busy || !!conflict}
             onClick={publish}
             className="flex items-center gap-1 px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium disabled:opacity-50"
           >

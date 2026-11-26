@@ -566,3 +566,38 @@ def test_owner_recovery_of_a_damaged_pin_waits_on_the_row_lock_postgresql(pg_url
         assert meta[PIN_METADATA_KEY]["version_id"] == "v2" and PIN_RECOVERY_METADATA_KEY in meta
     finally:
         engine.dispose()
+
+
+def test_conversation_save_lock_timeout_postgresql(pg_url):
+    from sqlalchemy.exc import DBAPIError
+    from atlas.modules.chat_history import ConversationRepository
+
+    engine = create_engine(pg_url)
+    try:
+        store = ConversationRepository(
+            sessionmaker(bind=engine, expire_on_commit=False)
+        )
+        conv = str(uuid.uuid4())
+        original = {
+            PIN_METADATA_KEY: V1,
+            PIN_REVISION_METADATA_KEY: 1,
+        }
+        _save(store, conv, original)
+
+        with engine.begin() as holding:
+            holding.execute(
+                text("SELECT id FROM conversations WHERE id = :id FOR UPDATE"),
+                {"id": conv},
+            )
+            with pytest.raises(DBAPIError) as exc:
+                _save(store, conv, original, MESSAGES * 2)
+            error = exc.value.orig
+            assert (
+                getattr(error, "sqlstate", None)
+                or getattr(error, "pgcode", None)
+            ) == "55P03"
+
+        assert _meta(store, conv)[PIN_METADATA_KEY] == V1
+        assert _save(store, conv, original, MESSAGES * 2) is not None
+    finally:
+        engine.dispose()

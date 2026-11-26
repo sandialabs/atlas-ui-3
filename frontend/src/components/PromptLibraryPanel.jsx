@@ -223,6 +223,7 @@ const PromptLibraryPanel = () => {
       return (
         <PromptLibraryEditor
           prompt={detail}
+          onRefresh={() => library.getPrompt(prompt.id)}
           onCancel={close}
           onSave={async (fields, revision) => {
             const saved = await library.updatePrompt(prompt.id, fields, revision)

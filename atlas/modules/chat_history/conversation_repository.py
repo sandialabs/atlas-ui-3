@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, desc
+from sqlalchemy import delete, desc, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from atlas.core.log_sanitizer import sanitize_for_logging
@@ -191,6 +191,10 @@ class ConversationRepository(ConversationPinStore):
         """
         user_email = normalize_user_email(user_email)
         with self._get_session() as session:
+            bind = session.get_bind()
+            if bind is not None and bind.dialect.name == "postgresql":
+                # Bound lock waits on the synchronous chat save path.
+                session.execute(text("SET LOCAL lock_timeout = '2s'"))
             existing = self._owned_conversation(session, conversation_id, user_email)
 
             if existing:

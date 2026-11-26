@@ -1323,6 +1323,8 @@ class ChatService:
                     SAVE_FLOOR_CONTEXT_KEY, conv_class.SESSION_BINDING_KEY,
                     "workspace_id", "incognito"):
             session.context.pop(key, None)
+        # A new conversation must never inherit the previous prompt pin.
+        library_turn.clear_pin(session.context)
         self._incognito_save_floor.pop(session.id, None)
         self._save_floor_locked.discard(session.id)
         session.history.messages.clear()
