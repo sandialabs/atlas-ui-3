@@ -9,6 +9,7 @@ audio server under an audio label.
 
 from __future__ import annotations
 
+import struct
 from typing import Optional
 
 # Declared type -> (canonical type, file extension sent upstream). Covers what
@@ -33,6 +34,9 @@ _MEDIA_TYPES = {
 }
 
 _EXTENSIONS = {canonical: extension for canonical, extension in _MEDIA_TYPES.values()}
+
+# Every canonical type an upload can normalize to.
+CANONICAL_MEDIA_TYPES = frozenset(_EXTENSIONS)
 
 
 def normalize_media_type(declared: Optional[str]) -> Optional[str]:
@@ -69,3 +73,59 @@ def matches_signature(content: bytes, media_type: str) -> bool:
         # An ID3 tag, or an MPEG audio frame sync (11 set bits).
         return head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)
     return False
+
+
+# --- raw PCM from providers (issue #1255) ---------------------------------
+#
+# Gemini text-to-speech returns bare 16-bit little-endian PCM (declared as
+# ``audio/L16;codec=pcm;rate=24000``), and OpenAI Chat Completions audio can
+# too (``pcm16``). A browser cannot play headerless PCM, so it is framed as a
+# WAV file: a 44-byte RIFF header in front of the unchanged samples.
+
+DEFAULT_PCM_SAMPLE_RATE = 24000
+_MAX_SAMPLE_RATE = 384000
+
+
+def pcm_sample_rate(mime_type: Optional[str], default: int = DEFAULT_PCM_SAMPLE_RATE) -> Optional[int]:
+    """The sample rate of a raw PCM media type, or None when it is not raw PCM.
+
+    Accepts ``audio/L16`` and ``audio/pcm`` with an optional ``rate=``
+    parameter; a missing or unusable rate falls back to ``default``.
+    """
+    if not mime_type:
+        return None
+    parts = [part.strip() for part in mime_type.split(";")]
+    if parts[0].lower() not in ("audio/l16", "audio/pcm"):
+        return None
+    for param in parts[1:]:
+        key, _, value = param.partition("=")
+        if key.strip().lower() == "rate" and value.strip().isdigit():
+            rate = int(value.strip())
+            if 0 < rate <= _MAX_SAMPLE_RATE:
+                return rate
+    return default
+
+
+def pcm_to_wav(pcm: bytes, sample_rate: int = DEFAULT_PCM_SAMPLE_RATE, channels: int = 1, sample_width: int = 2) -> bytes:
+    """Frame raw little-endian PCM samples as a playable WAV file."""
+    block_align = channels * sample_width
+    # A trailing partial sample would make the data chunk length disagree
+    # with the block alignment; drop it.
+    pcm = pcm[: len(pcm) - (len(pcm) % block_align)]
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + len(pcm),
+        b"WAVE",
+        b"fmt ",
+        16,  # fmt chunk size
+        1,  # PCM
+        channels,
+        sample_rate,
+        sample_rate * block_align,
+        block_align,
+        sample_width * 8,
+        b"data",
+        len(pcm),
+    )
+    return header + pcm

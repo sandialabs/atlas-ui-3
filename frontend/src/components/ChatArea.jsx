@@ -1583,6 +1583,7 @@ const ChatArea = () => {
                   onTranscript={insertDictation}
                   maxDurationSeconds={audioControls.stt.max_duration_seconds}
                   maxAudioBytes={audioControls.stt.max_audio_bytes}
+                  acceptedMediaTypes={audioControls.stt.accepted_media_types}
                   complianceLevel={audioControls.complianceLevel}
                 />
               )}

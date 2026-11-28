@@ -3,8 +3,9 @@
 The two capabilities are configured independently through ``AppSettings``
 (``FEATURE_AUDIO_STT_ENABLED`` / ``AUDIO_STT_*`` and
 ``FEATURE_AUDIO_TTS_ENABLED`` / ``AUDIO_TTS_*``). Neither depends on the chat
-models or on LiteLLM: each names its own OpenAI-compatible base URL, model
-and optional credential.
+models: each names its own provider adapter (issue #1255; default
+``openai_compatible``, see ``audio_providers``), base URL, model and optional
+credential.
 
 A capability is *available* only when it is switched on and completely
 configured. One that is switched on with a missing or malformed setting is
@@ -16,9 +17,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+
+from atlas.modules.audio.audio_formats import CANONICAL_MEDIA_TYPES
+from atlas.modules.audio.audio_providers import (
+    DEFAULT_PROVIDER,
+    PROVIDERS,
+    TTS_SPEED_RANGE,
+    provider_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +79,7 @@ class AudioCapabilityConfig:
 
     name: str  # "stt" or "tts"
     enabled: bool = False
+    provider: str = DEFAULT_PROVIDER
     show_button_by_default: bool = True
     base_url: str = ""
     model: str = ""
@@ -95,6 +107,8 @@ class TtsConfig(AudioCapabilityConfig):
     response_format: str = "mp3"
     max_input_chars: int = 4096
     max_audio_bytes: int = 25 * 1024 * 1024
+    instructions: str = field(default="", repr=False)
+    speed: Optional[float] = None
 
 
 def _warn_once(capability: str, problem: str) -> None:
@@ -112,18 +126,57 @@ def _common(settings: Any, prefix: str) -> Dict[str, Any]:
     def get(name: str, default: Any = None) -> Any:
         return getattr(settings, f"audio_{prefix}_{name}", default)
 
+    provider = str(get("provider", DEFAULT_PROVIDER) or DEFAULT_PROVIDER).strip().lower()
+    spec = provider_spec(provider)
     api_key = get("api_key")
+    api_key = (str(api_key).strip() or None) if api_key else None
+    if api_key is None and spec is not None:
+        for env_name in spec.fallback_env_names:
+            api_key = os.environ.get(env_name, "").strip() or None
+            if api_key:
+                break
+    base_url = str(get("base_url", "") or "").strip().rstrip("/")
+    if not base_url and spec is not None and spec.default_base_url:
+        base_url = spec.default_base_url
     return {
         "name": prefix,
         "enabled": bool(getattr(settings, f"feature_audio_{prefix}_enabled", False)),
+        "provider": provider,
         "show_button_by_default": bool(get("show_button_by_default", True)),
-        "base_url": str(get("base_url", "") or "").strip().rstrip("/"),
+        "base_url": base_url,
         "model": str(get("model", "") or "").strip(),
-        "api_key": (str(api_key).strip() or None) if api_key else None,
+        "api_key": api_key,
         "groups": _split_csv(get("groups", "")),
         "allowed_data_classifications": _split_csv(get("allowed_data_classifications", "")),
         "timeout_seconds": float(get("timeout_seconds", 60.0)),
     }
+
+
+def _provider_problem(values: Dict[str, Any]) -> Optional[str]:
+    """What stops the common settings from working with the chosen provider.
+
+    Reads only whether a credential is present, never its value, so nothing
+    derived from it can reach the warning this message is logged in.
+    """
+    return _settings_problem(
+        values["name"].upper(), values["provider"], values["base_url"], values["model"], values["api_key"] is not None
+    )
+
+
+def _settings_problem(prefix: str, provider: str, base_url: str, model: str, key_set: bool) -> Optional[str]:
+    spec = provider_spec(provider)
+    if spec is None:
+        return f"AUDIO_{prefix}_PROVIDER must be one of " + ", ".join(sorted(PROVIDERS))
+    if base_url or not spec.base_url_optional:
+        problem = _base_url_problem(base_url)
+        if problem:
+            return problem
+    if not model:
+        return f"AUDIO_{prefix}_MODEL is not set"
+    if spec.needs_key and not key_set:
+        names = " or ".join((f"AUDIO_{prefix}_API_KEY",) + spec.fallback_env_names)
+        return f"the {spec.name} provider needs a credential; set {names}"
+    return None
 
 
 def resolve_stt_config(settings: Any) -> SttConfig:
@@ -131,9 +184,7 @@ def resolve_stt_config(settings: Any) -> SttConfig:
     values = _common(settings, "stt")
     problem = None
     if values["enabled"]:
-        problem = _base_url_problem(values["base_url"])
-        if problem is None and not values["model"]:
-            problem = "AUDIO_STT_MODEL is not set"
+        problem = _provider_problem(values)
         if problem:
             _warn_once("stt", problem)
     return SttConfig(
@@ -144,20 +195,51 @@ def resolve_stt_config(settings: Any) -> SttConfig:
     )
 
 
+def _parse_speed(raw: Any) -> Tuple[Optional[float], Optional[str]]:
+    """AUDIO_TTS_SPEED as a number, or None when unset, and any problem with it."""
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return None, None
+    low, high = TTS_SPEED_RANGE
+    problem = f"AUDIO_TTS_SPEED must be a number between {low} and {high}"
+    try:
+        speed = float(text)
+    except ValueError:
+        return None, problem
+    if not (math.isfinite(speed) and low <= speed <= high):
+        return None, problem
+    return speed, None
+
+
 def resolve_tts_config(settings: Any) -> TtsConfig:
     """The text-to-speech settings, with completeness checked."""
     values = _common(settings, "tts")
     voice = str(getattr(settings, "audio_tts_voice", "") or "").strip()
     response_format = str(getattr(settings, "audio_tts_response_format", "mp3") or "mp3").strip().lower()
+    instructions = str(getattr(settings, "audio_tts_instructions", "") or "").strip()
+    spec = provider_spec(values["provider"])
+    speed, speed_problem = None, None
+    if spec is not None and spec.tts_speed:
+        # Only for an adapter that sends it: Gemini and Chat Completions audio
+        # have no speed parameter, so the setting is ignored for them.
+        speed, speed_problem = _parse_speed(getattr(settings, "audio_tts_speed", ""))
+    if spec is not None and spec.tts_formats is None:
+        # The provider decides the format (Gemini returns PCM, framed as WAV).
+        response_format = "wav"
     problem = None
     if values["enabled"]:
-        problem = _base_url_problem(values["base_url"])
-        if problem is None and not values["model"]:
-            problem = "AUDIO_TTS_MODEL is not set"
-        if problem is None and not voice:
+        problem = _provider_problem(values)
+        if problem is None and spec.tts_voice_required and not voice:
             problem = "AUDIO_TTS_VOICE is not set"
         if problem is None and response_format not in TTS_FORMAT_MEDIA_TYPES:
             problem = "AUDIO_TTS_RESPONSE_FORMAT must be one of " + ", ".join(sorted(TTS_FORMAT_MEDIA_TYPES))
+        if problem is None and spec.tts_formats is not None and response_format not in spec.tts_formats:
+            problem = (
+                f"the {spec.name} provider supports AUDIO_TTS_RESPONSE_FORMAT "
+                + ", ".join(sorted(spec.tts_formats))
+            )
+        if problem is None:
+            problem = speed_problem
         if problem:
             _warn_once("tts", problem)
     return TtsConfig(
@@ -167,7 +249,17 @@ def resolve_tts_config(settings: Any) -> TtsConfig:
         response_format=response_format,
         max_input_chars=int(getattr(settings, "audio_tts_max_input_chars", 4096)),
         max_audio_bytes=int(getattr(settings, "audio_tts_max_audio_bytes", 25 * 1024 * 1024)),
+        instructions=instructions,
+        speed=speed,
     )
+
+
+def stt_accepted_media_types(config: AudioCapabilityConfig) -> List[str]:
+    """The canonical upload types the configured provider transcribes."""
+    spec = provider_spec(config.provider)
+    if spec is None:
+        return []
+    return sorted(spec.stt_media_types if spec.stt_media_types is not None else CANONICAL_MEDIA_TYPES)
 
 
 async def user_may_use(config: AudioCapabilityConfig, user_email: str) -> bool:
@@ -197,8 +289,10 @@ def _classifications_for_client(config: AudioCapabilityConfig, compliance_enable
 async def public_audio_config(settings: Any, user_email: str) -> Dict[str, Any]:
     """What the browser may know: availability, defaults and limits.
 
-    Never includes the endpoint URLs, model or voice identifiers, or
-    credentials. ``enabled`` is already per-user (it folds in ``groups``), so
+    ``stt.accepted_media_types`` lists the upload formats the configured
+    service takes, so the client can hide the microphone when the browser
+    cannot record any of them. Never includes the provider, endpoint URLs, model or voice identifiers,
+    instructions, or credentials. ``enabled`` is already per-user (it folds in ``groups``), so
     the client needs no second check to decide whether to draw a control.
     """
     stt = resolve_stt_config(settings)
@@ -217,6 +311,7 @@ async def public_audio_config(settings: Any, user_email: str) -> Dict[str, Any]:
     }
     if stt_enabled:
         result["stt"].update(
+            accepted_media_types=stt_accepted_media_types(stt),
             max_audio_bytes=stt.max_audio_bytes,
             max_duration_seconds=stt.max_duration_seconds,
             allowed_data_classifications=_classifications_for_client(stt, compliance_enabled),

@@ -1181,9 +1181,10 @@ class AppSettings(BaseSettings):
     )
 
     # Speech-to-text and text-to-speech (issue #1251). Each capability talks
-    # to its own OpenAI-compatible audio endpoint (``/audio/transcriptions``,
-    # ``/audio/speech``), configured independently of the chat models and of
-    # each other. Both are off by default. The resolved view, including the
+    # to its own audio service, configured independently of the chat models
+    # and of each other. ``AUDIO_*_PROVIDER`` (issue #1255) picks the adapter;
+    # the default ``openai_compatible`` speaks ``/audio/transcriptions`` and
+    # ``/audio/speech``. Both are off by default. The resolved view, including the
     # "enabled but incompletely configured" case, is
     # ``atlas.modules.audio.audio_config``.
     feature_audio_stt_enabled: bool = Field(
@@ -1195,6 +1196,14 @@ class AppSettings(BaseSettings):
         True,
         description="Show the microphone button to users who have not chosen for themselves",
         validation_alias=AliasChoices("AUDIO_STT_SHOW_BUTTON_BY_DEFAULT"),
+    )
+    audio_stt_provider: str = Field(
+        "openai_compatible",
+        description=(
+            "Speech-to-text adapter: openai_compatible, litellm, gemini, elevenlabs "
+            "or openai_chat_audio"
+        ),
+        validation_alias=AliasChoices("AUDIO_STT_PROVIDER"),
     )
     audio_stt_base_url: str = Field(
         "",
@@ -1263,6 +1272,14 @@ class AppSettings(BaseSettings):
         description="Show the read-aloud button to users who have not chosen for themselves",
         validation_alias=AliasChoices("AUDIO_TTS_SHOW_BUTTON_BY_DEFAULT"),
     )
+    audio_tts_provider: str = Field(
+        "openai_compatible",
+        description=(
+            "Text-to-speech adapter: openai_compatible, litellm, gemini, elevenlabs "
+            "or openai_chat_audio"
+        ),
+        validation_alias=AliasChoices("AUDIO_TTS_PROVIDER"),
+    )
     audio_tts_base_url: str = Field(
         "",
         description="OpenAI-compatible base URL for speech synthesis, e.g. http://speaches:8000/v1",
@@ -1301,6 +1318,21 @@ class AppSettings(BaseSettings):
         "mp3",
         description="Audio format requested from the speech endpoint (mp3, wav, opus, aac or flac)",
         validation_alias=AliasChoices("AUDIO_TTS_RESPONSE_FORMAT"),
+    )
+    audio_tts_instructions: str = Field(
+        "",
+        description=(
+            "Optional delivery direction (tone, pace, accent) sent with every speech "
+            "request where the provider supports it"
+        ),
+        validation_alias=AliasChoices("AUDIO_TTS_INSTRUCTIONS"),
+    )
+    # A string, parsed in audio_config: an empty or mistyped value must leave
+    # the setting unset or switch read-aloud off, not stop Atlas starting.
+    audio_tts_speed: str = Field(
+        "",
+        description="Optional speaking speed (0.25 to 4.0) sent where the provider supports it",
+        validation_alias=AliasChoices("AUDIO_TTS_SPEED"),
     )
     audio_tts_timeout_seconds: float = Field(
         60.0,

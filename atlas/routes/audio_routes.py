@@ -2,9 +2,11 @@
 
 ``POST /api/audio/transcriptions`` takes a recorded clip and returns its
 text; ``POST /api/audio/speech`` takes text and returns audio. Both relay to
-the OpenAI-compatible endpoint the operator configured for that capability
-(``atlas.modules.audio``); the browser never talks to the audio server and
-never sees its address or credential.
+the provider the operator configured for that capability (an
+OpenAI-compatible endpoint by default; other adapters in issue #1255, see
+``atlas.modules.audio.audio_provider_dispatch``); the browser never talks to
+the audio server and never sees which provider it is, its address or its
+credential.
 
 Policy applied to every request, in this order:
 
@@ -53,8 +55,9 @@ from atlas.modules.audio.audio_formats import (
     matches_signature,
     normalize_media_type,
 )
-from atlas.modules.audio.openai_audio_client import (
-    AudioUpstreamError,
+from atlas.modules.audio.audio_http import AudioUpstreamError
+from atlas.modules.audio.audio_provider_dispatch import (
+    stt_accepts,
     synthesize,
     transcribe,
 )
@@ -169,11 +172,14 @@ async def _capped_stream(request: Request, limit: int, detail: str):
         yield chunk
 
 
-def _raise_upstream(exc: AudioUpstreamError, capability: str, user: str) -> None:
+def _raise_upstream(exc: AudioUpstreamError, capability: str, provider: str, user: str) -> None:
+    # The provider is one of the fixed names in audio_providers (an unknown
+    # one never reaches an adapter), so it is safe to log as is.
     logger.warning(
-        "Audio %s request failed: kind=%s upstream_status=%s", capability, exc.kind, exc.upstream_status
+        "Audio %s request failed: provider=%s kind=%s upstream_status=%s",
+        capability, provider, exc.kind, exc.upstream_status,
     )
-    log_metric("error", user, error_type=f"audio_{capability}_{exc.kind}")
+    log_metric("error", user, error_type=f"audio_{capability}_{exc.kind}", provider=provider)
     raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
@@ -247,6 +253,10 @@ async def _transcribe_upload(request: Request, settings, config, current_user: s
         media_type = normalize_media_type(upload.content_type)
         if media_type is None:
             raise HTTPException(status_code=415, detail="This audio format is not supported for dictation.")
+        if not stt_accepts(config, media_type):
+            raise HTTPException(
+                status_code=415, detail="The configured speech service does not accept this audio format."
+            )
 
         content = await upload.read(config.max_audio_bytes + 1)
         if not content:
@@ -269,7 +279,7 @@ async def _transcribe_upload(request: Request, settings, config, current_user: s
                 language=language or None,
             )
         except AudioUpstreamError as exc:
-            _raise_upstream(exc, "stt", current_user)
+            _raise_upstream(exc, "stt", config.provider, current_user)
     finally:
         # Starlette spools a large part to a temporary file; closing the form
         # deletes it now instead of whenever the request object is collected.
@@ -278,6 +288,7 @@ async def _transcribe_upload(request: Request, settings, config, current_user: s
     log_metric(
         "audio_transcription",
         current_user,
+        provider=config.provider,
         audio_bytes=len(content),
         content_type=media_type,
         text_chars=len(text),
@@ -327,11 +338,12 @@ async def _synthesize_text(request: Request, settings, config, current_user: str
     try:
         audio, media_type = await synthesize(config, text)
     except AudioUpstreamError as exc:
-        _raise_upstream(exc, "tts", current_user)
+        _raise_upstream(exc, "tts", config.provider, current_user)
 
     log_metric(
         "audio_speech",
         current_user,
+        provider=config.provider,
         text_chars=len(text),
         audio_bytes=len(audio),
         content_type=media_type,
