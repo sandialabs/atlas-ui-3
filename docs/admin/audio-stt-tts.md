@@ -77,7 +77,7 @@ are never sent to the browser and are masked in the admin configuration view.
 | `AUDIO_TTS_ALLOWED_DATA_CLASSIFICATIONS` | (empty) | Compliance levels the endpoint is approved for |
 | `AUDIO_TTS_RESPONSE_FORMAT` | `mp3` | Format requested from the server: `mp3`, `wav`, `opus`, `aac` or `flac`. Some providers accept fewer; `gemini` ignores it and always returns WAV |
 | `AUDIO_TTS_INSTRUCTIONS` | (empty) | Optional delivery direction (tone, pace). Used by `openai_compatible` (sent as `instructions` only when set), `litellm`, `gemini` and `openai_chat_audio`; ignored by `elevenlabs` |
-| `AUDIO_TTS_SPEED` | (empty) | Optional speaking speed, a number from 0.25 to 4.0; empty means unset. Used by `openai_compatible` (sent as `speed` only when set), `litellm` and `elevenlabs`; ignored by `gemini` and `openai_chat_audio`. A value that is not a number in range switches read-aloud off, with the reason logged |
+| `AUDIO_TTS_SPEED` | (empty) | Optional speaking speed, a number from 0.25 to 4.0; empty means unset. Used by `openai_compatible` (sent as `speed` only when set), `litellm` and `elevenlabs`; ignored (and not checked) for `gemini` and `openai_chat_audio`. For the providers that use it, a value that is not a number in range switches read-aloud off, with the reason logged |
 | `AUDIO_TTS_TIMEOUT_SECONDS` | `60` | Overall deadline for one speech request |
 | `AUDIO_TTS_MAX_INPUT_CHARS` | `4096` | Longest text sent in one request |
 | `AUDIO_TTS_MAX_AUDIO_BYTES` | `26214400` (25 MB) | Largest audio reply relayed to the browser |
@@ -193,7 +193,8 @@ not Atlas's.
 Gemini has no OpenAI-style audio routes, so Atlas uses `generateContent` with
 the key in the `x-goog-api-key` header. The key comes from `AUDIO_*_API_KEY`,
 else `GOOGLE_API_KEY`, else `GEMINI_API_KEY`, so an installation that already
-sets one of those for its chat models needs no extra variable.
+sets one of those for its chat models needs no extra variable. The bundled
+`docker-compose.yml` passes all three into the container.
 
 ```bash
 FEATURE_AUDIO_STT_ENABLED=true
@@ -283,11 +284,14 @@ AUDIO_TTS_API_KEY=sk-your-openai-key
   supported. Atlas checks that the decoded audio starts with the signature of
   the requested format.
 - Dictation accepts **WAV and MP3 uploads only**, which is all the chat
-  audio input takes. The browser's microphone button records WebM or MP4, so a
-  dictation from it is refused with 415 ("The configured speech service does
-  not accept this audio format."). This provider is therefore mainly useful
-  for API clients that upload WAV or MP3; for browser dictation choose another
-  provider.
+  audio input takes. Browsers record WebM, Ogg or MP4, never WAV or MP3, so
+  with this provider the microphone button and its Settings switch are not
+  shown: `/api/config/shell` lists the accepted upload types
+  (`stt.accepted_media_types`) and the browser draws the button only when it
+  can record one of them. `/api/audio/transcriptions` still serves API
+  clients that upload WAV or MP3, and refuses other types with 415 ("The
+  configured speech service does not accept this audio format."). For
+  browser dictation choose another provider.
 - A chat model follows instructions rather than a fixed contract. Atlas asks
   it to read the text verbatim or transcribe verbatim, but it can occasionally
   add or change words. Prefer a dedicated speech model where exactness matters.
@@ -316,13 +320,18 @@ The browser learns what to draw from `/api/config/shell` and `/api/config`:
 ```json
 "audio": {
   "stt": {"enabled": true, "show_button_by_default": true,
+          "accepted_media_types": ["audio/flac", "audio/mp4", "audio/mpeg",
+                                   "audio/ogg", "audio/wav", "audio/webm"],
           "max_audio_bytes": 26214400, "max_duration_seconds": 300,
           "allowed_data_classifications": null},
   "tts": {"enabled": false, "show_button_by_default": true}
 }
 ```
 
-`enabled` is already specific to the signed-in user. The response never
+`enabled` is already specific to the signed-in user. `accepted_media_types`
+lists the upload types the configured provider transcribes; the browser hides
+the microphone when it cannot record any of them (see
+[openai_chat_audio](#openai_chat_audio)). The response never
 contains the provider, a base URL, model, voice, delivery instructions or
 credential.
 
@@ -524,8 +533,10 @@ provider uses LiteLLM's own HTTP client and its redirect behavior.
 - **Nothing is logged but metadata.** With
   `FEATURE_METRICS_LOGGING_ENABLED=true`, each request writes one
   `[METRIC]` line (`audio_transcription` or `audio_speech`) with the user,
-  byte and character counts, the media type and the elapsed time. Failures
-  log the error category and the upstream status code. The audio, the
+  the provider name (`provider=gemini`, ...), byte and character counts, the
+  media type and the elapsed time. Failures log the provider name, the error
+  category and the upstream status code, so an alert can be scoped to one
+  provider. The audio, the
   transcript, the text to speak, the uploaded filename, the audio server's
   error body and the API keys are never logged.
 - **The audio server has its own retention.** What it logs or stores is

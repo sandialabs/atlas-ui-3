@@ -15,9 +15,12 @@
 # D. elevenlabs: native routes with xi-api-key from ELEVENLABS_API_KEY; wav
 #    is requested as PCM and framed
 # E. openai_chat_audio: /chat/completions audio; dictation takes WAV, refuses
-#    browser WebM with 415 before contacting the server
+#    browser WebM with 415 before contacting the server; the browser config
+#    lists only WAV/MP3 as accepted (so the UI hides the microphone); a bad
+#    AUDIO_TTS_SPEED, which this provider never sends, leaves read-aloud on
 # F. Mixed providers (litellm STT + gemini TTS) are independent; a provider
 #    missing its key, or an unknown provider, is reported off and answers 404
+# G. docker-compose.yml forwards every credential fallback the providers read
 # Every phase: no credential, transcript or text in the backend logs, and the
 # browser config never names the provider, URL, model or voice.
 # Then the backend unit test suite.
@@ -229,6 +232,13 @@ assert reqs[1]['extra_fields'] == [], reqs[1]
 assert [r['credential'] for r in reqs] == ['stt', 'tts'], reqs
 "
 print_result $? "The speech request carries exactly the #1251 fields (no instructions or speed)"
+python3 -c "
+import json
+types = json.load(open('$WORK_DIR/shell.json'))['audio']['stt']['accepted_media_types']
+assert {'audio/webm', 'audio/mp4', 'audio/ogg'} <= set(types), types
+print(types)
+"
+print_result $? "The default provider lists the browser recording formats as accepted"
 
 # --- B. LiteLLM in process -------------------------------------------------------
 print_header "B. AUDIO_*_PROVIDER=litellm: in-process LiteLLM, no proxy"
@@ -303,7 +313,13 @@ start_backend \
     AUDIO_STT_MODEL=validation-audio-chat AUDIO_STT_API_KEY="$STT_KEY" \
     FEATURE_AUDIO_TTS_ENABLED=true AUDIO_TTS_PROVIDER=openai_chat_audio AUDIO_TTS_BASE_URL="$MOCK_URL/v1" \
     AUDIO_TTS_MODEL=validation-audio-chat AUDIO_TTS_VOICE=alloy AUDIO_TTS_API_KEY="$TTS_KEY" \
-    AUDIO_TTS_RESPONSE_FORMAT=wav
+    AUDIO_TTS_RESPONSE_FORMAT=wav AUDIO_TTS_SPEED=fast
+check_client_config openai_chat_audio alloy validation-audio-chat && python3 -c "
+import json
+audio = json.load(open('$WORK_DIR/shell.json'))['audio']
+assert audio['stt']['accepted_media_types'] == ['audio/mpeg', 'audio/wav'], audio['stt']
+"
+print_result $? "Config lists only WAV/MP3 uploads (the UI hides the mic) and a bad AUDIO_TTS_SPEED leaves read-aloud on"
 [ "$(transcribe "$WORK_DIR/clip.wav")" = '{"text":"validation transcript"} 200' ]
 print_result $? "Chat Completions audio transcribes a WAV upload"
 OUT=$(transcribe "$WORK_DIR/clip.webm" "audio/webm")
@@ -354,6 +370,21 @@ stop_backend
 
 ! grep -q "$STT_KEY\|$TTS_KEY\|validation transcript\|$SECRET_TEXT\|Speak warmly" "$WORK_DIR/backend.log" "$LOG_DIR"/* 2>/dev/null
 print_result $? "No credential, transcript, text or instructions in the backend logs (all phases)"
+
+# --- G. docker-compose credential fallbacks -------------------------------------------
+print_header "G. docker-compose.yml forwards the provider credential fallbacks"
+python3 - "$PROJECT_ROOT" <<'PY'
+import sys, pathlib
+sys.path.insert(0, sys.argv[1])
+from atlas.modules.audio.audio_providers import PROVIDERS
+compose = (pathlib.Path(sys.argv[1]) / "docker-compose.yml").read_text()
+example = (pathlib.Path(sys.argv[1]) / ".env.example").read_text()
+names = sorted({n for spec in PROVIDERS.values() for n in spec.fallback_env_names})
+missing = [n for n in names if f"- {n}=${{{n}:-}}" not in compose or n not in example]
+assert not missing, missing
+print(names)
+PY
+print_result $? "Every fallback credential variable is forwarded by compose and listed in .env.example"
 
 # --- Backend unit tests ---------------------------------------------------------------
 print_header "Backend unit tests"

@@ -197,3 +197,55 @@ async def test_public_config_never_names_the_provider(monkeypatch):
     rendered = repr(result)
     for secret in ("gemini", "googleapis", "google-key-value", "model-x", "model-y", "voice-1", "Speak warmly"):
         assert secret not in rendered
+
+
+# --- review follow-ups -----------------------------------------------------
+
+
+@pytest.mark.parametrize("provider", ["gemini", "openai_chat_audio"])
+@pytest.mark.parametrize("raw", ["fast", "9", "nan"])
+def test_speed_is_ignored_by_providers_that_do_not_send_it(monkeypatch, provider, raw):
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+    config = resolve_tts_config(
+        tts_settings(
+            audio_tts_provider=provider, audio_tts_base_url="https://api.test/v1",
+            audio_tts_response_format="wav", audio_tts_speed=raw,
+        )
+    )
+    assert config.available, config.config_error
+    assert config.speed is None
+
+
+@pytest.mark.parametrize("provider", ["openai_compatible", "litellm", "elevenlabs"])
+def test_speed_is_still_checked_for_providers_that_send_it(monkeypatch, provider):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "xi-key")
+    config = resolve_tts_config(
+        tts_settings(audio_tts_provider=provider, audio_tts_base_url="https://api.test/v1", audio_tts_speed="fast")
+    )
+    assert not config.available
+    assert "AUDIO_TTS_SPEED" in config.config_error
+
+
+def test_speed_flag_matches_the_adapters():
+    assert {name for name, spec in PROVIDERS.items() if spec.tts_speed} == {"openai_compatible", "litellm", "elevenlabs"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider,expected",
+    [
+        ("openai_compatible", ["audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm"]),
+        ("litellm", ["audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm"]),
+        ("openai_chat_audio", ["audio/mpeg", "audio/wav"]),
+    ],
+)
+async def test_public_config_lists_the_accepted_upload_types(provider, expected):
+    settings = stt_settings(audio_stt_provider=provider, audio_stt_base_url="https://api.test/v1")
+    result = await public_audio_config(settings, "user@test.com")
+    assert result["stt"]["accepted_media_types"] == expected
+
+
+@pytest.mark.asyncio
+async def test_public_config_omits_accepted_types_when_dictation_is_off():
+    result = await public_audio_config(stt_settings(feature_audio_stt_enabled=False), "user@test.com")
+    assert "accepted_media_types" not in result["stt"]

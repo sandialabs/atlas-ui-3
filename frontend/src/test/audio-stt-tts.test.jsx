@@ -21,7 +21,7 @@ import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, cleanup, waitFor } from '@testing-library/react'
 
-import { resolveAudioControl, audioButtonPreference } from '../utils/audioControls'
+import { resolveAudioControl, audioButtonPreference, audioCapabilityOffered, recordableMimeTypes } from '../utils/audioControls'
 import { toSpeechText, fitSpeechText } from '../utils/speechText'
 import { describeMicrophoneError, pickRecordingMimeType } from '../hooks/useDictation'
 import AudioSettingsSection from '../components/AudioSettingsSection'
@@ -93,6 +93,35 @@ describe('button visibility rule', () => {
     expect(resolveAudioControl({ ...ON, allowed_data_classifications: null }, null, { levels, activeLevel: 'Public' }).visible).toBe(true)
     // Level definitions not loaded yet: do not flash the button away.
     expect(resolveAudioControl(approved, null, { levels: [], activeLevel: 'Public' }).visible).toBe(true)
+  })
+})
+
+describe('accepted upload types (issue #1255)', () => {
+  const WAV_MP3_ONLY = { ...ON, accepted_media_types: ['audio/mpeg', 'audio/wav'] }
+  const ALL_TYPES = { ...ON, accepted_media_types: ['audio/flac', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm'] }
+
+  it('hides dictation when the service takes nothing a browser can record', () => {
+    expect(audioCapabilityOffered(WAV_MP3_ONLY)).toBe(false)
+    expect(resolveAudioControl(WAV_MP3_ONLY, true)).toEqual({ available: false, visible: false })
+  })
+
+  it('keeps dictation when the service takes a recorder format, or does not say', () => {
+    expect(resolveAudioControl(ALL_TYPES, null).visible).toBe(true)
+    expect(resolveAudioControl({ ...ON, accepted_media_types: ['audio/mp4'] }, null).visible).toBe(true)
+    expect(resolveAudioControl(ON, null).visible).toBe(true)
+  })
+
+  it('only offers recorder types the service accepts', () => {
+    expect(recordableMimeTypes(['audio/mp4', 'audio/wav'])).toEqual(['audio/mp4'])
+    expect(recordableMimeTypes(['audio/webm'])).toEqual(['audio/webm;codecs=opus', 'audio/webm'])
+    expect(recordableMimeTypes(undefined)).toHaveLength(4)
+  })
+
+  it('has no Settings switch for dictation the browser cannot use', () => {
+    useChat.mockReturnValue(chatState({ audio: { stt: WAV_MP3_ONLY, tts: ON } }))
+    render(<AudioSettingsSection />)
+    expect(screen.queryByRole('switch', { name: 'Show microphone button' })).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Show read-aloud button' })).toBeTruthy()
   })
 })
 
@@ -290,6 +319,25 @@ describe('dictation button', () => {
     installMicrophone()
     FakeRecorder.supported = ['audio/mp4']
     expect(pickRecordingMimeType()).toBe('audio/mp4')
+  })
+
+  it('picks only a format the service accepts', () => {
+    installMicrophone()
+    FakeRecorder.supported = ['audio/webm;codecs=opus', 'audio/mp4']
+    expect(pickRecordingMimeType(['audio/mp4'])).toBe('audio/mp4')
+    expect(pickRecordingMimeType(['audio/wav'])).toBeNull()
+    expect(pickRecordingMimeType(undefined)).toBe('audio/webm;codecs=opus')
+  })
+
+  it('records in the accepted format it was given', async () => {
+    installMicrophone()
+    FakeRecorder.supported = ['audio/webm;codecs=opus', 'audio/mp4']
+    const getUserMedia = navigator.mediaDevices.getUserMedia
+    render(withToast(<DictationButton onTranscript={vi.fn()} maxDurationSeconds={60} maxAudioBytes={1000} acceptedMediaTypes={['audio/mp4']} />))
+    fireEvent.click(screen.getByTestId('dictation-start'))
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled())
+    await screen.findByTestId('dictation-stop')
+    expect(FakeRecorder.instances.at(-1).mimeType).toBe('audio/mp4')
   })
 
   it('shows the server error and returns to idle', async () => {

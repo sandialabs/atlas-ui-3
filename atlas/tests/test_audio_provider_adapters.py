@@ -394,3 +394,66 @@ async def test_oversized_json_reply_is_refused_while_reading(upstream):
 def test_base64_reply_limit_fits_the_largest_allowed_audio():
     limit = audio_http.base64_reply_limit(3000)
     assert limit >= len(b64(b"\x00" * 3000))
+
+
+# --- capped reads without Content-Length -------------------------------------
+
+
+def _chunked(total_bytes, chunk_bytes=4096):
+    """A reply streamed in chunks with no Content-Length header."""
+
+    async def body():
+        sent = 0
+        while sent < total_bytes:
+            size = min(chunk_bytes, total_bytes - sent)
+            sent += size
+            yield b"x" * size
+
+    return httpx.Response(200, content=body(), headers={"content-type": "application/json"})
+
+
+async def test_chunked_reply_over_the_limit_is_refused_while_reading(upstream):
+    upstream.handler = lambda r: _chunked(audio_http.MAX_TRANSCRIPTION_RESPONSE_BYTES + 1)
+    with pytest.raises(AudioUpstreamError) as raised:
+        await run_stt(gemini_audio_client, stt("gemini"))
+    assert raised.value.kind == "upstream_response_too_large"
+
+
+async def test_capped_read_stops_at_the_first_chunk_past_the_limit():
+    chunks_read = []
+
+    async def body():
+        for index in range(100):
+            chunks_read.append(index)
+            yield b"x" * 10
+
+    response = httpx.Response(200, content=body())
+    assert "content-length" not in response.headers
+    with pytest.raises(AudioUpstreamError) as raised:
+        await audio_http._read_capped(response, 25)
+    assert raised.value.kind == "upstream_response_too_large"
+    assert len(chunks_read) == 3
+
+
+async def test_capped_read_accepts_a_chunked_reply_at_the_limit():
+    async def body():
+        for _ in range(5):
+            yield b"x" * 10
+
+    assert await audio_http._read_capped(httpx.Response(200, content=body()), 50) == b"x" * 50
+
+
+async def test_default_provider_transcription_cap_applies_to_chunked_replies(upstream):
+    from atlas.modules.audio import openai_audio_client
+
+    upstream.handler = lambda r: _chunked(audio_http.MAX_TRANSCRIPTION_RESPONSE_BYTES + 1)
+    with pytest.raises(AudioUpstreamError) as raised:
+        await run_stt(openai_audio_client, stt("openai_compatible"))
+    assert raised.value.kind == "upstream_response_too_large"
+
+
+async def test_speech_cap_applies_to_chunked_audio(upstream):
+    upstream.handler = lambda r: _chunked(2048)
+    with pytest.raises(AudioUpstreamError) as raised:
+        await elevenlabs_audio_client.synthesize(tts("elevenlabs", max_audio_bytes=1024), "Hello.")
+    assert raised.value.kind == "upstream_response_too_large"

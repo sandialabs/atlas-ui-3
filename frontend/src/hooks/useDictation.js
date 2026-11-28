@@ -1,20 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { transcribeAudio } from '../utils/audioApi'
+import { RECORDING_MIME_TYPES, recordableMimeTypes } from '../utils/audioControls'
 
-// Containers the transcription endpoint accepts, in the order to try them.
-// MediaRecorder support differs by browser (WebM/Opus in Chromium and
-// Firefox, MP4/AAC in Safari), so the first one the browser can produce wins.
-export const RECORDING_MIME_TYPES = [
-  'audio/webm;codecs=opus',
-  'audio/webm',
-  'audio/ogg;codecs=opus',
-  'audio/mp4',
-]
+// Re-exported for existing imports; the list lives with the visibility rule.
+export { RECORDING_MIME_TYPES }
 
-export const pickRecordingMimeType = () => {
+/** The first recorder type this browser can produce that the service takes. */
+export const pickRecordingMimeType = (acceptedMediaTypes) => {
   const Recorder = typeof window !== 'undefined' ? window.MediaRecorder : undefined
   if (!Recorder || typeof Recorder.isTypeSupported !== 'function') return null
-  return RECORDING_MIME_TYPES.find(type => Recorder.isTypeSupported(type)) || null
+  return recordableMimeTypes(acceptedMediaTypes).find(type => Recorder.isTypeSupported(type)) || null
 }
 
 /** What to tell the user when the microphone could not be opened. */
@@ -46,14 +41,14 @@ export const describeMicrophoneError = (error) => {
  * The audio exists only in this tab's memory until it has been sent, and the
  * microphone is released as soon as recording ends, whatever the reason.
  */
-export function useDictation({ maxDurationSeconds = 300, maxAudioBytes, complianceLevel, onTranscript, onError, onNotice }) {
+export function useDictation({ maxDurationSeconds = 300, maxAudioBytes, acceptedMediaTypes, complianceLevel, onTranscript, onError, onNotice }) {
   const [status, setStatus] = useState('idle')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   // One attempt's mutable state. A new object per attempt, so a late callback
   // from an abandoned attempt can see that it is no longer the current one.
   const attemptRef = useRef(null)
   const callbacksRef = useRef({})
-  callbacksRef.current = { onTranscript, onError, onNotice, complianceLevel, maxAudioBytes }
+  callbacksRef.current = { onTranscript, onError, onNotice, complianceLevel, maxAudioBytes, acceptedMediaTypes }
 
   const release = useCallback((attempt) => {
     if (!attempt) return
@@ -132,7 +127,7 @@ export function useDictation({ maxDurationSeconds = 300, maxAudioBytes, complian
         : 'This browser does not support audio recording.')
       return
     }
-    const mimeType = pickRecordingMimeType()
+    const mimeType = pickRecordingMimeType(callbacksRef.current.acceptedMediaTypes)
     if (!mimeType) {
       report('This browser cannot record audio in a format the transcription service accepts. Try a current version of Chrome, Edge, Firefox or Safari.')
       return

@@ -4,7 +4,8 @@
 //   1. The server says whether the capability is available to this user
 //      (`audio.<capability>.enabled`: switched on, fully configured, and the
 //      user is in an allowed group). Nothing below can turn an unavailable
-//      capability on.
+//      capability on. For dictation the service must also accept a format a
+//      browser can record (`audio.stt.accepted_media_types`).
 //   2. With compliance levels on, the audio endpoint must be approved for
 //      the conversation's level -- the same rule models and tools follow.
 //      The server enforces it on every request; hiding the button here just
@@ -17,6 +18,37 @@ import { isComplianceAccessible, complianceLevelsReady } from './complianceAcces
 // Keys in the `chatui-settings` preferences. `null` (or absent) means the
 // user has not chosen, so the administrator's default applies.
 export const AUDIO_PREFERENCE_KEYS = { stt: 'showSttButton', tts: 'showTtsButton' }
+
+// Containers the browser can record, in the order to try them. MediaRecorder
+// support differs by browser (WebM/Opus in Chromium and Firefox, MP4/AAC in
+// Safari), so the first one the browser can produce wins.
+export const RECORDING_MIME_TYPES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/mp4',
+]
+
+const baseMediaType = type => type.split(';')[0].trim().toLowerCase()
+
+/**
+ * The recorder types the transcription service takes. `accepted` is the
+ * server's `stt.accepted_media_types` (canonical types such as `audio/webm`);
+ * a server that does not send it accepts every recorder type.
+ */
+export const recordableMimeTypes = accepted =>
+  Array.isArray(accepted)
+    ? RECORDING_MIME_TYPES.filter(type => accepted.includes(baseMediaType(type)))
+    : RECORDING_MIME_TYPES
+
+/**
+ * Whether the server offers the capability to this user at all. Dictation
+ * also needs a service that takes something a browser can record: one that
+ * accepts only WAV or MP3 uploads is usable from API clients, not from here.
+ */
+export const audioCapabilityOffered = capability =>
+  Boolean(capability?.enabled) &&
+  (capability.accepted_media_types === undefined || recordableMimeTypes(capability.accepted_media_types).length > 0)
 
 export const DEFAULT_AUDIO_CONFIG = {
   stt: { enabled: false, show_button_by_default: true },
@@ -34,7 +66,7 @@ export const audioButtonPreference = (capability, preference) =>
  * `visible`: the button is drawn (available, and not hidden by preference).
  */
 export const resolveAudioControl = (capability, preference, { levels = [], activeLevel = null } = {}) => {
-  if (!capability?.enabled) return { available: false, visible: false }
+  if (!audioCapabilityOffered(capability)) return { available: false, visible: false }
   let permitted = true
   // `null` means compliance levels are off; an array is the endpoint's
   // declaration (possibly empty, which approves it for no classified level).

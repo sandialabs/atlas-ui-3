@@ -35,6 +35,9 @@ _MEDIA_TYPES = {
 
 _EXTENSIONS = {canonical: extension for canonical, extension in _MEDIA_TYPES.values()}
 
+# Every canonical type an upload can normalize to.
+CANONICAL_MEDIA_TYPES = frozenset(_EXTENSIONS)
+
 
 def normalize_media_type(declared: Optional[str]) -> Optional[str]:
     """The canonical type for a declared one, or None when it is not accepted.

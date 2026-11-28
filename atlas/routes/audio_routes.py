@@ -172,11 +172,14 @@ async def _capped_stream(request: Request, limit: int, detail: str):
         yield chunk
 
 
-def _raise_upstream(exc: AudioUpstreamError, capability: str, user: str) -> None:
+def _raise_upstream(exc: AudioUpstreamError, capability: str, provider: str, user: str) -> None:
+    # The provider is one of the fixed names in audio_providers (an unknown
+    # one never reaches an adapter), so it is safe to log as is.
     logger.warning(
-        "Audio %s request failed: kind=%s upstream_status=%s", capability, exc.kind, exc.upstream_status
+        "Audio %s request failed: provider=%s kind=%s upstream_status=%s",
+        capability, provider, exc.kind, exc.upstream_status,
     )
-    log_metric("error", user, error_type=f"audio_{capability}_{exc.kind}")
+    log_metric("error", user, error_type=f"audio_{capability}_{exc.kind}", provider=provider)
     raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
@@ -276,7 +279,7 @@ async def _transcribe_upload(request: Request, settings, config, current_user: s
                 language=language or None,
             )
         except AudioUpstreamError as exc:
-            _raise_upstream(exc, "stt", current_user)
+            _raise_upstream(exc, "stt", config.provider, current_user)
     finally:
         # Starlette spools a large part to a temporary file; closing the form
         # deletes it now instead of whenever the request object is collected.
@@ -285,6 +288,7 @@ async def _transcribe_upload(request: Request, settings, config, current_user: s
     log_metric(
         "audio_transcription",
         current_user,
+        provider=config.provider,
         audio_bytes=len(content),
         content_type=media_type,
         text_chars=len(text),
@@ -334,11 +338,12 @@ async def _synthesize_text(request: Request, settings, config, current_user: str
     try:
         audio, media_type = await synthesize(config, text)
     except AudioUpstreamError as exc:
-        _raise_upstream(exc, "tts", current_user)
+        _raise_upstream(exc, "tts", config.provider, current_user)
 
     log_metric(
         "audio_speech",
         current_user,
+        provider=config.provider,
         text_chars=len(text),
         audio_bytes=len(audio),
         content_type=media_type,

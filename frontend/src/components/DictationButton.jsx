@@ -13,11 +13,12 @@ const BUTTON = 'w-12 h-12 sm:w-auto sm:h-auto sm:px-4 sm:py-3 min-w-[48px] min-h
  * transcribe, and hand the text to `onTranscript`. The caller inserts it into
  * the draft; nothing here sends a message.
  */
-const DictationButton = ({ onTranscript, maxDurationSeconds, maxAudioBytes, complianceLevel }) => {
+const DictationButton = ({ onTranscript, maxDurationSeconds, maxAudioBytes, acceptedMediaTypes, complianceLevel }) => {
   const toast = useToast()
   const { status, elapsedSeconds, start, stop, cancel } = useDictation({
     maxDurationSeconds,
     maxAudioBytes,
+    acceptedMediaTypes,
     complianceLevel,
     onTranscript,
     onError: message => toast.error(message),

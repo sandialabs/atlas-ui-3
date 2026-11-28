@@ -3,6 +3,7 @@ import { FOCUS_RING } from '../utils/focusRing'
 import {
   AUDIO_PREFERENCE_KEYS,
   audioButtonPreference,
+  audioCapabilityOffered,
   hasExplicitAudioPreference,
 } from '../utils/audioControls'
 
@@ -24,14 +25,15 @@ const ROWS = [
 /**
  * The show/hide switches for dictation and read-aloud (issue #1251).
  *
- * A capability the administrator has not made available to this user has no
+ * A capability the administrator has not made available to this user (or,
+ * for dictation, whose service takes no format a browser records) has no
  * row at all: a preference cannot turn it on, so there is nothing to offer.
  * Until the user flips a switch it follows the administrator's default; a
  * flip is saved immediately, like the other context-owned switches here.
  */
 const AudioSettingsSection = ({ reduceHelpText = false }) => {
   const { audio, settings, updateSettings } = useChat()
-  const rows = ROWS.filter(row => audio?.[row.capability]?.enabled)
+  const rows = ROWS.filter(row => audioCapabilityOffered(audio?.[row.capability]))
   if (rows.length === 0) return null
 
   return (

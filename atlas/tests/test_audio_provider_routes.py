@@ -360,3 +360,53 @@ def test_provider_payloads_and_credentials_are_not_logged(client, test_user_head
     assert "audio_transcription" in logged
     for leaked in ("secret transcript", "secret sentence", "secret style", "stt-secret-value", "tts-secret-value", "memo.webm"):
         assert leaked not in logged
+
+
+# --- review follow-ups -----------------------------------------------------
+
+
+async def test_litellm_missing_function_maps_to_502(monkeypatch, caplog):
+    monkeypatch.delattr(litellm, "aspeech")
+    with caplog.at_level(logging.WARNING), pytest.raises(audio_http.AudioUpstreamError) as raised:
+        await litellm_audio_client.synthesize(tts(), "the secret sentence")
+    assert raised.value.status_code == 502 and raised.value.kind == "upstream_error"
+    assert "secret sentence" not in caplog.text
+
+
+async def test_litellm_import_failure_maps_to_502(monkeypatch):
+    def broken():
+        raise ImportError("litellm is not installed")
+
+    monkeypatch.setattr(litellm_audio_client, "_litellm", broken)
+    with pytest.raises(audio_http.AudioUpstreamError) as raised:
+        await litellm_audio_client.transcribe(stt(), content=WAV, filename="audio.wav", content_type="audio/wav")
+    assert raised.value.status_code == 502
+
+
+def test_upstream_failures_are_labeled_by_provider(client, test_user_headers, upstream, provider_on, caplog, monkeypatch):
+    from atlas.modules.config import config_manager
+
+    monkeypatch.setattr(config_manager.app_settings, "feature_metrics_logging_enabled", True, raising=False)
+    provider_on("elevenlabs", "gemini")
+    upstream.handler = lambda r: httpx.Response(500, text="echo")
+    with caplog.at_level(logging.INFO):
+        assert post_clip(client, test_user_headers).status_code == 502
+        assert post_speech(client, test_user_headers).status_code == 502
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("Audio stt request failed: provider=elevenlabs kind=upstream_error" in m for m in messages)
+    assert any("Audio tts request failed: provider=gemini kind=upstream_error" in m for m in messages)
+    metrics = [m for m in messages if "[METRIC]" in m and "error_type=audio_" in m]
+    assert any("provider=elevenlabs" in m for m in metrics) and any("provider=gemini" in m for m in metrics)
+
+
+def test_shell_config_lists_accepted_upload_types(client, test_user_headers, upstream, provider_on):
+    provider_on("openai_chat_audio", "openai_chat_audio", audio_stt_base_url="https://api.test/v1", audio_tts_base_url="https://api.test/v1")
+    shell = client.get("/api/config/shell", headers=test_user_headers).json()["audio"]
+    assert shell["stt"]["enabled"] is True
+    assert shell["stt"]["accepted_media_types"] == ["audio/mpeg", "audio/wav"]
+
+
+def test_bad_speed_does_not_disable_gemini_read_aloud(client, test_user_headers, upstream, provider_on):
+    provider_on("gemini", "gemini", audio_tts_speed="fast")
+    shell = client.get("/api/config/shell", headers=test_user_headers).json()["audio"]
+    assert shell["tts"]["enabled"] is True

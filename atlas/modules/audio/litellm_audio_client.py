@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from typing import Any, Dict, Optional, Tuple
 
 from atlas.modules.audio import audio_http
@@ -68,11 +69,16 @@ def _common_kwargs(config: AudioCapabilityConfig) -> Dict[str, Any]:
 
 
 def _error_for_exception(exc: Exception) -> audio_http.AudioUpstreamError:
-    litellm = _litellm()
-    if isinstance(exc, (asyncio.TimeoutError, litellm.exceptions.Timeout)):
+    if isinstance(exc, asyncio.TimeoutError):
         return audio_http.timed_out()
-    if isinstance(exc, litellm.exceptions.APIConnectionError):
-        return audio_http.unreachable()
+    exceptions = getattr(sys.modules.get("litellm"), "exceptions", None)
+    if exceptions is not None:
+        # Looked up, not imported: when the import itself is what failed,
+        # mapping that failure must not raise again.
+        if isinstance(exc, getattr(exceptions, "Timeout", ())):
+            return audio_http.timed_out()
+        if isinstance(exc, getattr(exceptions, "APIConnectionError", ())):
+            return audio_http.unreachable()
     status = getattr(exc, "status_code", None)
     if isinstance(status, int) and 400 <= status < 600:
         return audio_http.error_for_status(status)
@@ -80,8 +86,10 @@ def _error_for_exception(exc: Exception) -> audio_http.AudioUpstreamError:
 
 
 async def _call(config: AudioCapabilityConfig, function_name: str, **kwargs: Any) -> Any:
-    function = getattr(_litellm(), function_name)
     try:
+        # Inside the mapping: a missing or broken LiteLLM install is a 502
+        # like any other upstream failure, not an unhandled 500.
+        function = getattr(_litellm(), function_name)
         return await asyncio.wait_for(function(**_common_kwargs(config), **kwargs), timeout=config.timeout_seconds)
     except audio_http.AudioUpstreamError:
         raise

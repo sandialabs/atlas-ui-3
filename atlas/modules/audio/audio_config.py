@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+from atlas.modules.audio.audio_formats import CANONICAL_MEDIA_TYPES
 from atlas.modules.audio.audio_providers import (
     DEFAULT_PROVIDER,
     PROVIDERS,
@@ -216,8 +217,12 @@ def resolve_tts_config(settings: Any) -> TtsConfig:
     voice = str(getattr(settings, "audio_tts_voice", "") or "").strip()
     response_format = str(getattr(settings, "audio_tts_response_format", "mp3") or "mp3").strip().lower()
     instructions = str(getattr(settings, "audio_tts_instructions", "") or "").strip()
-    speed, speed_problem = _parse_speed(getattr(settings, "audio_tts_speed", ""))
     spec = provider_spec(values["provider"])
+    speed, speed_problem = None, None
+    if spec is not None and spec.tts_speed:
+        # Only for an adapter that sends it: Gemini and Chat Completions audio
+        # have no speed parameter, so the setting is ignored for them.
+        speed, speed_problem = _parse_speed(getattr(settings, "audio_tts_speed", ""))
     if spec is not None and spec.tts_formats is None:
         # The provider decides the format (Gemini returns PCM, framed as WAV).
         response_format = "wav"
@@ -249,6 +254,14 @@ def resolve_tts_config(settings: Any) -> TtsConfig:
     )
 
 
+def stt_accepted_media_types(config: AudioCapabilityConfig) -> List[str]:
+    """The canonical upload types the configured provider transcribes."""
+    spec = provider_spec(config.provider)
+    if spec is None:
+        return []
+    return sorted(spec.stt_media_types if spec.stt_media_types is not None else CANONICAL_MEDIA_TYPES)
+
+
 async def user_may_use(config: AudioCapabilityConfig, user_email: str) -> bool:
     """Whether the capability is available to this user.
 
@@ -276,7 +289,9 @@ def _classifications_for_client(config: AudioCapabilityConfig, compliance_enable
 async def public_audio_config(settings: Any, user_email: str) -> Dict[str, Any]:
     """What the browser may know: availability, defaults and limits.
 
-    Never includes the provider, endpoint URLs, model or voice identifiers,
+    ``stt.accepted_media_types`` lists the upload formats the configured
+    service takes, so the client can hide the microphone when the browser
+    cannot record any of them. Never includes the provider, endpoint URLs, model or voice identifiers,
     instructions, or credentials. ``enabled`` is already per-user (it folds in ``groups``), so
     the client needs no second check to decide whether to draw a control.
     """
@@ -296,6 +311,7 @@ async def public_audio_config(settings: Any, user_email: str) -> Dict[str, Any]:
     }
     if stt_enabled:
         result["stt"].update(
+            accepted_media_types=stt_accepted_media_types(stt),
             max_audio_bytes=stt.max_audio_bytes,
             max_duration_seconds=stt.max_duration_seconds,
             allowed_data_classifications=_classifications_for_client(stt, compliance_enabled),

@@ -44,8 +44,12 @@ class ProviderSpec:
     # Formats AUDIO_TTS_RESPONSE_FORMAT may name. None: the provider decides
     # the format and the setting is not read (Gemini always yields WAV).
     tts_formats: Optional[FrozenSet[str]] = ALL_TTS_FORMATS
+    # Whether the adapter sends AUDIO_TTS_SPEED upstream. When it does not,
+    # the setting is not read, so a bad value cannot switch read-aloud off.
+    tts_speed: bool = True
     # Canonical upload media types the provider accepts for transcription.
-    # None: everything ``audio_formats`` accepts.
+    # None: everything ``audio_formats`` accepts. The list is published to the
+    # browser, which hides the microphone when it cannot record any of them.
     stt_media_types: Optional[FrozenSet[str]] = None
 
 
@@ -59,6 +63,7 @@ PROVIDERS = {
         fallback_env_names=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
         tts_voice_required=False,
         tts_formats=None,
+        tts_speed=False,
     ),
     ELEVENLABS: ProviderSpec(
         ELEVENLABS,
@@ -70,6 +75,7 @@ PROVIDERS = {
     OPENAI_CHAT_AUDIO: ProviderSpec(
         OPENAI_CHAT_AUDIO,
         tts_formats=frozenset({"mp3", "wav", "opus", "flac"}),
+        tts_speed=False,
         # Chat Completions ``input_audio`` takes only WAV and MP3.
         stt_media_types=frozenset({"audio/wav", "audio/mpeg"}),
     ),
