@@ -457,3 +457,20 @@ async def test_speech_cap_applies_to_chunked_audio(upstream):
     with pytest.raises(AudioUpstreamError) as raised:
         await elevenlabs_audio_client.synthesize(tts("elevenlabs", max_audio_bytes=1024), "Hello.")
     assert raised.value.kind == "upstream_response_too_large"
+
+
+@pytest.mark.parametrize(
+    "canonical,sent",
+    [("audio/mp4", "audio/m4a"), ("audio/webm", "audio/webm"), ("audio/ogg", "audio/ogg"), ("audio/mpeg", "audio/mpeg"), ("audio/flac", "audio/flac")],
+)
+async def test_gemini_declares_uploads_with_its_documented_mime_types(upstream, canonical, sent):
+    upstream.handler = lambda r: httpx.Response(200, json=gemini_reply([{"text": "ok"}]))
+    await run_stt(gemini_audio_client, stt("gemini"), content=b"\x00" * 16, content_type=canonical)
+    assert upstream.json_body()["contents"][0]["parts"][1]["inlineData"]["mimeType"] == sent
+
+
+def test_every_selectable_provider_has_an_adapter():
+    from atlas.modules.audio import audio_provider_dispatch
+    from atlas.modules.audio.audio_providers import PROVIDERS
+
+    assert set(audio_provider_dispatch._ADAPTERS) == set(PROVIDERS)

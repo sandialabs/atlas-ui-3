@@ -51,6 +51,16 @@ def _first_candidate_parts(payload: Any) -> list:
     return [part for part in parts if isinstance(part, dict)] if isinstance(parts, list) else []
 
 
+# Gemini's documented audio MIME types differ from the canonical upload type
+# in one case: an MP4 audio recording (Safari's MediaRecorder output) is
+# declared as M4A. Every other canonical type is on Gemini's list as is.
+_GEMINI_MIME_TYPES = {"audio/mp4": "audio/m4a"}
+
+
+def _gemini_mime_type(content_type: str) -> str:
+    return _GEMINI_MIME_TYPES.get(content_type, content_type)
+
+
 async def transcribe(
     config: SttConfig,
     *,
@@ -68,7 +78,7 @@ async def transcribe(
                 "role": "user",
                 "parts": [
                     {"text": prompt},
-                    {"inlineData": {"mimeType": content_type, "data": base64.b64encode(content).decode("ascii")}},
+                    {"inlineData": {"mimeType": _gemini_mime_type(content_type), "data": base64.b64encode(content).decode("ascii")}},
                 ],
             }
         ],

@@ -28,6 +28,7 @@ from atlas.modules.audio.audio_providers import (
     LITELLM,
     OPENAI_CHAT_AUDIO,
     OPENAI_COMPATIBLE,
+    PROVIDERS,
     provider_spec,
 )
 
@@ -38,6 +39,12 @@ _ADAPTERS = {
     ELEVENLABS: elevenlabs_audio_client,
     OPENAI_CHAT_AUDIO: openai_chat_audio_client,
 }
+
+# Every provider an operator can select has an adapter, and nothing else
+# does: a name in only one table would be reported available and then fail
+# on the first request.
+if set(_ADAPTERS) != set(PROVIDERS):  # pragma: no cover -- a programming error, caught at import
+    raise RuntimeError("audio provider registry and adapter table disagree")
 
 
 def _adapter(provider: str) -> ModuleType:

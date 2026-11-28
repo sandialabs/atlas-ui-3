@@ -215,9 +215,10 @@ GOOGLE_API_KEY=your-gemini-key
 - **Dictation** sends the clip inline (base64) with a fixed prompt that asks
   for a verbatim transcript. Gemini limits the size of an inline request
   (about 20 MB in total), and base64 makes the clip about a third larger, so
-  lower `AUDIO_STT_MAX_AUDIO_BYTES` to about 14 MB as above. Check that your
-  Gemini model accepts the browser's recording format: Chrome and Firefox
-  record WebM/Opus and Safari records MP4.
+  lower `AUDIO_STT_MAX_AUDIO_BYTES` to about 14 MB as above. Chrome and
+  Firefox record WebM/Opus and Safari records MP4; Atlas declares an MP4
+  recording to Gemini as `audio/m4a`, the name on Gemini's list of supported
+  audio types, and sends the other types under their usual names.
 - **Read-aloud** receives raw PCM audio, which Atlas wraps as WAV. The output
   is always WAV and `AUDIO_TTS_RESPONSE_FORMAT` is ignored. The voice is
   optional and is a prebuilt voice name such as `Kore`. Instructions are
