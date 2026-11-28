@@ -9,6 +9,20 @@ implements the two routes Atlas calls:
 | `POST /v1/audio/transcriptions` | multipart `file`, `model`, optional `language` | `{"text": "..."}` |
 | `POST /v1/audio/speech` | JSON `model`, `input`, `voice`, `response_format` | a WAV tone (`audio/wav`) |
 
+It also answers the provider-native routes the issue #1255 adapters call,
+with the same canned transcript and tone:
+
+| Route | Provider setting | Reply |
+| ----- | ---------------- | ----- |
+| `POST /v1beta/models/{model}:generateContent` | `gemini` (base URL `http://127.0.0.1:8094/v1beta`) | transcript text, or base64 raw PCM when `responseModalities` is `["AUDIO"]` |
+| `POST /v1/speech-to-text` | `elevenlabs` | `{"text": "..."}` |
+| `POST /v1/text-to-speech/{voice_id}` | `elevenlabs` | a WAV tone, or raw PCM for a `pcm_*` `output_format` |
+| `POST /v1/chat/completions` | `openai_chat_audio` | transcript text, or a base64 WAV tone in `message.audio` |
+
+The `litellm` provider can use the first two routes through LiteLLM's
+OpenAI handler: `AUDIO_*_PROVIDER=litellm`, a model such as
+`openai/mock-whisper`, and the base URL below.
+
 `GET /mock/requests` lists what was received (field values, sizes and, when
 `MOCK_AUDIO_KEY_LABELS` is set, the label of the credential that arrived;
 never the credential or anything derived from it, the audio or the text), and
@@ -43,7 +57,7 @@ stop and playback speed.
 | Variable | Effect |
 | -------- | ------ |
 | `MOCK_AUDIO_PORT` | Port to listen on (default `8094`) |
-| `MOCK_AUDIO_API_KEY` | Require `Authorization: Bearer <key>`; pair with `AUDIO_STT_API_KEY` / `AUDIO_TTS_API_KEY` |
+| `MOCK_AUDIO_API_KEY` | Require the key (`Authorization: Bearer <key>`, or `x-goog-api-key` / `xi-api-key` on the provider-native routes); pair with `AUDIO_STT_API_KEY` / `AUDIO_TTS_API_KEY` |
 | `MOCK_AUDIO_KEY_LABELS` | `name=key,name=key`: each logged request gets `credential` set to the matching name, `unrecognized`, or `null` when none was sent |
 | `MOCK_AUDIO_DELAY_SECONDS` | Delay every reply, to exercise `AUDIO_*_TIMEOUT_SECONDS` |
 | `MOCK_AUDIO_TRANSCRIPT` | The text every transcription returns |

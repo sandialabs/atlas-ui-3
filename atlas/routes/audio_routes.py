@@ -2,9 +2,11 @@
 
 ``POST /api/audio/transcriptions`` takes a recorded clip and returns its
 text; ``POST /api/audio/speech`` takes text and returns audio. Both relay to
-the OpenAI-compatible endpoint the operator configured for that capability
-(``atlas.modules.audio``); the browser never talks to the audio server and
-never sees its address or credential.
+the provider the operator configured for that capability (an
+OpenAI-compatible endpoint by default; other adapters in issue #1255, see
+``atlas.modules.audio.audio_provider_dispatch``); the browser never talks to
+the audio server and never sees which provider it is, its address or its
+credential.
 
 Policy applied to every request, in this order:
 
@@ -53,8 +55,9 @@ from atlas.modules.audio.audio_formats import (
     matches_signature,
     normalize_media_type,
 )
-from atlas.modules.audio.openai_audio_client import (
-    AudioUpstreamError,
+from atlas.modules.audio.audio_http import AudioUpstreamError
+from atlas.modules.audio.audio_provider_dispatch import (
+    stt_accepts,
     synthesize,
     transcribe,
 )
@@ -247,6 +250,10 @@ async def _transcribe_upload(request: Request, settings, config, current_user: s
         media_type = normalize_media_type(upload.content_type)
         if media_type is None:
             raise HTTPException(status_code=415, detail="This audio format is not supported for dictation.")
+        if not stt_accepts(config, media_type):
+            raise HTTPException(
+                status_code=415, detail="The configured speech service does not accept this audio format."
+            )
 
         content = await upload.read(config.max_audio_bytes + 1)
         if not content:

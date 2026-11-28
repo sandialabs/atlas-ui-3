@@ -15,7 +15,7 @@ from main import app
 from starlette.testclient import TestClient
 
 from atlas.infrastructure.app_factory import app_factory
-from atlas.modules.audio import openai_audio_client
+from atlas.modules.audio import audio_http
 
 WEBM = b"\x1a\x45\xdf\xa3" + b"\x00" * 64
 MP3 = b"ID3" + b"\x00" * 64
@@ -85,7 +85,7 @@ def upstream(monkeypatch):
             transport=httpx.MockTransport(fake._dispatch), timeout=timeout_seconds, follow_redirects=False
         )
 
-    monkeypatch.setattr(openai_audio_client, "build_http_client", build)
+    monkeypatch.setattr(audio_http, "build_http_client", build)
     return fake
 
 
