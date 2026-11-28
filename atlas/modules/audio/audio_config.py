@@ -130,7 +130,7 @@ def _common(settings: Any, prefix: str) -> Dict[str, Any]:
     api_key = get("api_key")
     api_key = (str(api_key).strip() or None) if api_key else None
     if api_key is None and spec is not None:
-        for env_name in spec.api_key_env:
+        for env_name in spec.fallback_env_names:
             api_key = os.environ.get(env_name, "").strip() or None
             if api_key:
                 break
@@ -152,19 +152,28 @@ def _common(settings: Any, prefix: str) -> Dict[str, Any]:
 
 
 def _provider_problem(values: Dict[str, Any]) -> Optional[str]:
-    """What stops the common settings from working with the chosen provider."""
-    prefix = values["name"].upper()
-    spec = provider_spec(values["provider"])
+    """What stops the common settings from working with the chosen provider.
+
+    Reads only whether a credential is present, never its value, so nothing
+    derived from it can reach the warning this message is logged in.
+    """
+    return _settings_problem(
+        values["name"].upper(), values["provider"], values["base_url"], values["model"], values["api_key"] is not None
+    )
+
+
+def _settings_problem(prefix: str, provider: str, base_url: str, model: str, key_set: bool) -> Optional[str]:
+    spec = provider_spec(provider)
     if spec is None:
         return f"AUDIO_{prefix}_PROVIDER must be one of " + ", ".join(sorted(PROVIDERS))
-    if values["base_url"] or not spec.base_url_optional:
-        problem = _base_url_problem(values["base_url"])
+    if base_url or not spec.base_url_optional:
+        problem = _base_url_problem(base_url)
         if problem:
             return problem
-    if not values["model"]:
+    if not model:
         return f"AUDIO_{prefix}_MODEL is not set"
-    if spec.api_key_required and not values["api_key"]:
-        names = " or ".join((f"AUDIO_{prefix}_API_KEY",) + spec.api_key_env)
+    if spec.needs_key and not key_set:
+        names = " or ".join((f"AUDIO_{prefix}_API_KEY",) + spec.fallback_env_names)
         return f"the {spec.name} provider needs a credential; set {names}"
     return None
 

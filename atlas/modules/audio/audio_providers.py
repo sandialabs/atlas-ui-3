@@ -35,11 +35,11 @@ class ProviderSpec:
     # the provider's own endpoint.
     base_url_optional: bool = False
     # Whether a request without a credential is pointless (a hosted API).
-    api_key_required: bool = False
+    needs_key: bool = False
     # Environment variables read for the credential when AUDIO_*_API_KEY is
     # empty, in order. The provider's conventional name, so an installation
     # that already sets GOOGLE_API_KEY for its chat models need not repeat it.
-    api_key_env: Tuple[str, ...] = ()
+    fallback_env_names: Tuple[str, ...] = ()
     tts_voice_required: bool = True
     # Formats AUDIO_TTS_RESPONSE_FORMAT may name. None: the provider decides
     # the format and the setting is not read (Gemini always yields WAV).
@@ -55,16 +55,16 @@ PROVIDERS = {
     GEMINI: ProviderSpec(
         GEMINI,
         default_base_url="https://generativelanguage.googleapis.com/v1beta",
-        api_key_required=True,
-        api_key_env=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        needs_key=True,
+        fallback_env_names=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
         tts_voice_required=False,
         tts_formats=None,
     ),
     ELEVENLABS: ProviderSpec(
         ELEVENLABS,
         default_base_url="https://api.elevenlabs.io/v1",
-        api_key_required=True,
-        api_key_env=("ELEVENLABS_API_KEY",),
+        needs_key=True,
+        fallback_env_names=("ELEVENLABS_API_KEY",),
         tts_formats=frozenset({"mp3", "wav", "opus"}),
     ),
     OPENAI_CHAT_AUDIO: ProviderSpec(
